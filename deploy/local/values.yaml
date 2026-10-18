@@ -1,0 +1,127 @@
+# Helm values of the local stack (chart mode). Test only. NOT FOR PRODUCTION.
+#
+# This file is a template. up.sh replaces each double-underscore placeholder and writes
+# the result to $LOCAL_DIR/values.generated.yaml (mode 0600: it holds the
+# secret key and the database password). The Go renderer of deploy/helm takes
+# one values file, so the whole install is in this one file.
+fullnameOverride: openfactory
+secretKey: "__SECRET_KEY__"
+
+image:
+  repository: __SERVER_REPOSITORY__
+  tag: "__SERVER_TAG__"
+  pullPolicy: Never
+
+database:
+  mode: postgres
+  postgres:
+    url: "__DATABASE_URL__"
+
+# Run data goes to the AWS emulator. The server has no static AWS keys: it gets
+# credentials through the Pod Identity agent sidecar (server.extraContainers).
+objectStore:
+  url: '__OBJECT_STORE_URL__'
+  # The emulator keeps at most 1000 objects in a bucket.
+  retention: "__RETENTION__"
+
+runner:
+  image: __RUNNER_IMAGE__
+  claudeToolImage: __RUNNER_CLAUDE_IMAGE__
+
+server:
+  replicaCount: 2
+  publicURL: "__PUBLIC_URL__"
+  # The image changes under the same tag: the annotation restarts the Pods then.
+  podAnnotations:
+    of-local/image-id: "__IMAGE_IDS__"
+  service:
+    type: LoadBalancer
+    port: 80
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+  env:
+    # Short sweeps, so that check R3 sees retention delete run data.
+    OF_OBJECT_STORE_RETENTION_INTERVAL: 1m
+  # EKS Pod Identity, as on Amazon EKS: a projected service account token for
+  # the audience pods.eks.amazonaws.com, and the agent that exchanges it for
+  # role credentials. The server reads them from the agent on 127.0.0.1:2703.
+  extraEnvVars:
+    - name: AWS_CONTAINER_CREDENTIALS_FULL_URI
+      value: http://127.0.0.1:2703/v1/credentials
+    - name: AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE
+      value: /var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token
+    - name: AWS_CA_BUNDLE
+      value: /etc/aws-local-ca/ca.crt
+    - name: AWS_REGION
+      value: us-east-1
+  extraVolumes:
+    - name: pod-identity-token
+      projected:
+        sources:
+          - serviceAccountToken:
+              audience: pods.eks.amazonaws.com
+              expirationSeconds: 3600
+              path: eks-pod-identity-token
+    - name: aws-local-ca
+      configMap:
+        name: aws-local-ca
+  extraVolumeMounts:
+    - name: pod-identity-token
+      mountPath: /var/run/secrets/pods.eks.amazonaws.com/serviceaccount
+      readOnly: true
+    - name: aws-local-ca
+      mountPath: /etc/aws-local-ca
+      readOnly: true
+  extraContainers:
+    - name: pod-identity-agent
+      image: __TESTKIT_IMAGE__
+      imagePullPolicy: Never
+      args:
+        - pod-identity-agent
+        - -listen
+        - 127.0.0.1:2703
+        - -upstream
+        - https://__AWS_HOST__:9443/__pod-identity
+        - -ca
+        - /etc/aws-local-ca/ca.crt
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          memory: 128Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      volumeMounts:
+        - name: aws-local-ca
+          mountPath: /etc/aws-local-ca
+          readOnly: true
+
+sandbox:
+  namespace: of-local-sandboxes
+  # up.sh makes the namespace and the ConfigMap aws-local-ca in it.
+  createNamespace: false
+  rbac:
+    create: true
+  image: __SANDBOX_IMAGE__
+  k8s:
+    imagePullPolicy: Never
+    # Restricted sandboxes reach the server Pods.
+    controlPlane:
+      namespace: of-local
+      selector: app.kubernetes.io/name=openfactory,app.kubernetes.io/component=server
+    # A restricted sandbox gets its own egress proxy sidecar (the runner image has
+    # the openfactory binary). Blocked hosts then show in the run diagnostics.
+    egressProxy:
+      sidecarImage: __RUNNER_IMAGE__
+  # Sandbox Pods trust the CA of the local AWS stack (presigned URLs on
+  # https://__AWS_HOST__:9443). The file is the same as in host mode.
+  podTemplate: |
+__POD_TEMPLATE__

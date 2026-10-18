@@ -1,0 +1,96 @@
+{
+  "$id": "https://openfactory-org.github.io/schemas/v1/benchmark_suite.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "benchmarks/<suite-slug>/suite.yaml.",
+  "properties": {
+    "agent": {
+      "$ref": "common.schema.json#/$defs/resourceName",
+      "description": "Agent that the trials start. It must be an agent of the definition."
+    },
+    "configurations": {
+      "description": "Configurations that the suite compares.",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "agents": {
+            "description": "Agent pins of the configuration.",
+            "items": {
+              "additionalProperties": false,
+              "oneOf": [
+                {
+                  "required": [
+                    "model"
+                  ]
+                },
+                {
+                  "required": [
+                    "harness"
+                  ]
+                }
+              ],
+              "properties": {
+                "agent": {
+                  "$ref": "common.schema.json#/$defs/resourceName",
+                  "description": "Agent to pin. It must be an agent of the definition, once per configuration."
+                },
+                "harness": {
+                  "$ref": "common.schema.json#/$defs/harness",
+                  "description": "Complete harness of the pinned agent: type and model are required. Set exactly one of model or harness."
+                },
+                "model": {
+                  "$ref": "common.schema.json#/$defs/model",
+                  "description": "Model of the pinned agent. Set exactly one of model or harness."
+                }
+              },
+              "required": [
+                "agent"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "machine": {
+            "$ref": "common.schema.json#/$defs/resourceName",
+            "description": "Machine of every agent in the trials of this configuration: the name of a file machines/<name>.yaml."
+          },
+          "name": {
+            "description": "Name of the configuration. Unique in the suite.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "maxItems": 6,
+      "minItems": 1,
+      "type": "array"
+    },
+    "description": {
+      "description": "Short description of the suite.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Name of the suite. Unique among the suites.",
+      "minLength": 1,
+      "type": "string"
+    },
+    "tasks": {
+      "description": "Task names. Each name needs a file benchmarks/<suite>/tasks/<name>.yaml. Each task file must be in this list.",
+      "items": {
+        "$ref": "common.schema.json#/$defs/resourceName"
+      },
+      "type": "array",
+      "uniqueItems": true
+    }
+  },
+  "required": [
+    "name",
+    "agent"
+  ],
+  "title": "Benchmark suite",
+  "type": "object"
+}

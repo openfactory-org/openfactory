@@ -1,0 +1,91 @@
+# Test-only local AWS stack: the AWS emulator behind tlsfront. NOT FOR PRODUCTION.
+# up.sh applies this file after it replaces __HOST__ and creates the TLS Secret.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aws-local
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aws-emulator
+  namespace: aws-local
+---
+# The Pod Identity broker checks tokens with TokenReview (the role
+# system:auth-delegator allows only that and access checks).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: aws-local-emulator-auth-delegator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: aws-emulator
+    namespace: aws-local
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aws-emulator
+  namespace: aws-local
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: aws-emulator}
+  template:
+    metadata:
+      labels: {app: aws-emulator}
+    spec:
+      serviceAccountName: aws-emulator
+      automountServiceAccountToken: true # the broker needs it for TokenReview
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: emulator
+          image: of-local/aws-emulator:latest
+          imagePullPolicy: Never
+          env:
+            # Pod Identity broker settings. The broker caps the life of the
+            # credentials it returns, so renewal shows within minutes.
+            - {name: CLUSTER_NAME, value: of-local}
+            - {name: POD_IDENTITY_EXPIRY_CAP, value: 6m}
+          ports:
+            - {name: https, containerPort: 9443}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          readinessProbe:
+            httpGet: {path: /__admin/health, port: 9443, scheme: HTTPS}
+            periodSeconds: 2
+          livenessProbe:
+            httpGet: {path: /__admin/health, port: 9443, scheme: HTTPS}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - {name: home, mountPath: /home/emulator}
+            - {name: tls, mountPath: /etc/tlsfront, readOnly: true}
+      volumes:
+        - name: home
+          emptyDir: {}
+        - name: tls
+          secret: {secretName: aws-local-tls}
+---
+# A LoadBalancer Service: the host name __HOST__ must resolve to it on the
+# workstation and in Pods (OrbStack gives every *.k8s.orb.local name this).
+apiVersion: v1
+kind: Service
+metadata:
+  name: aws-emulator
+  namespace: aws-local
+spec:
+  type: LoadBalancer
+  selector: {app: aws-emulator}
+  ports:
+    - {name: https, port: 9443, targetPort: 9443}

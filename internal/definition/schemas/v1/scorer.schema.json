@@ -1,0 +1,148 @@
+{
+  "$id": "https://openfactory-org.github.io/schemas/v1/scorer.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "anyOf": [
+    {
+      "required": [
+        "model"
+      ]
+    },
+    {
+      "required": [
+        "harness"
+      ]
+    }
+  ],
+  "description": "YAML frontmatter of scorers/<slug>/scorer.md.",
+  "properties": {
+    "agents": {
+      "description": "Agents whose runs the scorer samples. Each entry is an agent name or {name, includeDescendants}. Each name must be an agent of the definition, listed once.",
+      "items": {
+        "anyOf": [
+          {
+            "$ref": "common.schema.json#/$defs/resourceName"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "includeDescendants": {
+                "default": false,
+                "description": "If true, the transcripts of all descendant runs are added as evidence.",
+                "type": "boolean"
+              },
+              "name": {
+                "$ref": "common.schema.json#/$defs/resourceName",
+                "description": "Name of the agent."
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "description": {
+      "description": "Short description of the scorer.",
+      "type": "string"
+    },
+    "harness": {
+      "anyOf": [
+        {
+          "$ref": "common.schema.json#/$defs/harnessOverride"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The harness of the judge run, over scorerDefaults and agentDefaults."
+    },
+    "labels": {
+      "description": "Labels that the judge can give a run.",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "description": "What the label means.",
+            "type": "string"
+          },
+          "score": {
+            "description": "Score of the label.",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "value": {
+            "description": "Name of the label. Unique in the scorer.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "score"
+        ],
+        "type": "object"
+      },
+      "maxItems": 20,
+      "minItems": 1,
+      "type": "array"
+    },
+    "machine": {
+      "$ref": "common.schema.json#/$defs/resourceName",
+      "description": "Machine of the judge run. It replaces scorerDefaults.machine."
+    },
+    "mcpServers": {
+      "$ref": "common.schema.json#/$defs/mcpServers",
+      "description": "MCP servers of the judge run. They add to scorerDefaults.mcpServers. A server with the same name replaces the server of scorerDefaults."
+    },
+    "model": {
+      "$ref": "common.schema.json#/$defs/model",
+      "description": "Model of the judge run. Required unless harness is set. Without harness, the model name selects the harness. With harness, it replaces the model of that harness."
+    },
+    "name": {
+      "description": "Name of the scorer. Unique among the scorers.",
+      "minLength": 1,
+      "type": "string"
+    },
+    "output": {
+      "const": "classification",
+      "default": "classification",
+      "description": "Kind of output."
+    },
+    "passingScore": {
+      "description": "Lowest passing score. At least one label must have a score at or above it, and at least one label a score below it.",
+      "maximum": 1,
+      "minimum": 0,
+      "type": "number"
+    },
+    "samplingRate": {
+      "default": 10,
+      "description": "Percent of finished runs to score, rounded to two decimals. 0 turns off automatic scoring.",
+      "maximum": 100,
+      "minimum": 0,
+      "type": "number"
+    },
+    "secrets": {
+      "$ref": "common.schema.json#/$defs/secretList",
+      "description": "Secret names of the judge run. They add to scorerDefaults.secrets."
+    },
+    "selfImprovement": {
+      "default": false,
+      "description": "If true, the failures of this scorer go to Self-improvement.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "name",
+    "agents",
+    "labels",
+    "passingScore"
+  ],
+  "title": "Scorer frontmatter",
+  "type": "object"
+}

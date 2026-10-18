@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=https://openfactory-org.github.io/schemas/v1/factory.schema.json
+schemaVersion: v1
+name: incident-response
+description: Investigates production incidents from PagerDuty and Sentry and proposes fixes.
+alias: oncall
+repositories:
+  - owner: acme
+    name: payments-service
+integrations:
+  - type: slack
+    slack:
+      autoRespondToThreadReplies: true
+mcpServers:
+  sentry:
+    managedId: SENTRY_MCP_INSTALLATION_ID
+networkPolicy:
+  extends: builtin/package-registries@1.0.0
+  deniedHosts:
+    - pastebin.com
+agentDefaults:
+  harness:
+    type: claude
+    model: claude-opus-5-5
+    auth:
+      source: managedSecret
+      secretName: ANTHROPIC_API_KEY
+  secrets:
+    - DATADOG_API_KEY

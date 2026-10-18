@@ -1,0 +1,71 @@
+# golangci-lint v2 configuration.
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - bodyclose
+    - errorlint
+    - gosec
+    - misspell
+    - nilerr
+    - noctx
+    - revive
+    - unconvert
+    - whitespace
+  settings:
+    errcheck:
+      exclude-functions:
+        - (io.Closer).Close
+        - (net/http.ResponseWriter).Write
+        - (*encoding/json.Encoder).Encode
+    gosec:
+      excludes:
+        - G104 # covered by errcheck
+        - G204 # subprocesses with variable args are the sandbox backends' job
+        - G301 # workspace, checkout and data directories use the usual 0755; the umask narrows it
+        - G302 # same for files that a checkout keeps, such as the exclude file of a repository (0644)
+        - G304 # file paths come from configuration
+        - G306
+    misspell:
+      locale: US
+      ignore-rules:
+        - cancelled # the run state "cancelled" is API
+        - cancelling # same word family as the API value "cancelled"
+        - noteable # field name of the forge webhook payload (noteable_type)
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
+        - name: var-naming
+          disabled: true
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters: [gosec, errcheck, noctx, bodyclose]
+    paths:
+      - dist/
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/openfactory-org/openfactory

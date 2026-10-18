@@ -1,0 +1,21 @@
+{
+  "action": "labeled",
+  "label": {"name": "factory:of-local-check"},
+  "issue": {
+    "number": 1,
+    "title": "Check W3",
+    "body": "A signed delivery of the local stack checks.",
+    "html_url": "https://github.com/of-local-checks/webhook-demo/issues/1",
+    "state": "open",
+    "user": {"login": "of-local-checker[bot]", "id": 1, "type": "Bot"},
+    "labels": [{"name": "factory:of-local-check"}],
+    "assignees": []
+  },
+  "repository": {
+    "id": 1,
+    "full_name": "of-local-checks/webhook-demo",
+    "html_url": "https://github.com/of-local-checks/webhook-demo",
+    "default_branch": "main"
+  },
+  "sender": {"login": "of-local-checker[bot]", "id": 1, "type": "Bot"}
+}

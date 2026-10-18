@@ -1,0 +1,58 @@
+name: Feature request
+description: Propose a new feature or a change.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For open questions or early ideas, start a [discussion](https://github.com/openfactory-org/openfactory/discussions) first.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What you want to do, and why you cannot do it today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: The behavior you want. Include definition fields, API calls, CLI commands or Helm values if you know them.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - Definitions and agents
+        - Automations and work sources
+        - Integrations
+        - Harnesses
+        - Sandbox backends and workers
+        - Dashboard
+        - REST API, CLI or SDK
+        - Helm chart and operations
+        - Scorers and benchmarks
+        - Documentation
+        - Other
+  - type: dropdown
+    id: breaking
+    attributes:
+      label: Does this change a public contract?
+      description: The definition schema, the REST API, the Helm values or the database upgrade path.
+      options:
+        - "No"
+        - "Yes"
+        - Not sure
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I can send a pull request for this.

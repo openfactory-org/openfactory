@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=https://openfactory-org.github.io/schemas/v1/factory.schema.json
+schemaVersion: v1
+name: sdlc
+description: Turns labeled issues into reviewed pull requests for the web and iOS apps.
+alias: sdlc
+repositories:
+  - owner: acme
+    name: web-app
+  - owner: acme
+    name: ios-app
+secrets:
+  - NPM_TOKEN
+networkPolicy:
+  extends: builtin/package-registries@^1
+  allowedHosts:
+    - api.acme.dev
+agentDefaults:
+  harness:
+    type: claude
+    model: claude-opus-5-5
+    auth:
+      source: managedSecret
+      secretName: ANTHROPIC_API_KEY
+  machine: linux-build
+selfImprovement:
+  failedRunThreshold: 5
+  reviewerType: admins

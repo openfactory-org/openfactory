@@ -1,0 +1,12 @@
+apiVersion: v2
+name: openfactory
+description: Open Factory - AI coding agent factories on Kubernetes (all-in-one server replicas in SQLite or PostgreSQL mode, optional remote worker)
+type: application
+version: 0.2.0
+appVersion: "0.1.0"
+home: https://github.com/openfactory-org/openfactory
+sources:
+  - https://github.com/openfactory-org/openfactory
+keywords: [ai, agents, coding-agents, automation, mcp]
+maintainers:
+  - name: Open Factory maintainers

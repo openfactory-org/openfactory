@@ -1,0 +1,6 @@
+title: Fix invoice date formatting
+prompt: Invoice dates render in UTC instead of the account's time zone. Fix the formatting and add tests.
+successCriteria: Dates render in the account time zone, existing tests pass, and a new test covers a non-UTC zone.
+tags: [bug, frontend]
+startingRepoRefs:
+  - github.com:acme/web-app@0123456789abcdef0123456789abcdef01234567

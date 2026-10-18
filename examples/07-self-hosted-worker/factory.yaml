@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=https://openfactory-org.github.io/schemas/v1/factory.schema.json
+schemaVersion: v1
+name: self-hosted
+description: Runs every agent on a self-hosted worker inside the company network.
+repositories:
+  - codeForge: GITLAB
+    owner: acme/platform
+    name: billing
+codeForges:
+  - GITLAB
+credentialStrategy: EXECUTOR
+mcpServers:
+  internal-docs:
+    url: https://docs-mcp.internal.acme.dev/mcp
+    headers:
+      Authorization: "Bearer {{INTERNAL_DOCS_TOKEN}}"
+agentDefaults:
+  harness:
+    type: claude
+    model: claude-opus-5-5
+    auth:
+      source: workerEnvironment
+  machine: linux-worker
+  workerHost: acme-prod-worker

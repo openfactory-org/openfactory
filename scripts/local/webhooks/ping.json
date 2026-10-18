@@ -1,0 +1,7 @@
+{
+  "zen": "Keep it logically awesome.",
+  "hook_id": 1,
+  "hook": {"type": "Repository", "id": 1, "active": true, "events": ["issues"]},
+  "repository": {"id": 1, "full_name": "of-local-checks/webhook-demo"},
+  "sender": {"login": "of-local-checker[bot]", "id": 1, "type": "Bot"}
+}

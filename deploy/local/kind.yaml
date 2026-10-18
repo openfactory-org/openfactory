@@ -1,0 +1,22 @@
+# kind cluster of the local stack. Test only. NOT FOR PRODUCTION.
+# up.sh creates it when KUBE_CONTEXT is kind-<name> and the cluster does not
+# exist. See docs/self-hosting/local-testing.md.
+#
+# The default network plugin of kind does not enforce NetworkPolicy, so this
+# cluster has none: up.sh installs Calico (pod subnet 192.168.0.0/16).
+#
+# kind has no LoadBalancer. Each Service of the stack gets a fixed node port
+# (lib.sh: kind_node_port), and the node maps it to the same port as on
+# OrbStack, on 127.0.0.1 of the workstation only.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+networking:
+  disableDefaultCNI: true
+  podSubnet: 192.168.0.0/16
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - {containerPort: 30080, hostPort: 80, listenAddress: 127.0.0.1}     # server (of.)
+      - {containerPort: 30943, hostPort: 9443, listenAddress: 127.0.0.1}   # AWS emulator (aws.)
+      - {containerPort: 30432, hostPort: 5432, listenAddress: 127.0.0.1}   # PostgreSQL (db.)
+      - {containerPort: 30418, hostPort: 9418, listenAddress: 127.0.0.1}   # git server (git.)

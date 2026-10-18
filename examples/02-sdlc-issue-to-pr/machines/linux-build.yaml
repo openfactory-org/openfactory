@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=https://openfactory-org.github.io/schemas/v1/machine.schema.json
+description: Linux machine for web builds and tests
+setupCommands:
+  - corepack enable
+  - pnpm install --frozen-lockfile
+instanceShape:
+  vcpus: 4
+  memoryGb: 8
+platform:
+  os: linux
+  arch: x86_64
+  linux:
+    image: node:22-bookworm

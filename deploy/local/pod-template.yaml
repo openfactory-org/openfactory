@@ -1,0 +1,18 @@
+# Template of the sandbox Pods of the local stack. up.sh writes it to
+# $LOCAL_DIR/pod-template.yaml with the sandbox image. The server merges its own
+# settings into it. Sandbox Pods trust the CA of the local AWS stack.
+automountServiceAccountToken: false
+enableServiceLinks: false
+volumes:
+  - name: aws-local-ca
+    configMap: {name: aws-local-ca}
+containers:
+  - name: sandbox
+    image: __SANDBOX_IMAGE__
+    env:
+      - {name: SSL_CERT_DIR, value: "/etc/ssl/certs:/etc/aws-local-ca"}
+    volumeMounts:
+      - {name: aws-local-ca, mountPath: /etc/aws-local-ca, readOnly: true}
+    resources:
+      requests: {cpu: 100m, memory: 256Mi}
+      limits: {memory: 2Gi}

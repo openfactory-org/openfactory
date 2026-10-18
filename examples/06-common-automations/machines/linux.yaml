@@ -1,0 +1,5 @@
+description: Default Linux machine
+platform:
+  os: linux
+  linux:
+    image: ubuntu:24.04

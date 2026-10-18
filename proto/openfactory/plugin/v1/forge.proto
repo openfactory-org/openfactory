@@ -1,0 +1,226 @@
+syntax = "proto3";
+
+package openfactory.plugin.v1;
+
+import "google/protobuf/timestamp.proto";
+import "openfactory/plugin/v1/common.proto";
+
+option go_package = "github.com/openfactory-org/openfactory/pkg/plugin/pb;pluginv1";
+
+// Forge mirrors core.Forge. Every request carries the target (integration
+// config plus resolved credential), so a plugin is stateless and survives
+// restarts. Optional methods (CommentIssue, CommentWorkItem) may return
+// UNIMPLEMENTED. The review methods (ReplyInThread, ResolveThread,
+// SubmitReview, MarkReady) return UNIMPLEMENTED when the forge does not
+// support them; the host maps that to operation_not_supported.
+// SetWorkItemState and AttachPullRequestToWorkItem are the tracker write-back
+// of a forge that has work items (Azure DevOps). They also return UNIMPLEMENTED
+// when the forge has no work items.
+// RequestReviewers, Login, GetReviewThread and GetFileDiff are optional.
+// A forge that does not support one returns UNIMPLEMENTED. Login
+// returns the reviewer identifier of the credential (the username on GitLab,
+// the identity ID on Azure DevOps), which RequestReviewers accepts.
+service Forge {
+  rpc Name(ForgeNameRequest) returns (ForgeNameResponse);
+  rpc CloneURL(RepoRequest) returns (CloneURLResponse);
+  rpc DefaultBranch(RepoRequest) returns (DefaultBranchResponse);
+  rpc CreatePullRequest(CreatePullRequestRequest) returns (PullRequestRef);
+  rpc GetPullRequest(GetPullRequestRequest) returns (PullRequestRef);
+  rpc Comment(CommentRequest) returns (Empty);
+  rpc CommentIssue(CommentRequest) returns (Empty);
+  rpc CommentWorkItem(CommentWorkItemRequest) returns (Empty);
+  rpc SetCommitStatus(SetCommitStatusRequest) returns (Empty);
+  rpc GetFiles(GetFilesRequest) returns (GetFilesResponse);
+  rpc ReplyInThread(ThreadRequest) returns (Empty);
+  rpc ResolveThread(ThreadRequest) returns (Empty);
+  rpc SubmitReview(SubmitReviewRequest) returns (Empty);
+  rpc MarkReady(GetPullRequestRequest) returns (Empty);
+  rpc SetWorkItemState(SetWorkItemStateRequest) returns (Empty);
+  rpc AttachPullRequestToWorkItem(AttachPullRequestToWorkItemRequest) returns (Empty);
+  rpc RequestReviewers(RequestReviewersRequest) returns (Empty);
+  rpc Login(LoginRequest) returns (LoginResponse);
+  rpc GetReviewThread(ThreadRequest) returns (ReviewThread);
+  rpc GetFileDiff(FileDiffRequest) returns (FileDiff);
+}
+
+message ForgeTarget {
+  string provider = 1; // integration provider, e.g. "gitlab"
+  string integration_id = 2;
+  string team_id = 3;
+  map<string, string> config = 4; // core.Integration.Config
+  string token = 5;               // resolved secret (integration token or user token)
+  bool user_token = 6;            // token is a team member's personal token
+}
+
+message ForgeNameRequest {
+  ForgeTarget target = 1;
+}
+
+message ForgeNameResponse {
+  string name = 1; // code-forge identifier, e.g. GITLAB
+}
+
+message RepoRequest {
+  ForgeTarget target = 1;
+  string owner = 2;
+  string repo = 3;
+}
+
+message CloneURLResponse {
+  string url = 1;
+}
+
+message DefaultBranchResponse {
+  string branch = 1;
+}
+
+message CreatePullRequestRequest {
+  ForgeTarget target = 1;
+  string owner = 2;
+  string repo = 3;
+  string head = 4;
+  string base = 5;
+  string title = 6;
+  string body = 7;
+  bool draft = 8;
+}
+
+message GetPullRequestRequest {
+  ForgeTarget target = 1;
+  string owner = 2;
+  string repo = 3;
+  int64 number = 4;
+}
+
+message CommentRequest {
+  ForgeTarget target = 1;
+  string owner = 2;
+  string repo = 3;
+  int64 number = 4;
+  string body = 5;
+}
+
+message CommentWorkItemRequest {
+  ForgeTarget target = 1;
+  string project = 2;
+  int64 id = 3;
+  string body = 4;
+}
+
+message SetCommitStatusRequest {
+  ForgeTarget target = 1;
+  string owner = 2;
+  string repo = 3;
+  string sha = 4;
+  CommitStatus status = 5;
+}
+
+message GetFilesRequest {
+  ForgeTarget target = 1;
+  string owner = 2;
+  string repo = 3;
+  string ref = 4;
+  string path = 5;
+}
+
+message GetFilesResponse {
+  map<string, string> files = 1;
+  string commit_sha = 2;
+}
+
+message ThreadRequest {
+  ForgeTarget target = 1;
+  string owner = 2;
+  string repo = 3;
+  int64 number = 4;
+  string thread_ref = 5;
+  string body = 6; // ReplyInThread only
+}
+
+// SetWorkItemStateRequest moves a work item to a generic state:
+// in_progress, in_review or done. The forge maps it to its own workflow.
+message SetWorkItemStateRequest {
+  ForgeTarget target = 1;
+  string project = 2;
+  int64 id = 3;
+  string state = 4;
+}
+
+message AttachPullRequestToWorkItemRequest {
+  ForgeTarget target = 1;
+  string project = 2;
+  int64 id = 3;
+  PullRequestRef pull_request = 4;
+}
+
+message ReviewComment {
+  string path = 1;
+  int64 line = 2;
+  string side = 3; // RIGHT (default) or LEFT
+  string body = 4;
+}
+
+message SubmitReviewRequest {
+  ForgeTarget target = 1;
+  string owner = 2;
+  string repo = 3;
+  int64 number = 4;
+  string event = 5; // comment (default), approve, request_changes
+  string body = 6;
+  repeated ReviewComment comments = 7;
+}
+
+// RequestReviewersRequest asks users for a review of a pull request. A login
+// is a value that Login returns for the same forge.
+message RequestReviewersRequest {
+  ForgeTarget target = 1;
+  string owner = 2;
+  string repo = 3;
+  int64 number = 4;
+  repeated string logins = 5;
+}
+
+message LoginRequest {
+  ForgeTarget target = 1;
+}
+
+message LoginResponse {
+  string login = 1;
+}
+
+// ThreadComment is one comment of a review thread.
+message ThreadComment {
+  string id = 1;
+  string author = 2;
+  string body = 3;
+  string path = 4;
+  int64 line = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+// ReviewThread is a review thread of a pull request, oldest comment first.
+// path is the file that the thread is on. It is empty for a discussion that
+// is not on a file.
+message ReviewThread {
+  string ref = 1;
+  string path = 2;
+  int64 line = 3;
+  bool resolved = 4;
+  repeated ThreadComment comments = 5;
+}
+
+message FileDiffRequest {
+  ForgeTarget target = 1;
+  string owner = 2;
+  string repo = 3;
+  int64 number = 4;
+  string path = 5;
+}
+
+// FileDiff is the unified diff of one file of a pull request: the hunks,
+// without the file header. truncated is true when the forge cut the patch.
+message FileDiff {
+  string path = 1;
+  string patch = 2;
+  bool truncated = 3;
+}

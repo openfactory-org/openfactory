@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=https://openfactory-org.github.io/schemas/v1/factory.schema.json
+schemaVersion: v1
+name: multi-harness
+description: Mixes the Claude Code and Codex harnesses across agents.
+repositories:
+  - owner: acme
+    name: platform-api
+networkPolicy:
+  extends:
+    - builtin/package-registries@1.1.0
+    - builtin/claude-code@^1
+    - builtin/codex@latest
+agentDefaults:
+  harness:
+    type: claude
+    model: claude-opus-5-5
+    reasoningLevel: high
+    auth:
+      source: managedSecret
+      secretName: ANTHROPIC_API_KEY
+  machine: linux-large

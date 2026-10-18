@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=https://openfactory-org.github.io/schemas/v1/factory.schema.json
+schemaVersion: v1
+name: default-agents
+description: The default foreman, triage, spec, implement and review agents of a new factory.
+alias: default-agents
+repositories:
+  - owner: acme
+    name: web-app
+agentDefaults:
+  harness:
+    type: claude
+    model: claude-opus-5-5
+    auth:
+      source: managedSecret
+      secretName: ANTHROPIC_API_KEY

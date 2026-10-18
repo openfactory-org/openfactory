@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package openfactory.plugin.v1;
+
+import "openfactory/plugin/v1/common.proto";
+
+option go_package = "github.com/openfactory-org/openfactory/pkg/plugin/pb;pluginv1";
+
+// Plugin is implemented by every plugin. The host calls GetInfo first, then
+// Configure once (and again after each restart), then Ping periodically.
+service Plugin {
+  rpc GetInfo(GetInfoRequest) returns (PluginInfo);
+  rpc Configure(ConfigureRequest) returns (Empty);
+  rpc Ping(Empty) returns (Empty);
+}
+
+message GetInfoRequest {
+  uint32 host_protocol_version = 1;
+}
+
+// Capability names.
+//   forge            the Forge service is served
+//   responder        the Responder service is served
+//   ingress          the Ingress service is served
+//   sandbox_backend  the version 2 SandboxBackend service is served
+message PluginInfo {
+  string name = 1;    // unique plugin name, [a-z0-9_-]+; used in /plugins/{name}/webhook
+  string version = 2; // plugin version (free form, semver recommended)
+  uint32 protocol_version = 3;
+  repeated string capabilities = 4;
+  // forge_providers are integration providers (core.Integration.Provider,
+  // e.g. "gitlab") whose code forges this plugin serves.
+  repeated string forge_providers = 5;
+  // responder_providers are source providers this plugin replies to.
+  repeated string responder_providers = 6;
+  // integration_providers are the integration providers whose records (and
+  // referenced secrets) the plugin may read through the Host service.
+  repeated string integration_providers = 7;
+  // config_schema is a JSON Schema (draft 2020-12) of the Configure config map.
+  string config_schema = 8;
+}
+
+message ConfigureRequest {
+  // host_broker_id is the go-plugin broker id where the Host service listens.
+  uint32 host_broker_id = 1;
+  map<string, string> config = 2;
+}

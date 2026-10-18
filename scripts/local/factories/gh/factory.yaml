@@ -1,0 +1,16 @@
+# Factory of the checks G1 to G3. It works on the test repository of the
+# GitHub forge (LOCAL_GITHUB_REPO). The agent has the token GITHUB_TOKEN as an
+# environment variable, so that it can run gh.
+schemaVersion: v1
+name: of-local-gh
+alias: of-local-gh
+description: Factory of the GitHub checks of the local stack.
+repositories:
+  - owner: __GITHUB_OWNER__
+    name: __GITHUB_NAME__
+automations:
+  githubOnboardingNotices: false
+secrets:
+  - GITHUB_TOKEN
+agentDefaults:
+  model: claude-sonnet-5-5

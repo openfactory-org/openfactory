@@ -1,0 +1,6 @@
+# yaml-language-server: $schema=https://openfactory-org.github.io/schemas/v1/webhook.schema.json
+authMode: signature
+signatureScheme: pagerduty
+secretName: PAGERDUTY_WEBHOOK_SECRET
+deliveryIdHeader: X-Webhook-Id
+enabled: true

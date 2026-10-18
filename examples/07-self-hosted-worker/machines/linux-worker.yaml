@@ -1,0 +1,11 @@
+description: Linux sandbox image for the self-hosted Kubernetes worker
+setupCommands:
+  - make bootstrap
+instanceShape:
+  vcpus: 4
+  memoryGb: 16
+platform:
+  os: linux
+  arch: x86_64
+  linux:
+    image: registry.internal.acme.dev/factory/billing-dev:latest

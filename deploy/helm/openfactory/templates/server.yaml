@@ -1,0 +1,260 @@
+{{- if .Values.server.enabled }}
+{{- $sqlite := eq .Values.database.mode "sqlite" }}
+{{- $persist := and $sqlite .Values.database.sqlite.persistence.enabled }}
+{{- $claimTemplate := and $persist (not .Values.database.sqlite.persistence.existingClaim) }}
+apiVersion: apps/v1
+kind: {{ include "openfactory.serverKind" . }}
+metadata:
+  name: {{ include "openfactory.fullname" . }}
+  labels:
+    {{- include "openfactory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  {{- if $sqlite }}
+  # SQLite supports exactly one writer: one replica, always.
+  replicas: 1
+  serviceName: {{ include "openfactory.fullname" . }}-headless
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  {{- else }}
+  replicas: {{ .Values.server.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "openfactory.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: server
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.server.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "openfactory.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: server
+        {{- with .Values.server.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "openfactory.serviceAccountName" . }}
+      terminationGracePeriodSeconds: {{ .Values.server.terminationGracePeriodSeconds }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.server.podSecurityContext | nindent 8 }}
+      {{- if or .Values.plugins.bundled .Values.plugins.images }}
+      initContainers:
+        {{- if .Values.plugins.bundled }}
+        # The server image ships the GitLab and Azure DevOps plugins in
+        # /usr/local/lib/openfactory/plugins; copy them into the plugin
+        # directory next to the plugins of plugins.images.
+        - name: bundled-plugins
+          image: {{ include "openfactory.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["sh", "-c", "cp -a /usr/local/lib/openfactory/plugins/. /opt/openfactory/plugins/"]
+          securityContext:
+            {{- toYaml .Values.server.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: plugins
+              mountPath: /opt/openfactory/plugins
+        {{- end }}
+        {{- range .Values.plugins.images }}
+        - name: plugin-{{ .name }}
+          image: {{ .image }}
+          imagePullPolicy: {{ default "IfNotPresent" .pullPolicy }}
+          command: ["sh", "-c", "cp -a {{ default "/plugins" .path }}/. /opt/openfactory/plugins/"]
+          securityContext:
+            {{- toYaml $.Values.server.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: plugins
+              mountPath: /opt/openfactory/plugins
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: server
+          image: {{ include "openfactory.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["serve"]
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "openfactory.fullname" . }}
+            - secretRef:
+                name: {{ include "openfactory.secretName" . }}
+            {{- with .Values.objectStore.existingSecret }}
+            - secretRef:
+                name: {{ . }}
+            {{- end }}
+          env:
+            # Replica identity for leases and worker routing.
+            - name: OF_REPLICA_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            {{- if include "openfactory.generateKey" . }}
+            # The master key from the Secret that the hook Job created.
+            - name: OF_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openfactory.keySecretName" . }}
+                  key: OF_SECRET_KEY
+            {{- end }}
+            {{- if and (eq .Values.database.mode "postgres") .Values.database.postgres.existingSecret }}
+            - name: OF_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.postgres.existingSecret }}
+                  key: {{ .Values.database.postgres.existingSecretKey }}
+            {{- end }}
+            {{- if and .Values.oidc.enabled .Values.oidc.existingSecret }}
+            - name: OF_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.oidc.existingSecret }}
+                  key: {{ .Values.oidc.existingSecretKey }}
+            {{- end }}
+            {{- if .Values.objectStore.gcsCredentialsSecret }}
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: /etc/openfactory/gcs/{{ .Values.objectStore.gcsCredentialsKey }}
+            {{- end }}
+            {{- with .Values.server.extraEnvVars }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.server.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.server.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/openfactory
+            - name: tmp
+              mountPath: /tmp
+            - name: plugins
+              mountPath: /opt/openfactory/plugins
+              readOnly: true
+            - name: pod-template
+              mountPath: /etc/openfactory/pod-template.yaml
+              subPath: pod-template.yaml
+              readOnly: true
+            {{- if .Values.objectStore.gcsCredentialsSecret }}
+            - name: gcs-credentials
+              mountPath: /etc/openfactory/gcs
+              readOnly: true
+            {{- end }}
+            {{- with .Values.server.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+        {{- with .Values.server.extraContainers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      volumes:
+        {{- if not $claimTemplate }}
+        - name: data
+          {{- if $persist }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.database.sqlite.persistence.existingClaim }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- end }}
+        - name: tmp
+          emptyDir: {}
+        - name: plugins
+          emptyDir: {}
+        - name: pod-template
+          configMap:
+            name: {{ include "openfactory.fullname" . }}-pod-template
+        {{- with .Values.objectStore.gcsCredentialsSecret }}
+        - name: gcs-credentials
+          secret:
+            secretName: {{ . }}
+            defaultMode: 0400
+        {{- end }}
+        {{- with .Values.server.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- if and (not $sqlite) .Values.server.topologySpread (gt (int .Values.server.replicaCount) 1) }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "openfactory.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: server
+      {{- end }}
+      {{- with .Values.server.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.server.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.server.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- if $claimTemplate }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "openfactory.selectorLabels" . | nindent 10 }}
+          app.kubernetes.io/component: server
+      spec:
+        accessModes:
+          {{- toYaml .Values.database.sqlite.persistence.accessModes | nindent 10 }}
+        {{- with .Values.database.sqlite.persistence.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.database.sqlite.persistence.size }}
+  {{- end }}
+{{- if and (not $sqlite) .Values.server.podDisruptionBudget.enabled (gt (int .Values.server.replicaCount) 1) }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "openfactory.fullname" . }}
+  labels:
+    {{- include "openfactory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  maxUnavailable: {{ .Values.server.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "openfactory.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: server
+{{- end }}
+{{- end }}

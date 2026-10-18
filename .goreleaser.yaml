@@ -1,0 +1,134 @@
+# GoReleaser configuration: `make release` (on a tag) or `make snapshot`.
+version: 2
+project_name: openfactory
+
+before:
+  hooks:
+    - go mod download
+    # Build the React dashboard into internal/webui/dist (embedded; needs Node 20+).
+    - sh -c "cd web && npm ci && npm run build"
+
+builds:
+  - id: openfactory
+    main: ./cmd/openfactory
+    binary: openfactory
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      # The last two flags make the default sandbox image of a release binary the sandbox image of the same
+      # release, and the default runner image (OF_RUNNER_IMAGE) the server image of the same release.
+      - -s -w -X main.version={{ .Version }} -X main.commit={{ .ShortCommit }} -X main.date={{ .Date }} -X github.com/openfactory-org/openfactory/internal/sandbox.DefaultImage=ghcr.io/openfactory-org/sandbox:{{ .Version }} -X github.com/openfactory-org/openfactory/internal/config.DefaultRunnerImage=ghcr.io/openfactory-org/openfactory:{{ .Version }}
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: windows
+        goarch: arm64
+  # Bundled gRPC plugins. They ship in the server image (OF_PLUGIN_DIR) and
+  # in the archives; the binary names must start with openfactory-plugin-.
+  - id: plugin-gitlab
+    main: ./plugins/gitlab
+    binary: openfactory-plugin-gitlab
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: windows
+        goarch: arm64
+  - id: plugin-azuredevops
+    main: ./plugins/azuredevops
+    binary: openfactory-plugin-azuredevops
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+      - docs/**/*
+      - examples/**/*
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Bug fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Other
+      order: 999
+
+dockers:
+  - id: openfactory-amd64
+    ids: [openfactory, plugin-gitlab, plugin-azuredevops]
+    goos: linux
+    goarch: amd64
+    dockerfile: deploy/docker/Dockerfile.release
+    use: buildx
+    image_templates:
+      - "ghcr.io/openfactory-org/openfactory:{{ .Version }}-amd64"
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+  - id: openfactory-arm64
+    ids: [openfactory, plugin-gitlab, plugin-azuredevops]
+    goos: linux
+    goarch: arm64
+    dockerfile: deploy/docker/Dockerfile.release
+    use: buildx
+    image_templates:
+      - "ghcr.io/openfactory-org/openfactory:{{ .Version }}-arm64"
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+
+docker_manifests:
+  - name_template: "ghcr.io/openfactory-org/openfactory:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/openfactory-org/openfactory:{{ .Version }}-amd64"
+      - "ghcr.io/openfactory-org/openfactory:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/openfactory-org/openfactory:latest"
+    skip_push: auto
+    image_templates:
+      - "ghcr.io/openfactory-org/openfactory:{{ .Version }}-amd64"
+      - "ghcr.io/openfactory-org/openfactory:{{ .Version }}-arm64"
+
+release:
+  github:
+    owner: openfactory-org
+    name: openfactory
+  prerelease: auto

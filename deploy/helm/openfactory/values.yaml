@@ -1,0 +1,392 @@
+# Default values for the openfactory chart.
+# See docs/self-hosting/kubernetes.md. With no values file, the chart installs
+# one server in SQLite mode and creates the master key.
+#
+# Every replica is all-in-one: it serves ingress, the API and the dashboard,
+# and runs the engine, the dispatcher and (on the lease holder) the scheduler.
+
+image:
+  # -- Image for the server and the worker.
+  repository: ghcr.io/openfactory-org/openfactory
+  # -- Image tag. Defaults to the chart appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+# -- Base64-encoded 32-byte master key (OF_SECRET_KEY). Generate with
+# `openssl rand -base64 32`. Keep it stable: it encrypts stored secrets and
+# signs sessions. When secretKey and existingSecret are empty, a hook Job
+# creates the Secret "<fullname>-key" with a random key at the first install.
+# The Job never changes a Secret that exists, and `helm uninstall` keeps it.
+# Back up that Secret.
+secretKey: ""
+# -- Name of an existing Secret with the server environment. It must hold
+# OF_SECRET_KEY. Other OF_* keys in it are also loaded (for example
+# OF_DATABASE_URL, OF_OIDC_CLIENT_SECRET or object storage credentials).
+existingSecret: ""
+
+database:
+  # -- sqlite or postgres.
+  # sqlite: a StatefulSet with exactly one replica and a PersistentVolumeClaim
+  #   that holds the database and the local object store.
+  # postgres: a Deployment with server.replicaCount replicas, a
+  #   PodDisruptionBudget, and a database that you supply
+  #   (database.postgres.url or database.postgres.existingSecret).
+  mode: sqlite
+  sqlite:
+    persistence:
+      # -- Disable only for throwaway installs: the database is lost when the pod restarts.
+      enabled: true
+      size: 10Gi
+      storageClass: ""
+      accessModes: [ReadWriteOnce]
+      # -- Use an existing PVC instead of the StatefulSet volume claim template
+      # (for example the claim of an older chart version, "<release>-openfactory-data").
+      existingClaim: ""
+  postgres:
+    # -- External database URL (postgres://user:pass@host:5432/db?sslmode=require).
+    # Stored in the chart Secret.
+    url: ""
+    # -- Read the URL from an existing Secret instead (key below).
+    existingSecret: ""
+    existingSecretKey: database-url
+
+server:
+  # -- Install the server. Set false (with worker.enabled and worker.serverURL)
+  # to install only a remote worker in a cluster that connects outbound to a
+  # server elsewhere.
+  enabled: true
+  # -- Number of replicas. Must be 1 with database.mode sqlite.
+  replicaCount: 1
+  # -- Externally reachable base URL (OF_PUBLIC_URL). Webhooks, sandboxes,
+  # OIDC redirects and dashboard links use it. Defaults to the first ingress
+  # host when empty.
+  publicURL: ""
+  # -- URL that sandbox pods use to reach the server (OF_INTERNAL_URL). When
+  # empty, the chart uses the server Service:
+  # http://<service name>.<namespace>.svc:<service port>.
+  internalURL: ""
+  # -- Issuer URL of the run tokens for cloud identity federation
+  # (OF_OIDC_ISSUER_URL). When empty, the issuer is the public URL. Route this
+  # URL to the server: cloud providers read its /.well-known/ paths.
+  oidcIssuerURL: ""
+  # -- Sandbox backend. The only value is kubernetes: sandbox Pods start in
+  # sandbox.namespace. The chart refuses local, because the local backend runs
+  # agents in the server Pod without isolation.
+  sandboxBackend: kubernetes
+  # -- Development mode (OF_DEV): a bootstrap admin whose API key is printed in the logs.
+  # Never in production.
+  dev: false
+  logLevel: info
+  logFormat: json
+  # -- Extra plain environment variables (name: value), for example
+  # OF_LEADER_LEASE_TTL or OF_OUTBOX_MAX_ATTEMPTS.
+  env: {}
+  # -- Extra secret environment variables (name: value), stored in the chart
+  # Secret, for example OF_OIDC_CLIENT_SECRET. Model credentials and
+  # integration credentials are team secrets, not server settings.
+  secretEnv: {}
+  # -- Extra environment variables for the server container, as a list of
+  # Kubernetes EnvVar objects (name with value or valueFrom). Use it where
+  # server.env cannot work, for example a value from a Secret key or the
+  # downward API. They come after the chart's own variables.
+  extraEnvVars: []
+  #  - name: AWS_REGION
+  #    value: us-east-1
+  # -- Extra volumes for the server Pod (a list of Kubernetes Volume objects),
+  # for example a ConfigMap with a CA bundle or a projected service account
+  # token.
+  extraVolumes: []
+  # -- Extra volume mounts for the server container (a list of Kubernetes
+  # VolumeMount objects). They mount the volumes of extraVolumes.
+  extraVolumeMounts: []
+  # -- Extra containers in the server Pod (a list of full Kubernetes Container
+  # objects), for example a sidecar. They run next to the server container and
+  # share the Pod network. Every replica gets them.
+  extraContainers: []
+  service:
+    type: ClusterIP
+    port: 80
+    # -- Annotations of the server Service, for example for a cloud load balancer.
+    annotations: {}
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+  # -- PodDisruptionBudget for database.mode postgres with more than one replica.
+  podDisruptionBudget:
+    enabled: true
+    maxUnavailable: 1
+  # -- Spread postgres-mode replicas across nodes (topologySpreadConstraints).
+  topologySpread: true
+  # -- Seconds a terminating replica gets to finish turns and hand back leases.
+  # It must cover OF_SHUTDOWN_DRAIN (default 5s) plus 30 s of HTTP shutdown.
+  terminationGracePeriodSeconds: 60
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+
+# -- Run data storage (transcripts, artifacts, prompt attachments). The
+# database keeps metadata only; clients read run data through presigned URLs.
+objectStore:
+  # -- OF_OBJECT_STORE_URL: s3://bucket/prefix?region=..., gs://bucket/prefix,
+  # azblob://account/container/prefix or file:///path. Empty means local disk
+  # in the data directory: fine for sqlite mode (it is on the PVC), and
+  # rejected for postgres mode with more than one replica, because replicas do
+  # not share a disk.
+  url: ""
+  # -- Optional per-category URLs. Each falls back to url.
+  transcriptsURL: ""
+  artifactsURL: ""
+  attachmentsURL: ""
+  # -- Delete run data older than this Go duration (for example 720h). Empty keeps it forever.
+  retention: ""
+  # -- Lifetime of presigned URLs (Go duration). Empty means 15m.
+  presignTTL: ""
+  # -- HMAC key for file:// presigned links (OF_OBJECT_STORE_SIGNING_KEY).
+  # Stored in the chart Secret.
+  signingKey: ""
+  # -- Provider credentials as secret environment variables, for example
+  # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION or AZURE_STORAGE_KEY.
+  # Prefer a role where you can: EKS Pod Identity (an association for the
+  # server service account), IRSA or GKE Workload Identity (through
+  # serviceAccount.annotations). Azure Blob needs AZURE_STORAGE_KEY.
+  credentials: {}
+  # -- Existing Secret whose keys are loaded as environment variables (credentials).
+  existingSecret: ""
+  # -- Existing Secret with a GCS service-account JSON key. Mounted and passed
+  # as GOOGLE_APPLICATION_CREDENTIALS.
+  gcsCredentialsSecret: ""
+  gcsCredentialsKey: credentials.json
+
+# -- OIDC single sign-on for the dashboard. Redirect URI to register with the
+# identity provider: <publicURL>/auth/oidc/callback.
+oidc:
+  enabled: false
+  # -- Issuer URL (OF_OIDC_ISSUER), for example https://accounts.example.com.
+  issuer: ""
+  clientID: ""
+  # -- Client secret, stored in the chart Secret. Empty for PKCE public clients.
+  clientSecret: ""
+  # -- Existing Secret with the client secret (key below) instead of clientSecret.
+  existingSecret: ""
+  existingSecretKey: client-secret
+  # -- Defaults to <publicURL>/auth/oidc/callback.
+  redirectURL: ""
+  scopes: "openid,profile,email"
+  # -- Comma-separated email domains allowed to sign in. Empty allows any.
+  allowedDomains: ""
+  groupsClaim: groups
+  # -- Comma-separated groups mapped to the admin and editor roles.
+  adminGroups: ""
+  editorGroups: ""
+  # -- Role for users in no mapped group: admin, editor or user.
+  defaultRole: user
+  # -- Login button label.
+  displayName: Single sign-on
+  requireVerifiedEmail: true
+
+# -- gRPC plugins (for example GitLab and Azure DevOps). The server launches
+# every executable named openfactory-plugin-<name> in OF_PLUGIN_DIR. A plugin
+# gets a minimal environment plus the variables in plugins.envAllow.
+plugins:
+  # -- Load the plugins bundled in the server image (GitLab, Azure DevOps).
+  bundled: true
+  # -- Names of server environment variables that every plugin process gets
+  # (OF_PLUGIN_ENV_ALLOW). A plugin always gets PATH, HOME, TMPDIR, LANG and
+  # TZ. The server never passes its own keys and credentials. Put the values
+  # in server.env or server.secretEnv.
+  envAllow: []
+  # -- Names of server environment variables for single plugins
+  # (OF_PLUGIN_ENV): a map from plugin name to a list of names. A plugin gets
+  # only the variables of its own entry, besides envAllow. The same rule about
+  # keys and credentials holds. For example: acme: [ACME_API_URL].
+  env: {}
+  # -- Plugin images. Each one becomes an init container that copies the
+  # plugin executables from `path` in the image into the plugin directory.
+  # The image needs `sh` and `cp`, and its executables must match the server
+  # OS and architecture.
+  images: []
+  #  - name: gitlab
+  #    image: ghcr.io/openfactory-org/openfactory-plugin-gitlab:0.2.0
+  #    path: /plugins
+  #    pullPolicy: IfNotPresent
+
+runner:
+  # -- Image with the runner binary at /usr/local/bin/openfactory
+  # (OF_RUNNER_IMAGE). The kubernetes backend copies it into each sandbox. Empty
+  # means the server image (image.repository and image.tag).
+  image: ""
+  # -- Images with the claude and codex CLIs (OF_CLAUDE_TOOL_IMAGE and
+  # OF_CODEX_TOOL_IMAGE). The kubernetes backend copies the image of the
+  # harness into each sandbox. Empty means the server default.
+  claudeToolImage: ""
+  codexToolImage: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  # -- Annotations, for example for workload identity to object storage.
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: factories.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: factories-tls
+  #    hosts: [factories.example.com]
+
+sandbox:
+  # -- Namespace for sandbox pods. Empty means the release namespace.
+  namespace: ""
+  # -- Create the sandbox namespace.
+  createNamespace: false
+  # -- Create the Role and RoleBindings that let the server and the worker
+  # manage Jobs, pods and NetworkPolicies in the sandbox namespace (and
+  # nothing else). The Role has no pods/exec.
+  rbac:
+    create: true
+  # -- Default sandbox image (OF_SANDBOX_IMAGE). It must ship sh and git.
+  image: ghcr.io/openfactory-org/sandbox:latest
+  # -- Settings for sandbox Jobs on the kubernetes backend. An empty value keeps
+  # the built-in default.
+  k8s:
+    # -- Labels for sandbox Jobs and Pods (OF_K8S_LABELS). A map of key to value.
+    labels: {}
+    # -- Annotations for sandbox Jobs and Pods (OF_K8S_ANNOTATIONS). To keep a
+    # node autoscaler from stopping a sandbox, set
+    # cluster-autoscaler.kubernetes.io/safe-to-evict: "false".
+    annotations: {}
+    # -- Image pull policy (OF_K8S_IMAGE_PULL_POLICY): Always, IfNotPresent or
+    # Never. Empty means IfNotPresent.
+    imagePullPolicy: ""
+    # -- User of sandbox Pods (OF_K8S_RUN_AS_USER): a number, or "image" to keep
+    # the user of the image. Empty means 1000, with group and fsGroup 1000.
+    runAsUser: ""
+    # -- Size limit of the workspace volume (OF_K8S_WORKSPACE_SIZE_LIMIT), for
+    # example 20Gi. Empty means no limit.
+    workspaceSizeLimit: ""
+    # -- At startup, run a small test Job that checks that the cluster can
+    # start sandbox Pods (OF_K8S_PREFLIGHT_JOB).
+    preflightJob: false
+    # -- Control-plane Pods that a sandbox with a restricted network policy can
+    # reach (OF_K8S_CONTROL_PLANE_SELECTOR, OF_K8S_CONTROL_PLANE_NAMESPACE).
+    # The selector is a label selector such as app.kubernetes.io/name=openfactory.
+    # Namespace is the namespace of those Pods. An empty selector means the
+    # server Pods of this release in the release namespace, if server.enabled
+    # is true and server.internalURL is empty. Else an empty selector sets
+    # nothing. A set selector replaces the default.
+    controlPlane:
+      namespace: ""
+      selector: ""
+    # -- The egress proxy sidecar of a restricted sandbox.
+    egressProxy:
+      # -- Image with the openfactory binary (OF_K8S_EGRESS_PROXY_SIDECAR_IMAGE).
+      # A restricted sandbox gets its own proxy sidecar with its allowed hosts.
+      # Needs Kubernetes 1.29 or later. Empty means the runner image
+      # (runner.image, or the server image).
+      sidecarImage: ""
+      # -- Close the direct path on ports 80 and 443 next to the sidecar
+      # (OF_K8S_EGRESS_LOCK): none (default) or iptables. With iptables, each
+      # restricted sandbox Pod gets an init container with the capability
+      # NET_ADMIN. The sandbox namespace must allow that (Pod Security
+      # Admission level privileged), and the sidecar image needs iptables.
+      lock: ""
+    # -- Check that the cluster network plugin enforces NetworkPolicy.
+    networkPolicy:
+      # -- probe (default) or off (OF_K8S_NETWORK_POLICY_CHECK). The probe runs
+      # three short Pods and one NetworkPolicy in the sandbox namespace at startup.
+      check: ""
+      # -- warn (default) or require (OF_K8S_NETWORK_POLICY_ENFORCEMENT). With
+      # require, a restricted run fails unless the probe showed enforcement.
+      enforcement: ""
+      # -- How long a restricted sandbox waits until its NetworkPolicy is active
+      # (OF_K8S_EGRESS_WAIT_TIMEOUT), for example 60s. Default: 30s. Use "off"
+      # to not wait: the sandbox then starts at once, and the policy takes effect
+      # a few hundred milliseconds later. At least 1s.
+      waitTimeout: ""
+      # -- host:port that the wait dials (OF_K8S_EGRESS_WAIT_ADDR). It must
+      # accept connections without a policy, and the policy of a sandbox must
+      # block it. Default: the kubelet of the node of the Pod, port 10250.
+      waitAddr: ""
+    # -- Start a sandbox with a restricted network policy even if its
+    # NetworkPolicy cannot be created (OF_ALLOW_UNENFORCED_NETWORK_POLICY).
+    # Set this only if another control enforces egress for sandbox Pods.
+    allowUnenforcedNetworkPolicy: false
+  # -- PodSpec template merged into every sandbox pod (YAML). Rendered into a
+  # ConfigMap and passed as OF_K8S_POD_TEMPLATE. See deploy/kubernetes/pod-template.yaml.
+  # Put image pull secrets for sandbox Pods here, as imagePullSecrets.
+  podTemplate: |
+    automountServiceAccountToken: false
+    enableServiceLinks: false
+    containers:
+      - name: sandbox
+        image: ghcr.io/openfactory-org/sandbox:latest
+        resources:
+          requests:
+            cpu: "1"
+            memory: 2Gi
+          limits:
+            memory: 8Gi
+
+worker:
+  # -- Run a remote worker in this cluster. It connects outbound to the server
+  # (worker.serverURL) and starts sandbox Jobs with the kubernetes backend.
+  # Use it when the server runs elsewhere, or to give a cluster its own
+  # workerHost id.
+  enabled: false
+  replicaCount: 1
+  # -- Worker id. Agents select it with workerHost. Reserved: server, local,
+  # kubernetes, direct, managed and ids that start with "openfactory".
+  id: k8s-worker
+  name: ""
+  capacity: 8
+  labels: {}
+  # -- Serve the worker's Prometheus metrics (of_worker_*) on this address,
+  # for example ":9090" (OF_METRICS_ADDR). Empty disables the listener.
+  metricsAddr: ""
+  # -- Server URL the worker dials. Defaults to the in-cluster server Service.
+  serverURL: ""
+  # -- Team API key (of_<prefix>_<secret>) the worker authenticates with.
+  apiKey: ""
+  # -- Existing Secret with the API key (key below) instead of apiKey.
+  existingSecret: ""
+  existingSecretKey: api-key
+  # -- Extra environment for the worker, for example credentials for
+  # harnesses with auth.source: workerEnvironment.
+  env: {}
+  secretEnv: {}
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}

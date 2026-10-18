@@ -1,0 +1,86 @@
+{{- if .Values.server.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "openfactory.fullname" . }}
+  labels:
+    {{- include "openfactory.labels" . | nindent 4 }}
+data:
+  OF_LISTEN: ":8080"
+  OF_PUBLIC_URL: {{ include "openfactory.publicURL" . | quote }}
+  OF_INTERNAL_URL: {{ include "openfactory.internalURL" . | quote }}
+  {{- with .Values.server.oidcIssuerURL }}
+  OF_OIDC_ISSUER_URL: {{ . | quote }}
+  {{- end }}
+  OF_DATA_DIR: "/var/lib/openfactory"
+  OF_SANDBOX_BACKEND: {{ .Values.server.sandboxBackend | quote }}
+  OF_SANDBOX_IMAGE: {{ .Values.sandbox.image | quote }}
+  OF_DEV: {{ .Values.server.dev | quote }}
+  OF_LOG_LEVEL: {{ .Values.server.logLevel | quote }}
+  OF_LOG_FORMAT: {{ .Values.server.logFormat | quote }}
+  OF_K8S_NAMESPACE: {{ include "openfactory.sandboxNamespace" . | quote }}
+  {{- if eq .Values.server.sandboxBackend "kubernetes" }}
+  OF_K8S_POD_TEMPLATE: "/etc/openfactory/pod-template.yaml"
+  {{- end }}
+  {{- with include "openfactory.sandboxK8sEnv" . | trim }}
+  {{- . | nindent 2 }}
+  {{- end }}
+  OF_PLUGIN_DIR: "/opt/openfactory/plugins"
+  {{- with .Values.plugins.envAllow }}
+  OF_PLUGIN_ENV_ALLOW: {{ include "openfactory.csv" . | quote }}
+  {{- end }}
+  {{- with .Values.plugins.env }}
+  OF_PLUGIN_ENV: {{ include "openfactory.pluginEnv" . | quote }}
+  {{- end }}
+  OF_RUNNER_IMAGE: {{ include "openfactory.runnerImage" . | quote }}
+  {{- with .Values.runner.claudeToolImage }}
+  OF_CLAUDE_TOOL_IMAGE: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.runner.codexToolImage }}
+  OF_CODEX_TOOL_IMAGE: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.objectStore.url }}
+  OF_OBJECT_STORE_URL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.objectStore.transcriptsURL }}
+  OF_OBJECT_STORE_TRANSCRIPTS_URL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.objectStore.artifactsURL }}
+  OF_OBJECT_STORE_ARTIFACTS_URL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.objectStore.attachmentsURL }}
+  OF_OBJECT_STORE_ATTACHMENTS_URL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.objectStore.retention }}
+  OF_OBJECT_STORE_RETENTION: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.objectStore.presignTTL }}
+  OF_OBJECT_STORE_PRESIGN_TTL: {{ . | quote }}
+  {{- end }}
+  {{- if .Values.oidc.enabled }}
+  OF_OIDC_ISSUER: {{ .Values.oidc.issuer | quote }}
+  OF_OIDC_CLIENT_ID: {{ .Values.oidc.clientID | quote }}
+  OF_OIDC_REDIRECT_URL: {{ default (printf "%s/auth/oidc/callback" (include "openfactory.publicURL" .)) .Values.oidc.redirectURL | quote }}
+  OF_OIDC_SCOPES: {{ .Values.oidc.scopes | quote }}
+  OF_OIDC_ALLOWED_DOMAINS: {{ .Values.oidc.allowedDomains | quote }}
+  OF_OIDC_GROUPS_CLAIM: {{ .Values.oidc.groupsClaim | quote }}
+  OF_OIDC_ADMIN_GROUPS: {{ .Values.oidc.adminGroups | quote }}
+  OF_OIDC_EDITOR_GROUPS: {{ .Values.oidc.editorGroups | quote }}
+  OF_OIDC_DEFAULT_ROLE: {{ .Values.oidc.defaultRole | quote }}
+  OF_OIDC_DISPLAY_NAME: {{ .Values.oidc.displayName | quote }}
+  OF_OIDC_REQUIRE_VERIFIED_EMAIL: {{ .Values.oidc.requireVerifiedEmail | quote }}
+  {{- end }}
+  {{- range $k, $v := .Values.server.env }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}
+{{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "openfactory.fullname" . }}-pod-template
+  labels:
+    {{- include "openfactory.labels" . | nindent 4 }}
+data:
+  pod-template.yaml: |
+    {{- .Values.sandbox.podTemplate | nindent 4 }}

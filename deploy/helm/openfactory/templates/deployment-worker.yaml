@@ -1,0 +1,137 @@
+{{- if .Values.worker.enabled }}
+{{- $secret := default (printf "%s-worker" (include "openfactory.fullname" .)) .Values.worker.existingSecret }}
+{{- $key := ternary .Values.worker.existingSecretKey "api-key" (ne .Values.worker.existingSecret "") }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "openfactory.fullname" . }}-worker
+  labels:
+    {{- include "openfactory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "openfactory.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+      labels:
+        {{- include "openfactory.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      serviceAccountName: {{ include "openfactory.workerServiceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.server.podSecurityContext | nindent 8 }}
+      containers:
+        - name: worker
+          image: {{ include "openfactory.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - worker
+          {{- with .Values.worker.metricsAddr }}
+          ports:
+            - name: metrics
+              containerPort: {{ regexReplaceAll "^.*:" . "" | int }}
+              protocol: TCP
+          {{- end }}
+          env:
+            - name: OF_SERVER
+              value: {{ default (printf "http://%s:%v" (include "openfactory.fullname" .) .Values.server.service.port) .Values.worker.serverURL | quote }}
+            - name: OF_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: {{ $key }}
+            - name: OF_SANDBOX_BACKEND
+              value: kubernetes
+            - name: OF_WORKER_ID
+              value: {{ .Values.worker.id | quote }}
+            - name: OF_WORKER_NAME
+              value: {{ default .Values.worker.id .Values.worker.name | quote }}
+            - name: OF_WORKER_CAPACITY
+              value: {{ .Values.worker.capacity | quote }}
+            {{- with .Values.worker.metricsAddr }}
+            - name: OF_METRICS_ADDR
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.worker.labels }}
+            - name: OF_WORKER_LABELS
+              value: {{ include "openfactory.kvList" . | quote }}
+            {{- end }}
+            - name: OF_K8S_NAMESPACE
+              value: {{ include "openfactory.sandboxNamespace" . | quote }}
+            - name: OF_K8S_POD_TEMPLATE
+              value: /etc/openfactory/pod-template.yaml
+            {{- /* The same sandbox.k8s settings as the server. */}}
+            {{- range $k, $v := include "openfactory.sandboxK8sEnv" . | fromYaml }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            - name: OF_SANDBOX_IMAGE
+              value: {{ .Values.sandbox.image | quote }}
+            - name: OF_RUNNER_IMAGE
+              value: {{ include "openfactory.runnerImage" . | quote }}
+            {{- with .Values.runner.claudeToolImage }}
+            - name: OF_CLAUDE_TOOL_IMAGE
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.runner.codexToolImage }}
+            - name: OF_CODEX_TOOL_IMAGE
+              value: {{ . | quote }}
+            {{- end }}
+            - name: HOME
+              value: /var/lib/openfactory
+            {{- range $k, $v := .Values.worker.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            {{- if not .Values.worker.existingSecret }}
+            {{- range $k, $v := .Values.worker.secretEnv }}
+            - name: {{ $k }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: {{ $k }}
+            {{- end }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.server.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: home
+              mountPath: /var/lib/openfactory
+            - name: tmp
+              mountPath: /tmp
+            - name: pod-template
+              mountPath: /etc/openfactory/pod-template.yaml
+              subPath: pod-template.yaml
+              readOnly: true
+      volumes:
+        - name: home
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        - name: pod-template
+          configMap:
+            name: {{ include "openfactory.fullname" . }}-pod-template
+      {{- with .Values.worker.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

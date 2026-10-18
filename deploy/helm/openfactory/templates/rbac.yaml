@@ -1,0 +1,76 @@
+{{- if .Values.sandbox.createNamespace }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ include "openfactory.sandboxNamespace" . }}
+  labels:
+    {{- include "openfactory.labels" . | nindent 4 }}
+---
+{{- end }}
+{{- if include "openfactory.needsSandboxRBAC" . }}
+# Lets Open Factory create one Job for each sandbox, read its pods and make
+# the NetworkPolicy of a restricted sandbox, in the sandbox namespace only. The
+# control plane never runs a command in a pod, so the Role has no pods/exec.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "openfactory.fullname" . }}-sandbox
+  namespace: {{ include "openfactory.sandboxNamespace" . }}
+  labels:
+    {{- include "openfactory.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "get", "list", "watch", "delete", "patch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete", "patch"]
+  # One NetworkPolicy for each sandbox with a restricted network policy. The Job
+  # owns it, and the server also deletes it when it destroys the sandbox.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["create", "get", "delete", "patch"]
+{{- if and .Values.server.enabled (eq .Values.server.sandboxBackend "kubernetes") }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "openfactory.fullname" . }}-sandbox-server
+  namespace: {{ include "openfactory.sandboxNamespace" . }}
+  labels:
+    {{- include "openfactory.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "openfactory.fullname" . }}-sandbox
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "openfactory.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- if .Values.worker.enabled }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "openfactory.fullname" . }}-sandbox-worker
+  namespace: {{ include "openfactory.sandboxNamespace" . }}
+  labels:
+    {{- include "openfactory.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "openfactory.fullname" . }}-sandbox
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "openfactory.workerServiceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end }}

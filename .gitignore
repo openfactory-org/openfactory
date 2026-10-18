@@ -1,0 +1,37 @@
+# Build output
+/bin/
+/dist/
+/openfactory
+/openfactory.exe
+*.test
+
+# Test and coverage output
+coverage.out
+*.coverprofile
+
+# Local data (SQLite databases, dev data directory)
+*.db
+*.db-*
+/.openfactory/
+
+# Dependencies
+node_modules/
+__pycache__/
+
+# Helm dependency output
+deploy/helm/openfactory/charts/
+deploy/helm/openfactory/Chart.lock
+
+# Local tool state
+/.owner/
+/.claude/
+/.aws-emulator/
+.env
+.env.local
+
+# Editor and OS files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~

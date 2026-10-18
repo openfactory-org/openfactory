@@ -1,0 +1,158 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+# Each job asks for the permissions it needs.
+permissions:
+  contents: read
+
+# Two pushes of the same tag never publish at the same time.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  goreleaser:
+    name: Binaries and server image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # GitHub release
+      packages: write   # server image on GHCR
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      # The GoReleaser before-hook builds the dashboard with npm.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Test
+        run: go test -race -count=1 ./...
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sandbox-image:
+    name: Sandbox image
+    runs-on: ubuntu-latest
+    # Publish only after the tests in the goreleaser job pass.
+    needs: goreleaser
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/openfactory-org/sandbox
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: deploy/sandbox
+          file: deploy/sandbox/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # The server image (GoReleaser job) is also the runner image. These jobs
+  # build only the tool images with the harness CLIs.
+  tool-images:
+    name: Tool images
+    runs-on: ubuntu-latest
+    # Publish only after the tests in the goreleaser job pass.
+    needs: goreleaser
+    permissions:
+      contents: read
+      packages: write
+    env:
+      REGISTRY: ghcr.io/openfactory-org
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Version and tags
+        id: version
+        # A prerelease tag (v1.2.0-rc.1) does not move :latest.
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+          for tool in claude codex; do
+            tags="${REGISTRY}/tool-$tool:$version"
+            case "$version" in *-*) ;; *) tags="$tags,${REGISTRY}/tool-$tool:latest" ;; esac
+            echo "$tool=$tags" >> "$GITHUB_OUTPUT"
+          done
+      - name: Tool image with the claude CLI
+        uses: docker/build-push-action@v6
+        with:
+          context: images/tool-claude
+          file: images/tool-claude/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.version.outputs.claude }}
+      - name: Tool image with the codex CLI
+        uses: docker/build-push-action@v6
+        with:
+          context: images/tool-codex
+          file: images/tool-codex/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.version.outputs.codex }}
+
+  helm-chart:
+    name: Helm chart
+    runs-on: ubuntu-latest
+    # Publish only after the tests in the goreleaser job pass.
+    needs: goreleaser
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      # The chart has no dependencies: users install it from one OCI reference,
+      # oci://ghcr.io/openfactory-org/charts/openfactory.
+      - name: Package and push to GHCR (OCI)
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          echo "$GHCR_TOKEN" | helm registry login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          helm lint deploy/helm/openfactory
+          helm package deploy/helm/openfactory --version "$version" --app-version "$version" -d dist
+          helm push "dist/openfactory-${version}.tgz" oci://ghcr.io/openfactory-org/charts

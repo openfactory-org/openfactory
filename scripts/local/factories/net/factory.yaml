@@ -1,0 +1,12 @@
+# Factory of check N1. The network policy is restricted: a task reaches the
+# control plane (always allowed), the object store of the stack and nothing else.
+schemaVersion: v1
+name: of-local-net
+alias: of-local-net
+description: Restricted network policy for check N1.
+repositories: []
+networkPolicy:
+  allowedHosts:
+    - aws.__LOCAL_DOMAIN__
+agentDefaults:
+  model: claude-sonnet-5-5

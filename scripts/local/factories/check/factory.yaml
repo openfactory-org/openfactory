@@ -1,0 +1,12 @@
+# Test factory of the local stack checks (scripts/local/check.sh).
+# The agents use the claude harness. The stack installs the claude CLI stand-in
+# (deploy/local/testkit), which returns fixed answers and needs no credential.
+schemaVersion: v1
+name: of-local-check
+alias: of-local-check
+description: Test factory of the local stack checks. The agents use the claude CLI stand-in.
+repositories: []
+automations:
+  githubOnboardingNotices: false
+agentDefaults:
+  model: claude-sonnet-5-5

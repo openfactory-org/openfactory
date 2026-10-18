@@ -1,0 +1,9 @@
+title: Add an empty state to the invoices list
+prompt: When an account has no invoices, the list renders blank. Add an empty state with a call to action.
+successCriteria: The empty state appears with no invoices, links to invoice creation, and has a snapshot test.
+tags: [feature, frontend]
+startingRepoRefs:
+  - codeForge: GITHUB
+    owner: acme
+    repo: web-app
+    ref: 89abcdef0123456789abcdef0123456789abcdef

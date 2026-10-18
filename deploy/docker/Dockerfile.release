@@ -1,0 +1,28 @@
+# Runtime image for GoReleaser. GoReleaser builds the binary and the bundled
+# plugins (openfactory-plugin-gitlab, openfactory-plugin-azuredevops) and
+# copies them in. Keep this file in sync with the runtime stage of
+# deploy/docker/Dockerfile. The image is also the runner image: the
+# kubernetes backend copies /usr/local/bin/openfactory into each sandbox.
+FROM alpine:3.22
+RUN apk add --no-cache ca-certificates tzdata git openssh-client iptables \
+ && addgroup -S -g 10001 openfactory \
+ && adduser -S -D -H -u 10001 -G openfactory -h /var/lib/openfactory openfactory \
+ && mkdir -p /var/lib/openfactory \
+ && chown openfactory:openfactory /var/lib/openfactory
+COPY openfactory /usr/local/bin/openfactory
+COPY openfactory-plugin-gitlab openfactory-plugin-azuredevops /usr/local/lib/openfactory/plugins/
+LABEL org.opencontainers.image.title="openfactory" \
+      org.opencontainers.image.source="https://github.com/openfactory-org/openfactory" \
+      org.opencontainers.image.licenses="Apache-2.0"
+ENV HOME=/var/lib/openfactory \
+    OF_DATA_DIR=/var/lib/openfactory \
+    OF_PLUGIN_DIR=/usr/local/lib/openfactory/plugins \
+    OF_LISTEN=:8080
+USER 10001:10001
+WORKDIR /var/lib/openfactory
+VOLUME ["/var/lib/openfactory"]
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1
+ENTRYPOINT ["/usr/local/bin/openfactory"]
+CMD ["serve"]

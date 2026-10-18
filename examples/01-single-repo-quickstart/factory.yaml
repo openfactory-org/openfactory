@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=https://openfactory-org.github.io/schemas/v1/factory.schema.json
+schemaVersion: v1
+name: quickstart
+description: A minimal factory for one repository.
+repositories:
+  - owner: acme
+    name: payments-service
+agentDefaults:
+  harness:
+    type: claude
+    model: claude-opus-5-5
+    auth:
+      source: managedSecret
+      secretName: ANTHROPIC_API_KEY

@@ -1,0 +1,10 @@
+# Machine of the agent coder: it clones the test repository from the git server
+# of the local stack into the directory repo. The setup command is safe to run
+# again: a session that restores a snapshot has the clone already.
+description: Clone of the test repository on the git server of the local stack
+setupCommands:
+  - "[ -d repo/.git ] || git clone -q __GIT_CLONE_URL__ repo"
+platform:
+  os: linux
+  linux:
+    image: __SANDBOX_IMAGE__

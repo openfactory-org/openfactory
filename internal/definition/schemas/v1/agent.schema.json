@@ -1,0 +1,165 @@
+{
+  "$id": "https://openfactory-org.github.io/schemas/v1/agent.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "not": {
+        "properties": {
+          "harness": {
+            "type": "object"
+          },
+          "model": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "harness"
+        ]
+      }
+    }
+  ],
+  "description": "YAML frontmatter of agents/<name>/agent.md.",
+  "properties": {
+    "agentType": {
+      "default": "CUSTOM",
+      "description": "Role of the agent. MAIN is an alias of FOREMAN. Exactly one agent must be the foreman.",
+      "enum": [
+        "CUSTOM",
+        "FOREMAN",
+        "MAIN",
+        "TRIAGE",
+        "SPEC",
+        "IMPLEMENT",
+        "REVIEW",
+        "VERIFY"
+      ],
+      "type": "string"
+    },
+    "credentialStrategy": {
+      "$ref": "common.schema.json#/$defs/credential",
+      "description": "Whose code-forge credentials the runs use. It overrides the factory value."
+    },
+    "description": {
+      "description": "Short description that list_agents shows to the foreman.",
+      "type": "string"
+    },
+    "environmentId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "ID of the environment of the runs. null clears the inherited value."
+    },
+    "harness": {
+      "anyOf": [
+        {
+          "$ref": "common.schema.json#/$defs/harnessOverride"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Sparse override of the inherited harness. It changes only the fields that you set. Set auth to null to clear the inherited credential."
+    },
+    "idleTimeoutMinutes": {
+      "anyOf": [
+        {
+          "maximum": 60,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Minutes that a finished run keeps its sandbox and session for follow-ups. 0 ends the session after each turn. Without a value, the server default OF_IDLE_TIMEOUT_DEFAULT applies (10 minutes) to every run. OF_IDLE_TIMEOUT_MAX (60 minutes) is the upper limit."
+    },
+    "machine": {
+      "anyOf": [
+        {
+          "$ref": "common.schema.json#/$defs/resourceName"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Machine of the runs: the name of a file machines/<name>.yaml. It replaces the inherited machine."
+    },
+    "mcpServers": {
+      "anyOf": [
+        {
+          "$ref": "common.schema.json#/$defs/mcpServers"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "MCP servers of the runs. They replace the mcpServers of agentDefaults. {} removes those defaults. The factory-wide servers always stay."
+    },
+    "model": {
+      "$ref": "common.schema.json#/$defs/model",
+      "description": "Model shorthand. A Claude model selects the claude harness. An OpenAI model selects the codex harness. Do not set it together with harness."
+    },
+    "networkPolicy": {
+      "$ref": "common.schema.json#/$defs/networkPolicy",
+      "description": "Network policy of the agent. It merges with the policy of the factory."
+    },
+    "secrets": {
+      "anyOf": [
+        {
+          "$ref": "common.schema.json#/$defs/secretList"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Secret names of the runs. They replace the secrets of agentDefaults. [] removes those defaults. The factory-wide secrets always stay."
+    },
+    "snapshot": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": true,
+      "description": "If false, a snapshot stores only the harness state, not the workspace."
+    },
+    "spawnableBy": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "common.schema.json#/$defs/resourceName"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Agents that can start this agent with run_agents. Without a value, only the foreman can. [] means no agent. Each name must be an agent of the definition."
+    },
+    "workerHost": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Worker that runs the agent. The value is trimmed. null or empty clears an inherited host."
+    }
+  },
+  "title": "Agent frontmatter",
+  "type": "object"
+}

@@ -1,0 +1,45 @@
+# Example PodSpec template for the kubernetes sandbox backend.
+#
+# Point OF_K8S_POD_TEMPLATE (server) or the worker at this file. It is a raw
+# PodSpec (not a full Pod). The backend merges its required fields into it:
+#   - a container named "sandbox" (added when missing) that runs the sandbox image
+#     with a long-lived sleep; the image comes from the environment, the
+#     machine (platform.linux.image) or the default image
+#   - an emptyDir volume mounted at /workspace
+#   - restartPolicy: Never, run/sandbox labels and annotations
+#   - a machine instanceShape sets requests = limits for cpu and memory on the
+#     sandbox container, replacing matching values from this template
+# Machine registry credentials are ignored here; list imagePullSecrets instead.
+serviceAccountName: openfactory-sandbox
+automountServiceAccountToken: false
+enableServiceLinks: false
+terminationGracePeriodSeconds: 30
+nodeSelector:
+  kubernetes.io/os: linux
+tolerations:
+  - key: openfactory.dev/sandbox
+    operator: Exists
+    effect: NoSchedule
+imagePullSecrets:
+  - name: registry-credentials
+securityContext:
+  seccompProfile:
+    type: RuntimeDefault
+containers:
+  - name: sandbox
+    resources:
+      requests:
+        cpu: "1"
+        memory: 4Gi
+        ephemeral-storage: 10Gi
+      limits:
+        cpu: "4"
+        memory: 8Gi
+        ephemeral-storage: 20Gi
+    env:
+      - name: GIT_TERMINAL_PROMPT
+        value: "0"
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]

@@ -1,0 +1,254 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# A new push to a pull request cancels its older runs. Runs on main finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: Vet, test and build
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: of_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Runs the PostgreSQL store conformance and upgrade suites.
+      OF_TEST_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/of_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: gofmt
+        run: make fmt-check
+      - name: go vet
+        run: go vet ./...
+      - name: go test -race
+        run: go test -race -count=1 -coverprofile=coverage.out ./...
+      - name: Build binary and bundled plugins
+        run: make build plugins
+      - name: Build the Go example modules
+        run: make examples-go
+      - name: Validate example definitions
+        run: |
+          set -e
+          for d in examples/*/; do
+            [ -f "$d/factory.yaml" ] || continue
+            echo "::group::validate $d"
+            ./bin/openfactory validate "$d"
+            echo "::endgroup::"
+          done
+      - name: Definition schemas are up to date
+        run: make schemas-check
+      - name: Definition reference tables are up to date
+        run: make docs-check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openfactory-linux-amd64
+          path: |
+            bin/openfactory
+            bin/plugins/
+          retention-days: 7
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          # Pinned so a new linter release does not fail unchanged code.
+          version: v2.15.0
+
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.10.0
+      - name: govulncheck
+        run: make vuln
+
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The ubuntu runner image includes shellcheck.
+      - name: shellcheck
+        run: make shellcheck
+
+  # The REST API becomes a stable contract with the tag v1.0.0. Until then
+  # the diff against the committed baseline only reports: it shows the changes
+  # in the job summary and never fails the build. The check that the baseline
+  # file exists and is valid still fails the build.
+  # When v1.0.0 is tagged, set OPENAPI_ENFORCE to "1" here and in the Makefile.
+  # Then a breaking change fails the build. Regenerate the baseline
+  # (make openapi-baseline) when a release is cut.
+  openapi:
+    name: OpenAPI diff (report only until v1.0.0)
+    runs-on: ubuntu-latest
+    env:
+      OPENAPI_ENFORCE: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: oasdiff breaking
+        run: |
+          set +e
+          make openapi-check > oasdiff.txt 2>&1
+          status=$?
+          cat oasdiff.txt
+          {
+            echo '### OpenAPI diff against the baseline'
+            if [ "$OPENAPI_ENFORCE" = "1" ]; then echo '(enforced: a breaking change fails the build)'; else echo '(report only until v1.0.0)'; fi
+            echo '```'
+            cat oasdiff.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+  # pkg/ is experimental in v1. The Go API diff reports changes in the
+  # job summary and never fails the build.
+  go-apidiff:
+    name: Go API diff (report only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: apidiff pkg/
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD~1' }}
+        run: |
+          sh scripts/go-apidiff.sh "$BASE" | tee apidiff.txt
+          {
+            echo '### Go API diff (pkg/, report only)'
+            echo '```'
+            cat apidiff.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  web:
+    name: Dashboard build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Typed API client matches the OpenAPI spec
+        run: |
+          cd web && npm ci
+          npm run check:api
+      - name: npm ci, build, and check internal/webui/dist is committed
+        run: make web-check
+      - name: Dashboard tests
+        working-directory: web
+        run: npm test
+
+  # Upgrade tests migrate databases from each earlier release and
+  # check that a database made before the single baseline migration is
+  # refused. The store conformance suites run in the main test job.
+  upgrade-test:
+    name: Database upgrade tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: of_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Runs the PostgreSQL upgrade tests too (only tests matched by -run Upgrade).
+      OF_TEST_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/of_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: go test -run Upgrade
+        run: make upgrade-test
+
+  deploy:
+    name: Helm chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      # The chart test renders with the real helm command. Without Helm it
+      # skips, so install Helm first: here the test must run.
+      - uses: azure/setup-helm@v4
+      - name: helm lint and the chart test (every mode)
+        run: make helm-test
+
+  images:
+    name: Container images build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Server image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Tool example image
+        uses: docker/build-push-action@v6
+        with:
+          context: images/tool-example
+          file: images/tool-example/Dockerfile
+          push: false

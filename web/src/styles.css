@@ -1,0 +1,7 @@
+/* Open Factory dashboard styles. Light/dark via prefers-color-scheme,
+   overridable with <html data-theme="light|dark">. */
+@import "./styles/tokens.css";
+@import "./styles/base.css";
+@import "./styles/layout.css";
+@import "./styles/components.css";
+@import "./styles/pages.css";

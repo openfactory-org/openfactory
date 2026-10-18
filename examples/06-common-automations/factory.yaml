@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=https://openfactory-org.github.io/schemas/v1/factory.schema.json
+schemaVersion: v1
+name: common-automations
+description: A catalog of everyday automations for Slack, Linear, schedules and GitHub.
+alias: builder
+repositories:
+  - owner: acme
+    name: api
+  - owner: acme
+    name: web
+integrations:
+  - type: slack
+  - type: linear
+automations:
+  githubOnboardingNotices: false
+github:
+  factoryConfigChecks: all
+agentDefaults:
+  harness:
+    type: claude
+    model: claude-opus-5-5
+    auth:
+      source: managedSecret
+      secretName: ANTHROPIC_API_KEY
+  machine: linux

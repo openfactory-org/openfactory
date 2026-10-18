@@ -1,0 +1,25 @@
+# Build context of deploy/docker/Dockerfile and deploy/local/testkit/Dockerfile.
+.git
+.github
+bin/
+dist/
+/openfactory
+/openfactory.exe
+coverage.out
+**/*.test
+deploy/helm/
+deploy/.env
+*.db
+*.db-*
+**/node_modules/
+
+# Local tool state and owner files
+.owner/
+.claude/
+.aws-emulator/
+.openfactory/
+
+# Editor and OS files
+**/.DS_Store
+.idea/
+.vscode/
