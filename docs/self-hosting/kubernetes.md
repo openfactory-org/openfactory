@@ -362,7 +362,7 @@ The `kubernetes` backend ignores the machine's `registryCredentialSecretName`. U
 
 ## Network policy
 
-A run with a restricted network policy gets a NetworkPolicy and a proxy sidecar in its sandbox Pod. The NetworkPolicy allows DNS, the control plane and, for the sidecar, ports 80 and 443. The sidecar enforces the host list. The chart sets the sidecar image (`sandbox.k8s.egressProxy.sidecarImage`) to the runner image. **Without the sidecar, a restricted sandbox can reach DNS and the control plane only.** Details, the CNI requirement and the optional egress lock are in [Network policy](network-policy.md#kubernetes).
+A run with a restricted network policy gets a NetworkPolicy and a proxy sidecar in its sandbox Pod. The NetworkPolicy allows DNS, the control plane and, for the sidecar, ports 80 and 443. The sidecar enforces the host list. The chart sets the sidecar image (`sandbox.k8s.egressProxy.sidecarImage`) to the runner image. **Without the sidecar, a restricted sandbox can reach DNS and the control plane only.** Details, the CNI requirement and the egress lock are in [Network policy](network-policy.md#kubernetes). The egress lock is on by default and needs a sandbox namespace that allows `NET_ADMIN` for the init container `egress-lock`.
 
 The chart sets the control plane rule. If `sandbox.k8s.controlPlane.selector` is empty, `server.enabled` is `true` and `server.internalURL` is empty, the chart sets:
 
@@ -390,7 +390,7 @@ Each value under `sandbox.k8s` sets one variable for the server and the worker. 
 | `preflightJob` | `OF_K8S_PREFLIGHT_JOB` | See [Preflight](#preflight). |
 | `controlPlane.namespace`, `controlPlane.selector` | `OF_K8S_CONTROL_PLANE_NAMESPACE`, `OF_K8S_CONTROL_PLANE_SELECTOR` | Server Pods that a restricted sandbox can reach. Chart default: the server Pods of the release. See [Network policy](#network-policy). |
 | `egressProxy.sidecarImage` | `OF_K8S_EGRESS_PROXY_SIDECAR_IMAGE` | Proxy sidecar image (chart default: the runner image). Needs Kubernetes 1.29 or later. See [Proxy sidecar](network-policy.md#proxy-sidecar-for-each-sandbox). |
-| `egressProxy.lock` | `OF_K8S_EGRESS_LOCK` | `none` (default) or `iptables`. See [Egress lock](network-policy.md#egress-lock-optional). |
+| `egressProxy.lock` | `OF_K8S_EGRESS_LOCK` | `iptables` or `none`. Empty means `iptables` when the sandbox user is numeric (the default). See [Egress lock](network-policy.md#egress-lock). |
 | `networkPolicy.check` | `OF_K8S_NETWORK_POLICY_CHECK` | `probe` (default) or `off`. See [Check that the cluster enforces NetworkPolicy](network-policy.md#check-that-the-cluster-enforces-networkpolicy). |
 | `networkPolicy.enforcement` | `OF_K8S_NETWORK_POLICY_ENFORCEMENT` | `warn` (default) or `require`. |
 | `networkPolicy.waitTimeout`, `networkPolicy.waitAddr` | `OF_K8S_EGRESS_WAIT_TIMEOUT`, `OF_K8S_EGRESS_WAIT_ADDR` | Wait until the NetworkPolicy is active. See [The sandbox does not start before the policy is active](network-policy.md#the-sandbox-does-not-start-before-the-policy-is-active). |

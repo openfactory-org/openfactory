@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -119,14 +120,13 @@ func (e *Engine) lifecycleParts(child *core.Run, side bool, event string) (data 
 
 // sendLifecycle tells the run to that the child run, or side run, started,
 // finished a turn or was cancelled (see lifecycleTarget).
-func (e *Engine) sendLifecycle(ctx context.Context, child *core.Run, to string, side bool, event string) {
+func (e *Engine) sendLifecycle(ctx context.Context, child *core.Run, to string, side bool, event string) error {
 	if to == "" {
-		return
+		return nil
 	}
 	data, content, err := e.lifecycleParts(child, side, event)
 	if err != nil {
-		e.log.Warn("encode lifecycle message", "child_run_id", child.ID, "err", err)
-		return
+		return fmt.Errorf("%w: encode lifecycle message of %s: %w", core.ErrInvalid, child.ID, err)
 	}
 	dedupe := "lifecycle:" + child.ID + ":" + event + ":" + strconv.FormatInt(child.Turns, 10)
 	if event == "started" {
@@ -142,6 +142,7 @@ func (e *Engine) sendLifecycle(ctx context.Context, child *core.Run, to string, 
 		DedupeKey: dedupe,
 	}
 	if _, err := e.runner.Send(ctx, in); err != nil {
-		e.log.Warn("send lifecycle message", "child_run_id", child.ID, "parent_run_id", to, "side", side, "event", event, "err", err)
+		return fmt.Errorf("send lifecycle message of %s to %s (%s): %w", child.ID, to, event, err)
 	}
+	return nil
 }

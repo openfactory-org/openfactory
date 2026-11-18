@@ -312,10 +312,13 @@ sandbox:
       # (runner.image, or the server image).
       sidecarImage: ""
       # -- Close the direct path on ports 80 and 443 next to the sidecar
-      # (OF_K8S_EGRESS_LOCK): none (default) or iptables. With iptables, each
-      # restricted sandbox Pod gets an init container with the capability
-      # NET_ADMIN. The sandbox namespace must allow that (Pod Security
-      # Admission level privileged), and the sidecar image needs iptables.
+      # (OF_K8S_EGRESS_LOCK): iptables or none. Empty means iptables when the
+      # sandbox user is numeric (the default). With iptables, each restricted
+      # sandbox Pod gets an init container with the capability NET_ADMIN. The
+      # sandbox namespace must allow that (Pod Security Admission level
+      # privileged, or an exception), and the sidecar image needs iptables.
+      # Use none only when the namespace cannot allow NET_ADMIN: a program
+      # that ignores the proxy can then reach any host on ports 80 and 443.
       lock: ""
     # -- Check that the cluster network plugin enforces NetworkPolicy.
     networkPolicy:

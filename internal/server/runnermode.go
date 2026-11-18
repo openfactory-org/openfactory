@@ -324,6 +324,7 @@ func newRunnerMode(cfg *config.Config, signKey []byte, signPrev [][]byte, st cor
 			cp := *r
 			bus.Publish(ctx, core.TopicRunUpdated, &cp)
 		},
+		Queue:    queueOf(bus),
 		OnUpload: onUpload,
 		RequiredHosts: func(run *core.Run) []string {
 			opts := engine.RequiredHostsOptions{SandboxURL: cfg.SandboxURL(), DefaultImage: cfg.SandboxImage}
@@ -787,4 +788,12 @@ func (c *runnerContent) sessionLimitSeconds() int {
 		return c.maxSessionSec
 	}
 	return runnerMaxSessionSec
+}
+
+// queueOf returns bus as a core.Queue, or nil when it is not one.
+func queueOf(bus core.EventBus) core.Queue {
+	if q, ok := bus.(core.Queue); ok {
+		return q
+	}
+	return nil
 }

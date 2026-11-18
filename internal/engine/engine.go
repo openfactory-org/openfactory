@@ -197,11 +197,15 @@ func (e *Engine) Start(ctx context.Context) error {
 		// Durable bus: inbound events are acknowledged only after HandleEvent
 		// returns, so a crash mid-way redelivers them (at least once).
 		stop := q.Consume(core.TopicInboundEvent, e.handleInboundJob)
+		// Turn ends are reported from a durable job too, so a crash after
+		// the state change or a failed send does not lose the report.
+		stopTurns := q.Consume(core.TopicRunTurnEnded, e.handleTurnEndedJob)
 		e.wg.Add(1)
 		go func() {
 			defer e.wg.Done()
 			<-ctx.Done()
 			stop()
+			stopTurns()
 		}()
 	} else {
 		e.startInboundSubscriber(ctx)

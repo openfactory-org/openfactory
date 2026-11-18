@@ -135,7 +135,7 @@ The proxy applies these rules in order:
 
 A blocked request gets HTTP status `403` with the body `Open Factory network policy blocked access to <host>`.
 
-> **Important:** The proxy controls only programs that honour the proxy variables. A program that opens raw sockets bypasses it on ports 80 and 443. The NetworkPolicy blocks all other ports. To also close ports 80 and 443, turn on the [egress lock](#egress-lock-optional).
+> **Important:** The proxy controls only programs that honour the proxy variables. A program that opens raw sockets bypasses it on ports 80 and 443. The NetworkPolicy blocks all other ports. The [egress lock](#egress-lock) closes ports 80 and 443. It is on by default when it can work.
 
 ### Kubernetes
 
@@ -229,19 +229,25 @@ A restricted sandbox container gets these variables:
 
 An unrestricted sandbox gets no sidecar and none of these variables.
 
-A NetworkPolicy cannot select one container, so ports 80 and 443 are also open for the sandbox container. A program that ignores the proxy variables can connect directly on them. To close this gap, turn on the [egress lock](#egress-lock-optional).
+A NetworkPolicy cannot select one container, so ports 80 and 443 are also open for the sandbox container. A program that ignores the proxy variables can connect directly on them. The [egress lock](#egress-lock) closes this gap.
 
 #### Blocked hosts in the diagnostics of the run
 
 The sidecar serves a report of blocked hosts at `http://127.0.0.1:3129/blocked`, reachable only inside the Pod (`OF_NETGUARD_REPORT`). The runner reads it every 5 seconds and when the session ends, so the sandbox image needs no `curl`. For each blocked host, the runner sends one diagnostic `network/egress_blocked` with `data.blocked_host` and `data.count`. A diagnostic is a warning, not a result, and does not appear in the transcript. Read it with `GET /api/v1/runs/{runId}/diagnostics`.
 
-#### Egress lock (optional)
+#### Egress lock
 
-The lock is an optional hardening step. It closes ports 80 and 443 for every process of the sandbox except the proxy.
+The lock closes ports 80 and 443 for every process of the sandbox except the proxy. Without it, a program in a restricted sandbox that ignores the proxy variables can connect to any address on these ports.
 
-With `OF_K8S_EGRESS_LOCK=iptables`, a restricted sandbox Pod gets the init container `egress-lock`, which runs first. It adds a firewall rule to the Pod network (and an `ip6tables` rule for IPv6): a TCP connection to port 80 or 443 is refused unless its process runs as the proxy user, 65532. If the sandbox user or a template `runAsUser` is 65532, the proxy uses the next free user, for example 65533. A program that ignores the proxy variables gets `connection refused`. The rule goes away with the Pod and does not change the node or other Pods.
+| `OF_K8S_EGRESS_LOCK` | Effect |
+|---|---|
+| Not set | `iptables` when `OF_K8S_EGRESS_PROXY_SIDECAR_IMAGE` is set and `OF_K8S_RUN_AS_USER` is numeric (the chart sets both by default). Otherwise `none`. |
+| `iptables` | The lock is on. The server does not start without the sidecar image or with `OF_K8S_RUN_AS_USER=image`. |
+| `none` | The lock is off. Set it when the sandbox namespace cannot allow `NET_ADMIN`, and accept the gap. |
 
-The lock needs a numeric sandbox user. The server does not start with `OF_K8S_EGRESS_LOCK=iptables` and `OF_K8S_RUN_AS_USER=image`, and a restricted run with `platform.linux.user: image` fails. The sandbox container always gets `runAsNonRoot: true` and no capabilities, so it cannot switch to the proxy user.
+With the lock on, a restricted sandbox Pod gets the init container `egress-lock`, which runs first. It adds a firewall rule to the Pod network (and an `ip6tables` rule for IPv6): a TCP connection to port 80 or 443 is refused unless its process runs as the proxy user, 65532. If the sandbox user or a template `runAsUser` is 65532, the proxy uses the next free user, for example 65533. A program that ignores the proxy variables gets `connection refused`. The rule goes away with the Pod and does not change the node or other Pods.
+
+The lock needs a numeric sandbox user. A restricted run with `platform.linux.user: image` fails while the lock is on. The sandbox container always gets `runAsNonRoot: true` and no capabilities, so it cannot switch to the proxy user.
 
 | Requirement | Reason |
 |---|---|
@@ -263,7 +269,7 @@ Seeing the rule from inside a Pod needs `NET_ADMIN`. Read `kubectl logs <pod> -c
 | `the cluster does not enforce NetworkPolicy` | `require`, and the probe found `not_enforced`. Install a plugin that enforces policies. See [Check that the cluster enforces NetworkPolicy](#check-that-the-cluster-enforces-networkpolicy). |
 | `it is not known that the cluster enforces NetworkPolicy` | `require`, and the probe had no answer. The error names the reason, for example an image that does not pull. |
 | The run ends with `network_policy_timeout` | `egress-wait` could still reach the kubelet after 30 seconds: the plugin applied the policy too late, or not at all. Read `kubectl logs <pod> -c egress-wait`. See [The sandbox does not start before the policy is active](#the-sandbox-does-not-start-before-the-policy-is-active). |
-| `egress-lock` init container fails | `OF_K8S_EGRESS_LOCK=iptables`, and the namespace refuses `NET_ADMIN`, or the image has no `iptables`. Read `kubectl logs <pod> -c egress-lock`. |
+| `egress-lock` init container fails | The lock is on (the default), and the namespace refuses `NET_ADMIN`, or the image has no `iptables`. Read `kubectl logs <pod> -c egress-lock`. Allow `NET_ADMIN` for the container `egress-lock`, or set `OF_K8S_EGRESS_LOCK=none`. |
 
 #### Extra rules
 

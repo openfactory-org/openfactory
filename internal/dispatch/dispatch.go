@@ -6,6 +6,7 @@ package dispatch
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -65,6 +66,10 @@ type Config struct {
 	SweepEvery time.Duration
 	// OnRunChanged is called after each run write. It may be nil.
 	OnRunChanged func(ctx context.Context, r *core.Run)
+	// Queue gets a core.TopicRunTurnEnded job in the transaction of each run
+	// write that ends a turn (core.EnqueueTurnEnded). It may be nil: then only
+	// OnRunChanged announces the turn end, and a crash can lose the report.
+	Queue core.Queue
 	// OnRunMessage is called after each conversation write. It may be nil.
 	OnRunMessage func(ctx context.Context, m *core.RunMessage)
 	// OnUpload stores an upload that an artifact or transcript.saved event reports. It may be nil.
@@ -190,11 +195,19 @@ func (d *Dispatcher) mutateRun(ctx context.Context, runID string, apply func(r *
 			return err
 		}
 		out = r
+		prev := r.State
 		if !apply(r) {
 			return nil
 		}
 		if err := d.cfg.Store.UpdateRun(ctx, r); err != nil {
 			return err
+		}
+		if r.State != prev {
+			// The turn-end job commits with the state, so the report of the
+			// turn end survives a crash before OnRunChanged.
+			if err := core.EnqueueTurnEnded(ctx, d.cfg.Queue, r); err != nil {
+				return fmt.Errorf("enqueue turn end: %w", err)
+			}
 		}
 		wrote = true
 		return nil

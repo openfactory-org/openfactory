@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -20,12 +21,14 @@ const (
 
 // createRun persists a new queued run and its initial user message.
 func (e *Engine) createRun(ctx context.Context, r *core.Run, actor string) error {
-	return e.createRunWith(ctx, r, actor, "", nil)
+	return e.createRunWith(ctx, r, actor, "", nil, nil)
 }
 
 // createRunWith is createRun with the ID of the first message and its event
-// context. msgID may be empty; ev may be nil.
-func (e *Engine) createRunWith(ctx context.Context, r *core.Run, actor, msgID string, ev *eventctx.Bundle) error {
+// context. msgID may be empty; ev may be nil. inTx, when not nil, runs in the
+// transaction that creates the run, so its writes commit with the run or not
+// at all. It must not take engine locks.
+func (e *Engine) createRunWith(ctx context.Context, r *core.Run, actor, msgID string, ev *eventctx.Bundle, inTx func(ctx context.Context) error) error {
 	if strings.TrimSpace(r.Prompt) == "" {
 		return fmt.Errorf("%w: prompt is required", core.ErrInvalid)
 	}
@@ -68,6 +71,11 @@ func (e *Engine) createRunWith(ctx context.Context, r *core.Run, actor, msgID st
 		}
 		if err := e.storeEventBundle(ctx, r.ID, true, ev); err != nil {
 			return err
+		}
+		if inTx != nil {
+			if err := inTx(ctx); err != nil {
+				return err
+			}
 		}
 		// The dispatch record of an event commits with the run. It is
 		// written last: without a transaction a failed
@@ -282,31 +290,45 @@ func (e *Engine) Dispatch(ctx context.Context, req core.DispatchRequest) (*core.
 	if run.TriggeredBy == "" {
 		run.TriggeredBy = "api"
 	}
+	// The new run becomes the root run in the transaction that creates it. A
+	// crash can then not leave a run that the work item does not know: the
+	// dispatch record would make a retry skip the link, and the next event
+	// would start a second root run.
+	var linkRoot func(ctx context.Context) error
+	unlock := func() {}
 	if wi.RootRunID == "" {
 		// The new run is the root run: the action is given to the work item too.
 		addClaimTarget(ctx, "wi:"+wi.ID)
-	}
-	if err := e.createRunWith(ctx, run, actor, p.msgID, bundle); err != nil {
-		return nil, nil, err
-	}
-	unlock := e.lock("wi:" + wi.ID)
-	err = e.atomicRetry(ctx, func(ctx context.Context) error {
-		if cur, err := e.store.GetWorkItem(ctx, wi.ID); err == nil {
-			wi = cur
+		unlock = e.lock("wi:" + wi.ID)
+		if run.ID == "" {
+			run.ID = core.NewID("run")
 		}
-		if wi.RootRunID == "" {
-			wi.RootRunID = run.ID
-			wi.UpdatedAt = e.now()
-			if err := e.store.UpdateWorkItem(ctx, wi); err != nil {
-				return err
-			}
+		linkRoot = func(ctx context.Context) error {
+			return retryStale(ctx, func() error {
+				cur, err := e.store.GetWorkItem(ctx, wi.ID)
+				if err != nil {
+					return err
+				}
+				if cur.RootRunID == "" {
+					cur.RootRunID = run.ID
+					cur.UpdatedAt = e.now()
+					if err := e.store.UpdateWorkItem(ctx, cur); err != nil {
+						return err
+					}
+				}
+				wi = cur
+				e.publishWorkItem(ctx, cur)
+				return nil
+			})
 		}
-		e.publishWorkItem(ctx, wi)
-		return nil
-	})
+	}
+	err = e.createRunWith(ctx, run, actor, p.msgID, bundle, linkRoot)
 	unlock()
 	if err != nil {
 		return nil, nil, err
+	}
+	if linkRoot == nil {
+		e.publishWorkItem(ctx, wi)
 	}
 	e.log.Info("dispatched run", "factory_id", f.ID, "work_item_id", wi.ID, "run_id", run.ID, "agent", cfg.Name, "triggered_by", run.TriggeredBy)
 	return wi, run, nil
@@ -361,7 +383,7 @@ func (e *Engine) startSideRun(ctx context.Context, wi *core.WorkItem, req core.D
 		Creator:     p.creator,
 		RunAs:       p.runAs,
 	}
-	if err := e.createRunWith(ctx, run, p.actor, p.msgID, bundle); err != nil {
+	if err := e.createRunWith(ctx, run, p.actor, p.msgID, bundle, nil); err != nil {
 		return nil, err
 	}
 	e.timeline(ctx, wi.ID, "side_run_started", run.ID, p.actor, map[string]any{"agent": cfg.Name, "automation_id": req.AutomationID})
@@ -929,6 +951,9 @@ func (e *Engine) cancelOne(ctx context.Context, runID, actor string) (bool, erro
 		if err := e.store.UpdateRun(ctx, r); err != nil {
 			return err
 		}
+		if err := core.EnqueueTurnEnded(ctx, e.queue(), r); err != nil {
+			return fmt.Errorf("enqueue turn end: %w", err)
+		}
 		e.publishRun(ctx, r)
 		e.timeline(ctx, r.WorkItemID, "run_finished", r.ID, actor, map[string]any{"state": core.RunCancelled, "name": r.Name})
 		cancelled = true
@@ -1016,7 +1041,9 @@ func (e *Engine) onRunUpdated(ctx context.Context, snap *core.Run) {
 	if snap.State == core.RunRunning && (snap.ParentRunID != "" || snap.WorkItemID != "") {
 		if r, err := e.store.GetRun(ctx, snap.ID); err == nil && r.State == core.RunRunning {
 			if to, side := e.lifecycleTarget(ctx, r); to != "" {
-				e.sendLifecycle(ctx, r, to, side, "started")
+				if err := e.sendLifecycle(ctx, r, to, side, "started"); err != nil {
+					e.log.Warn("send lifecycle message", "child_run_id", r.ID, "to", to, "event", "started", "err", err)
+				}
 			}
 		}
 		return
@@ -1028,71 +1055,133 @@ func (e *Engine) onRunUpdated(ctx context.Context, snap *core.Run) {
 	if err != nil {
 		return
 	}
-	if !r.State.WaitsForInput() && !r.State.Terminal() {
-		return // re-queued since; the next turn end will report
+	if err := e.reportTurnEnd(ctx, r); err != nil {
+		// The durable turn-end job (core.TopicRunTurnEnded) tries again.
+		e.log.Warn("report turn end", "run_id", r.ID, "err", err)
 	}
-	e.checkMergeCompletion(ctx, r)
-	// Report each turn end once. An idle run that later expires to succeeded, or is
-	// cancelled while idle, keeps the same ConsumedSeq and is not reported again.
-	// The pair (ConsumedSeq, Turns) identifies one turn.
-	turnKey := "engine:turn:" + r.ID
-	marker := strconv.FormatInt(r.ConsumedSeq, 10) + ":" + strconv.FormatInt(r.Turns, 10)
-	if r.State == core.RunCancelled {
-		marker += ":cancelled" // the cancel of a blocked run is reported once more
-	}
-	unlock := e.lock("turn:" + r.ID) // the check-and-set must be atomic across replicas
-	reported := false
-	// The turn marker, the timeline entry and (for a failed root run) the
-	// failure inbox item and notice commit together.
-	err = e.Atomic(ctx, func(ctx context.Context) error {
-		if prev, err := e.store.KVGet(ctx, turnKey); err == nil && prev == marker {
-			reported = true
-			return nil
-		}
-		if err := e.store.KVSet(ctx, turnKey, marker); err != nil {
-			e.log.Warn("record turn marker", "run_id", r.ID, "err", err)
-		}
-		if r.WorkItemID != "" && r.State != core.RunCancelled {
-			e.timeline(ctx, r.WorkItemID, "run_finished", r.ID, "system", map[string]any{
-				"state": r.State, "name": r.Name, "agent": r.AgentName, "error": r.Error,
-			})
-		}
-		if r.ParentRunID == "" && (r.State == core.RunFailed || r.State == core.RunError) && r.WorkItemID != "" {
-			e.reportRootFailure(ctx, r)
-		}
-		if r.ParentRunID == "" && r.State == core.RunBlocked && r.BlockedReason == "harness_needs_input" && r.WorkItemID != "" {
-			e.reportBlocked(ctx, r)
-		}
+}
+
+// handleTurnEndedJob reports the turn end of a core.TopicRunTurnEnded job. An
+// error makes the queue deliver the job again.
+func (e *Engine) handleTurnEndedJob(ctx context.Context, job core.Job) error {
+	var m core.RunTurnEnded
+	if err := json.Unmarshal(job.Payload, &m); err != nil || m.RunID == "" {
+		e.log.Error("decode turn-end job; dropping it", "job_id", job.ID, "err", err)
 		return nil
-	})
-	unlock()
-	if reported {
-		return
+	}
+	r, err := e.store.GetRun(ctx, m.RunID)
+	if errors.Is(err, core.ErrNotFound) {
+		return nil
 	}
 	if err != nil {
-		e.log.Warn("report turn end", "run_id", r.ID, "err", err)
-		return
+		return err
 	}
+	if err := e.reportTurnEnd(ctx, r); err != nil {
+		if permanent(err) {
+			e.log.Error("report turn end", "run_id", r.ID, "err", err)
+			return nil
+		}
+		return err
+	}
+	return nil
+}
 
-	// A child run reports to its parent. A side run of a work item reports to
-	// the root run of the work item, while the work item is active.
-	if to, side := e.lifecycleTarget(ctx, r); to != "" {
-		parent, err := e.store.GetRun(ctx, to)
-		if err != nil || parent.State == core.RunCancelled {
-			return
+// turnPending is the suffix of a turn marker whose timeline entry and inbox
+// items are written, and whose lifecycle message is not sent yet.
+const turnPending = "|send"
+
+// reportTurnEnd reports the turn end of r once: the timeline entry, the
+// failure or blocked inbox item of a root run, and the lifecycle message to
+// the parent run (or to the root run, for a side run). The live path
+// (onRunUpdated) and the durable job (handleTurnEndedJob) both call it, and
+// the turn marker makes the second call a no-op.
+//
+// The marker has two steps. The first write commits with the timeline entry
+// and the inbox items. When a lifecycle message must go out, the marker gets
+// the suffix turnPending, and it loses the suffix only after the send. A send
+// that fails returns an error, so the job tries again and sends the message
+// (its dedupe key makes a second send a no-op) without a second timeline
+// entry or inbox item.
+func (e *Engine) reportTurnEnd(ctx context.Context, r *core.Run) error {
+	if !r.State.WaitsForInput() && !r.State.Terminal() {
+		return nil // re-queued since; the next turn end will report
+	}
+	e.checkMergeCompletion(ctx, r)
+	turnKey := "engine:turn:" + r.ID
+	marker := core.TurnMarker(r)
+	unlock := e.lock("turn:" + r.ID) // the check-and-set must be atomic across replicas
+	defer unlock()
+	prev, err := e.store.KVGet(ctx, turnKey)
+	if err != nil && !errors.Is(err, core.ErrNotFound) {
+		return fmt.Errorf("read turn marker: %w", err)
+	}
+	if prev == marker {
+		return nil
+	}
+	to, side, event := e.turnEndMessage(ctx, r)
+	if prev != marker+turnPending {
+		first := marker
+		if event != "" {
+			first += turnPending
 		}
-		if r.WorkItemID != "" {
-			if wi, err := e.store.GetWorkItem(ctx, r.WorkItemID); err == nil && wi.Stage.Terminal() {
-				return // work is over; don't wake the parent
+		// The turn marker, the timeline entry and (for a failed root run) the
+		// failure inbox item and notice commit together.
+		err := e.Atomic(ctx, func(ctx context.Context) error {
+			if err := e.store.KVSet(ctx, turnKey, first); err != nil {
+				return fmt.Errorf("record turn marker: %w", err)
 			}
-		}
-		if r.State == core.RunCancelled && (r.CancelledBy == "run:"+to) {
-			return // the recipient asked for the cancel
-		}
-		if event := lifecycleEvent(r.State); event != "" {
-			e.sendLifecycle(ctx, r, to, side, event)
+			if r.WorkItemID != "" && r.State != core.RunCancelled {
+				e.timeline(ctx, r.WorkItemID, "run_finished", r.ID, "system", map[string]any{
+					"state": r.State, "name": r.Name, "agent": r.AgentName, "error": r.Error,
+				})
+			}
+			if r.ParentRunID == "" && (r.State == core.RunFailed || r.State == core.RunError) && r.WorkItemID != "" {
+				e.reportRootFailure(ctx, r)
+			}
+			if r.ParentRunID == "" && r.State == core.RunBlocked && r.BlockedReason == "harness_needs_input" && r.WorkItemID != "" {
+				e.reportBlocked(ctx, r)
+			}
+			return nil
+		})
+		if err != nil {
+			return err
 		}
 	}
+	if event == "" {
+		return nil
+	}
+	if err := e.sendLifecycle(ctx, r, to, side, event); err != nil {
+		return err
+	}
+	return e.store.KVSet(ctx, turnKey, marker)
+}
+
+// turnEndMessage returns the run that gets the lifecycle message of the turn
+// end of r, whether r is a side run, and the event. The event is empty when no
+// message goes out. A child run reports to its parent. A side run of a work
+// item reports to the root run of the work item, while the work item is
+// active.
+func (e *Engine) turnEndMessage(ctx context.Context, r *core.Run) (to string, side bool, event string) {
+	to, side = e.lifecycleTarget(ctx, r)
+	if to == "" {
+		return "", false, ""
+	}
+	parent, err := e.store.GetRun(ctx, to)
+	if err != nil || parent.State == core.RunCancelled {
+		return "", false, ""
+	}
+	if r.WorkItemID != "" {
+		if wi, err := e.store.GetWorkItem(ctx, r.WorkItemID); err == nil && wi.Stage.Terminal() {
+			return "", false, "" // work is over; don't wake the parent
+		}
+	}
+	if r.State == core.RunCancelled && (r.CancelledBy == "run:"+to) {
+		return "", false, "" // the recipient asked for the cancel
+	}
+	if event = lifecycleEvent(r.State); event == "" {
+		return "", false, ""
+	}
+	return to, side, event
 }
 
 // reportRootFailure raises a failure inbox item (unless one is open) and
