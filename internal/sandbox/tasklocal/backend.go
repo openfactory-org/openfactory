@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"sort"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/sandbox/egress"
 )
 
 var _ core.TaskBackend = (*Backend)(nil)
@@ -180,6 +182,12 @@ func (b *Backend) Start(ctx context.Context, task core.Task) (core.TaskStatus, e
 		}
 	}
 
+	if egress.Restricted(task.NetworkPolicy) {
+		// The process shares the network of the host. Say so, so that a
+		// worker with this backend does not look restricted.
+		slog.WarnContext(ctx, "tasklocal: the local backend does not enforce network policies; this restricted task has full network access",
+			"task", task.TaskID)
+	}
 	dir := b.opts.Root + string(os.PathSeparator) + dirName(task.TaskID)
 	workspace := dir + string(os.PathSeparator) + "workspace"
 	if err := os.MkdirAll(workspace, 0o755); err != nil {

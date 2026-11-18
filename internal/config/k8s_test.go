@@ -120,6 +120,34 @@ func TestK8sNetworkPolicyDefaults(t *testing.T) {
 	}
 }
 
+// The egress lock is on by default when it can work, because without it a
+// restricted sandbox can reach any address on ports 80 and 443.
+func TestK8sEgressLockDefault(t *testing.T) {
+	const img = "example.test/of:1"
+	cases := []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{"no sidecar image", map[string]string{}, "none"},
+		{"sidecar image", map[string]string{"OF_K8S_EGRESS_PROXY_SIDECAR_IMAGE": img}, "iptables"},
+		{"numeric user", map[string]string{"OF_K8S_EGRESS_PROXY_SIDECAR_IMAGE": img, "OF_K8S_RUN_AS_USER": "2000"}, "iptables"},
+		{"user of the image", map[string]string{"OF_K8S_EGRESS_PROXY_SIDECAR_IMAGE": img, "OF_K8S_RUN_AS_USER": "image"}, "none"},
+		{"explicit none", map[string]string{"OF_K8S_EGRESS_PROXY_SIDECAR_IMAGE": img, "OF_K8S_EGRESS_LOCK": "none"}, "none"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := loadK8s(t, tc.env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := c.K8sEgressLockValue(); got != tc.want {
+				t.Fatalf("lock = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestK8sNetworkPolicySettings(t *testing.T) {
 	c, err := loadK8s(t, map[string]string{
 		"OF_K8S_NETWORK_POLICY_CHECK":       "OFF",

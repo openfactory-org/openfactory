@@ -134,10 +134,19 @@ func (c *Config) K8sNetworkPolicyEnforcementValue() string {
 	return "warn"
 }
 
-// K8sEgressLockValue returns OF_K8S_EGRESS_LOCK. The default is "none".
+// K8sEgressLockValue returns OF_K8S_EGRESS_LOCK. Without a value, the lock is
+// on ("iptables") when it can work: the proxy sidecar image is set and the
+// sandbox user is numeric. Without the lock, a program in a restricted
+// sandbox that ignores the proxy variables can connect to any address on
+// ports 80 and 443. Otherwise the default is "none".
 func (c *Config) K8sEgressLockValue() string {
 	if v := strings.ToLower(strings.TrimSpace(c.K8sEgressLock)); v != "" {
 		return v
+	}
+	if strings.TrimSpace(c.K8sEgressProxySidecarImage) != "" {
+		if _, image := c.K8sRunAsUserValue(); !image {
+			return "iptables"
+		}
 	}
 	return "none"
 }

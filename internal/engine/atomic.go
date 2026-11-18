@@ -18,6 +18,14 @@ func (e *Engine) Atomic(ctx context.Context, fn func(ctx context.Context) error)
 	return core.RunInTx(ctx, e.store, fn)
 }
 
+// queue returns the event bus as a durable queue, or nil when it is not one.
+func (e *Engine) queue() core.Queue {
+	if q, ok := e.bus.(core.Queue); ok {
+		return q
+	}
+	return nil
+}
+
 // txAware is implemented by buses whose Publish joins a store transaction
 // carried by the context (events.Bus, events.Durable).
 type txAware interface{ TxAware() bool }

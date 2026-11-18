@@ -19,6 +19,7 @@ type fakeRoute struct {
 	stopped      []string
 	interrupted  []string
 	interruptErr error
+	sendErr      error // when set, lifecycle messages fail and are not recorded
 }
 
 func (f *fakeRoute) Interrupt(_ context.Context, runID string) error {
@@ -31,6 +32,9 @@ func (f *fakeRoute) Interrupt(_ context.Context, runID string) error {
 func (f *fakeRoute) Send(_ context.Context, m *core.RunInput) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.sendErr != nil && m.Kind == "lifecycle" {
+		return "", f.sendErr
+	}
 	if m.DedupeKey == "prompt" {
 		f.prompts = append(f.prompts, *m)
 	} else {

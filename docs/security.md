@@ -266,7 +266,7 @@ The control plane makes no model calls and holds no model key. Each harness CLI 
 | `local` | Development and tests only. A separate workspace directory, but processes share the host kernel, file system and network. Sandboxes get only `HOME`, `TMPDIR` and `PATH` from the host, plus run variables. |
 | `kubernetes` | A separate Pod per run. Use Pod Security admission, a restricted sandbox service account and NetworkPolicy. |
 
-For agents that process untrusted input (public issues, external pull requests, chat from many users), use `kubernetes` and a restricted `networkPolicy`. The backend then creates a NetworkPolicy and a proxy sidecar for each sandbox, and the cluster network plugin must enforce NetworkPolicy. Set `OF_K8S_NETWORK_POLICY_ENFORCEMENT=require` to fail restricted runs on a cluster that does not enforce policies, and consider the optional egress lock. See [Network policy](self-hosting/network-policy.md#kubernetes).
+For agents that process untrusted input (public issues, external pull requests, chat from many users), use `kubernetes` and a restricted `networkPolicy`. The backend then creates a NetworkPolicy and a proxy sidecar for each sandbox, and the cluster network plugin must enforce NetworkPolicy. Set `OF_K8S_NETWORK_POLICY_ENFORCEMENT=require` to fail restricted runs on a cluster that does not enforce policies, and keep the egress lock on (the default; it needs `NET_ADMIN` for one init container). See [Network policy](self-hosting/network-policy.md#kubernetes).
 
 ## Data boundaries
 
