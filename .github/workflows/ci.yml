@@ -62,7 +62,7 @@ jobs:
         run: make schemas-check
       - name: Definition reference tables are up to date
         run: make docs-check
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: openfactory-linux-amd64
           path: |
