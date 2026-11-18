@@ -889,6 +889,11 @@ func TestWebhookDedupeAgainstTheServer(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "webhook.secret"), []byte(secret+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// The check reads the sandbox image from the server settings. Without
+	// them it looks for a local Docker image, which CI does not have.
+	if err := os.WriteFile(filepath.Join(dir, "server-host.env"), []byte("export OF_SANDBOX_IMAGE=example.test/sandbox:test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	script := `
 set -u
 HERE=$(pwd); REPO=$(cd ../.. && pwd)
