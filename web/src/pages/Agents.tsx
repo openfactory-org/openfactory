@@ -7,6 +7,7 @@ import { fpath, useFactory } from "../components/FactoryLayout";
 import { Alert, Badge, Button, Card, Empty, Field, PageHeader, Query, Tabs, ValidationList } from "../components/ui";
 import { Bot, Plus } from "lucide-react";
 import { useMutate } from "../lib/mutate";
+import { useUsableSecrets } from "../lib/secrets";
 
 type AgentSpec = Schemas["AgentSpec"];
 type AgentConfig = Schemas["AgentConfig"];
@@ -97,10 +98,8 @@ export function AgentPage() {
     queryKey: ["agent", f.id, name],
     queryFn: () => unwrap(api.GET("/factories/{uid}/agents/{name}", { params: { path: { uid: f.id, name } } })) as Promise<AgentConfig>,
   });
-  const secrets = useQuery({
-    queryKey: ["secrets", f.id],
-    queryFn: () => unwrap(api.GET("/secrets", { params: { query: { factory_id: f.id } } })).then((r) => r.items ?? []),
-  });
+  // GET /secrets?factory_id= returns only the factory's own secrets; agents can also use team secrets.
+  const secrets = useUsableSecrets(f.id);
   const workers = useQuery({ queryKey: ["workers"], queryFn: () => unwrap(api.GET("/workers")).then((r) => r.items ?? []) });
   const envs = useQuery({ queryKey: ["environments"], queryFn: () => unwrap(api.GET("/environments")).then((r) => r.items ?? []) });
 
@@ -129,6 +128,7 @@ export function AgentPage() {
 
   const spec = specQ.data;
   const agent = agentQ.data;
+  const secretScope = new Map((secrets.data ?? []).map((s) => [s.name, s.scope]));
   const editable = !!spec?.editable && canEditFactory(f.id);
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((p) => (p ? { ...p, [k]: v } : p));
   const explicitHarness = form?.harness_type === "claude" || form?.harness_type === "codex";
@@ -228,6 +228,7 @@ export function AgentPage() {
                               {(secrets.data ?? []).map((sec) => (
                                 <option key={sec.id ?? sec.name} value={sec.name}>
                                   {sec.name} · {sec.type}
+                                  {sec.scope === "factory" ? " · factory" : ""}
                                 </option>
                               ))}
                               {form.auth_secret && !(secrets.data ?? []).some((x) => x.name === form.auth_secret) && <option value={form.auth_secret}>{form.auth_secret}</option>}
@@ -288,6 +289,7 @@ export function AgentPage() {
                               onChange={(e) => set("secrets", e.target.checked ? [...(form.secrets ?? []), n] : (form.secrets ?? []).filter((x) => x !== n))}
                             />{" "}
                             {n}
+                            {secretScope.get(n) === "factory" && <span className="muted small"> (factory)</span>}
                           </label>
                         ))}
                       </div>
