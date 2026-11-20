@@ -269,6 +269,7 @@ export function RunPage() {
   if (q.isLoading) return <Skeleton rows={6} />;
   if (q.isError || !run) return <ErrorAlert error={q.error ?? new Error("Run not found.")} />;
   const terminal = isTerminal(run.state);
+  const notStarted = terminal && !run.started_at;
   const failure = run.state !== "BLOCKED" ? humanizeError(run.status_message?.message || run.error) : { message: "", detail: "" };
   const submitFollowUp = () => {
     if (followUp.trim() && !send.isPending) send.mutate(followUp.trim());
@@ -409,7 +410,7 @@ export function RunPage() {
                 ["Cost", <span key="c">{money(run.usage?.cost_usd)}</span>],
                 ["Tokens in", <span key="i">{count(run.usage?.input_tokens)}</span>],
                 ["Tokens out", <span key="o">{count(run.usage?.output_tokens)}</span>],
-                ["Duration", <span key="d">{duration(run.usage?.duration_ms)}</span>],
+                ["Duration", <span key="d">{run.usage?.duration_ms == null && notStarted ? "Agent did not start" : duration(run.usage?.duration_ms)}</span>],
               ]}
             />
           </section>
@@ -423,7 +424,9 @@ export function RunPage() {
                 ...(run.run_as ? ([["Runs as", principalLabel(run.run_as)]] as [string, string][]) : []),
                 ...(run.config?.machine?.name ? ([["Machine", run.config.machine.name]] as [string, string][]) : []),
                 ...(run.worker_id ? ([["Worker", run.worker_id]] as [string, string][]) : []),
-                ["Started", fmtTime(run.started_at)],
+                // started_at is the start of the first agent turn. A run
+                // can end in its sandbox setup, before any turn.
+                ["Started", run.started_at ? fmtTime(run.started_at) : notStarted ? "Agent did not start" : "Not yet"],
                 ["Finished", fmtTime(run.finished_at)],
               ]}
             />
