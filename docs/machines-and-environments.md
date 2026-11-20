@@ -102,12 +102,12 @@ An environment is a reusable team workspace. Use one when several agents or fact
 
 | Field | Type | Meaning |
 |---|---|---|
-| `name` | string | **Required.** Non-empty. |
+| `name` | string | **Required.** Non-empty. Unique in the team, without regard to case. |
 | `description` | string | Optional. |
-| `repos` | list of strings | Repositories to check out. Each entry is `[forge:]owner/name` (for example `GITLAB:acme/platform/billing`) or an `https://` repository URL. Without a forge, the repository is on GitHub. |
-| `image` | string | Sandbox image. It wins over the machine's image. |
+| `repos` | list of strings | Repositories to check out. Each entry is `[forge:]owner/name` (for example `GITLAB:acme/platform/billing`) or an `https://` repository URL (for example `https://github.com/acme/web`). Without a forge, the repository is on GitHub. A URL on a GitLab or Azure DevOps host selects that forge. |
+| `image` | string | Sandbox image, a valid image reference such as `node:22-bookworm` or `registry.example.com/team/tools:1.2@sha256:...`. It wins over the machine's image. |
 | `setup_commands` | list of strings | Run after the machine's setup commands. |
-| `env_vars` | map of string to string | Environment variables for the sandbox. |
+| `env_vars` | map of string to string | Environment variables for the sandbox. Names have letters, digits and `_`, and do not start with a digit. Names that start with `OF_` are reserved. |
 
 ### Create an environment
 
@@ -144,7 +144,7 @@ An environment is a reusable team workspace. Use one when several agents or fact
 | `GET /api/v1/environments` | List the team's environments. |
 | `GET /api/v1/environments/{id}` | Read one environment. |
 | `PATCH /api/v1/environments/{id}` | Change only the fields in the body. |
-| `DELETE /api/v1/environments/{id}` | Delete the environment. |
+| `DELETE /api/v1/environments/{id}` | Delete the environment. Refused with `409` while an agent, automation or `scorerDefaults` of an active definition in the team uses it. |
 
 Create, change and delete require the `editor` role.
 
@@ -154,5 +154,7 @@ Create, change and delete require the `editor` role.
 - With an environment, the run checks out the environment's `repos` instead of the factory's `repositories`. The agent's working directory is the workspace root.
 - Without an environment, each factory repository is checked out to `<workspace>/<name>`. If the factory has exactly one repository, the agent's working directory is that repository.
 - Do not put credentials in `env_vars`; use [secrets](secrets.md). A secret with the same name wins.
-- Do not use the `OF_METADATA_` prefix; it is reserved for [run metadata](agents.md#run-metadata).
+- The API refuses `env_vars` names that start with `OF_`. The platform sets these variables in a run, for example `OF_RUN_ID` and the [run metadata](agents.md#run-metadata) variables `OF_METADATA_*`.
+- The API refuses a second environment with the same name: `an environment named "<name>" already exists`.
+- The API refuses to delete an environment that an active definition uses, for example `Environment web-monorepo is used by agent foreman of factory payments. Remove the reference first.` Remove the `environmentId` from the definition, apply it, then delete the environment.
 - `environmentId: null` at the agent or automation level clears an inherited environment.

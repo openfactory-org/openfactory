@@ -39,7 +39,7 @@ openfactory mcp-registry add docs --command npx --arg -y --arg @acme/docs-mcp
 
 | Field | Rules |
 |---|---|
-| `name` | 1 to 64 letters, digits, `.`, `_` or `-`. Unique in the team. Names that start with `builtin` are reserved. Agents use it as `managedId`. |
+| `name` | 1 to 64 letters, digits, `.`, `_` or `-`. Unique in the team: a second server with the same name gets `409` (`an MCP server named "<name>" already exists`). Names that start with `builtin` are reserved. Agents use it as `managedId`. |
 | `url` | An absolute `http` or `https` URL: streamable HTTP, or legacy SSE when the path ends in `/sse`. Set exactly one of `url` and `command`. |
 | `headers` | Only with `url`. |
 | `command`, `args`, `env` | A command that starts in the sandbox and speaks MCP over stdio. `args` and `env` only with `command`. |
@@ -177,7 +177,7 @@ List results return at most 50 items. The server log records each tool call with
 | `POST /api/v1/mcp-servers` | editor | Register a server. |
 | `GET /api/v1/mcp-servers/{id}` | user | Get a server by ID or name. |
 | `PATCH /api/v1/mcp-servers/{id}` | editor | Change a server. Absent fields do not change. An empty string clears `url` or `command`. `"oauth": null` removes OAuth. A `command` server that becomes a `url` server gets the default mode. |
-| `DELETE /api/v1/mcp-servers/{id}` | editor | Delete a server and its token. |
+| `DELETE /api/v1/mcp-servers/{id}` | editor | Delete a server and its token. Refused with `409` while the active definition of a factory in the team references the server by `managedId`. The error names the factories and the places. |
 | `POST /api/v1/mcp-servers/{id}/oauth/connect` | editor | Start the OAuth flow. Returns `authorization_url`. |
 | `POST /api/v1/mcp-servers/{id}/oauth/disconnect` | editor | Delete the token. |
 | `GET /api/v1/mcp-servers/oauth/callback` | editor | The provider's redirect target. Needs the browser session of the user who started the flow. |

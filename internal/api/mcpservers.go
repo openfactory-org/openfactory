@@ -195,6 +195,15 @@ func (s *Server) handleDeleteMCPServer(w http.ResponseWriter, r *http.Request, p
 	if err != nil {
 		return err
 	}
+	uses, err := s.teamResourceUses(ctx, p.TeamID, func(def *core.CompiledDefinition) []string {
+		return mcpServerUses(def, m.ID, m.Name)
+	})
+	if err != nil {
+		return err
+	}
+	if err := inUseError("MCP server", m.Name, uses); err != nil {
+		return err
+	}
 	if err := s.opts.Store.DeleteMCPServer(ctx, m.ID); err != nil {
 		return err
 	}
