@@ -296,6 +296,28 @@ func TestHandlerAcceptedEvent(t *testing.T) {
 	}
 }
 
+func TestPayloadTitle(t *testing.T) {
+	tests := []struct {
+		name, body, want string
+	}{
+		{name: "no title field", body: `{"event":"deploy.finished"}`, want: "hook"},
+		{name: "title", body: `{"title":"Deploy failed","subject":"x"}`, want: "Deploy failed"},
+		{name: "subject", body: `{"subject":" Disk full \nmore"}`, want: "Disk full"},
+		{name: "summary", body: `{"summary":"Nightly report"}`, want: "Nightly report"},
+		{name: "empty title falls through", body: `{"title":"  ","summary":"S"}`, want: "S"},
+		{name: "non-string title", body: `{"title":{"text":"x"}}`, want: "hook"},
+		{name: "array body", body: `[1,2]`, want: "hook"},
+		{name: "long title is cut", body: `{"title":"` + strings.Repeat("é", 150) + `"}`, want: strings.Repeat("é", 100)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := payloadTitle([]byte(tt.body), "hook"); got != tt.want {
+				t.Fatalf("payloadTitle = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestHandlerDedupe(t *testing.T) {
 	e := newEnv(t, Options{})
 	post := func(body string, extra http.Header) map[string]string {
