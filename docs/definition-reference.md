@@ -139,7 +139,7 @@ A `managed` factory created without files gets a generated tree:
 
 - `factory.yaml` with `schemaVersion`, `name`, the repositories you send and `agentDefaults.model` (default `claude-opus-5-5`).
 - `codeForges` when the repositories use a code host other than GitHub, or more than one code host.
-- The default agents `foreman`, `triage`, `spec`, `implement` and `review` (as in [`../examples/00-default-agents`](../examples/00-default-agents)). The `agents` field selects a subset; the foreman is always included.
+- The default agents `foreman`, `triage`, `spec`, `implement` and `review` (as in [`../examples/00-default-agents`](../examples/00-default-agents)). The `agents` field selects a subset; the foreman is always included. The foreman instructions name only the agents in the subset. Without stage agents, they tell the foreman to do the work itself.
 
 ## Directory layout
 

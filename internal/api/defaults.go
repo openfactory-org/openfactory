@@ -36,18 +36,7 @@ type defaultAgent struct {
 }
 
 var defaultAgents = map[string]defaultAgent{
-	"foreman": {core.AgentForeman, "Coordinates each work item and communicates with people",
-		`You are the foreman of this factory. You receive every work item, decide which
-stages it needs, and coordinate the other agents with the run_agents tool.
-
-- Start by understanding the request and its source (issue, pull request, chat thread, webhook).
-- Use the triage agent to scope unclear requests, the spec agent to write a plan for
-  non-trivial changes, the implement agent to make changes, and the review agent to check them.
-- Ask a human with ask_human when a decision is required; request approval of specs with
-  request_approval before implementation starts.
-- Keep the work item's stage current with set_stage and post short progress updates.
-- Link every pull request you open with link_pull_request and hand the result back where the
-  work started. Complete the work item when nothing remains.`},
+	"foreman": {core.AgentForeman, "Coordinates each work item and communicates with people", ""},
 	"triage": {core.AgentTriage, "Scopes incoming requests and gathers context",
 		`Triage the request. Identify the affected repositories, components and owners,
 reproduce the problem when possible, and report the scope, risks, open questions and a
@@ -177,15 +166,83 @@ func GenerateDefaultDefinition(req DefaultDefinitionRequest) map[string]string {
 	yamlSet(root, "agentDefaults", defs)
 	files["factory.yaml"] = encodeYAMLNode(root)
 
-	names := append([]string{"foreman"}, req.Agents...)
-	for _, n := range names {
-		a, ok := defaultAgents[n]
-		if !ok {
-			continue
+	var stages []string
+	for _, n := range DefaultAgentNames {
+		if slices.Contains(req.Agents, n) {
+			stages = append(stages, n)
+		}
+	}
+	for _, n := range append([]string{"foreman"}, stages...) {
+		a := defaultAgents[n]
+		if n == "foreman" {
+			a.Instructions = foremanInstructions(stages)
 		}
 		files["agents/"+n+"/agent.md"] = fmt.Sprintf("---\ndescription: %s\nagentType: %s\n---\n\n%s\n", a.Description, a.Type, a.Instructions)
 	}
 	return files
+}
+
+// foremanStageUse says what the foreman uses each default stage agent for.
+var foremanStageUse = map[string]string{
+	"triage":    "the triage agent to scope unclear requests",
+	"spec":      "the spec agent to write a plan for non-trivial changes",
+	"implement": "the implement agent to make changes",
+	"review":    "the review agent to check them",
+}
+
+// foremanInstructions builds the foreman instructions for the stage agents
+// that the factory has. Without stage agents, the foreman does the work
+// itself, so the instructions name no agent that does not exist.
+func foremanInstructions(stages []string) string {
+	var b strings.Builder
+	if len(stages) == 0 {
+		b.WriteString(`You are the foreman of this factory. You receive every work item and do the work
+yourself: this factory has no other agents.
+
+- Start by understanding the request and its source (issue, pull request, chat thread, webhook).
+- Scope unclear requests, write a short plan for non-trivial changes, make the changes, and
+  check them before you hand them back.
+- Ask a human with ask_human when a decision is required; request approval of a plan with
+  request_approval before you make a large change.
+`)
+	} else {
+		b.WriteString(`You are the foreman of this factory. You receive every work item, decide which
+stages it needs, and coordinate the other agents with the run_agents tool.
+
+- Start by understanding the request and its source (issue, pull request, chat thread, webhook).
+`)
+		uses := make([]string, len(stages))
+		for i, n := range stages {
+			uses[i] = foremanStageUse[n]
+		}
+		b.WriteString("- Use " + joinAnd(uses) + ".")
+		if !slices.Contains(stages, "implement") {
+			b.WriteString(" Make code changes yourself.")
+		}
+		b.WriteString("\n")
+		b.WriteString("- Ask a human with ask_human when a decision is required.")
+		if slices.Contains(stages, "spec") {
+			b.WriteString(" Request approval of specs with\n  request_approval before implementation starts.")
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString(`- Keep the work item's stage current with set_stage and post short progress updates.
+- Link every pull request you open with link_pull_request and hand the result back where the
+  work started. Complete the work item when nothing remains.`)
+	return b.String()
+}
+
+// joinAnd joins items as "a", "a and b" or "a, b, and c".
+func joinAnd(items []string) string {
+	switch len(items) {
+	case 0:
+		return ""
+	case 1:
+		return items[0]
+	case 2:
+		return items[0] + " and " + items[1]
+	}
+	return strings.Join(items[:len(items)-1], ", ") + ", and " + items[len(items)-1]
 }
 
 func scalarValue(s string) any {
