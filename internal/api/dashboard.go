@@ -389,7 +389,7 @@ func applyAgentSpec(d *mdDoc, f AgentSpecUpdate) error {
 	if strings.TrimSpace(f.MCPServers) != "" {
 		mcp, err := parseYAMLMapping(f.MCPServers)
 		if err != nil {
-			return errInvalid("mcp_servers: %v", err)
+			return errInvalid("mcpServers: %v", err)
 		}
 		mapSet(d.front, "mcpServers", mcp)
 	} else {

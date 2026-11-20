@@ -300,7 +300,7 @@ func (s *Server) checkAliasFree(ctx context.Context, teamID, alias, exceptID str
 	}
 	for _, f := range fs {
 		if f.ID != exceptID && strings.EqualFold(f.Alias, alias) {
-			return Errf(CodeConflict, "alias %q is already used by factory %s", alias, f.ID)
+			return Errf(CodeConflict, "alias %q is already used by factory %q", alias, f.Name)
 		}
 	}
 	return nil

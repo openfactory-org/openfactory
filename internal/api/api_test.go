@@ -388,7 +388,9 @@ func TestFactoryLifecycle(t *testing.T) {
 	}
 
 	// Errors.
-	e.must(e.do("POST", "/factories", e.editor.Key, map[string]any{"name": "dup", "alias": "payments-factory"}), 409)
+	if dup := e.must(e.do("POST", "/factories", e.editor.Key, map[string]any{"name": "dup", "alias": "payments-factory"}), 409); dup.Body["detail"] != `alias "payments-factory" is already used by factory "Payments Factory"` {
+		t.Fatalf("alias conflict names the factory: %s", dup.Raw)
+	}
 	bad := e.must(e.do("POST", "/factories", e.editor.Key, map[string]any{"name": "x", "integrations": []map[string]any{{"type": "linear"}, {"type": "jira"}}}), 400)
 	if errCode(bad) != CodeInvalidRequest {
 		t.Fatal(bad.Body)

@@ -171,6 +171,9 @@ func TestAgentSpecEndpoints(t *testing.T) {
 	if r := e.do("PUT", "/factories/"+fid+"/agents/"+name+"/spec", e.editor.Key, map[string]any{"idle_timeout_minutes": "99"}); r.Status != 400 {
 		t.Fatalf("bad idle = %d", r.Status)
 	}
+	if r := e.do("PUT", "/factories/"+fid+"/agents/"+name+"/spec", e.editor.Key, map[string]any{"mcp_servers": "- not a mapping"}); r.Status != 400 || !strings.HasPrefix(str(r.Body, "detail"), "mcpServers: ") {
+		t.Fatalf("bad mcpServers = %d %s", r.Status, r.Raw)
+	}
 	prompt := "Be precise."
 	r := e.must(e.do("PUT", "/factories/"+fid+"/agents/"+name+"/spec", e.editor.Key, map[string]any{
 		"description": "Coordinates", "harness_type": "claude", "model": "sonnet", "auth_secret": "ANTHROPIC_KEY",
