@@ -99,7 +99,7 @@ func (e *Engine) preflight(ctx context.Context, f *core.Factory, def *core.Compi
 	e.preflightApprovers(ctx, f, def, chk)
 	preflightMachines(def, chk)
 	preflightModels(def, chk)
-	preflightCredentials(def, chk)
+	e.preflightCredentials(ctx, f, def, chk)
 	resolved := e.preflightNameFilters(ctx, f, def, chk)
 	sortIssues(chk.Errors)
 	sortIssues(chk.Warnings)
@@ -437,18 +437,57 @@ func (e *Engine) preflightApprovers(ctx context.Context, f *core.Factory, def *c
 // ---------- credentials ----------
 
 // preflightCredentials adds a warning for each agent that has no harness
-// credential. A factory needs one (harness.auth) before its first run: the
-// harness CLI runs in the sandbox and calls the model provider itself. It is
-// a warning, because a sandbox can hold a credential of its own (a signed-in
+// credential. The harness CLI runs in the sandbox and calls the model
+// provider itself, so a run needs a credential. An agent without
+// harness.auth uses the default credential: the one factory or team secret
+// whose type the harness accepts (findDefaultCredential). The check warns
+// when there is no such secret, or more than one at the same scope. It is a
+// warning, because a sandbox can hold a credential of its own (a signed-in
 // CLI on a workstation in development mode).
-func preflightCredentials(def *core.CompiledDefinition, chk *core.DefinitionCheck) {
+func (e *Engine) preflightCredentials(ctx context.Context, f *core.Factory, def *core.CompiledDefinition, chk *core.DefinitionCheck) {
+	found := map[core.HarnessType]HarnessCredential{}
 	for _, a := range def.Agents {
 		if a.Harness.Auth != nil {
 			continue
 		}
-		chk.Warnings = append(chk.Warnings, core.ValidationError{File: agentFile(a.Name), Field: "harness.auth",
-			Message: fmt.Sprintf("the %s harness of agent %q has no credential; set harness.auth (for example in agentDefaults) to a managed secret with the model key before the first run", harness.NormalizeType(string(a.Harness.Type)), a.Name)})
+		h := harness.NormalizeType(string(a.Harness.Type))
+		cred, ok := found[h]
+		if !ok {
+			var err error
+			if cred, err = findDefaultCredential(ctx, e.secrets, f.TeamID, f.ID, h); err != nil {
+				e.log.WarnContext(ctx, "preflight: list secrets for the default model credential", "factory", f.ID, "err", err)
+			}
+			found[h] = cred
+		}
+		var msg string
+		switch {
+		case cred.IsDefault():
+			continue
+		case cred.Reason == CredentialReasonAmbiguous:
+			msg = fmt.Sprintf("the %s harness of agent %q has no harness.auth, and more than one %s secret fits (%s), so runs get no credential; set harness.auth (for example in agentDefaults) to one of them",
+				h, a.Name, cred.Scope, strings.Join(cred.Candidates, ", "))
+		case len(harness.CredentialSecretTypes(h)) == 0:
+			msg = fmt.Sprintf("the %s harness of agent %q has no credential; set harness.auth (for example in agentDefaults) to a managed secret with the model key before the first run", h, a.Name)
+		default:
+			msg = fmt.Sprintf("the %s harness of agent %q has no credential; add a secret of type %s under Secrets, or set harness.auth (for example in agentDefaults) to a managed secret with the model key, before the first run",
+				h, a.Name, credentialTypeList(h))
+		}
+		chk.Warnings = append(chk.Warnings, core.ValidationError{File: agentFile(a.Name), Field: "harness.auth", Message: msg})
 	}
+}
+
+// credentialTypeList names the credential secret types of a harness for a
+// message, for example "anthropic_api_key or anthropic_oauth_token".
+func credentialTypeList(h core.HarnessType) string {
+	types := harness.CredentialSecretTypes(h)
+	names := make([]string, len(types))
+	for i, t := range types {
+		names[i] = string(t)
+	}
+	if len(names) < 2 {
+		return strings.Join(names, "")
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " or " + names[len(names)-1]
 }
 
 // ---------- models ----------

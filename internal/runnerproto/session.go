@@ -195,6 +195,11 @@ type SecretsResponse struct {
 	Files []SecretFile `json:"files"`
 	// HarnessAuth are the credentials of the harness.
 	HarnessAuth map[string]string `json:"harness_auth"`
+	// HarnessAuthDefault tells that HarnessAuth is the default model
+	// credential (the definition sets no harness.auth). The runner then
+	// drops HarnessAuth when its own environment already holds a model
+	// credential for the harness.
+	HarnessAuthDefault bool `json:"harness_auth_default,omitempty"`
 	// MCPHeaders maps an MCP server name to its request headers.
 	MCPHeaders map[string]map[string]string `json:"mcp_headers"`
 	// MCPEnv maps the name of an MCP server with a command to its

@@ -252,12 +252,13 @@ Limits: a secret that an agent encodes another way (for example hex) or splits i
 
 ## Model credentials
 
-The control plane makes no model calls and holds no model key. Each harness CLI calls the model provider from the sandbox, with the factory's model credential (`harness.auth`) in its environment. So an agent command can read the credential.
+The control plane makes no model calls and holds no model key. Each harness CLI calls the model provider from the sandbox, with the factory's model credential (`harness.auth`, or the [default credential](harnesses.md#default-credential)) in its environment. So an agent command can read the credential.
 
 - Use a model key for each factory or team, not a shared personal key.
 - Set spend and usage limits at the provider.
 - Rotate the key when a run might have exposed it.
 - With `auth.source: workerEnvironment`, the credential comes from the self-hosted worker. The sandbox can read it too.
+- Without `harness.auth`, a run uses the one factory or team secret of a model credential type. Every agent of the team without `harness.auth` can then read it. Use a factory secret or `harness.auth` to keep a key to one factory.
 
 ## Sandbox isolation
 

@@ -76,7 +76,7 @@ describe("run detail live transcript", () => {
     });
     await waitFor(() => expect(screen.queryByText(/● Live/)).not.toBeInTheDocument());
     expect(screen.getAllByText("Opened PR #12").length).toBeGreaterThan(0);
-    expect(screen.getByText("Succeeded")).toBeInTheDocument();
+    expect(screen.getByText("SUCCEEDED")).toBeInTheDocument();
     expect(screen.queryByLabelText(/follow-up message/i)).not.toBeInTheDocument();
     expect(es.readyState).toBe(MockEventSource.CLOSED);
   });
@@ -129,10 +129,13 @@ describe("run states", () => {
     expect(screen.queryByLabelText(/follow-up message/i)).not.toBeInTheDocument();
   });
 
-  it("says the agent did not start when a run ended before its first turn", async () => {
+  it.each([
+    ["no usage", undefined],
+    ["usage with a zero duration", { cost_usd: 0, input_tokens: 0, output_tokens: 0, duration_ms: 0 }],
+  ])("says the agent did not start when a run ended before its first turn (%s)", async (_name, usage) => {
     mockFetch({
       "GET /api/v1/me": ME,
-      "GET /api/v1/runs/run_1": { ...RUN, state: "ERROR", usage: undefined, started_at: undefined, finished_at: new Date().toISOString() },
+      "GET /api/v1/runs/run_1": { ...RUN, state: "ERROR", usage, started_at: undefined, finished_at: new Date().toISOString() },
       "GET /api/v1/runs": { items: [], page_info: { has_next_page: false } },
       "GET /api/v1/factories/fac_1/scorers": { items: [], page_info: { has_next_page: false } },
     });

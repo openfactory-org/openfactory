@@ -8,7 +8,7 @@ import { useAuth } from "../auth/AuthContext";
 import { fpath } from "../components/FactoryLayout";
 import { confirm } from "../components/overlays";
 import { Alert, Button, Empty, ErrorAlert, Keys, KV, PageHeader, Skeleton, StateBadge, StatusIcon, TimeAgo } from "../components/ui";
-import { count, duration, firstLine, fmtClock, fmtTime, humanizeError, money, shortID, stateLabel } from "../lib/format";
+import { count, duration, firstLine, fmtClock, fmtTime, humanizeError, money, shortID } from "../lib/format";
 import { useMutate } from "../lib/mutate";
 import { isSubmitChord, MOD } from "../lib/queries";
 import { runTree } from "./Work";
@@ -57,7 +57,7 @@ export function RunTable({ runs }: { runs: Run[] }) {
             </Link>
             <span className="row-meta">
               {run.state === "BLOCKED" && run.blocked_reason && <span className="state-label">{blockedLabel(run.blocked_reason)}</span>}
-              <span className={run.state === "SUCCEEDED" || (run.state === "BLOCKED" && run.blocked_reason) ? "sr-only" : "state-label"}>{stateLabel(run.state)}</span>
+              <span className={run.state === "SUCCEEDED" || (run.state === "BLOCKED" && run.blocked_reason) ? "sr-only" : "state-label"}>{(run.state ?? "").toLowerCase()}</span>
               {run.agent_name && <span className="chip hide-sm">{run.agent_name}</span>}
               <span className="hide-sm faint">{run.config?.harness?.model}</span>
               <span className="num" style={{ width: 52 }}>
@@ -410,7 +410,9 @@ export function RunPage() {
                 ["Cost", <span key="c">{money(run.usage?.cost_usd)}</span>],
                 ["Tokens in", <span key="i">{count(run.usage?.input_tokens)}</span>],
                 ["Tokens out", <span key="o">{count(run.usage?.output_tokens)}</span>],
-                ["Duration", <span key="d">{run.usage?.duration_ms == null && notStarted ? "Agent did not start" : duration(run.usage?.duration_ms)}</span>],
+                // The API reports usage with duration_ms 0 for a run whose
+                // agent did not start, so 0 counts as no duration.
+                ["Duration", <span key="d">{!run.usage?.duration_ms && notStarted ? "Agent did not start" : duration(run.usage?.duration_ms)}</span>],
               ]}
             />
           </section>

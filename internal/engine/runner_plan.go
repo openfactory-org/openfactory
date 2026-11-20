@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"slices"
 	"strings"
@@ -23,9 +24,11 @@ type RunnerRepo struct{ Forge, Owner, Name, Path, Ref, CloneURL string }
 
 // RunnerPlan is the content of a runner session.
 type RunnerPlan struct {
-	Env          map[string]string // no secret values
-	SecretEnv    map[string]string // secret values of r.Config.Secrets
-	HarnessAuth  map[string]string
+	Env         map[string]string // no secret values
+	SecretEnv   map[string]string // secret values of r.Config.Secrets
+	HarnessAuth map[string]string
+	// Credential tells where HarnessAuth comes from. It holds no value.
+	Credential   HarnessCredential
 	Repos        []RunnerRepo
 	WorkDir      string       // relative to the workspace; "" or the single repository path
 	Skills       []core.Skill // merged factory and agent skills
@@ -59,7 +62,7 @@ func (x *Planner) RunnerPlan(ctx context.Context, r *core.Run) (*RunnerPlan, err
 	if err != nil {
 		return nil, err
 	}
-	auth, err := x.harnessAuth(ctx, r)
+	auth, cred, err := x.resolveHarnessAuth(ctx, r, env)
 	if err != nil {
 		return nil, err
 	}
@@ -86,6 +89,7 @@ func (x *Planner) RunnerPlan(ctx context.Context, r *core.Run) (*RunnerPlan, err
 		Env:          map[string]string{},
 		SecretEnv:    map[string]string{},
 		HarnessAuth:  auth,
+		Credential:   cred,
 		Repos:        repos,
 		Skills:       cfg.Skills,
 		SystemPrompt: prompts.Compose(cfg, wi, r, agents),
@@ -119,6 +123,20 @@ func (x *Planner) RunnerPlan(ctx context.Context, r *core.Run) (*RunnerPlan, err
 		p.EnvSetupCommands = slices.Clone(envr.SetupCommands)
 	}
 	return p, nil
+}
+
+// LogHarnessCredential logs the default model credential of a run with the
+// secret name only, and warns when more than one secret fits. The runner
+// API calls it once for each secrets read of a session.
+func LogHarnessCredential(ctx context.Context, log *slog.Logger, r *core.Run, c HarnessCredential) {
+	switch {
+	case c.IsDefault():
+		log.InfoContext(ctx, "model credential: default secret", "run_id", r.ID, "harness", r.Config.Harness.Type,
+			"secret", c.SecretName, "scope", c.Scope, "type", c.Type)
+	case c.Reason == CredentialReasonAmbiguous:
+		log.WarnContext(ctx, "model credential: more than one secret fits, none is used; set harness.auth", "run_id", r.ID,
+			"harness", r.Config.Harness.Type, "scope", c.Scope, "candidates", strings.Join(c.Candidates, ","))
+	}
 }
 
 // sessionTokenServers finds the servers that point at the control plane. It

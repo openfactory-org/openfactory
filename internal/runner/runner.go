@@ -196,6 +196,9 @@ func Run(ctx context.Context, cfg Config) error {
 	r.flusherDone = make(chan struct{})
 	go r.flusher()
 	defer r.stopFlusher()
+	if secrets.HarnessAuthDefault {
+		r.dropDefaultAuth()
+	}
 
 	// The local forwarder adds the session token to the MCP requests.
 	r.startMCPForward()

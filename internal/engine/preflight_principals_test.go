@@ -165,22 +165,42 @@ func TestPreflightWarnsAboutUnknownModels(t *testing.T) {
 	}
 }
 
-// An agent without a harness credential gets a warning, and an agent with one
-// gets none.
+// An agent without harness.auth gets a warning unless exactly one secret
+// fits as its default credential. An agent with harness.auth gets none.
 func TestPreflightWarnsAboutMissingCredential(t *testing.T) {
-	pf := newPrincipalFixture(t, "EXECUTOR")
-	def := pf.def()
-	for i := range def.Agents {
-		def.Agents[i].Harness.Auth = &core.HarnessAuth{Source: "workerEnvironment"}
+	tests := []struct {
+		name    string
+		secrets []testSecret
+		want    string // "" means no warning
+	}{
+		{name: "no secret", want: "has no credential; add a secret of type anthropic_api_key, anthropic_oauth_token"},
+		{name: "generic secret", secrets: []testSecret{{"", "ANTHROPIC_API_KEY", core.SecretGeneric, ""}}, want: "has no credential"},
+		{name: "one team secret", secrets: []testSecret{{"", "CLAUDE_OAUTH_TOKEN", core.SecretAnthropicOAuth, ""}}},
+		{name: "two team secrets", secrets: []testSecret{{"", "B", core.SecretAnthropicOAuth, ""}, {"", "A", core.SecretAnthropicKey, ""}},
+			want: "more than one team secret fits (A, B)"},
 	}
-	def.Agents[0].Harness.Auth = nil
-	chk := pf.checkWith(t, def)
-	if !hasIssue(chk.Warnings, agentFile(def.Agents[0].Name), "harness.auth", "has no credential") {
-		t.Errorf("no credential warning for %s: %+v", def.Agents[0].Name, chk.Warnings)
-	}
-	for _, a := range def.Agents[1:] {
-		if hasIssue(chk.Warnings, agentFile(a.Name), "harness.auth", "") {
-			t.Errorf("unexpected credential warning for %s", a.Name)
-		}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			pf := newPrincipalFixture(t, "EXECUTOR")
+			pf.eng.secrets = scopedSecrets(t, tc.secrets)
+			def := pf.def()
+			for i := range def.Agents {
+				def.Agents[i].Harness.Auth = &core.HarnessAuth{Source: "workerEnvironment"}
+			}
+			def.Agents[0].Harness.Auth = nil
+			chk := pf.checkWith(t, def)
+			got := hasIssue(chk.Warnings, agentFile(def.Agents[0].Name), "harness.auth", tc.want)
+			if tc.want == "" {
+				got = !hasIssue(chk.Warnings, agentFile(def.Agents[0].Name), "harness.auth", "")
+			}
+			if !got {
+				t.Errorf("want warning %q for %s: %+v", tc.want, def.Agents[0].Name, chk.Warnings)
+			}
+			for _, a := range def.Agents[1:] {
+				if hasIssue(chk.Warnings, agentFile(a.Name), "harness.auth", "") {
+					t.Errorf("unexpected credential warning for %s", a.Name)
+				}
+			}
+		})
 	}
 }
