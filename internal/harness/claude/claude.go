@@ -236,6 +236,11 @@ func (h *Harness) Run(ctx context.Context, sb core.Sandbox, req core.HarnessRequ
 		if p.finished {
 			return
 		}
+		// The turn ended without a result message (cancelled, crashed or
+		// timed out). Report the tokens of the assistant messages so far.
+		if u := p.partialUsage(); u != nil {
+			em.Emit(core.HarnessEvent{Kind: harness.EventUsage, Usage: u, SessionID: p.sessionID})
+		}
 		msg := ""
 		switch {
 		case err != nil:
@@ -262,9 +267,48 @@ type parser struct {
 	lastText  string
 	toolNames map[string]string
 	finished  bool
+	// msgUsage is the newest usage of each assistant message of the turn,
+	// by message ID. The CLI repeats the usage of a message on each of its
+	// content blocks, so the last one counts.
+	msgUsage map[string]usageJSON
+	msgOrder []string
 }
 
-func newParser() *parser { return &parser{toolNames: map[string]string{}} }
+func newParser() *parser {
+	return &parser{toolNames: map[string]string{}, msgUsage: map[string]usageJSON{}}
+}
+
+// noteUsage records the usage of an assistant message.
+func (p *parser) noteUsage(m *streamInner) {
+	if m.Usage == nil {
+		return
+	}
+	id := m.ID
+	if id == "" {
+		id = fmt.Sprintf("anon-%d", len(p.msgOrder))
+	}
+	if _, ok := p.msgUsage[id]; !ok {
+		p.msgOrder = append(p.msgOrder, id)
+	}
+	p.msgUsage[id] = *m.Usage
+}
+
+// partialUsage returns the sum of the usage of the assistant messages, marked
+// partial, or nil without tokens. The stream has no cost for single messages,
+// so the cost is 0. The duration is 0: the runner measures the turn.
+func (p *parser) partialUsage() *core.Usage {
+	var u core.Usage
+	for _, id := range p.msgOrder {
+		m := p.msgUsage[id]
+		u.InputTokens += m.InputTokens + m.CacheCreationInputTokens + m.CacheReadInputTokens
+		u.OutputTokens += m.OutputTokens
+	}
+	if u.InputTokens == 0 && u.OutputTokens == 0 {
+		return nil
+	}
+	u.Coverage = core.UsagePartial
+	return &u
+}
 
 type streamMsg struct {
 	Type            string          `json:"type"`
@@ -380,6 +424,7 @@ func (p *parser) assistant(m streamMsg) []core.HarnessEvent {
 	if m.Message == nil {
 		return nil
 	}
+	p.noteUsage(m.Message)
 	var evs []core.HarnessEvent
 	for _, b := range parseBlocks(m.Message.Content) {
 		switch b.Type {
@@ -441,6 +486,8 @@ func resultText(raw json.RawMessage) string {
 	return strings.Join(parts, "\n")
 }
 
+// result reports the totals of the result message. They replace the usage
+// of the assistant messages, so nothing counts twice.
 func (p *parser) result(m streamMsg) []core.HarnessEvent {
 	p.finished = true
 	u := &core.Usage{CostUSD: m.TotalCostUSD, DurationMS: m.DurationMS}

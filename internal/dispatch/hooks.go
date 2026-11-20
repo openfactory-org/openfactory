@@ -122,9 +122,18 @@ func (d *Dispatcher) onUsage(ctx context.Context, runID string, session int, e c
 		return nil
 	}
 	// A cumulative event replaces the usage of its session only. The run
-	// gets the sum over all its sessions.
+	// gets the sum over all its sessions, and is partial when one session
+	// is partial. A runner older than duration_ms sends no duration.
 	_, _, err := d.updateSession(ctx, runID, session, func(s *core.RunSession) bool {
-		s.Usage = core.Usage{InputTokens: data.InputTokens, OutputTokens: data.OutputTokens, CostUSD: data.CostUSD}
+		s.Usage = core.Usage{
+			InputTokens:  data.InputTokens,
+			OutputTokens: data.OutputTokens,
+			CostUSD:      data.CostUSD,
+			DurationMS:   data.DurationMS,
+		}
+		if data.Coverage == core.UsagePartial {
+			s.Usage.Coverage = core.UsagePartial
+		}
 		return true
 	})
 	if err != nil {
@@ -139,11 +148,13 @@ func (d *Dispatcher) onUsage(ctx context.Context, runID string, session int, e c
 		total.InputTokens += s.Usage.InputTokens
 		total.OutputTokens += s.Usage.OutputTokens
 		total.CostUSD += s.Usage.CostUSD
+		total.DurationMS += s.Usage.DurationMS
+		if s.Usage.Coverage == core.UsagePartial {
+			total.Coverage = core.UsagePartial
+		}
 	}
 	_, err = d.update(ctx, runID, func(r *core.Run) {
-		r.Usage.InputTokens = total.InputTokens
-		r.Usage.OutputTokens = total.OutputTokens
-		r.Usage.CostUSD = total.CostUSD
+		r.Usage = total
 	})
 	return err
 }

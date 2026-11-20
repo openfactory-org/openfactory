@@ -10,8 +10,19 @@ A harness is the CLI that runs an agent's turns inside the run's sandbox. Open F
 | `reasoningLevel` | `low`, `medium`, `high`, `xhigh`, `max` | `minimal`, `low`, `medium`, `high`, `xhigh` |
 | Session resume | `--resume <session>` | `codex exec resume <thread_id>` |
 | Cost | The CLI reports the cost of each turn. | Estimated from the token counts that the CLI reports. |
+| Stopped turn | The tokens of the assistant messages so far count, with cost 0 and coverage `partial`. | No tokens count. |
 
 The control plane makes no model calls. The model credential is in the environment of the harness CLI, inside the sandbox. The spend limit uses the usage that the CLI reports.
+
+### Run usage
+
+The `usage` of a run is the sum over its sessions and turns:
+
+| Field | Value |
+|---|---|
+| `input_tokens`, `output_tokens`, `cost_usd` | The totals that the harness reports at the end of each turn. |
+| `duration_ms` | Agent time. For each turn, the duration that the harness reports. If the harness reports no duration, the runner measures the wall time of the turn. |
+| `coverage` | `known`, or `partial` when at least one turn ended before the harness reported its totals, for example a cancelled, crashed or timed-out turn. Partial counts are an estimate and can be lower than the real use. The dashboard shows "(partial)" after the cost. |
 
 Both harnesses get the same inputs (see [How configuration reaches a run](#how-configuration-reaches-a-run)), including the `factory` orchestration server. So a foreman on either harness can start other agents with `run_agents`.
 
