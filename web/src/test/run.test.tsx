@@ -129,6 +129,18 @@ describe("run states", () => {
     expect(screen.queryByLabelText(/follow-up message/i)).not.toBeInTheDocument();
   });
 
+  it("marks partial usage", async () => {
+    mockFetch({
+      "GET /api/v1/me": ME,
+      "GET /api/v1/runs/run_1": { ...RUN, state: "IDLE", usage: { ...RUN.usage, cost_usd: 0, coverage: "partial" } },
+      "GET /api/v1/runs": { items: [], page_info: { has_next_page: false } },
+      "GET /api/v1/factories/fac_1/scorers": { items: [], page_info: { has_next_page: false } },
+    });
+    renderAt(<RunPage />, { route: "/runs/run_1", path: "/runs/:id" });
+    const details = await screen.findByRole("complementary", { name: "Run details" });
+    expect(await within(details).findByText(/\(partial\)/)).toBeInTheDocument();
+  });
+
   it.each([
     ["no usage", undefined],
     ["usage with a zero duration", { cost_usd: 0, input_tokens: 0, output_tokens: 0, duration_ms: 0 }],

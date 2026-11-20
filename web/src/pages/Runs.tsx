@@ -407,7 +407,9 @@ export function RunPage() {
             <h2>Usage</h2>
             <KV
               items={[
-                ["Cost", <span key="c">{money(run.usage?.cost_usd)}</span>],
+                // Partial usage: a turn ended before the agent reported its
+                // totals, so the counts are an estimate and the cost may be low.
+                ["Cost", <span key="c">{money(run.usage?.cost_usd)}{run.usage?.coverage === "partial" ? " (partial)" : ""}</span>],
                 ["Tokens in", <span key="i">{count(run.usage?.input_tokens)}</span>],
                 ["Tokens out", <span key="o">{count(run.usage?.output_tokens)}</span>],
                 // The API reports usage with duration_ms 0 for a run whose
