@@ -1,12 +1,12 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { api, errorMessage, unwrap, type Schemas } from "../api/client";
+import { api, unwrap, type Schemas } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { fpath, useFactory } from "../components/FactoryLayout";
 import { Plus, Webhook as WebhookIcon } from "lucide-react";
 import { confirm, Dialog } from "../components/overlays";
-import { Alert, Badge, Button, Card, Code, Empty, Field, KV, PageHeader, Query, TimeAgo } from "../components/ui";
+import { Alert, Badge, Button, Card, Code, Empty, ErrorAlert, Field, KV, PageHeader, Query, TimeAgo } from "../components/ui";
 import { fmtTime } from "../lib/format";
 import { useMutate } from "../lib/mutate";
 import { ReadOnlyNotice } from "./Agents";
@@ -14,6 +14,8 @@ import { ReadOnlyNotice } from "./Agents";
 type Webhook = Schemas["Webhook"];
 type Delivery = Schemas["Delivery"];
 type TestFilterResult = Schemas["TestFilterResult"];
+
+const TONES_BY_STATUS: Record<string, string> = { accepted: "ok", rejected: "bad", deduplicated: "neutral", duplicate: "neutral" };
 
 const SCHEMES = ["github", "pagerduty", "sentry", "standard_webhooks", "stripe", "vercel"] as const;
 
@@ -39,6 +41,117 @@ export function CopyField({ id, label, value }: { id: string; label: string; val
   );
 }
 
+const HEX_SHA256 = `SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | sed 's/^.* //')`;
+
+/** What a sender adds to a delivery, per signature scheme (internal/webhooks/signature.go). */
+const SIGNATURES: Record<string, { header: string; how: string; sign: string[] }> = {
+  github: {
+    header: "X-Hub-Signature-256: sha256=<signature>",
+    how: "The signature is the HMAC-SHA256 of the raw body with the secret, in hex.",
+    sign: [HEX_SHA256],
+  },
+  pagerduty: {
+    header: "X-PagerDuty-Signature: v1=<signature>",
+    how: "The signature is the HMAC-SHA256 of the raw body with the secret, in hex.",
+    sign: [HEX_SHA256],
+  },
+  sentry: {
+    header: "Sentry-Hook-Signature: <signature>",
+    how: "The signature is the HMAC-SHA256 of the raw body with the secret, in hex.",
+    sign: [HEX_SHA256],
+  },
+  vercel: {
+    header: "X-Vercel-Signature: <signature>",
+    how: "The signature is the HMAC-SHA1 of the raw body with the secret, in hex.",
+    sign: [`SIG=$(printf '%s' "$BODY" | openssl dgst -sha1 -hmac "$SECRET" -hex | sed 's/^.* //')`],
+  },
+  stripe: {
+    header: "Stripe-Signature: t=<timestamp>,v1=<signature>",
+    how: 'The signature is the HMAC-SHA256 of "<timestamp>.<raw body>" with the secret, in hex. The timestamp is in Unix seconds and must be recent.',
+    sign: ["TS=$(date +%s)", `SIG=$(printf '%s' "$TS.$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | sed 's/^.* //')`],
+  },
+  standard_webhooks: {
+    header: "Webhook-Id: <id>, Webhook-Timestamp: <timestamp> and Webhook-Signature: v1,<signature>",
+    how: 'The signature is the HMAC-SHA256 of "<id>.<timestamp>.<raw body>", in base64. The key is the secret without "whsec_", base64-decoded. The timestamp is in Unix seconds and must be recent.',
+    sign: [
+      "ID=msg_$(date +%s)",
+      "TS=$(date +%s)",
+      `KEY=$(printf '%s' "\${SECRET#whsec_}" | base64 -d | od -An -tx1 | tr -d ' \\n')`,
+      `SIG=$(printf '%s' "$ID.$TS.$BODY" | openssl dgst -sha256 -mac HMAC -macopt hexkey:$KEY -binary | base64)`,
+    ],
+  },
+};
+
+type UsageHook = Pick<Webhook, "auth_mode" | "signature_scheme" | "ingress_url">;
+
+/** How to call a webhook: what to send, and a curl example with a placeholder credential. */
+export function webhookUsage(h: UsageHook): { lines: string[]; curl: string } {
+  const base = (h.ingress_url ?? "").replace(/\/\{token\}$/, "");
+  const body = `BODY='{"event":"test"}'`;
+  const json = `  -H "Content-Type: application/json" \\`;
+  if (h.auth_mode === "url_token") {
+    return {
+      lines: ["Put the token at the end of the URL: POST <ingress URL>/<token>. No credential header is needed."],
+      curl: [`TOKEN='<token>'`, body, `curl -X POST "${base}/$TOKEN" \\`, json, `  -d "$BODY"`].join("\n"),
+    };
+  }
+  if (h.auth_mode === "signature") {
+    const sc = SIGNATURES[h.signature_scheme ?? ""];
+    if (!sc) return { lines: ["The provider signs each delivery."], curl: "" };
+    const headers =
+      h.signature_scheme === "standard_webhooks"
+        ? [`  -H "Webhook-Id: $ID" \\`, `  -H "Webhook-Timestamp: $TS" \\`, `  -H "Webhook-Signature: v1,$SIG" \\`]
+        : [`  -H "${sc.header.replace("<signature>", "$SIG").replace("<timestamp>", "$TS")}" \\`];
+    return {
+      lines: [`The provider signs each delivery with the header ${sc.header}.`, sc.how],
+      curl: [`SECRET='<secret>'`, body, ...sc.sign, `curl -X POST "${base}" \\`, json, ...headers, `  -d "$BODY"`].join("\n"),
+    };
+  }
+  return {
+    lines: ["Send the token in the header Authorization: Bearer <token>."],
+    curl: [`TOKEN='<token>'`, body, `curl -X POST "${base}" \\`, `  -H "Authorization: Bearer $TOKEN" \\`, json, `  -d "$BODY"`].join("\n"),
+  };
+}
+
+function CopyButton({ value, label = "Copy" }: { value: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <Button
+      onClick={() => {
+        void navigator.clipboard?.writeText(value).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+    >
+      {copied ? "Copied" : label}
+    </Button>
+  );
+}
+
+/** Explains how to send the credential of a webhook, with a curl example. */
+export function WebhookUsage({ h }: { h: UsageHook }) {
+  const u = webhookUsage(h);
+  return (
+    <div className="stack stack-sm" role="group" aria-label="How to call this webhook">
+      <strong>How to call it</strong>
+      {u.lines.map((l) => (
+        <p key={l} className="small">
+          {l}
+        </p>
+      ))}
+      {u.curl && (
+        <>
+          <Code>{u.curl}</Code>
+          <div>
+            <CopyButton value={u.curl} label="Copy curl example" />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function useWebhooks(fid: string) {
   return useQuery({
     queryKey: ["webhooks", fid],
@@ -53,7 +166,7 @@ export function WebhooksPage() {
   const editable = canEditFactory(f.id) && f.source !== "git";
   const [form, setForm] = useState({ name: "", auth_mode: "token", signature_scheme: "", secret: "", secret_name: "", delivery_id_header: "" });
   const [created, setCreated] = useState<Schemas["WebhookCreated"] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [open, setOpen] = useState(false);
   const create = useMutate(
     (body: Schemas["CreateWebhookRequest"]) => unwrap(api.POST("/factories/{uid}/webhooks", { params: { path: { uid: f.id } }, body })),
@@ -82,7 +195,7 @@ export function WebhooksPage() {
         delivery_id_header: form.delivery_id_header.trim() || undefined,
       });
     } catch (err) {
-      setError(errorMessage(err));
+      setError(err);
     }
   }
 
@@ -116,6 +229,11 @@ export function WebhooksPage() {
                 The secret is not shown again; it is stored in the managed secret <code>{created.webhook.secret_name}</code>.
               </>
             )}
+            {created.secret_reused && (
+              <>
+                The webhook uses the existing team secret <code>{created.webhook.secret_name}</code>; its value is not shown. Use the value you stored there, or rotate the secret on the webhook page to get a new one.
+              </>
+            )}
           </p>
           <CopyField id="c-url" label="Ingress URL" value={created.ingress_url} />
           {created.secret && <CopyField id="c-secret" label="Secret" value={created.secret} />}
@@ -125,6 +243,7 @@ export function WebhooksPage() {
               <Link to="/secrets">Secrets</Link> page and enable the webhook.
             </Alert>
           )}
+          <WebhookUsage h={created.webhook} />
           <p className="small">
             Webhook UID: <code>{created.webhook.id}</code> — use it in an automation trigger's <code>webhook_ids</code>.
           </p>
@@ -181,7 +300,7 @@ export function WebhooksPage() {
       </Query>
       {editable && (
         <Dialog open={open} onOpenChange={setOpen} title="Add webhook" className="dialog-wide">
-          {error && <Alert kind="error">{error}</Alert>}
+          <ErrorAlert error={error} />
           <form className="stack stack-sm" onSubmit={submit}>
             <div className="grid-2">
               <Field label="Name" htmlFor="wh-name">
@@ -234,10 +353,17 @@ export function WebhooksPage() {
   );
 }
 
-function FilterResult({ r }: { r: TestFilterResult }) {
+/** The headline of a filter test. A match does not start work while the automation is disabled. */
+export function filterHeadline(r: Pick<TestFilterResult, "would_trigger" | "result">, automationEnabled?: boolean): { text: string; ok: boolean } {
+  if (r.would_trigger && automationEnabled === false) return { text: "Would match, but the automation is disabled", ok: false };
+  return { text: r.result ?? (r.would_trigger ? "Would trigger" : "Would not trigger"), ok: !!r.would_trigger };
+}
+
+function FilterResult({ r, automationEnabled }: { r: TestFilterResult; automationEnabled?: boolean }) {
+  const head = filterHeadline(r, automationEnabled);
   return (
-    <div className={`alert ${r.would_trigger ? "alert-success" : "alert-warning"}`} role="status">
-      <strong>{r.result}</strong>
+    <div className={`alert ${head.ok ? "alert-success" : "alert-warning"}`} role="status">
+      <strong>{head.text}</strong>
       <ul className="small">
         <li>
           {r.webhook_check?.passed ? "✓" : "✗"} Webhook: {r.webhook_check?.detail}
@@ -255,7 +381,18 @@ function FilterResult({ r }: { r: TestFilterResult }) {
  * Tests a trigger filter (or an automation's webhook triggers) against a stored
  * delivery of any of the factory's webhooks.
  */
-export function TestFilterPanel({ factoryID, automation, webhookID }: { factoryID: string; automation?: string; webhookID?: string }) {
+export function TestFilterPanel({
+  factoryID,
+  automation,
+  webhookID,
+  automationEnabled,
+}: {
+  factoryID: string;
+  automation?: string;
+  webhookID?: string;
+  /** False when the tested automation is disabled. */
+  automationEnabled?: boolean;
+}) {
   const hooks = useWebhooks(factoryID);
   const [hookID, setHookID] = useState(webhookID ?? "");
   const activeHook = hookID || webhookID || hooks.data?.[0]?.id || "";
@@ -267,7 +404,7 @@ export function TestFilterPanel({ factoryID, automation, webhookID }: { factoryI
   const [deliveryID, setDeliveryID] = useState("");
   const [filter, setFilter] = useState("");
   const [result, setResult] = useState<TestFilterResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const run = useMutate(
     (body: Schemas["FactoryTestFilterRequest"]) => unwrap(api.POST("/factories/{uid}/test-filter", { params: { path: { uid: factoryID } }, body })),
     { quietErrors: true, onSuccess: (r) => setResult(r) },
@@ -281,7 +418,7 @@ export function TestFilterPanel({ factoryID, automation, webhookID }: { factoryI
     try {
       await run.mutateAsync(filter.trim() ? { delivery_id: did, filter: filter.trim() } : { delivery_id: did, automation });
     } catch (err) {
-      setError(errorMessage(err));
+      setError(err);
     }
   }
 
@@ -326,8 +463,8 @@ export function TestFilterPanel({ factoryID, automation, webhookID }: { factoryI
         <Field label="Filter (JSON or YAML)" htmlFor="tf-filter" hint={automation !== undefined ? "Leave empty to try this automation's webhook triggers in order." : "For example: payload: { action: [deploy] }"}>
           <textarea id="tf-filter" rows={5} className="mono" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={"webhook_ids: [my-hook]\npayload:\n  env: [prod]"} />
         </Field>
-        {error && <Alert kind="error">{error}</Alert>}
-        {result && <FilterResult r={result} />}
+        <ErrorAlert error={error} />
+        {result && <FilterResult r={result} automationEnabled={automationEnabled} />}
         <div className="form-actions">
           <Button type="submit" busy={run.isPending} disabled={!did}>
             Test
@@ -415,7 +552,7 @@ export function WebhookPage() {
                     {deliveries.data!.map((d) => (
                       <li key={d.id}>
                         <button type="button" className="btn-link-plain" aria-expanded={openDelivery === d.id} onClick={() => setOpenDelivery(openDelivery === d.id ? null : d.id)}>
-                          <Badge>{d.status}</Badge> {d.label || d.delivery_id || d.id}
+                          <Badge tone={TONES_BY_STATUS[d.status] ?? "neutral"}>{d.label || d.status}</Badge> {d.delivery_id || d.id}
                         </button>{" "}
                         <span className="muted small">
                           <TimeAgo t={d.received_at} />
@@ -451,6 +588,7 @@ export function WebhookPage() {
                     ["Created", fmtTime(h.created_at)],
                   ]}
                 />
+                <WebhookUsage h={h} />
               </Card>
             </aside>
           </div>
