@@ -7,6 +7,7 @@ import { fpath, useFactory } from "../components/FactoryLayout";
 import { Plus, Zap } from "lucide-react";
 import { confirm } from "../components/overlays";
 import { Alert, Badge, Button, Card, Empty, Field, PageHeader, Query, ValidationList } from "../components/ui";
+import { fmtUTC } from "../lib/format";
 import { useMutate } from "../lib/mutate";
 import { ReadOnlyNotice } from "./Agents";
 import { TestFilterPanel } from "./Webhooks";
@@ -15,13 +16,8 @@ type Automation = Schemas["Automation"];
 type ValidationResult = Schemas["ValidationResult"];
 type Schedule = Schemas["Schedule"];
 
-/** A time in UTC, for example "2026-11-20 09:00 UTC". Cron schedules run in UTC. */
-export function fmtUTC(t?: string | null): string {
-  if (!t) return "—";
-  const d = new Date(t);
-  if (Number.isNaN(d.getTime())) return "—";
-  return `${d.toISOString().slice(0, 16).replace("T", " ")} UTC`;
-}
+// Cron schedules run in UTC; the page shows their times in UTC.
+export { fmtUTC } from "../lib/format";
 
 /**
  * Sets `enabled:` in the YAML frontmatter of automation.md. It adds the field
@@ -360,9 +356,9 @@ export function AutomationPage() {
         </form>
         <aside className="stack">
           {q.data?.automation && (
-            <Card title="Active">
+            <Card title={q.data.automation.enabled ? "Enabled" : "Disabled"}>
               <p className="small">
-                {q.data.automation.enabled ? <Badge tone="ok">enabled</Badge> : <Badge>disabled</Badge>} · agent {q.data.automation.agent || "foreman"}
+                {q.data.automation.enabled ? "Its triggers start runs" : "Its triggers do not start runs"} of the agent <strong>{q.data.automation.agent || "foreman"}</strong>.
               </p>
             </Card>
           )}
@@ -373,5 +369,12 @@ export function AutomationPage() {
     </>
   );
   if (isNew) return body;
-  return <Query q={q}>{() => body}</Query>;
+  return (
+    <Query
+      q={q}
+      notFound={{ title: "Automation not found", text: `This factory has no automation named "${routeName}".`, back: { label: "Go to automations", to: fpath(f, "automations") } }}
+    >
+      {() => body}
+    </Query>
+  );
 }
