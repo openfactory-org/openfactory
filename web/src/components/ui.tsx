@@ -4,7 +4,7 @@ import type { UseQueryResult } from "@tanstack/react-query";
 import * as RTooltip from "@radix-ui/react-tooltip";
 import { ChevronRight, Menu as MenuIcon } from "lucide-react";
 import { errorMessage, type ValidationError } from "../api/client";
-import { ago, fmtTime } from "../lib/format";
+import { ago, fmtTime, stateLabel } from "../lib/format";
 
 /** Event that opens the sidebar on small screens (the shell listens for it). */
 export const NAV_TOGGLE_EVENT = "of:toggle-nav";
@@ -270,7 +270,7 @@ export function StatusIcon({ state, size = 14 }: { state?: string | null; size?:
 /** A state or a stage, as an icon with its name. */
 export function StateBadge({ state }: { state?: string | null }) {
   if (!state) return null;
-  const label = state.replace(/_/g, " ");
+  const label = stateLabel(state);
   return (
     <span className="state">
       <StatusIcon state={state} />

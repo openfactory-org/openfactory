@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { diffFiles, diffLines, hunks } from "../lib/diff";
-import { duration, humanizeError, money, parseKVLines, samplingLabel, shortID } from "../lib/format";
+import { duration, humanizeError, money, parseKVLines, samplingLabel, shortID, stateLabel } from "../lib/format";
 import { parseRepoLines } from "../pages/Factories";
 import { cleanDefPath } from "../pages/Definition";
 
@@ -43,6 +43,12 @@ describe("format", () => {
     expect(cleanDefPath(" agents/x/agent.md ")).toBe("agents/x/agent.md");
     expect(() => cleanDefPath("../etc")).toThrow();
     expect(() => cleanDefPath("/abs")).toThrow();
+  });
+});
+
+describe("stateLabel", () => {
+  it("writes every state in one case", () => {
+    expect(["SUCCEEDED", "ERROR", "CANCELLED", "in_progress", "", undefined].map(stateLabel)).toEqual(["Succeeded", "Error", "Cancelled", "In progress", "", ""]);
   });
 });
 
