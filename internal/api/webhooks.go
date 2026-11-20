@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"regexp"
 	"slices"
@@ -210,6 +209,12 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request, p *
 	if getErr != nil && !isNotFound(getErr) {
 		return getErr
 	}
+	oldType := core.SecretGeneric
+	if existing {
+		if oldType, err = s.teamSecretType(ctx, p.TeamID, secretName); err != nil {
+			return err
+		}
+	}
 	// generated is true when the server makes the credential.
 	generated := req.AuthMode != "signature" || req.SignatureScheme == "standard_webhooks"
 	reuse := false
@@ -278,7 +283,7 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request, p *
 	}
 	if err := s.applyFiles(ctx, p, f, files, "Add webhook "+req.Name); err != nil {
 		if store != "" {
-			s.restoreSecret(ctx, p.TeamID, secretName, written, existing, old)
+			s.restoreSecret(ctx, p.TeamID, secretName, written, existing, oldType, old)
 		}
 		return err
 	}
@@ -318,18 +323,32 @@ func (s *Server) webhookSecretInUse(ctx context.Context, teamID, name string) (b
 	return false, nil
 }
 
+// teamSecretType returns the type of a team secret.
+func (s *Server) teamSecretType(ctx context.Context, teamID, name string) (core.SecretType, error) {
+	secs, err := s.opts.Secrets.List(ctx, teamID, "")
+	if err != nil {
+		return "", err
+	}
+	for i := range secs {
+		if secs[i].Name == name && secs[i].FactoryID == "" {
+			return secs[i].Type, nil
+		}
+	}
+	return core.SecretGeneric, nil
+}
+
 // restoreSecret undoes a secret write after a failed apply: it puts back the
-// previous value, or deletes a secret that did not exist before.
-func (s *Server) restoreSecret(ctx context.Context, teamID, name string, written *core.Secret, existed bool, old []byte) {
+// previous value and type, or deletes a secret that did not exist before.
+func (s *Server) restoreSecret(ctx context.Context, teamID, name string, written *core.Secret, existed bool, typ core.SecretType, old []byte) {
 	var err error
 	switch {
 	case existed:
-		_, err = s.opts.Secrets.Put(ctx, teamID, "", name, core.SecretGeneric, old)
+		_, err = s.opts.Secrets.Put(ctx, teamID, "", name, typ, old)
 	case written != nil:
 		err = s.opts.Secrets.Delete(ctx, written.ID)
 	}
 	if err != nil {
-		slog.WarnContext(ctx, "restore webhook secret after a failed apply", "secret", name, "err", err)
+		s.log.WarnContext(ctx, "restore webhook secret after a failed apply", "secret", name, "err", err)
 	}
 }
 

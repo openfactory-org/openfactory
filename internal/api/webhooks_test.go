@@ -80,12 +80,16 @@ func TestWebhookCreateSecret(t *testing.T) {
 // shows the secret.
 func TestWebhookCreateFailedApplyRestoresSecret(t *testing.T) {
 	for _, c := range []struct {
-		name string
-		pre  string
-		body map[string]any
+		name    string
+		pre     string
+		preType core.SecretType
+		body    map[string]any
 	}{
 		{name: "generated secret", body: map[string]any{"name": "deploys"}},
 		{name: "provider secret over an existing one", pre: "old-provider", body: map[string]any{
+			"name": "deploys", "auth_mode": "signature", "signature_scheme": "github", "secret": "new-provider",
+		}},
+		{name: "keeps the type of the old secret", pre: "old-key", preType: core.SecretAnthropicKey, body: map[string]any{
 			"name": "deploys", "auth_mode": "signature", "signature_scheme": "github", "secret": "new-provider",
 		}},
 	} {
@@ -94,8 +98,12 @@ func TestWebhookCreateFailedApplyRestoresSecret(t *testing.T) {
 			ctx := context.Background()
 			fid := e.createFactory("hooks")
 			const name = "DEPLOYS_WEBHOOK_SECRET"
+			preType := c.preType
+			if preType == "" {
+				preType = core.SecretGeneric
+			}
 			if c.pre != "" {
-				if _, err := e.srv.opts.Secrets.Put(ctx, e.team.ID, "", name, core.SecretGeneric, []byte(c.pre)); err != nil {
+				if _, err := e.srv.opts.Secrets.Put(ctx, e.team.ID, "", name, preType, []byte(c.pre)); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -107,6 +115,17 @@ func TestWebhookCreateFailedApplyRestoresSecret(t *testing.T) {
 				t.Fatalf("secret left after a failed create: %q", v)
 			case c.pre != "" && string(v) != c.pre:
 				t.Fatalf("secret = %q, want restored %q", v, c.pre)
+			}
+			if c.pre != "" {
+				secs, err := e.srv.opts.Secrets.List(ctx, e.team.ID, "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, sec := range secs {
+					if sec.Name == name && sec.Type != preType {
+						t.Fatalf("restored secret type = %q, want %q", sec.Type, preType)
+					}
+				}
 			}
 
 			e.engine.Err = nil
