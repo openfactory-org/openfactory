@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/forge/forgeutil"
 )
 
 func errorsIs(err, target error) bool { return errors.Is(err, target) }
@@ -472,7 +474,97 @@ func (s *Server) checkGitBranch(ctx context.Context, f *core.Factory, outcome st
 	if errors.As(err, &ve) {
 		return validationError(fmt.Sprintf("the definition on branch %q of %s is invalid; %s", branchName(f), f.GitRepo, outcome), ve.ValidationErrors())
 	}
-	return errInvalid("the definition on branch %q of %s could not be checked; %s: %v", branchName(f), f.GitRepo, outcome, err)
+	// The cause can hold provider URLs and response bodies: log it, and
+	// give the user a short message. The cause stays in the chain for
+	// errors.Is.
+	s.log.WarnContext(ctx, "git definition source check failed", "factory", f.ID, "repo", f.GitRepo, "branch", branchName(f), "err", err)
+	return fmt.Errorf("%w: %w", errInvalid("%s %s", s.gitSourceProblem(ctx, f, err), capitalize(outcome)+"."), err)
+}
+
+// gitSourceProblem describes why the git source of f could not be read,
+// in one or two sentences that tell the user what to fix.
+func (s *Server) gitSourceProblem(ctx context.Context, f *core.Factory, err error) string {
+	in := s.gitSourceIntegration(ctx, f)
+	which := "of its integration"
+	if in != nil {
+		which = fmt.Sprintf("of integration %s", in.Name)
+	}
+	switch status := forgeutil.StatusCode(err); {
+	case errors.Is(err, forgeutil.ErrNoIntegration):
+		return fmt.Sprintf("No code host integration covers %s. Connect one under Integrations.", f.GitRepo)
+	case errors.Is(err, core.ErrIntegrationDisabled):
+		if in != nil {
+			return fmt.Sprintf("The code host integration %s is not active. Fix it under Integrations.", in.Name)
+		}
+		return fmt.Sprintf("The code host integration for %s is not active. Fix it under Integrations.", f.GitRepo)
+	case status == http.StatusUnauthorized:
+		return fmt.Sprintf("The code host refused the token %s (HTTP 401). Check the token secret.", which)
+	case status == http.StatusForbidden:
+		return fmt.Sprintf("The token %s cannot read %s (HTTP 403). Check the permissions of the token.", which, f.GitRepo)
+	case status == http.StatusNotFound:
+		return fmt.Sprintf("The code host did not find branch %q of %s, or the token %s cannot see the repository (HTTP 404). Check the repository, the branch and the path.", branchName(f), f.GitRepo, which)
+	case status != 0:
+		return fmt.Sprintf("The code host answered HTTP %d for branch %q of %s. Try again later; the server log has the details.", status, branchName(f), f.GitRepo)
+	case errors.Is(err, core.ErrInvalid):
+		// A check of the source (for example a malformed repository) has a
+		// one-part message for people. A wrapped chain ("a: b: c") does not:
+		// it can hold provider URLs or response bodies.
+		if msg := cleanCoreMessage(err, core.ErrInvalid); msg != "" && len(msg) <= 200 && !strings.Contains(msg, ": ") && !strings.Contains(msg, "://") {
+			return capitalize(strings.TrimSuffix(msg, ".")) + "."
+		}
+	}
+	return fmt.Sprintf("The definition on branch %q of %s could not be read. The server log has the details.", branchName(f), f.GitRepo)
+}
+
+// gitSourceIntegration returns the code host record that serves the owner
+// of the git source of f: the record of the factory, else the team record.
+// It returns nil when none matches.
+func (s *Server) gitSourceIntegration(ctx context.Context, f *core.Factory) *core.Integration {
+	owner := gitRepoOwner(f.GitRepo)
+	if owner == "" {
+		return nil
+	}
+	ints, err := s.opts.Store.ListIntegrations(ctx, f.TeamID)
+	if err != nil {
+		return nil
+	}
+	var team *core.Integration
+	for i := range ints {
+		in := &ints[i]
+		if !slices.Contains(forgeProviders, in.Provider) || !strings.EqualFold(in.Config["org"], owner) {
+			continue
+		}
+		switch in.FactoryID {
+		case f.ID:
+			return in
+		case "":
+			if team == nil {
+				team = in
+			}
+		}
+	}
+	return team
+}
+
+// gitRepoOwner returns the owner of a git source: "acme" for "acme/defs",
+// "https://github.com/acme/defs" and "github.com/acme/defs".
+func gitRepoOwner(raw string) string {
+	path := strings.TrimSpace(raw)
+	if u, err := url.Parse(path); err == nil && u.Host != "" {
+		path = u.Path
+	} else if i := strings.Index(path, "/"); i > 0 && strings.Contains(path[:i], ".") {
+		path = path[i+1:]
+	}
+	owner, _, _ := strings.Cut(strings.Trim(path, "/"), "/")
+	return owner
+}
+
+// capitalize upper-cases the first letter of s.
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 func (s *Server) handleDeleteFactory(w http.ResponseWriter, r *http.Request, p *Principal) error {

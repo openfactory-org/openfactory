@@ -119,6 +119,7 @@ A restore applies the files of an earlier version as a new version, with the mes
 - **`managed` to `git`:** send `"source": "git"` and `git_repo` (and `git_branch` and `git_path` if necessary). Open Factory first reads the branch and runs the compiler and the preflight. If the branch has errors or cannot be read, the request fails and the source stays `managed`. The next sync applies the branch; the managed files stay in the version history.
 - **`git` to `managed`:** send `"source": "managed"`. The active version stays active and becomes editable in the API or the dashboard.
 - The same branch check runs when you create a factory with `"source": "git"` (no factory is created on failure), and when you change `git_repo`, `git_branch` or `git_path`.
+- When the branch cannot be read, the error tells what to fix, for example `The code host refused the token of integration acme-github (HTTP 401). Check the token secret.` or `No code host integration covers acme/defs. Connect one under Integrations.` The server log has the full response of the code host.
 
 Git sync marks a commit as done only after a successful apply or a validation error. After another failure (for example, the database is not available), the next sync retries the same commit.
 

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -129,8 +130,9 @@ func TestResourceUses(t *testing.T) {
 		t.Fatalf("no uses: %v", err)
 	}
 	many := []string{"a", "b", "c", "d", "e", "f", "g"}
+	var ae *Error
 	err := inUseError("Environment", "x", many)
-	if want := "Environment x is used by a, b, c, d, e and 2 more. Remove the references first."; err == nil || err.(*Error).Detail != want {
+	if want := "Environment x is used by a, b, c, d, e and 2 more. Remove the references first."; !errors.As(err, &ae) || ae.Detail != want {
 		t.Fatalf("got %v, want %q", err, want)
 	}
 }
