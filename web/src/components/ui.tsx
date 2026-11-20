@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import type { UseQueryResult } from "@tanstack/react-query";
 import * as RTooltip from "@radix-ui/react-tooltip";
 import { ChevronRight, Menu as MenuIcon } from "lucide-react";
-import { errorMessage, type ValidationError } from "../api/client";
+import { ApiError, errorMessage, formatValidationError, type ValidationError } from "../api/client";
 import { ago, fmtTime, stateLabel } from "../lib/format";
 
 /** Event that opens the sidebar on small screens (the shell listens for it). */
@@ -296,10 +296,27 @@ export function Empty({ title, children, icon, action }: { title: string; childr
 
 export function ErrorAlert({ error, title }: { error: unknown; title?: string }) {
   if (!error) return null;
+  const errs = error instanceof ApiError ? error.validationErrors : [];
+  if (errs.length === 0) {
+    return (
+      <div className="alert alert-error" role="alert">
+        {title && <strong>{title}: </strong>}
+        {errorMessage(error)}
+      </div>
+    );
+  }
+  // A refused definition change: list the reasons, one per line.
+  const shown = errs.slice(0, 5);
   return (
     <div className="alert alert-error" role="alert">
       {title && <strong>{title}: </strong>}
-      {errorMessage(error)}
+      {(error as ApiError).message}
+      <ul className="validation-list">
+        {shown.map((e, i) => (
+          <li key={i}>{formatValidationError(e)}</li>
+        ))}
+      </ul>
+      {errs.length > shown.length && <p className="muted">And {errs.length - shown.length} more.</p>}
     </div>
   );
 }
