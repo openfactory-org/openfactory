@@ -133,11 +133,13 @@ The inbox collects requests that wait for a person: `/inbox` for all factories, 
 | `approval` | Approval | Click an option button, for example **approve** or **revise**. |
 | `blocked` | Waits for input | Type an answer and click **Answer**. |
 | `handoff` | Handoff | Review the pull request at the forge. The item closes when you submit a review or the pull request merges. Or click **Mark resolved**. |
-| `failure` | Failure | Look at the run, then click **Mark resolved**. |
+| `failure` | Failure | Look at the run, then click **Mark resolved**. To retry, send a follow-up message to the run. |
 | `review` | Review | For a definition change, read the diff and click **Approve and apply** or **Reject**. For a self-improvement pull request, review it at the forge, then click **Mark resolved**. |
 | `answered`, `spend_limit` | For your information, Spend limit | Click **Dismiss**. |
 
-When you resolve a question, blocked item or approval, the engine sends your answer to the waiting agent, which continues from where it stopped.
+When you resolve a question, blocked item or approval, or decide a definition change, the engine sends your answer to the waiting agent, which continues from where it stopped. The message names you by your name or email.
+
+When you resolve a handoff, a failure or a self-improvement pull request review, or dismiss a "For your information" item, the engine sends nothing to the agent and starts no new agent turn. The resolve only closes the item. To retry after a failure or to give the agent more work, send a follow-up message to the run or a message on the work item.
 
 **Undo** shows for 10 minutes after a resolve, while the agent has not read the answer. The agent then gets a message that withdraws the answer, and the item opens again. A handoff closed by a review or merge cannot be undone.
 

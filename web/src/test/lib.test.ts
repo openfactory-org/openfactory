@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { diffFiles, diffLines, hunks } from "../lib/diff";
-import { duration, humanizeError, money, parseKVLines, samplingLabel, shortID } from "../lib/format";
+import { bodyWithoutTitle, duration, humanizeError, money, parseKVLines, samplingLabel, shortID, sourceLabel, stateLabel } from "../lib/format";
 import { parseRepoLines } from "../pages/Factories";
 import { cleanDefPath } from "../pages/Definition";
 
@@ -46,6 +46,12 @@ describe("format", () => {
   });
 });
 
+describe("stateLabel", () => {
+  it("writes every state in one case", () => {
+    expect(["SUCCEEDED", "ERROR", "CANCELLED", "in_progress", "", undefined].map(stateLabel)).toEqual(["Succeeded", "Error", "Cancelled", "In progress", "", ""]);
+  });
+});
+
 describe("samplingLabel", () => {
   it("reads the rate as a percentage, not a ratio", () => {
     expect(samplingLabel(25)).toBe("25%");
@@ -60,5 +66,34 @@ describe("humanizeError", () => {
       message: "The run waited too long in the queue or passed the maximum session time.",
       detail: "infrastructure_timeout",
     });
+  });
+});
+
+describe("bodyWithoutTitle", () => {
+  const title = "Should I say hello or goodbye?";
+  it.each([
+    ["a body that starts with the title", `${title}\n\nThis is the QA ask test.`, "This is the QA ask test."],
+    ["the title in other case and spacing", `  should i say hello or goodbye?  \r\nMore.`, "More."],
+    ["a body equal to the title", title, ""],
+    ["a body that does not repeat the title", "Pick one.", "Pick one."],
+    ["a first line that only starts like the title", `${title} Or both?\nMore.`, `${title} Or both?\nMore.`],
+    ["no body", undefined, ""],
+  ])("handles %s", (_, body, want) => {
+    expect(bodyWithoutTitle(title, body)).toBe(want);
+  });
+});
+
+describe("sourceLabel", () => {
+  it.each([
+    ["DASHBOARD", "Dashboard"],
+    ["dashboard", "Dashboard"],
+    ["API", "API"],
+    ["WEBHOOK", "Webhook"],
+    ["SCHEDULE", "Schedule"],
+    ["SELF_IMPROVEMENT", "Self-improvement"],
+    ["something_new", "Something new"],
+    [undefined, ""],
+  ])("labels %s as %s", (src, want) => {
+    expect(sourceLabel(src)).toBe(want);
   });
 });

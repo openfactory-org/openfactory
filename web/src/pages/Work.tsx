@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
@@ -27,7 +27,7 @@ import { fpath, useFactory } from "../components/FactoryLayout";
 import { confirm } from "../components/overlays";
 import { useShell } from "../components/shell";
 import { Button, Empty, ErrorAlert, Keys, PageHeader, Query, Segmented, Skeleton, StateBadge, StatusIcon, TimeAgo } from "../components/ui";
-import { firstLine, humanizeError, money, shortID } from "../lib/format";
+import { bodyWithoutTitle, firstLine, humanizeError, money, shortID, sourceLabel, stateLabel } from "../lib/format";
 import { useMutate } from "../lib/mutate";
 import { isSubmitChord, MOD } from "../lib/queries";
 import { InboxItemCard } from "./Inbox";
@@ -62,7 +62,7 @@ function PRChip({ pr }: { pr: PR }) {
 
 function WorkRow({ wi, fid, showStage = true }: { wi: WorkItem; fid: string; showStage?: boolean }) {
   const src = wi.source;
-  const ref = src?.repo && src.number ? `${src.repo}#${src.number}` : src?.external_id || src?.provider;
+  const ref = src?.repo && src.number ? `${src.repo}#${src.number}` : src?.external_id || (src?.provider ? sourceLabel(src.provider) : undefined);
   return (
     <li>
       <div className="list-row">
@@ -189,7 +189,8 @@ export function WorkItemsPage() {
           <option value="">Any stage</option>
           {STAGES.map((s) => (
             <option key={s} value={s}>
-              {stageLabel(s)}
+              {/* Sentence case, like the group headings of the board (.state-label). */}
+              {stateLabel(s)}
             </option>
           ))}
         </select>
@@ -288,19 +289,94 @@ function str(v: unknown): string {
 /** Maps a user ID to a name for the timeline. */
 type NameOf = (userID: string) => string | undefined;
 
-function actorName(e: TimelineEvent, nameOf?: NameOf): string {
+/** What the timeline knows about the people behind its events. */
+type Actors = {
+  nameOf?: NameOf;
+  /** The creator of a run of the work item, by run ID. */
+  runCreator?: (runID: string) => Schemas["Principal"] | undefined;
+  /** The user who created the work item. */
+  itemCreatorID?: string;
+  /** Maps an automation ID to its name. */
+  automationName?: (automationID: string) => string | undefined;
+  /** Maps an inbox item ID to the kind of the item, for example "handoff". */
+  inboxKind?: (inboxID: string) => string | undefined;
+};
+
+// The object of "You resolved the …" for inbox kinds that a person closes
+// without an answer.
+const RESOLVED_OBJECT: Record<string, string> = {
+  handoff: "the handoff",
+  failure: "the failure",
+  answered: "the note",
+  spend_limit: "the spend limit notice",
+};
+
+// Resolutions that only close an item and carry no text of a person.
+const PLAIN_RESOLUTIONS = new Set(["resolved", "seen", "dismissed"]);
+
+/**
+ * Maps the inbox item IDs of a work item to their kinds. It reads the items
+ * and the timeline events that created them.
+ */
+export function inboxKinds(inbox: { id: string; kind: string }[], timeline: TimelineEvent[]): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const e of timeline) {
+    const d = (e.data ?? {}) as Record<string, unknown>;
+    if (str(d.inbox_id) && str(d.kind) && e.kind !== "message_out") m.set(str(d.inbox_id), str(d.kind));
+  }
+  for (const it of inbox) m.set(it.id, it.kind);
+  return m;
+}
+
+// Platform actors of automations: "<prefix>:<automation ID>".
+const AUTOMATION_ACTORS = ["automation:", "schedule:", "webhook:"];
+
+// The engine sends the resolution of an inbox item to the run as a message
+// that starts with one of these markers. The timeline already shows the
+// answer or decision, so the message is not shown again.
+const FOLLOW_UP_MARKER = /^\[human (answer|decision|response|correction)\]/;
+
+/** Reports whether a timeline event is the platform's copy of an inbox resolution. */
+export function isInboxFollowUp(e: TimelineEvent): boolean {
+  const d = (e.data ?? {}) as Record<string, unknown>;
+  return e.kind === "message_in" && FOLLOW_UP_MARKER.test(str(d.text));
+}
+
+// Channel actors: a person acted through the dashboard, the API, the CLI
+// or MCP, and the event does not name the person.
+const CHANNEL_ACTORS = new Set(["dashboard", "api", "cli", "mcp"]);
+
+function personName(userID: string, actors: Actors): string {
+  return actors.nameOf?.(userID) ?? "A team member";
+}
+
+function actorName(e: TimelineEvent, actors: Actors = {}): string {
   const a = e.actor ?? "";
   if (!a || a === "system") return "The factory";
   if (a.startsWith("run:")) return "The foreman";
-  if (a.startsWith("user:")) return nameOf?.(a.slice(5)) ?? "A team member";
-  if (a === "dashboard" || a === "api") return "A team member";
+  if (a.startsWith("user:")) return personName(a.slice(5), actors);
+  const auto = AUTOMATION_ACTORS.find((p) => a.startsWith(p));
+  if (auto) {
+    const name = actors.automationName?.(a.slice(auto.length));
+    return name ? `The automation ${name}` : "An automation";
+  }
+  if (CHANNEL_ACTORS.has(a.toLowerCase())) {
+    // A run records who started it: name that person.
+    const p = e.run_id ? actors.runCreator?.(e.run_id) : undefined;
+    if (p?.type === "user") return personName(p.id, actors);
+    if (p) return p.name || p.id;
+    // The first stage change is the creation of the work item.
+    const d = (e.data ?? {}) as Record<string, unknown>;
+    if (e.kind === "stage_changed" && !d.from && actors.itemCreatorID) return personName(actors.itemCreatorID, actors);
+    return "A team member";
+  }
   return a;
 }
 
 /** One timeline event as a sentence, an icon and an optional block of text. */
-export function describeEvent(e: TimelineEvent, nameOf?: NameOf): { icon: ReactNode; text: ReactNode; body?: string } {
+export function describeEvent(e: TimelineEvent, actors: Actors = {}): { icon: ReactNode; text: ReactNode; body?: string } {
   const d = (e.data ?? {}) as Record<string, unknown>;
-  const who = <strong>{actorName(e, nameOf)}</strong>;
+  const who = <strong>{actorName(e, actors)}</strong>;
   const size = 13;
   switch (e.kind) {
     case "stage_changed": {
@@ -326,7 +402,8 @@ export function describeEvent(e: TimelineEvent, nameOf?: NameOf): { icon: ReactN
         icon: state === "succeeded" ? <Check size={size} /> : state === "cancelled" ? <Square size={size} /> : <X size={size} />,
         text: (
           <>
-            <strong>{str(d.name) || "The run"}</strong> {state === "succeeded" ? "finished its turn" : state ? `ended: ${state}` : "ended"}
+            <strong>{str(d.name) || "The run"}</strong>{" "}
+            {state === "succeeded" ? "finished its turn" : state === "blocked" ? "is waiting on a person" : state ? `ended: ${state}` : "ended"}
           </>
         ),
         body: humanizeError(str(d.error) || str(d.message) || str(d.text)).message,
@@ -351,26 +428,71 @@ export function describeEvent(e: TimelineEvent, nameOf?: NameOf): { icon: ReactN
       return { icon: <RotateCcw size={size} />, text: <>{who} opened this again</> };
     case "sender_checked":
       return { icon: <ShieldCheck size={size} />, text: <>{who} checked the sender</> };
-    case "note":
-      return { icon: <StickyNote size={size} />, text: <>{who} noted</>, body: str(d.text) || str(d.summary) };
-    default: {
-      const body = str(d.body) || str(d.text) || str(d.resolution) || str(d.question) || str(d.summary) || str(d.note) || str(d.message);
+    case "question": {
+      const title = str(d.title);
       return {
         icon: <MessageSquare size={size} />,
         text: (
           <>
-            {who} · <span className="timeline-kind">{(e.kind ?? "event").replace(/_/g, " ")}</span>
-            {str(d.title) ? `: ${str(d.title)}` : ""}
+            {who} asked{title ? `: ${title}` : " a question"}
           </>
         ),
-        body,
+        body: bodyWithoutTitle(title, str(d.body) || str(d.question) || str(d.text)),
       };
     }
+    case "answer": {
+      const kind = str(d.inbox_kind) || actors.inboxKind?.(str(d.inbox_id)) || "";
+      const object = RESOLVED_OBJECT[kind];
+      if (!object) return describeOther(e, who, size);
+      const resolution = str(d.resolution).trim();
+      return {
+        icon: <Check size={size} />,
+        text: (
+          <>
+            {who} resolved {object}
+          </>
+        ),
+        body: PLAIN_RESOLUTIONS.has(resolution.toLowerCase()) ? undefined : resolution,
+      };
+    }
+    case "note": {
+      const title = str(d.title);
+      const verb = str(d.kind) === "handoff" ? "handed off" : "noted";
+      return {
+        icon: <StickyNote size={size} />,
+        text: (
+          <>
+            {who} {verb}
+            {title ? `: ${title}` : ""}
+          </>
+        ),
+        body: bodyWithoutTitle(title, str(d.text) || str(d.summary) || str(d.body)),
+      };
+    }
+    default:
+      return describeOther(e, who, size);
   }
 }
 
-function TimelineItem({ e, nameOf }: { e: TimelineEvent; nameOf?: NameOf }) {
-  const { icon, text, body } = describeEvent(e, nameOf);
+/** An event without its own sentence: the actor, the kind and the title. */
+function describeOther(e: TimelineEvent, who: ReactNode, size: number): { icon: ReactNode; text: ReactNode; body?: string } {
+  const d = (e.data ?? {}) as Record<string, unknown>;
+  const title = str(d.title);
+  const body = str(d.body) || str(d.text) || str(d.resolution) || str(d.question) || str(d.summary) || str(d.note) || str(d.message);
+  return {
+    icon: <MessageSquare size={size} />,
+    text: (
+      <>
+        {who} · <span className="timeline-kind">{(e.kind ?? "event").replace(/_/g, " ")}</span>
+        {title ? `: ${title}` : ""}
+      </>
+    ),
+    body: bodyWithoutTitle(title, body),
+  };
+}
+
+function TimelineItem({ e, actors }: { e: TimelineEvent; actors: Actors }) {
+  const { icon, text, body } = describeEvent(e, actors);
   return (
     <li>
       <span className="tl-icon" aria-hidden="true">
@@ -425,6 +547,15 @@ export function WorkItemPage() {
     const u = (users.data ?? []).find((x) => x.id === id);
     return u ? u.name || u.email : undefined;
   };
+  const automations = useQuery({
+    queryKey: ["automations", f.id],
+    queryFn: () => unwrap(api.GET("/factories/{uid}/automations", { params: { path: { uid: f.id } } })).then((r) => r.items ?? []),
+    retry: false,
+  });
+  const automationName = (id: string) => {
+    const a = (automations.data ?? []).find((x) => x.id === id);
+    return a ? a.display_name || a.name : undefined;
+  };
   const [message, setMessage] = useState("");
   const send = useMutate(
     (msg: string) => unwrap(api.POST("/work-items/{id}/messages", { params: { path: { id: wid } }, body: { message: msg } })),
@@ -443,11 +574,12 @@ export function WorkItemPage() {
   };
 
   return (
-    <Query q={q}>
+    <Query q={q} notFound={{ title: "Work item not found", text: "This factory has no work item with this ID.", back: { label: "Go to work items", to: fpath(f, "work") } }}>
       {(wi) => {
         const terminal = wi.stage === "complete" || wi.stage === "cancelled";
         const pending = (wi.inbox ?? []).filter((i) => !i.resolved);
         const cost = (wi.runs ?? []).reduce((a, r) => a + (r.usage?.cost_usd ?? 0), 0);
+        const kinds = inboxKinds(wi.inbox ?? [], wi.timeline ?? []);
         return (
           <>
             <PageHeader
@@ -497,8 +629,18 @@ export function WorkItemPage() {
                     <p className="muted small">No events yet.</p>
                   ) : (
                     <ol className="timeline">
-                      {wi.timeline.map((e) => (
-                        <TimelineItem key={e.id} e={e} nameOf={nameOf} />
+                      {wi.timeline.filter((e) => !isInboxFollowUp(e)).map((e) => (
+                        <TimelineItem
+                          key={e.id}
+                          e={e}
+                          actors={{
+                            nameOf,
+                            automationName,
+                            itemCreatorID: wi.creator_id,
+                            runCreator: (id) => (wi.runs ?? []).find((r) => r.run_id === id)?.creator,
+                            inboxKind: (id) => kinds.get(id),
+                          }}
+                        />
                       ))}
                     </ol>
                   )}
@@ -556,7 +698,7 @@ export function WorkItemPage() {
                             {wi.source.title ? firstLine(wi.source.title, 40) : wi.source.repo && wi.source.number ? `${wi.source.repo}#${wi.source.number}` : firstLine(wi.source.url, 40)} <ExternalLink size={11} aria-hidden="true" />
                           </a>
                         ) : (
-                          wi.source?.provider || firstLine(wi.source?.title, 40) || "—"
+                          (wi.source?.provider ? sourceLabel(wi.source.provider) : "") || firstLine(wi.source?.title, 40) || "—"
                         )}
                       </dd>
                     </div>
@@ -573,7 +715,7 @@ export function WorkItemPage() {
                       <li key={run.run_id} style={{ paddingLeft: `${depth * 16}px` }}>
                         <StatusIcon state={run.state} />
                         <Link to={`/runs/${encodeURIComponent(run.run_id)}`}>{run.name || run.agent_name || shortID(run.run_id)}</Link>
-                        <span className="sr-only">{run.state}</span>
+                        <span className="sr-only">{stateLabel(run.state)}</span>
                         <span className="cost">{money(run.usage?.cost_usd)}</span>
                       </li>
                     ))}
@@ -603,6 +745,20 @@ export function WorkItemPage() {
           </>
         );
       }}
+    </Query>
+  );
+}
+
+/** /work-items/{id}: finds the factory of a work item and opens its page there. */
+export function WorkItemRedirect() {
+  const { wid = "" } = useParams();
+  const q = useQuery({
+    queryKey: ["workitem", wid],
+    queryFn: () => unwrap(api.GET("/work-items/{id}", { params: { path: { id: wid } } })),
+  });
+  return (
+    <Query q={q} notFound={{ title: "Work item not found", text: "No factory has a work item with this ID.", back: { label: "Go to factories", to: "/factories" } }}>
+      {(wi) => <Navigate to={fpath(wi.factory_id, `work/${encodeURIComponent(wi.id)}`)} replace />}
     </Query>
   );
 }

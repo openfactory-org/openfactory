@@ -39,12 +39,15 @@ type errorSpec struct {
 	Retryable bool
 }
 
+// errorSpecs describes each code. A conflict is not retryable: the same
+// request fails the same way until the caller changes it (another name, a
+// fresh read of the resource).
 var errorSpecs = map[string]errorSpec{
 	CodeInvalidRequest:           {http.StatusBadRequest, "The request contains invalid or missing parameters.", false},
 	CodeAuthenticationRequired:   {http.StatusUnauthorized, "A valid API key is required.", false},
 	CodeNotAuthorized:            {http.StatusForbidden, "You do not have permission to perform this operation.", false},
 	CodeResourceNotFound:         {http.StatusNotFound, "The referenced resource does not exist.", false},
-	CodeConflict:                 {http.StatusConflict, "The request conflicts with the current state of the resource.", true},
+	CodeConflict:                 {http.StatusConflict, "The request conflicts with the current state of the resource.", false},
 	CodeOperationNotSupported:    {http.StatusUnprocessableEntity, "The operation is not supported for this resource or state.", false},
 	CodeFeatureNotAvailable:      {http.StatusNotImplemented, "This feature is not available on this server.", false},
 	CodeIntegrationNotConfigured: {http.StatusFailedDependency, "The integration setup is incomplete.", false},

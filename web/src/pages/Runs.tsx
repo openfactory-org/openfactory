@@ -7,8 +7,8 @@ import { useEventStream } from "../api/sse";
 import { useAuth } from "../auth/AuthContext";
 import { fpath } from "../components/FactoryLayout";
 import { confirm } from "../components/overlays";
-import { Alert, Button, Empty, ErrorAlert, Keys, KV, PageHeader, Skeleton, StateBadge, StatusIcon, TimeAgo } from "../components/ui";
-import { count, duration, firstLine, fmtClock, fmtTime, humanizeError, money, shortID } from "../lib/format";
+import { Alert, Button, Empty, ErrorAlert, isNotFound, Keys, KV, NotFound, PageHeader, Skeleton, StateBadge, StatusIcon, TimeAgo } from "../components/ui";
+import { count, duration, firstLine, fmtClock, fmtTime, humanizeError, money, shortID, sourceLabel, stateLabel } from "../lib/format";
 import { useMutate } from "../lib/mutate";
 import { isSubmitChord, MOD } from "../lib/queries";
 import { runTree } from "./Work";
@@ -57,7 +57,7 @@ export function RunTable({ runs }: { runs: Run[] }) {
             </Link>
             <span className="row-meta">
               {run.state === "BLOCKED" && run.blocked_reason && <span className="state-label">{blockedLabel(run.blocked_reason)}</span>}
-              <span className={run.state === "SUCCEEDED" || (run.state === "BLOCKED" && run.blocked_reason) ? "sr-only" : "state-label"}>{(run.state ?? "").toLowerCase()}</span>
+              <span className={run.state === "SUCCEEDED" || (run.state === "BLOCKED" && run.blocked_reason) ? "sr-only" : "state-label"}>{stateLabel(run.state)}</span>
               {run.agent_name && <span className="chip hide-sm">{run.agent_name}</span>}
               <span className="hide-sm faint">{run.config?.harness?.model}</span>
               <span className="num" style={{ width: 52 }}>
@@ -157,9 +157,17 @@ const ROLE_LABEL: Record<string, string> = {
 
 const TOOL_KIND: Record<string, string> = { tool_call: "Tool", tool_result: "Result", log: "Log" };
 
+/** The number of non-empty lines after the first one, which the one-line summary of a tool row hides. */
+export function hiddenLines(s?: string | null): number {
+  const lines = (s ?? "").split("\n").filter((l) => l.trim() !== "");
+  return Math.max(0, lines.length - 1);
+}
+
 export function TranscriptMessage({ m }: { m: RunMessage }) {
   const collapsible = m.role === "tool_call" || m.role === "tool_result" || m.role === "log";
   const summary = firstLine(m.content, 160);
+  const more = hiddenLines(m.content);
+  const hasData = !!m.data && Object.keys(m.data).length > 0;
   return (
     <li className={`msg msg-${m.role}`} data-seq={m.seq}>
       <div className="msg-meta">
@@ -174,8 +182,15 @@ export function TranscriptMessage({ m }: { m: RunMessage }) {
             <ChevronRight size={12} aria-hidden="true" />
             <span className="tool-kind">{TOOL_KIND[m.role]}</span>
             <span className="tool-text">{summary || "(empty)"}</span>
+            {more > 0 && (
+              <span className="faint nowrap" style={{ flexShrink: 0, fontFamily: "var(--sans)" }}>
+                … {more} more {more === 1 ? "line" : "lines"}
+              </span>
+            )}
           </summary>
-          <pre className="code">{m.data && Object.keys(m.data).length > 0 ? JSON.stringify(m.data, null, 2) : m.content}</pre>
+          {/* A multi-line text is shown in full; the structured data follows it. */}
+          {more > 0 && hasData && <pre className="code">{m.content}</pre>}
+          <pre className="code">{hasData ? JSON.stringify(m.data, null, 2) : m.content}</pre>
         </details>
       ) : (
         <div className="msg-body">{m.content}</div>
@@ -192,8 +207,15 @@ export function mergeMessages(prev: RunMessage[], incoming: RunMessage[]): RunMe
 }
 
 /**
+ * The delays after the done event at which the run page loads the run again.
+ * The final usage of a stopped run arrives after its state change.
+ */
+export const DONE_REFETCH_MS = [0, 3000, 10000];
+
+/**
  * Live transcript: replays every message then streams new ones and state
- * changes from GET /runs/{id}/events until the run finishes.
+ * changes from GET /runs/{id}/events until the run finishes. After the run
+ * finishes, it loads the run again a few times to get the final usage.
  */
 export function useRunStream(runID: string, initial?: Run) {
   const qc = useQueryClient();
@@ -215,9 +237,26 @@ export function useRunStream(runID: string, initial?: Run) {
     done: (d) => {
       setRun(d as Run);
       setDone(true);
-      void qc.invalidateQueries({ queryKey: ["run", runID] });
     },
   });
+  useEffect(() => {
+    if (!done) return;
+    let stopped = false;
+    const reload = () =>
+      unwrap(api.GET("/runs/{runId}", { params: { path: { runId: runID } } }))
+        .then((r) => {
+          // A copy read before the state change landed would undo it.
+          if (stopped || !isTerminal(r.state)) return;
+          setRun(r);
+          qc.setQueryData(["run", runID], r);
+        })
+        .catch(() => undefined);
+    const timers = DONE_REFETCH_MS.map((ms) => setTimeout(reload, ms));
+    return () => {
+      stopped = true;
+      timers.forEach(clearTimeout);
+    };
+  }, [done, runID, qc]);
   return { messages, run, live: stream.status === "open" && !done, status: stream.status, done };
 }
 
@@ -267,8 +306,10 @@ export function RunPage() {
   }, [run?.factory_id, parent.data]);
 
   if (q.isLoading) return <Skeleton rows={6} />;
+  if (isNotFound(q.error)) return <NotFound title="Run not found" text="This run does not exist, or you cannot see it." back={{ label: "Go to runs", to: "/runs" }} />;
   if (q.isError || !run) return <ErrorAlert error={q.error ?? new Error("Run not found.")} />;
   const terminal = isTerminal(run.state);
+  const notStarted = terminal && !run.started_at;
   const failure = run.state !== "BLOCKED" ? humanizeError(run.status_message?.message || run.error) : { message: "", detail: "" };
   const submitFollowUp = () => {
     if (followUp.trim() && !send.isPending) send.mutate(followUp.trim());
@@ -406,10 +447,14 @@ export function RunPage() {
             <h2>Usage</h2>
             <KV
               items={[
-                ["Cost", <span key="c">{money(run.usage?.cost_usd)}</span>],
+                // Partial usage: a turn ended before the agent reported its
+                // totals, so the counts are an estimate and the cost may be low.
+                ["Cost", <span key="c">{money(run.usage?.cost_usd)}{run.usage?.coverage === "partial" ? " (partial)" : ""}</span>],
                 ["Tokens in", <span key="i">{count(run.usage?.input_tokens)}</span>],
                 ["Tokens out", <span key="o">{count(run.usage?.output_tokens)}</span>],
-                ["Duration", <span key="d">{duration(run.usage?.duration_ms)}</span>],
+                // The API reports usage with duration_ms 0 for a run whose
+                // agent did not start, so 0 counts as no duration.
+                ["Duration", <span key="d">{!run.usage?.duration_ms && notStarted ? "Agent did not start" : duration(run.usage?.duration_ms)}</span>],
               ]}
             />
           </section>
@@ -418,12 +463,14 @@ export function RunPage() {
             <KV
               items={[
                 ["Run ID", <code key="id">{run.run_id}</code>],
-                ["Source", run.source_ref ? `${run.source} (${run.source_ref})` : run.source],
+                ["Source", run.source_ref ? `${sourceLabel(run.source)} (${run.source_ref})` : sourceLabel(run.source)],
                 ...(run.creator ? ([["Creator", run.creator.name || run.creator.id]] as [string, string][]) : []),
                 ...(run.run_as ? ([["Runs as", principalLabel(run.run_as)]] as [string, string][]) : []),
                 ...(run.config?.machine?.name ? ([["Machine", run.config.machine.name]] as [string, string][]) : []),
                 ...(run.worker_id ? ([["Worker", run.worker_id]] as [string, string][]) : []),
-                ["Started", fmtTime(run.started_at)],
+                // started_at is the start of the first agent turn. A run
+                // can end in its sandbox setup, before any turn.
+                ["Started", run.started_at ? fmtTime(run.started_at) : notStarted ? "Agent did not start" : "Not yet"],
                 ["Finished", fmtTime(run.finished_at)],
               ]}
             />

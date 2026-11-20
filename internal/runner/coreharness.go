@@ -32,6 +32,15 @@ type CoreHarness struct {
 	sessionID string     // newest harness session ID seen in this process
 	usage     core.Usage // totals of all turns
 	declared  []string   // artifact paths that the harness reported since the last take
+
+	now func() time.Time // clock for the turn wall time; nil means time.Now
+}
+
+func (c *CoreHarness) clock() time.Time {
+	if c.now != nil {
+		return c.now()
+	}
+	return time.Now()
 }
 
 // Capabilities returns the capabilities of the harness.
@@ -77,13 +86,19 @@ func (c *CoreHarness) Turn(ctx context.Context, req TurnRequest, emit Emitter) T
 		}
 	}
 
-	t := &coreTurn{c: c, emit: emit, known: resume}
+	t := &coreTurn{c: c, emit: emit, known: resume, start: c.clock()}
 	for ev := range ch {
 		if ctx.Err() != nil {
-			continue // drain; the runner reports interrupted
+			// Drain; the runner reports interrupted. The usage of the
+			// stopped turn still counts.
+			if ev.Kind == "usage" && ev.Usage != nil {
+				t.handle(ev)
+			}
+			continue
 		}
 		t.handle(ev)
 	}
+	t.endDuration()
 	if ctx.Err() != nil {
 		return TurnResult{Outcome: runnerproto.OutcomeInterrupted}
 	}
@@ -112,6 +127,9 @@ type coreTurn struct {
 	lastReply string // last non-empty assistant content
 	usageSeen bool   // a usage event came in this turn
 	result    *TurnResult
+
+	start      time.Time // start of the turn
+	durationMS int64     // turn duration that the harness reported; 0 means none
 }
 
 func (t *coreTurn) handle(ev core.HarnessEvent) {
@@ -235,20 +253,55 @@ func (t *coreTurn) addDoneUsage(u *core.Usage) {
 	}
 }
 
-// addUsage adds u to the totals and sends the new totals.
+// addUsage adds u to the totals and sends the new totals. The totals of a
+// session are partial from the first partial turn on. The duration of the
+// turn counts at its end (endDuration); until then the totals include the
+// duration that the harness reported for the turn.
 func (t *coreTurn) addUsage(u *core.Usage) {
+	if u.DurationMS > 0 {
+		t.durationMS = u.DurationMS
+	}
 	t.c.mu.Lock()
 	t.c.usage.InputTokens += u.InputTokens
 	t.c.usage.OutputTokens += u.OutputTokens
 	t.c.usage.CostUSD += u.CostUSD
+	if u.Coverage == core.UsagePartial {
+		t.c.usage.Coverage = core.UsagePartial
+	}
 	total := t.c.usage
 	t.c.mu.Unlock()
+	total.DurationMS += t.durationMS
+	t.sendUsage(total)
+}
+
+// endDuration adds the duration of the turn to the totals: the duration that
+// the harness reported, else the wall time of the turn. It sends the totals
+// when the turn sent none with this duration.
+func (t *coreTurn) endDuration() {
+	d, reported := t.durationMS, t.durationMS > 0
+	if !reported {
+		d = t.c.clock().Sub(t.start).Milliseconds()
+		if d < 0 {
+			d = 0
+		}
+	}
+	t.c.mu.Lock()
+	t.c.usage.DurationMS += d
+	total := t.c.usage
+	t.c.mu.Unlock()
+	if !reported && d > 0 {
+		t.sendUsage(total)
+	}
+}
+
+func (t *coreTurn) sendUsage(total core.Usage) {
 	t.emit(runnerproto.EventUsage, runnerproto.UsageData{
 		InputTokens:  total.InputTokens,
 		OutputTokens: total.OutputTokens,
 		CostUSD:      total.CostUSD,
+		DurationMS:   total.DurationMS,
 		Cumulative:   true,
-		Coverage:     "known",
+		Coverage:     total.CoverageLabel(),
 	})
 }
 

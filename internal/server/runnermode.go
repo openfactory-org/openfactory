@@ -374,6 +374,8 @@ func newRunnerMode(cfg *config.Config, signKey []byte, signPrev [][]byte, st cor
 		GitCredentials: content,
 		CloudTokens:    cloud,
 		Hooks:          d,
+		Logger:         log,
+		Redact:         content.redactFor,
 	}
 	if runData != nil {
 		// Artifacts and transcripts of the runner share one store. Snapshots
@@ -499,6 +501,16 @@ func (c *runnerContent) planner() (*engine.Planner, error) {
 // setPlanner gives the content provider the planner.
 func (m *runnerMode) setPlanner(x *engine.Planner) { m.content.plan.Store(x) }
 
+// redactFor returns a function that removes the secret values of a run from
+// text. It returns nil before the planner is ready.
+func (c *runnerContent) redactFor(ctx context.Context, run *core.Run) func(string) string {
+	x, err := c.planner()
+	if err != nil {
+		return nil
+	}
+	return x.RedactFor(ctx, run)
+}
+
 // StartConfig implements runnerapi.SessionConfigurer.
 func (c *runnerContent) StartConfig(ctx context.Context, run *core.Run, _ *core.RunSession) (runnerproto.StartResponse, error) {
 	x, err := c.planner()
@@ -607,12 +619,15 @@ func (c *runnerContent) Secrets(ctx context.Context, run *core.Run, s *core.RunS
 	if err != nil {
 		return runnerproto.SecretsResponse{}, fmt.Errorf("session plan: %w", err)
 	}
+	engine.LogHarnessCredential(ctx, c.log, run, plan.Credential)
 	resp := runnerproto.SecretsResponse{
 		Env:         plan.SecretEnv,
 		Files:       []runnerproto.SecretFile{},
 		HarnessAuth: plan.HarnessAuth,
-		MCPHeaders:  map[string]map[string]string{},
-		Redact:      []string{},
+		// Only a default credential that maps to variables can be dropped.
+		HarnessAuthDefault: plan.Credential.IsDefault() && len(plan.HarnessAuth) > 0,
+		MCPHeaders:         map[string]map[string]string{},
+		Redact:             []string{},
 	}
 	if resp.Env == nil {
 		resp.Env = map[string]string{}
@@ -652,16 +667,19 @@ func (c *runnerContent) Secrets(ctx context.Context, run *core.Run, s *core.RunS
 	}
 	resp.Redact = redactList(values)
 	if c.audit != nil {
-		c.audit.Record(ctx, secretsReadEvent(run, s, resp))
+		c.audit.Record(ctx, secretsReadEvent(run, s, resp, plan.Credential))
 	}
-	c.recordSecretsDelivered(ctx, run, s, resp)
+	c.recordSecretsDelivered(ctx, run, s, resp, plan.Credential)
 	return resp, nil
 }
 
 // recordSecretsDelivered writes the timeline event secrets.delivered. It
-// holds the names of the secrets and never their values. The event ID holds
-// the task ID, so a second read of the same session adds no row.
-func (c *runnerContent) recordSecretsDelivered(ctx context.Context, run *core.Run, s *core.RunSession, resp runnerproto.SecretsResponse) {
+// holds the names of the secrets and never their values, and in
+// harness_credential the source of the model credential, for example
+// {"source":"default","secret":"CLAUDE_OAUTH_TOKEN","scope":"team"}. The
+// event ID holds the task ID, so a second read of the same session adds no
+// row.
+func (c *runnerContent) recordSecretsDelivered(ctx context.Context, run *core.Run, s *core.RunSession, resp runnerproto.SecretsResponse, cred engine.HarnessCredential) {
 	if c.runner == nil || s == nil {
 		return
 	}
@@ -675,7 +693,7 @@ func (c *runnerContent) recordSecretsDelivered(ctx context.Context, run *core.Ru
 	for _, f := range resp.Files {
 		names[f.Path] = true
 	}
-	data, err := json.Marshal(map[string]any{"names": sortedKeys(names)})
+	data, err := json.Marshal(map[string]any{"names": sortedKeys(names), "harness_credential": cred})
 	if err != nil {
 		return
 	}
@@ -688,7 +706,7 @@ func (c *runnerContent) recordSecretsDelivered(ctx context.Context, run *core.Ru
 
 // secretsReadEvent builds the audit event of a secrets read. It holds names
 // and never values.
-func secretsReadEvent(run *core.Run, s *core.RunSession, resp runnerproto.SecretsResponse) auth.AuditEvent {
+func secretsReadEvent(run *core.Run, s *core.RunSession, resp runnerproto.SecretsResponse, cred engine.HarnessCredential) auth.AuditEvent {
 	files := make([]string, 0, len(resp.Files))
 	for _, f := range resp.Files {
 		files = append(files, f.Path)
@@ -712,15 +730,32 @@ func secretsReadEvent(run *core.Run, s *core.RunSession, resp runnerproto.Secret
 		TeamID:   run.TeamID,
 		Resource: &auth.Resource{Type: "run", ID: run.ID, TeamID: run.TeamID},
 		Detail: map[string]string{
-			"run_id":       run.ID,
-			"session":      strconv.Itoa(session),
-			"team_id":      run.TeamID,
-			"env":          strings.Join(sortedKeys(resp.Env), ","),
-			"files":        strings.Join(files, ","),
-			"harness_auth": strings.Join(sortedKeys(resp.HarnessAuth), ","),
-			"mcp_servers":  strings.Join(sortedKeys(servers), ","),
+			"run_id":             run.ID,
+			"session":            strconv.Itoa(session),
+			"team_id":            run.TeamID,
+			"env":                strings.Join(sortedKeys(resp.Env), ","),
+			"files":              strings.Join(files, ","),
+			"harness_auth":       strings.Join(sortedKeys(resp.HarnessAuth), ","),
+			"harness_credential": credentialLabel(cred),
+			"mcp_servers":        strings.Join(sortedKeys(servers), ","),
 		},
 	}
+}
+
+// credentialLabel names the source of a model credential for the audit log,
+// for example "default:team:CLAUDE_OAUTH_TOKEN". It holds no value.
+func credentialLabel(c engine.HarnessCredential) string {
+	parts := []string{c.Source}
+	if c.Scope != "" {
+		parts = append(parts, c.Scope)
+	}
+	if c.SecretName != "" {
+		parts = append(parts, c.SecretName)
+	}
+	if c.Reason != "" {
+		parts = append(parts, c.Reason)
+	}
+	return strings.Join(parts, ":")
 }
 
 // GitCredential implements runnerapi.GitCredentialProvider.

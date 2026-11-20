@@ -288,9 +288,15 @@ type UsageData struct {
 	CacheWriteTokens int64 `json:"cache_write_tokens,omitempty"`
 	// CostUSD is the cost in US dollars.
 	CostUSD float64 `json:"cost_usd,omitempty"`
+	// DurationMS is the agent time in milliseconds: for each turn, the
+	// duration that the harness reports, else the wall time of the turn in
+	// the runner. Older runners do not send it.
+	DurationMS int64 `json:"duration_ms,omitempty"`
 	// Cumulative is true if the counts are totals for the session.
 	Cumulative bool `json:"cumulative"`
-	// Coverage tells how much of the usage the counts cover.
+	// Coverage tells how much of the usage the counts cover: "known", or
+	// "partial" when a turn ended before the harness reported its totals
+	// (the counts are then an estimate). Empty means known.
 	Coverage string `json:"coverage,omitempty"`
 }
 

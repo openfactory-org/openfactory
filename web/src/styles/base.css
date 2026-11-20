@@ -109,6 +109,9 @@ strong {
 .right {
   text-align: right;
 }
+.nowrap {
+  white-space: nowrap;
+}
 .num {
   text-align: right;
   font-variant-numeric: tabular-nums;

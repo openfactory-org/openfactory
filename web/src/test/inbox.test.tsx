@@ -128,12 +128,35 @@ describe("inbox actions", () => {
     expect(within(card).getByText("Unread")).toBeInTheDocument();
     await user.click(within(card).getByRole("button", { name: "Which branch?" }));
     await waitFor(() => expect(reads).toEqual([true]));
-    await user.click(await within(screen.getByText("Which branch?").closest("li")!).findByRole("button", { name: "dev (recommended)" }));
+    await user.click(await within(screen.getByText("Which branch?").closest("li")!).findByRole("button", { name: "Answer: dev (recommended)" }));
     // The resolved item and the toast both offer Undo.
     const undo = await screen.findAllByRole("button", { name: "Undo" });
     expect(undo.length).toBe(2);
     await user.click(undo[0]);
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/inbox/in_9/unresolve")).toBe(true));
     expect(calls.find((c) => c.path === "/api/v1/inbox/in_9/resolve")!.body).toEqual({ resolution: "dev" });
+  });
+
+  it("shows the title of a question once and names the answer chips by their text", async () => {
+    const title = "Should I say hello or goodbye?";
+    mockFetch({
+      "GET /api/v1/me": ME,
+      "GET /api/v1/factories": { items: [], page_info: { has_next_page: false } },
+      "GET /api/v1/inbox": {
+        items: [
+          {
+            id: "in_q", factory_id: "fac_1", kind: "question", title, body: `${title}\n\nThis is the QA ask test.`,
+            options: ["hello", "goodbye"], recipients: ["usr_1"], is_read: true, resolved: false, created_at: now,
+          },
+        ],
+        page_info: { has_next_page: false },
+      },
+    });
+    renderAt(<InboxPage />, { route: "/inbox", path: "/inbox" });
+    const card = (await screen.findByRole("button", { name: title })).closest("li")!;
+    expect(within(card).getAllByText(title, { exact: false })).toHaveLength(1);
+    expect(within(card).getByText("This is the QA ask test.")).toBeInTheDocument();
+    const chip = within(card).getByRole("button", { name: "Answer: goodbye" });
+    expect(chip).toHaveAccessibleDescription("Sends the option as your answer.");
   });
 });

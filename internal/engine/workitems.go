@@ -355,14 +355,10 @@ func (e *Engine) ResolveInbox(ctx context.Context, inboxID, resolution, actor st
 	if err != nil {
 		return err
 	}
-	if it.RunID == "" || it.Kind == core.InboxAnswered {
-		// An answered item is information only: the run needs no reply.
+	if it.RunID == "" || !resumesRun(it) {
 		return nil
 	}
-	who := actor
-	if who == "" {
-		who = "a team member"
-	}
+	who := e.actorLabel(ctx, actor)
 	var msg string
 	switch it.Kind {
 	case core.InboxApproval:
@@ -378,6 +374,58 @@ func (e *Engine) ResolveInbox(ctx context.Context, inboxID, resolution, actor st
 		e.recordAnswer(ctx, it.ID, it.RunID, msg)
 	}
 	return nil
+}
+
+// resumesRun reports whether resolving it sends the resolution to the run as
+// a follow-up, which starts another agent turn (a paid turn). Only an item
+// that the agent waits on resumes it: a question, an approval, a blocked
+// run, and the review of a definition change (an item with the options
+// approve and reject, whose decision the author run needs).
+//
+// The other items are bookkeeping: a handoff, an information-only item, a
+// failure notice and the review of a self-improvement pull request. The
+// agent already finished its part, so resolving them only closes the item.
+// To retry after a failure, a person sends a follow-up message.
+func resumesRun(it *core.InboxItem) bool {
+	switch it.Kind {
+	case core.InboxHandoff, core.InboxAnswered, core.InboxFailure, core.InboxSpendLimit:
+		return false
+	case core.InboxReview:
+		return len(it.Options) > 0
+	}
+	return true
+}
+
+// actorLabel returns a readable name of an actor for text that people and
+// the model read. A "user:<id>" actor gives the user's name or email, never
+// the raw ID. Other platform actors (automations, webhooks, runs) give a
+// generic label. A plain handle, for example from a chat message, is kept.
+func (e *Engine) actorLabel(ctx context.Context, actor string) string {
+	actor = strings.TrimSpace(actor)
+	if actor == "" || actor == "api" {
+		return "a team member"
+	}
+	prefix, id, ok := strings.Cut(actor, ":")
+	if !ok {
+		return actor
+	}
+	switch prefix {
+	case "user":
+		if u, err := e.store.GetUser(ctx, id); err == nil {
+			if n := strings.TrimSpace(u.Name); n != "" {
+				return n
+			}
+			if m := strings.TrimSpace(u.Email); m != "" {
+				return m
+			}
+		}
+		return "a team member"
+	case "webhook", "automation", "trigger", "schedule":
+		return "an automation"
+	case "run", "agent", "system":
+		return "the factory"
+	}
+	return actor
 }
 
 // PostUpdate posts a progress update from a run back to its work source. An

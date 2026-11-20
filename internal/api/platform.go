@@ -3,8 +3,11 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/mail"
+	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -205,15 +208,97 @@ type environmentRequest struct {
 	EnvVars       map[string]string `json:"env_vars"`
 }
 
+// validateRepos checks the repository entries of an environment. The
+// planner reads each one with engine.ParseRepoSpec: "[forge:]owner/name" or
+// an http(s) repository URL.
 func validateRepos(repos []string) error {
 	for _, r := range repos {
-		ref := r
-		if i := strings.Index(r, ":"); i >= 0 {
-			ref = r[i+1:]
+		if err := validateRepo(strings.TrimSpace(r)); err != nil {
+			return errInvalid("repo %q must be [forge:]owner/name or an https:// repository URL", r)
 		}
-		owner, name, ok := strings.Cut(ref, "/")
-		if !ok || owner == "" || name == "" {
-			return errInvalid("repo %q must have the form [forge:]owner/name", r)
+	}
+	return nil
+}
+
+func validateRepo(r string) error {
+	ref := r
+	if scheme, _, ok := strings.Cut(r, "://"); ok {
+		u, err := url.Parse(r)
+		if err != nil || (scheme != "https" && scheme != "http") || u.Host == "" {
+			return core.ErrInvalid
+		}
+		ref = strings.TrimSuffix(strings.Trim(u.Path, "/"), ".git")
+	} else if i := strings.Index(r, ":"); i >= 0 {
+		if i == 0 || strings.Contains(r[:i], "/") {
+			return core.ErrInvalid
+		}
+		ref = r[i+1:]
+	}
+	i := strings.LastIndex(ref, "/")
+	if i <= 0 || i == len(ref)-1 || strings.ContainsAny(ref, " \t") {
+		return core.ErrInvalid
+	}
+	return nil
+}
+
+// imageRefRe is the OCI image reference grammar of the distribution
+// project: [registry[:port]/]path[:tag][@digest], with lowercase path
+// components.
+var imageRefRe = regexp.MustCompile(`^` +
+	`(?:(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)*|\[[0-9a-fA-F:]+\])(?::[0-9]+)?/)?` +
+	`[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*` +
+	`(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?` +
+	`(?:@[A-Za-z][A-Za-z0-9]*(?:[-_+.][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$`)
+
+// validImageRef reports whether ref is a valid image reference.
+func validImageRef(ref string) bool { return len(ref) <= 512 && imageRefRe.MatchString(ref) }
+
+// envVarNameRe is a POSIX environment variable name.
+var envVarNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// reservedEnvPrefix starts the variables that the platform sets in a run
+// (OF_RUN_ID, OF_METADATA_*, ...).
+const reservedEnvPrefix = "OF_"
+
+func validateEnvironmentFields(req *environmentRequest) error {
+	if req.Repos != nil {
+		if err := validateRepos(req.Repos); err != nil {
+			return err
+		}
+	}
+	if req.Image != nil {
+		img := strings.TrimSpace(*req.Image)
+		if img != "" && !validImageRef(img) {
+			return errInvalid("image %q is not a valid image reference (for example node:22-bookworm or registry.example.com/team/tools:1.2)", *req.Image)
+		}
+		*req.Image = img
+	}
+	names := make([]string, 0, len(req.EnvVars))
+	for k := range req.EnvVars {
+		names = append(names, k)
+	}
+	slices.Sort(names)
+	for _, k := range names {
+		if !envVarNameRe.MatchString(k) {
+			return errInvalid("env_vars: %q is not a valid variable name (letters, digits and _, not starting with a digit)", k)
+		}
+		if strings.HasPrefix(strings.ToUpper(k), reservedEnvPrefix) {
+			return errInvalid("env_vars: %q starts with %s, which is reserved for variables that the platform sets", k, reservedEnvPrefix)
+		}
+	}
+	return nil
+}
+
+// checkEnvironmentNameFree refuses a second environment with the same name
+// in a team.
+func (s *Server) checkEnvironmentNameFree(ctx context.Context, teamID, name, exceptID string) error {
+	es, err := s.opts.Store.ListEnvironments(ctx, teamID)
+	if err != nil {
+		return err
+	}
+	for _, e := range es {
+		if e.ID != exceptID && strings.EqualFold(e.Name, name) {
+			return Errf(CodeConflict, "an environment named %q already exists", e.Name)
 		}
 	}
 	return nil
@@ -250,7 +335,10 @@ func (s *Server) handleCreateEnvironment(w http.ResponseWriter, r *http.Request,
 	if req.Name == nil || strings.TrimSpace(*req.Name) == "" {
 		return errInvalid("name is required")
 	}
-	if err := validateRepos(req.Repos); err != nil {
+	if err := validateEnvironmentFields(&req); err != nil {
+		return err
+	}
+	if err := s.checkEnvironmentNameFree(r.Context(), p.TeamID, strings.TrimSpace(*req.Name), ""); err != nil {
 		return err
 	}
 	e := &core.Environment{
@@ -291,9 +379,15 @@ func (s *Server) handleUpdateEnvironment(w http.ResponseWriter, r *http.Request,
 	if err := decodeJSON(r, &req, false); err != nil {
 		return err
 	}
+	if err := validateEnvironmentFields(&req); err != nil {
+		return err
+	}
 	if req.Name != nil {
 		if strings.TrimSpace(*req.Name) == "" {
 			return errInvalid("name cannot be empty")
+		}
+		if err := s.checkEnvironmentNameFree(r.Context(), p.TeamID, strings.TrimSpace(*req.Name), e.ID); err != nil {
+			return err
 		}
 		e.Name = strings.TrimSpace(*req.Name)
 	}
@@ -301,9 +395,6 @@ func (s *Server) handleUpdateEnvironment(w http.ResponseWriter, r *http.Request,
 		e.Description = *req.Description
 	}
 	if req.Repos != nil {
-		if err := validateRepos(req.Repos); err != nil {
-			return err
-		}
 		e.Repos = req.Repos
 	}
 	if req.Image != nil {
@@ -327,11 +418,162 @@ func (s *Server) handleDeleteEnvironment(w http.ResponseWriter, r *http.Request,
 	if err != nil {
 		return err
 	}
+	uses, err := s.teamResourceUses(r.Context(), p.TeamID, func(def *core.CompiledDefinition) []string {
+		return environmentUses(def, e.ID)
+	})
+	if err != nil {
+		return err
+	}
+	if err := inUseError("Environment", e.Name, uses); err != nil {
+		return err
+	}
 	if err := s.opts.Store.DeleteEnvironment(r.Context(), e.ID); err != nil {
 		return err
 	}
 	w.WriteHeader(http.StatusNoContent)
 	return nil
+}
+
+// ---------- references from active definitions ----------
+
+// teamResourceUses returns, for every factory of the team, the places of
+// its active definition that uses reports, as "<place> of factory <name>".
+func (s *Server) teamResourceUses(ctx context.Context, teamID string, uses func(*core.CompiledDefinition) []string) ([]string, error) {
+	fs, err := s.opts.Store.ListFactories(ctx, teamID, "")
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for i := range fs {
+		f := &fs[i]
+		if f.ActiveVersionID == "" {
+			continue
+		}
+		def, err := s.definitionForReferences(ctx, f)
+		if err != nil {
+			return nil, err
+		}
+		for _, u := range uses(def) {
+			out = append(out, fmt.Sprintf("%s of factory %s", u, f.Name))
+		}
+	}
+	return out, nil
+}
+
+// definitionForReferences returns the compiled active definition of f. When
+// it cannot be compiled, it returns the stored resources of that
+// definition (agents, automations and scorers).
+func (s *Server) definitionForReferences(ctx context.Context, f *core.Factory) (*core.CompiledDefinition, error) {
+	def, _, err := s.activeDefinition(ctx, f)
+	if err != nil && !isNotFound(err) {
+		return nil, err
+	}
+	if def != nil {
+		return def, nil
+	}
+	def = &core.CompiledDefinition{}
+	if def.Agents, err = s.opts.Store.ListAgents(ctx, f.ID); err != nil {
+		return nil, err
+	}
+	if def.Automations, err = s.opts.Store.ListAutomations(ctx, f.ID); err != nil {
+		return nil, err
+	}
+	if def.Scorers, err = s.opts.Store.ListScorers(ctx, f.ID); err != nil {
+		return nil, err
+	}
+	return def, nil
+}
+
+// environmentUses lists the agents and automations of def that select the
+// environment id (directly or through agentDefaults).
+func environmentUses(def *core.CompiledDefinition, id string) []string {
+	var out []string
+	for _, a := range def.Agents {
+		if a.EnvironmentID == id {
+			out = append(out, "agent "+a.Name)
+		}
+	}
+	for _, au := range def.Automations {
+		if au.Overrides != nil && au.Overrides.EnvironmentID != nil && *au.Overrides.EnvironmentID == id {
+			out = append(out, "automation "+au.Name)
+		}
+	}
+	if def.ScorerDefaults != nil && def.ScorerDefaults.EnvironmentID != nil && *def.ScorerDefaults.EnvironmentID == id {
+		out = append(out, "scorerDefaults")
+	}
+	return out
+}
+
+// mcpServerUses lists the places of def whose mcpServers select the
+// registered server by managedId (its id or its name).
+func mcpServerUses(def *core.CompiledDefinition, refs ...string) []string {
+	selects := func(m map[string]core.MCPServer, skipFactoryWide bool) bool {
+		for name, srv := range m {
+			if srv.ManagedID == "" || !slices.Contains(refs, srv.ManagedID) {
+				continue
+			}
+			// Factory-wide servers also appear on each agent.
+			if fw, ok := def.MCPServers[name]; skipFactoryWide && ok && fw.ManagedID == srv.ManagedID {
+				continue
+			}
+			return true
+		}
+		return false
+	}
+	var out []string
+	if selects(def.MCPServers, false) {
+		out = append(out, "the factory-wide mcpServers")
+	}
+	for _, a := range def.Agents {
+		if selects(a.MCPServers, true) {
+			out = append(out, "agent "+a.Name)
+		}
+	}
+	for _, au := range def.Automations {
+		if au.Overrides != nil && selects(au.Overrides.MCPServers, true) {
+			out = append(out, "automation "+au.Name)
+		}
+	}
+	for _, sc := range def.Scorers {
+		if selects(sc.MCPServers, true) {
+			out = append(out, "scorer "+sc.Slug)
+		}
+	}
+	if def.ScorerDefaults != nil && selects(def.ScorerDefaults.MCPServers, true) {
+		out = append(out, "scorerDefaults")
+	}
+	return out
+}
+
+// maxListedUses bounds the places that an in-use error names.
+const maxListedUses = 5
+
+// inUseError refuses to delete a resource that active definitions use.
+// It returns nil when uses is empty.
+func inUseError(kind, name string, uses []string) error {
+	if len(uses) == 0 {
+		return nil
+	}
+	listed := uses
+	if len(listed) > maxListedUses {
+		listed = append(slices.Clone(uses[:maxListedUses]), fmt.Sprintf("%d more", len(uses)-maxListedUses))
+	}
+	ref := "the reference"
+	if len(uses) > 1 {
+		ref = "the references"
+	}
+	return Errf(CodeConflict, "%s %s is used by %s. Remove %s first.", kind, name, joinList(listed), ref)
+}
+
+// joinList joins items as "a", "a and b" or "a, b and c".
+func joinList(items []string) string {
+	switch len(items) {
+	case 0:
+		return ""
+	case 1:
+		return items[0]
+	}
+	return strings.Join(items[:len(items)-1], ", ") + " and " + items[len(items)-1]
 }
 
 // ---------- machines / workers ----------

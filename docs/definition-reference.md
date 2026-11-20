@@ -40,7 +40,7 @@ The compiler checks the files; the preflight checks them against the team. Apply
 | Each entry of `approvers` is the email of a person of the team, or the name of a service account of the team. | error |
 | A person in `runAs` of an automation whose agent uses `credentialStrategy: CREATOR` has a linked forge account. | warning |
 | Each `model` is in the model list of its harness. The lists are advisory: an unlisted name can still work. | warning |
-| Each agent has a harness credential (`harness.auth`). | warning |
+| Each agent has a harness credential: `harness.auth`, or exactly one factory or team secret of a model credential type (see [Default credential](harnesses.md#default-credential)). | warning |
 
 The server resolves filter names through the integration's API, with the integration record's credential:
 
@@ -119,6 +119,7 @@ A restore applies the files of an earlier version as a new version, with the mes
 - **`managed` to `git`:** send `"source": "git"` and `git_repo` (and `git_branch` and `git_path` if necessary). Open Factory first reads the branch and runs the compiler and the preflight. If the branch has errors or cannot be read, the request fails and the source stays `managed`. The next sync applies the branch; the managed files stay in the version history.
 - **`git` to `managed`:** send `"source": "managed"`. The active version stays active and becomes editable in the API or the dashboard.
 - The same branch check runs when you create a factory with `"source": "git"` (no factory is created on failure), and when you change `git_repo`, `git_branch` or `git_path`.
+- When the branch cannot be read, the error tells what to fix, for example `The code host refused the token of integration acme-github (HTTP 401). Check the token secret.` or `No code host integration covers acme/defs. Connect one under Integrations.` The server log has the full response of the code host.
 
 Git sync marks a commit as done only after a successful apply or a validation error. After another failure (for example, the database is not available), the next sync retries the same commit.
 
@@ -139,7 +140,7 @@ A `managed` factory created without files gets a generated tree:
 
 - `factory.yaml` with `schemaVersion`, `name`, the repositories you send and `agentDefaults.model` (default `claude-opus-5-5`).
 - `codeForges` when the repositories use a code host other than GitHub, or more than one code host.
-- The default agents `foreman`, `triage`, `spec`, `implement` and `review` (as in [`../examples/00-default-agents`](../examples/00-default-agents)). The `agents` field selects a subset; the foreman is always included.
+- The default agents `foreman`, `triage`, `spec`, `implement` and `review` (as in [`../examples/00-default-agents`](../examples/00-default-agents)). The `agents` field selects a subset; the foreman is always included. The foreman instructions name only the agents in the subset. Without stage agents, they tell the foreman to do the work itself.
 
 ## Directory layout
 

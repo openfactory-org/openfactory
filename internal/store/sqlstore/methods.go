@@ -827,7 +827,11 @@ func deliveryRow(d *core.WebhookDelivery) (*row, error) {
 	if err != nil {
 		return nil, err
 	}
-	r.set("webhook_id", d.WebhookID).set("delivery_id", d.DeliveryID).set("received_ns", d.ReceivedAt.UnixNano())
+	dup := 0
+	if d.Status == core.WebhookDeliveryDeduplicated {
+		dup = 1 // outside the unique (webhook_id, delivery_id) index
+	}
+	r.set("webhook_id", d.WebhookID).set("delivery_id", d.DeliveryID).set("received_ns", d.ReceivedAt.UnixNano()).set("duplicate", dup)
 	return r, nil
 }
 
@@ -1161,7 +1165,7 @@ func (s *Store) CreateMCPServer(ctx context.Context, m *core.RegisteredMCPServer
 	if err != nil {
 		return err
 	}
-	return s.insert(ctx, s.conn(ctx), "mcp_servers", r)
+	return withConflictMessage(s.insert(ctx, s.conn(ctx), "mcp_servers", r), fmt.Sprintf("an MCP server named %q already exists", m.Name))
 }
 
 func (s *Store) UpdateMCPServer(ctx context.Context, m *core.RegisteredMCPServer) error {
@@ -1169,7 +1173,7 @@ func (s *Store) UpdateMCPServer(ctx context.Context, m *core.RegisteredMCPServer
 	if err != nil {
 		return err
 	}
-	return s.update(ctx, s.conn(ctx), "mcp_servers", r)
+	return withConflictMessage(s.update(ctx, s.conn(ctx), "mcp_servers", r), fmt.Sprintf("an MCP server named %q already exists", m.Name))
 }
 
 func (s *Store) GetMCPServer(ctx context.Context, id string) (*core.RegisteredMCPServer, error) {

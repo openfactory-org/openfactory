@@ -1,10 +1,11 @@
-import { Fragment, useId, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { Fragment, useId, useSyncExternalStore, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { UseQueryResult } from "@tanstack/react-query";
 import * as RTooltip from "@radix-ui/react-tooltip";
 import { ChevronRight, Menu as MenuIcon } from "lucide-react";
-import { errorMessage, type ValidationError } from "../api/client";
-import { ago, fmtTime } from "../lib/format";
+import { ApiError, errorMessage, formatValidationError, type ValidationError } from "../api/client";
+import { ago, fmtTime, stateLabel } from "../lib/format";
+import { useDocumentTitle } from "../lib/title";
 
 /** Event that opens the sidebar on small screens (the shell listens for it). */
 export const NAV_TOGGLE_EVENT = "of:toggle-nav";
@@ -12,7 +13,8 @@ export const NAV_TOGGLE_EVENT = "of:toggle-nav";
 /**
  * The bar at the top of every page: breadcrumbs, the page title and the page
  * actions. With `display`, the bar keeps the breadcrumbs and the title moves
- * into the page as a large heading (detail pages).
+ * into the page as a large heading (detail pages). The header also sets the
+ * browser tab title; pass `docTitle` when `title` is not plain text.
  */
 export function PageHeader({
   title,
@@ -20,13 +22,16 @@ export function PageHeader({
   crumbs,
   actions,
   display,
+  docTitle,
 }: {
   title: ReactNode;
   subtitle?: ReactNode;
   crumbs?: { label: string; to: string }[];
   actions?: ReactNode;
   display?: boolean;
+  docTitle?: string;
 }) {
+  useDocumentTitle(docTitle ?? (typeof title === "string" ? title : undefined));
   return (
     <>
       <header className="page-bar">
@@ -270,7 +275,7 @@ export function StatusIcon({ state, size = 14 }: { state?: string | null; size?:
 /** A state or a stage, as an icon with its name. */
 export function StateBadge({ state }: { state?: string | null }) {
   if (!state) return null;
-  const label = state.replace(/_/g, " ");
+  const label = stateLabel(state);
   return (
     <span className="state">
       <StatusIcon state={state} />
@@ -296,11 +301,52 @@ export function Empty({ title, children, icon, action }: { title: string; childr
 
 export function ErrorAlert({ error, title }: { error: unknown; title?: string }) {
   if (!error) return null;
+  const errs = error instanceof ApiError ? error.validationErrors : [];
+  if (errs.length === 0) {
+    return (
+      <div className="alert alert-error" role="alert">
+        {title && <strong>{title}: </strong>}
+        {errorMessage(error)}
+      </div>
+    );
+  }
+  // A refused definition change: list the reasons, one per line.
+  const shown = errs.slice(0, 5);
   return (
     <div className="alert alert-error" role="alert">
       {title && <strong>{title}: </strong>}
-      {errorMessage(error)}
+      {(error as ApiError).message}
+      <ul className="validation-list">
+        {shown.map((e, i) => (
+          <li key={i}>{formatValidationError(e)}</li>
+        ))}
+      </ul>
+      {errs.length > shown.length && <p className="muted">And {errs.length - shown.length} more.</p>}
     </div>
+  );
+}
+
+/** True when the error is an API answer 404 (the resource does not exist or the caller cannot see it). */
+export function isNotFound(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 404;
+}
+
+export type NotFoundInfo = { title: string; text: ReactNode; back: { label: string; to: string } };
+
+/** The page for a resource that does not exist, for example a deleted factory. */
+export function NotFound({ title, text, back }: NotFoundInfo) {
+  return (
+    <>
+      <PageHeader title={title} />
+      <div className="empty">
+        <p>{text}</p>
+        <div className="empty-action">
+          <Link className="btn btn-secondary" to={back.to}>
+            {back.label}
+          </Link>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -334,9 +380,13 @@ export function Skeleton({ rows = 4, label = "Loading…" }: { rows?: number; la
   );
 }
 
-/** Renders loading / error states of a query, then `children(data)`. */
-export function Query<T>({ q, children, loading }: { q: UseQueryResult<T>; children: (data: T) => ReactNode; loading?: string }) {
+/**
+ * Renders loading / error states of a query, then `children(data)`. With
+ * `notFound`, an API 404 shows the not-found page instead of the error.
+ */
+export function Query<T>({ q, children, loading, notFound }: { q: UseQueryResult<T>; children: (data: T) => ReactNode; loading?: string; notFound?: NotFoundInfo }) {
   if (q.isLoading) return <Skeleton label={loading} />;
+  if (q.isError && notFound && isNotFound(q.error)) return <NotFound {...notFound} />;
   if (q.isError) return <ErrorAlert error={q.error} />;
   if (q.data === undefined) return null;
   return <>{children(q.data)}</>;
@@ -375,7 +425,39 @@ export function KV({ items }: { items: [ReactNode, ReactNode][] }) {
   );
 }
 
+/** How often relative times such as "2 minutes ago" advance. */
+export const CLOCK_TICK_MS = 30_000;
+
+// One timer serves every mounted TimeAgo. It runs only while one is mounted.
+const clockListeners = new Set<() => void>();
+let clockNow = Date.now();
+let clockTimer: ReturnType<typeof setInterval> | undefined;
+
+function subscribeClock(fn: () => void): () => void {
+  clockListeners.add(fn);
+  if (clockTimer === undefined) {
+    clockNow = Date.now();
+    clockTimer = setInterval(() => {
+      clockNow = Date.now();
+      clockListeners.forEach((l) => l());
+    }, CLOCK_TICK_MS);
+  }
+  return () => {
+    clockListeners.delete(fn);
+    if (clockListeners.size === 0 && clockTimer !== undefined) {
+      clearInterval(clockTimer);
+      clockTimer = undefined;
+    }
+  };
+}
+
+/** The current time, updated every CLOCK_TICK_MS by a timer that all callers share. */
+export function useNow(): number {
+  return useSyncExternalStore(subscribeClock, () => clockNow);
+}
+
 export function TimeAgo({ t }: { t?: string | null }) {
+  useNow(); // re-render on each tick so the text advances
   if (!t) return <span className="muted">—</span>;
   return (
     <time dateTime={t} title={fmtTime(t)}>

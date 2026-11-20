@@ -365,6 +365,8 @@ func TestIsRetryable(t *testing.T) {
 		{"503", &StatusError{Status: 503}, true},
 		{"400", &StatusError{Status: 400}, false},
 		{"401", &StatusError{Status: 401}, false},
+		{"422 configuration error", &StatusError{Status: 422, Code: runnerproto.CodeConfigurationError}, false},
+		{"500", &StatusError{Status: 500, Code: "internal"}, true},
 		{"network", errors.New("dial"), true},
 	}
 	for _, tt := range tests {

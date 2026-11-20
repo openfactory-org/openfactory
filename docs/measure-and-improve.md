@@ -188,7 +188,7 @@ The service checks an agent after each new failing score and every 15 minutes. I
 - the agent has at least `failedRunThreshold` unreviewed failures, or
 - its oldest unreviewed failure is at least 7 days old.
 
-**Run now** in the **Self-improvement** section of the **Scorers** page starts a run for every agent with at least one unreviewed failure. You cannot choose the agents or the failures.
+**Run self-improvement now** on the **Scorers** page starts a run for every agent with at least one unreviewed failure. You cannot choose the agents or the failures. The button is off when no scorer has `selfImprovement` turned on. When no failure waits for review, no run starts and the page says so.
 
 ### What the run does
 

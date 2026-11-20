@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -617,14 +618,16 @@ func TestSecretsReadEvent(t *testing.T) {
 		MCPEnv:      map[string]map[string]string{"db": {"TOKEN": value}},
 		Redact:      []string{value},
 	}
-	ev := secretsReadEvent(run, &core.RunSession{Session: 3}, resp)
+	cred := engine.HarnessCredential{Source: engine.CredentialDefault, SecretName: "CLAUDE_OAUTH_TOKEN", Scope: engine.CredentialScopeTeam, Type: core.SecretAnthropicOAuth}
+	ev := secretsReadEvent(run, &core.RunSession{Session: 3}, resp, cred)
 	if ev.Action != "runner.secrets.read" || ev.Outcome != auth.OutcomeSuccess || ev.ActorID != "run:run_1" || ev.TeamID != "team1" {
 		t.Errorf("event = %+v", ev)
 	}
 	if ev.Resource == nil || ev.Resource.Type != "run" || ev.Resource.ID != "run_1" {
 		t.Errorf("resource = %+v", ev.Resource)
 	}
-	want := map[string]string{"session": "3", "env": "DB_PASSWORD", "files": "/home/agent/.netrc", "harness_auth": "ANTHROPIC_API_KEY", "mcp_servers": "db,linear", "team_id": "team1"}
+	want := map[string]string{"session": "3", "env": "DB_PASSWORD", "files": "/home/agent/.netrc", "harness_auth": "ANTHROPIC_API_KEY", "mcp_servers": "db,linear", "team_id": "team1",
+		"harness_credential": "default:team:CLAUDE_OAUTH_TOKEN"}
 	for k, v := range want {
 		if ev.Detail[k] != v {
 			t.Errorf("detail[%s] = %q, want %q", k, ev.Detail[k], v)
@@ -657,5 +660,61 @@ func TestRunnerSecretsAudit(t *testing.T) {
 	}
 	if len(sink.events) != 1 || sink.events[0].Action != "runner.secrets.read" || sink.events[0].Resource.ID != run.ID {
 		t.Fatalf("events = %+v", sink.events)
+	}
+}
+
+// Without harness.auth, the secrets of a run hold the one team secret whose
+// type the harness accepts. The timeline names the secret and holds no value.
+func TestRunnerSecretsDefaultCredential(t *testing.T) {
+	const value = "oauth-token-fake-value"
+	srv := runnerServer(t)
+	ctx := context.Background()
+	if _, err := srv.Secrets.Put(ctx, "team1", "", "CLAUDE_OAUTH_TOKEN", core.SecretAnthropicOAuth, []byte(value)); err != nil {
+		t.Fatal(err)
+	}
+	cfg := core.AgentConfig{Name: "echo", Harness: core.HarnessConfig{Type: core.HarnessClaude}}
+	run, err := startRun(ctx, srv, cfg, "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitRun(t, srv, run.ID, "first turn", func(r *core.Run) bool { return r.State == core.RunSucceeded })
+	ss := sessions(t, srv, run.ID)
+	r, err := srv.Store.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := srv.runner.content.Secrets(ctx, r, &ss[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.HarnessAuth["CLAUDE_CODE_OAUTH_TOKEN"] != value || !resp.HarnessAuthDefault {
+		t.Errorf("harness auth = %v, default = %v", resp.HarnessAuth, resp.HarnessAuthDefault)
+	}
+	events, err := srv.runner.content.runner.ListTimelineEvents(ctx, run.ID, time.Time{}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, ev := range events {
+		if ev.Type != "secrets.delivered" {
+			continue
+		}
+		if strings.Contains(string(ev.Data), value) {
+			t.Errorf("the timeline holds the secret value: %s", ev.Data)
+		}
+		var data struct {
+			Credential engine.HarnessCredential `json:"harness_credential"`
+		}
+		if err := json.Unmarshal(ev.Data, &data); err != nil {
+			t.Fatal(err)
+		}
+		want := engine.HarnessCredential{Source: engine.CredentialDefault, SecretName: "CLAUDE_OAUTH_TOKEN", Scope: engine.CredentialScopeTeam, Type: core.SecretAnthropicOAuth}
+		if !reflect.DeepEqual(data.Credential, want) {
+			t.Errorf("harness_credential = %+v, want %+v", data.Credential, want)
+		}
+		found = true
+	}
+	if !found {
+		t.Errorf("no secrets.delivered event in %+v", events)
 	}
 }

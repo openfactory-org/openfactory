@@ -5062,7 +5062,8 @@
     "/factories/{uid}/self-improvement": {
       "post": {
         "operationId": "runSelfImprovement",
-        "summary": "Start a self-improvement check now",
+        "summary": "Start self-improvement now",
+        "description": "Starts one self-improvement run for each agent with unreviewed failed scores, whatever failedRunThreshold is. Returns 202 with the started runs, or 200 with started false and a reason when there is nothing to review.",
         "tags": [
           "Measure"
         ],
@@ -5077,6 +5078,16 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "Nothing to review: no run was started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfImprovementStarted"
+                }
+              }
+            }
+          },
           "202": {
             "description": "Accepted",
             "content": {
@@ -8879,6 +8890,10 @@
           },
           "awaiting_secret": {
             "type": "boolean"
+          },
+          "secret_reused": {
+            "type": "boolean",
+            "description": "True when the webhook uses an existing team secret (webhook.secret_name) whose value is not shown."
           }
         },
         "required": [
@@ -10187,12 +10202,25 @@
             "type": "string"
           },
           "started": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "True when at least one self-improvement run started."
+          },
+          "run_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "IDs of the started runs."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why no run started. Set only when started is false."
           }
         },
         "required": [
           "factory_id",
-          "started"
+          "started",
+          "run_ids"
         ]
       },
       "FactoryMetrics": {

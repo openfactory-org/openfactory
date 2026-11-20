@@ -52,6 +52,11 @@ const (
 	CodeSessionSuperseded = "session_superseded"
 	// CodeRunCancelled means that the run was cancelled.
 	CodeRunCancelled = "run_cancelled"
+	// CodeConfigurationError means that the configuration of the run is not
+	// valid, for example a repository without a code-forge integration. The
+	// control plane already ended the session and failed the run. The status
+	// is 422, and a retry gives the same result.
+	CodeConfigurationError = "configuration_error"
 )
 
 // ErrorBody is the JSON body of an error response.

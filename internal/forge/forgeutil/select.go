@@ -10,8 +10,17 @@ import (
 )
 
 // ErrNoIntegration is returned when no integration record serves the owner
-// of a repository.
-var ErrNoIntegration = errors.New("no code-forge integration configured")
+// of a repository. It matches core.ErrInvalid with errors.Is: the cause is in
+// the configuration of the team, and a retry gives the same result.
+var ErrNoIntegration error = &configError{msg: "no code-forge integration configured"}
+
+// configError is a sentinel error that matches core.ErrInvalid.
+type configError struct{ msg string }
+
+func (e *configError) Error() string { return e.msg }
+
+// Is reports whether target is core.ErrInvalid.
+func (e *configError) Is(target error) bool { return target == core.ErrInvalid }
 
 // RepoOwner returns the owner of a repository ("owner/name") for the
 // selection rule of SelectIntegration. The owner is the value that

@@ -35,7 +35,7 @@ const (
 const (
 	StatusAccepted     = "accepted"
 	StatusRejected     = "rejected"
-	StatusDeduplicated = "deduplicated"
+	StatusDeduplicated = core.WebhookDeliveryDeduplicated
 )
 
 // Rejection reasons recorded in core.WebhookDelivery.Reason.
@@ -257,7 +257,7 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, uid, urlToken st
 		DeliveryID: identity,
 		ActionKey:  ActionKey(wh.ID, identity),
 		Actor:      core.Actor{Provider: "webhook", ExternalID: wh.ID, Handle: wh.Name},
-		Source:     core.SourceRef{Provider: "webhook", Kind: "delivery", ExternalID: identity, Title: wh.Name},
+		Source:     core.SourceRef{Provider: "webhook", Kind: "delivery", ExternalID: identity, Title: payloadTitle(body, wh.Name)},
 		Attributes: map[string]any{
 			"webhook_id":         wh.ID,
 			"webhook_name":       wh.Name,
@@ -406,6 +406,40 @@ func readBody(r io.Reader, max int64) ([]byte, bool, error) {
 		return nil, true, nil
 	}
 	return b, false, nil
+}
+
+// payloadTitleKeys are the top-level payload fields that name a delivery,
+// in order of preference.
+var payloadTitleKeys = []string{"title", "subject", "summary"}
+
+// payloadTitle returns the first non-empty string field of payloadTitleKeys
+// in a JSON object body, cut to 200 bytes, or def. The work item of the
+// delivery gets this title, so a payload with a title is not named after
+// the webhook only.
+func payloadTitle(body []byte, def string) string {
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(body, &obj) != nil {
+		return def
+	}
+	for _, k := range payloadTitleKeys {
+		var s string
+		if json.Unmarshal(obj[k], &s) != nil {
+			continue
+		}
+		s = strings.TrimSpace(strings.SplitN(strings.TrimSpace(s), "\n", 2)[0])
+		if s == "" {
+			continue
+		}
+		if len(s) > 200 {
+			cut := 200
+			for cut > 0 && (s[cut]&0xC0) == 0x80 {
+				cut--
+			}
+			s = s[:cut]
+		}
+		return s
+	}
+	return def
 }
 
 // DeliveryIdentity returns the identity used to deduplicate a delivery, in

@@ -197,7 +197,7 @@ See [Harnesses](harnesses.md), [Machines and environments](machines-and-environm
 | `creator`, `run_as` | Principals, each `{"type", "id", "name"}`; `type` is `user`, `service_account` or `factory`. No `creator` for a schedule, webhook, scorer or benchmark. See [Run principals](definition-reference.md#run-principals). |
 | `active_child_runs` | Runs under this run that are not finished (`idle` and `blocked` count as not finished). Reads at most 1000 runs and 10 levels. |
 | `session` | Number of the newest session. `0` without a session or runner store. |
-| `usage` | `input_tokens`, `output_tokens`, `cost_usd`, `duration_ms`, `coverage` (`known`). |
+| `usage` | `input_tokens`, `output_tokens`, `cost_usd`, `duration_ms` (agent time over all turns), `coverage` (`known`, or `partial` when a turn ended before the harness reported its totals). See [Run usage](harnesses.md#run-usage). |
 | `judge_usage` | Usage of the judge runs of the run's scores, added to its cost. `GET /runs/{runId}` returns it when the run has scores. |
 | `source`, `source_ref` | How the run started (below), and the ID of its automation, schedule, webhook, parent run, scorer or benchmark. |
 
@@ -355,7 +355,7 @@ curl -s -X POST "$OF_PUBLIC_URL/api/v1/inbox/inbox_123/resolve" \
 | `approval` | Required. If the item has `options`, one of them (case-insensitive). |
 | `question`, `blocked` | Required. Your answer. |
 | `review` of a definition change | Required. `approve` applies the version. `reject` or `reject: <reason>` rejects it and sends the reason to the agent. Needs `editor`. See [Review](measure-and-improve.md#review). |
-| `handoff`, `failure`, `review` of a pull request, `answered`, `spend_limit` | Optional. Default `resolved`. |
+| `handoff`, `failure`, `review` of a pull request, `answered`, `spend_limit` | Optional. Default `resolved`. The resolve only closes the item: it sends nothing to the agent and starts no turn. To retry after a failure, send a [follow-up](#follow-ups-and-cancellation). |
 
 A question item also accepts `answers`, one per question, in place of `resolution`. The API checks each choice against the options; a `single_select` question takes one choice:
 
@@ -365,7 +365,7 @@ curl -s -X POST "$OF_PUBLIC_URL/api/v1/inbox/inbox_123/resolve" \
   -d '{"answers": [{"question_id": "q1", "selected": ["Postgres"]}]}'
 ```
 
-- The engine sends the resolution to the waiting agent as a user message. An `answered` item sends nothing.
+- The engine sends the resolution to the waiting agent as a user message, which starts a new agent turn. The message names the person by name or email, not by user ID. A `handoff` or `answered` item sends nothing and starts no turn.
 - Resolving a resolved item returns `409 conflict`.
 - The item records `resolved_by` and `resolved_via` (`api`, `dashboard` or `chat`).
 - If `factory.yaml` has `approvers`, only a listed user can resolve an `approval`.
@@ -423,7 +423,7 @@ Some errors add `reason` (a second code), `provider`, `auth_url` and `setup_url`
 | `external_authentication_required` | 401 | No | The run needs your account at `provider`, and you did not link it. `auth_url` is where you store a personal token. `reason` is `no_linked_account`. |
 | `not_authorized` | 403 | No | Your role is too low. |
 | `resource_not_found` | 404 | No | The resource does not exist, or belongs to another team. |
-| `conflict` | 409 | Yes | The resource changed or its state blocks the request. Read it again, then retry. |
+| `conflict` | 409 | No | The resource changed, a resource with the same name exists, or its state blocks the request. Read `detail`, read the resource again and change the request before you send it again. |
 | `operation_not_supported` | 422 | No | Not possible for this resource or state, for example a definition change on a git-backed factory. |
 | `integration_not_configured` | 424 | No | The integration setup is not complete. |
 | `integration_disabled` | 424 | No | The integration is disabled. |

@@ -388,7 +388,9 @@ func TestFactoryLifecycle(t *testing.T) {
 	}
 
 	// Errors.
-	e.must(e.do("POST", "/factories", e.editor.Key, map[string]any{"name": "dup", "alias": "payments-factory"}), 409)
+	if dup := e.must(e.do("POST", "/factories", e.editor.Key, map[string]any{"name": "dup", "alias": "payments-factory"}), 409); dup.Body["detail"] != `alias "payments-factory" is already used by factory "Payments Factory"` {
+		t.Fatalf("alias conflict names the factory: %s", dup.Raw)
+	}
 	bad := e.must(e.do("POST", "/factories", e.editor.Key, map[string]any{"name": "x", "integrations": []map[string]any{{"type": "linear"}, {"type": "jira"}}}), 400)
 	if errCode(bad) != CodeInvalidRequest {
 		t.Fatal(bad.Body)
@@ -852,25 +854,6 @@ func TestWebhooks(t *testing.T) {
 	// Git-backed factories manage webhooks in their repository.
 	gf := e.must(e.do("POST", "/factories", e.editor.Key, map[string]any{"name": "gitf", "source": "git", "git_repo": "github.com/acme/def"}), 201)
 	e.must(e.do("POST", "/factories/"+str(gf.Body, "factory", "uid")+"/webhooks", e.editor.Key, map[string]any{"name": "x"}), 422)
-}
-
-// TestWebhookCreateReusesDefaultSecret checks that a webhook created without
-// secret_name reuses an existing secret with the default name and never
-// overwrites it.
-func TestWebhookCreateReusesDefaultSecret(t *testing.T) {
-	e := newTestEnv(t)
-	ctx := context.Background()
-	fid := e.createFactory("hooks")
-	if _, err := e.srv.opts.Secrets.Put(ctx, e.team.ID, "", "DEPLOYS_WEBHOOK_SECRET", core.SecretGeneric, []byte("kept-value")); err != nil {
-		t.Fatal(err)
-	}
-	c := e.must(e.do("POST", "/factories/"+fid+"/webhooks", e.editor.Key, map[string]any{"name": "deploys"}), 201)
-	if str(c.Body, "secret") != "" {
-		t.Fatalf("an existing secret is revealed or replaced: %s", c.Raw)
-	}
-	if v, _ := e.srv.opts.Secrets.Get(ctx, e.team.ID, "", "DEPLOYS_WEBHOOK_SECRET"); string(v) != "kept-value" {
-		t.Fatalf("default secret overwritten: %q", v)
-	}
 }
 
 func TestDeliveryViewLabels(t *testing.T) {
@@ -1392,6 +1375,69 @@ func TestGenerateDefaultDefinitionCompiles(t *testing.T) {
 		if !strings.Contains(fy, want) {
 			t.Errorf("factory.yaml lacks %q:\n%s", want, fy)
 		}
+	}
+}
+
+func TestDeriveTitle(t *testing.T) {
+	long := strings.Repeat("word ", 30)
+	tests := []struct {
+		name, prompt, want string
+	}{
+		{name: "short", prompt: "Fix the login bug", want: "Fix the login bug"},
+		{name: "heading marks", prompt: "\n## Fix it\nmore", want: "Fix it"},
+		{name: "empty", prompt: " \n ", want: "Untitled task"},
+		{name: "cut after a sentence", prompt: "Add a short README file that explains the build steps in the repository root. Then link it from the docs index page.", want: "Add a short README file that explains the build steps in the repository root."},
+		{name: "cut mid-sentence", prompt: long, want: strings.TrimSpace(long[:79]) + "…"},
+		{name: "early sentence end is not used", prompt: "Hi. " + long, want: strings.TrimSpace(("Hi. " + long)[:79]) + "…"},
+		{name: "version number is not a sentence end", prompt: strings.Repeat("a", 70) + " v1.2.3 " + long, want: strings.TrimSpace((strings.Repeat("a", 70) + " v1.2.3 " + long)[:79]) + "…"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := deriveTitle(tt.prompt)
+			if got != tt.want {
+				t.Fatalf("deriveTitle = %q, want %q", got, tt.want)
+			}
+			if strings.HasSuffix(got, ".…") {
+				t.Fatalf("title ends with a sentence end and an ellipsis: %q", got)
+			}
+		})
+	}
+}
+
+func TestGenerateDefaultDefinitionForemanNamesOnlyCreatedAgents(t *testing.T) {
+	all := []string{"triage agent", "spec agent", "implement agent", "review agent"}
+	tests := []struct {
+		name    string
+		agents  []string
+		want    []string
+		notWant []string
+	}{
+		{name: "all agents", agents: DefaultAgentNames, want: append([]string{"run_agents"}, all...)},
+		{name: "no agents", agents: nil, want: []string{"do the work\nyourself", "make the changes"}, notWant: append([]string{"run_agents"}, all...)},
+		{name: "implement and review", agents: []string{"review", "implement"}, want: []string{"the implement agent to make changes and the review agent to check them"}, notWant: []string{"triage agent", "spec agent", "request_approval before implementation"}},
+		{name: "triage only", agents: []string{"triage"}, want: []string{"triage agent", "Make code changes yourself."}, notWant: []string{"spec agent", "implement agent", "review agent"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			files := GenerateDefaultDefinition(DefaultDefinitionRequest{Name: "x", Alias: "x", Agents: tt.agents})
+			if len(files) != 2+len(tt.agents) {
+				t.Fatalf("files = %v", files)
+			}
+			if _, errs := apitest.Compile(files); len(errs) > 0 {
+				t.Fatalf("errors: %v", errs)
+			}
+			fm := files["agents/foreman/agent.md"]
+			for _, w := range tt.want {
+				if !strings.Contains(fm, w) {
+					t.Errorf("foreman lacks %q:\n%s", w, fm)
+				}
+			}
+			for _, w := range tt.notWant {
+				if strings.Contains(fm, w) {
+					t.Errorf("foreman has %q:\n%s", w, fm)
+				}
+			}
+		})
 	}
 }
 

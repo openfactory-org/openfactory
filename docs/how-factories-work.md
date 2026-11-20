@@ -98,7 +98,7 @@ A message continues the run. If the session is alive, the message goes to it. Ot
 
 ## 6. Humans decide
 
-`ask_human` and `request_approval` create inbox items; failures and handoffs do too. People answer in the [dashboard inbox](dashboard.md#inbox), in the source thread (Slack approvals have buttons, and a reply such as "approve" or "reject" resolves an open approval), or on the issue or pull request. The answer goes to the foreman as a follow-up message.
+`ask_human` and `request_approval` create inbox items; failures and handoffs do too. People answer in the [dashboard inbox](dashboard.md#inbox), in the source thread (Slack approvals have buttons, and a reply such as "approve" or "reject" resolves an open approval), or on the issue or pull request. The answer to a question or approval goes to the foreman as a follow-up message. Resolving a handoff or a failure closes the item only and does not start the foreman again; to retry after a failure, send a follow-up message.
 
 ## 7. The work item completes
 

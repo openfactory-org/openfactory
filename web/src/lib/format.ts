@@ -30,6 +30,48 @@ export function duration(ms?: number | null): string {
   return `${Math.floor(h / 24)}d ${h % 24}h`;
 }
 
+/** A run or work item state as a label: "SUCCEEDED" and "in_progress" become "Succeeded" and "In progress". */
+export function stateLabel(state?: string | null): string {
+  const s = (state ?? "").replace(/_/g, " ").toLowerCase();
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+const SOURCE_LABELS: Record<string, string> = {
+  api: "API",
+  mcp: "MCP",
+  cli: "CLI",
+  dashboard: "Dashboard",
+  automation: "Automation",
+  schedule: "Schedule",
+  webhook: "Webhook",
+  mention: "Mention",
+  orchestration: "Orchestration",
+  scorer: "Scorer",
+  benchmark: "Benchmark",
+  self_improvement: "Self-improvement",
+};
+
+/** The origin of a run or work item as a label: "DASHBOARD" and "dashboard" become "Dashboard", "API" stays "API". */
+export function sourceLabel(source?: string | null): string {
+  const s = (source ?? "").trim();
+  return SOURCE_LABELS[s.toLowerCase()] ?? stateLabel(s);
+}
+
+/**
+ * The body of an item without a first line that repeats its title. The
+ * comparison ignores case and surrounding white space. The result is empty
+ * when the body only repeats the title.
+ */
+export function bodyWithoutTitle(title?: string | null, body?: string | null): string {
+  const b = (body ?? "").trim();
+  const t = (title ?? "").trim().toLowerCase();
+  if (!b || !t) return b;
+  const nl = b.indexOf("\n");
+  const first = (nl < 0 ? b : b.slice(0, nl)).trim();
+  if (first.toLowerCase() !== t) return b;
+  return nl < 0 ? "" : b.slice(nl + 1).trim();
+}
+
 /** A scorer sampling rate. The definition stores it as a percentage (0 to 100, default 10), not a ratio. */
 export function samplingLabel(rate?: number | null): string {
   const v = rate ?? 10;
@@ -46,6 +88,14 @@ export function fmtTime(t?: string | null): string {
   const d = new Date(t);
   if (Number.isNaN(d.getTime()) || d.getFullYear() < 1971) return "—";
   return d.toLocaleString();
+}
+
+/** A time in UTC to the minute, for example "2026-11-23 09:00 UTC". Schedules and webhook deliveries use it. */
+export function fmtUTC(t?: string | null): string {
+  if (!t) return "—";
+  const d = new Date(t);
+  if (Number.isNaN(d.getTime())) return "—";
+  return `${d.toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
 /** The time of day, for example 14:05:09. */
@@ -77,7 +127,20 @@ export function firstLine(s?: string | null, max = 80): string {
       .split("\n")
       .map((l) => l.trim())
       .find((l) => l !== "") ?? "";
-  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+  return clip(line, max);
+}
+
+/**
+ * Shortens s to at most max characters. It keeps the complete sentences that
+ * fit when they fill at least half of max; that text ends at a sentence end
+ * and gets no ellipsis. Else it cuts mid-sentence and adds "…".
+ */
+export function clip(s: string, max: number): string {
+  if (s.length <= max) return s;
+  for (let i = max - 1; i >= Math.floor(max / 2); i--) {
+    if (".!?".includes(s[i]) && (i + 1 === s.length || /\s/.test(s[i + 1]))) return s.slice(0, i + 1);
+  }
+  return `${s.slice(0, max - 1).trimEnd()}…`;
 }
 
 /**
@@ -105,7 +168,7 @@ export function humanizeError(raw?: string | null): { message: string; detail: s
 
 /** Sentences for the run failure codes (internal/core/failure.go), for a run error that is only a code. */
 export const FAILURE_TEXT: Record<string, string> = {
-  invalid_configuration: "A secret, machine or MCP server that the agent needs is missing.",
+  invalid_configuration: "A secret, machine, MCP server or code-forge integration that the agent needs is missing or not valid.",
   environment_setup_failed: "The environment setup failed: a clone, a setup command or an MCP server did not start.",
   harness_auth_failed: "The harness credential is missing or was refused. Check the API key secret.",
   external_authentication_required: "The user that the run acts as has no linked account for this integration.",

@@ -125,7 +125,7 @@ func TestCoreHarnessEventsAndResume(t *testing.T) {
 			{Kind: "done", Content: "second", SessionID: "s2", Usage: &core.Usage{InputTokens: 1, OutputTokens: 1}},
 		}
 	}}
-	c := &CoreHarness{H: f}
+	c := &CoreHarness{H: f, now: frozenClock}
 	var cap1 capture
 	res := c.Turn(context.Background(), baseTurnRequest(), cap1.emit)
 
@@ -216,7 +216,7 @@ func TestCoreHarnessDoneUsageWithoutUsageEvent(t *testing.T) {
 		return []core.HarnessEvent{{Kind: "done", Content: "ok", Usage: &core.Usage{InputTokens: 7, OutputTokens: 1}}}
 	}}
 	var cp capture
-	res := (&CoreHarness{H: f}).Turn(context.Background(), baseTurnRequest(), cp.emit)
+	res := (&CoreHarness{H: f, now: frozenClock}).Turn(context.Background(), baseTurnRequest(), cp.emit)
 	if res.Outcome != runnerproto.OutcomeDone || res.Result != "ok" {
 		t.Fatalf("result %+v", res)
 	}
@@ -233,7 +233,7 @@ func TestCoreHarnessResumeFromStartResponse(t *testing.T) {
 	req := baseTurnRequest()
 	req.ResumeSessionID = "old"
 	var cp capture
-	(&CoreHarness{H: f}).Turn(context.Background(), req, cp.emit)
+	(&CoreHarness{H: f, now: frozenClock}).Turn(context.Background(), req, cp.emit)
 	if r := f.reqs[0]; !r.Resume || r.Run.SessionID != "old" {
 		t.Fatalf("resume %v %q", r.Resume, r.Run.SessionID)
 	}
@@ -263,7 +263,7 @@ func TestCoreHarnessErrors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeCoreHarness{err: tc.startErr, script: func(int, core.HarnessRequest) []core.HarnessEvent { return tc.events }}
 			var cp capture
-			res := (&CoreHarness{H: f}).Turn(context.Background(), baseTurnRequest(), cp.emit)
+			res := (&CoreHarness{H: f, now: frozenClock}).Turn(context.Background(), baseTurnRequest(), cp.emit)
 			if res.Outcome != runnerproto.OutcomeError || res.FailureCode != tc.code || res.Message != tc.msg {
 				t.Fatalf("result %+v", res)
 			}
@@ -278,7 +278,7 @@ func TestCoreHarnessInterrupted(t *testing.T) {
 		return []core.HarnessEvent{{Kind: "message", Content: "late"}, {Kind: "error", Content: "context canceled"}}
 	}}
 	var cp capture
-	res := (&CoreHarness{H: f}).Turn(ctx, baseTurnRequest(), cp.emit)
+	res := (&CoreHarness{H: f, now: frozenClock}).Turn(ctx, baseTurnRequest(), cp.emit)
 	if res.Outcome != runnerproto.OutcomeInterrupted || len(cp.evs) != 0 {
 		t.Fatalf("result %+v events %v", res, cp.types())
 	}
@@ -297,7 +297,7 @@ func TestCoreHarnessPassesInputs(t *testing.T) {
 	}
 	req.Skills = []runnerproto.Skill{{Name: "review", Files: map[string]string{"SKILL.md": "be kind", "notes/a.md": "more"}}}
 	var cp capture
-	(&CoreHarness{H: f}).Turn(context.Background(), req, cp.emit)
+	(&CoreHarness{H: f, now: frozenClock}).Turn(context.Background(), req, cp.emit)
 
 	r := f.reqs[0]
 	if !reflect.DeepEqual(r.Auth, req.Auth) {
@@ -327,7 +327,7 @@ func TestCoreHarnessCutsLongDiagnostic(t *testing.T) {
 		}
 	}}
 	var cp capture
-	(&CoreHarness{H: f}).Turn(context.Background(), baseTurnRequest(), cp.emit)
+	(&CoreHarness{H: f, now: frozenClock}).Turn(context.Background(), baseTurnRequest(), cp.emit)
 	d := unmarshal[runnerproto.DiagnosticData](t, cp.all(runnerproto.EventDiagnostic)[0])
 	if len(d.Message) != 16<<10 {
 		t.Fatalf("diagnostic length %d", len(d.Message))
@@ -343,7 +343,7 @@ func TestCoreHarnessDeclaredArtifacts(t *testing.T) {
 			{Kind: "done", Content: "ok"},
 		}
 	}}
-	h := &CoreHarness{H: f}
+	h := &CoreHarness{H: f, now: frozenClock}
 	var cp capture
 	h.Turn(context.Background(), baseTurnRequest(), cp.emit)
 	got := strings.Join(h.TakeDeclaredArtifacts(), ",")

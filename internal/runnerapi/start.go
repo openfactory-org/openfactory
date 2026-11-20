@@ -1,6 +1,7 @@
 package runnerapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -19,10 +20,10 @@ func IssueBootstrap() (token, hash string, err error) {
 func (s *Service) handleStart(w http.ResponseWriter, r *http.Request) {
 	resp, aerr := s.start(r)
 	if aerr != nil {
-		writeError(w, aerr)
+		s.writeError(w, aerr)
 		return
 	}
-	writeJSON(w, http.StatusOK, resp)
+	s.writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Service) start(r *http.Request) (runnerproto.StartResponse, *apiError) {
@@ -48,14 +49,14 @@ func (s *Service) start(r *http.Request) (runnerproto.StartResponse, *apiError) 
 		return zero, errUnauthorized("unknown bootstrap token")
 	}
 	if err != nil {
-		return zero, errInternal("get session by bootstrap hash", err)
+		return zero, s.errInternal("get session by bootstrap hash", err)
 	}
 	run, err := s.store.GetRun(ctx, sess.RunID)
 	if errors.Is(err, core.ErrNotFound) {
 		return zero, errUnauthorized("unknown run")
 	}
 	if err != nil {
-		return zero, errInternal("get run", err)
+		return zero, s.errInternal("get run", err)
 	}
 	if run.State == core.RunCancelled {
 		return zero, &apiError{status: http.StatusGone, code: runnerproto.CodeRunCancelled, msg: "the run was cancelled"}
@@ -83,10 +84,10 @@ func (s *Service) start(r *http.Request) (runnerproto.StartResponse, *apiError) 
 		case errors.Is(err, core.ErrConflict):
 			// A parallel start won. Read the session again and check it.
 			if sess, err = s.runner.GetRunSession(ctx, sess.RunID, sess.Session); err != nil {
-				return zero, errInternal("reload session", err)
+				return zero, s.errInternal("reload session", err)
 			}
 		default:
-			return zero, errInternal("update session", err)
+			return zero, s.errInternal("update session", err)
 		}
 	}
 	if sess.State != core.SessionActive || !runnertoken.EqualHash(sess.InstanceHash, ih) {
@@ -98,7 +99,10 @@ func (s *Service) start(r *http.Request) (runnerproto.StartResponse, *apiError) 
 
 	resp, err := s.session.StartConfig(ctx, run, sess)
 	if err != nil {
-		return zero, errInternal("start config", err)
+		if isConfigError(err) {
+			return zero, s.failStart(ctx, run, sess, err)
+		}
+		return zero, s.errInternal("start config", err)
 	}
 	token, exp, aerr := s.issueToken(run, sess.Session)
 	if aerr != nil {
@@ -109,4 +113,48 @@ func (s *Service) start(r *http.Request) (runnerproto.StartResponse, *apiError) 
 	resp.SessionToken = token
 	resp.SessionTokenExpiresAt = exp
 	return resp, nil
+}
+
+// isConfigError reports whether a StartConfig error is a fault in the
+// configuration of the run (core.ErrInvalid or core.ErrNotFound). A retry
+// of the session start gives the same result.
+func isConfigError(err error) bool {
+	return errors.Is(err, core.ErrInvalid) || errors.Is(err, core.ErrNotFound)
+}
+
+// failStart ends a session whose start configuration has a configuration
+// fault. The run fails with invalid_configuration and the error text, after
+// the secret values of the run are removed from it. The answer is 422 with
+// the code configuration_error, which the runner does not retry.
+func (s *Service) failStart(ctx context.Context, run *core.Run, sess *core.RunSession, cause error) *apiError {
+	msg := cause.Error()
+	if s.redact != nil {
+		if red := s.redact(ctx, run); red != nil {
+			msg = red(msg)
+		}
+	}
+	s.log.WarnContext(ctx, "runnerapi: start config: configuration error", "run", run.ID, "session", sess.Session, "err", msg)
+	now := s.now()
+	code := core.FailureInvalidConfiguration
+	err := s.updateSession(ctx, sess, func(x *core.RunSession) {
+		x.State = core.SessionEnded
+		x.EndedAt = &now
+		x.EndReason = string(runnerproto.EndSetupFailed)
+		x.FailureCode = code
+		x.ActiveTurnID = ""
+	})
+	if err != nil {
+		return s.errInternal("end session", err)
+	}
+	if _, err := s.runner.ResetRunInputsOfSession(ctx, sess.RunID, sess.Session); err != nil {
+		s.log.WarnContext(ctx, "runnerapi: reset inputs of session", "run", sess.RunID, "session", sess.Session, "err", err)
+	}
+	s.hooks.SessionEnded(ctx, sess, runnerproto.EndRequest{
+		Reason:       runnerproto.EndSetupFailed,
+		FailureCode:  string(code),
+		Message:      msg,
+		LastEventSeq: sess.EventAck,
+	})
+	s.wake.notify(sessionKey{sess.RunID, sess.Session})
+	return &apiError{status: http.StatusUnprocessableEntity, code: runnerproto.CodeConfigurationError, msg: msg}
 }

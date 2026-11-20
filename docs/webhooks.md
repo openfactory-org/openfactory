@@ -62,7 +62,7 @@ curl -X POST "$OF_PUBLIC_URL/api/v1/factories/$FACTORY_UID/webhooks" \
 | `name` | Yes | 1-63 lowercase letters, digits, `-` or `_`. It becomes `webhooks/<name>.yaml`. |
 | `auth_mode` | No | `token` (default), `url_token` or `signature`. |
 | `signature_scheme` | For `signature` | One of the schemes in the table above. |
-| `secret_name` | No | The team secret that holds the credential. Default: `<NAME>_WEBHOOK_SECRET` in uppercase, with `-` and `.` changed to `_`. If the secret exists, the webhook uses it unchanged and the response does not show its value. Otherwise, the server writes a new value to it. |
+| `secret_name` | No | The team secret that holds the credential. Default: `<NAME>_WEBHOOK_SECRET` in uppercase, with `-` and `.` changed to `_`. The server writes a new value to it and the response shows the value, with these exceptions. If you name an existing secret, or another webhook of the team uses it, the webhook uses it unchanged: the response does not show its value and has `secret_reused: true`. A `signature` webhook whose provider issues the secret uses an existing secret unchanged. If the definition does not apply, the server restores the secret to its previous state. |
 | `secret` | No | The provider's signing secret, for `signature` mode only. |
 | `delivery_id_header` | No | A header that the sender fills with its own event ID. |
 | `enabled` | No | `true` (default) or `false`. |
@@ -166,6 +166,8 @@ Say in the prompt which fields of the body matter. For example: "Read `build.sta
 
 Each accepted delivery starts new runs or nothing. Deliveries do not continue earlier work items, and deliveries have no order.
 
+The work item of a delivery gets its title from the first non-empty top-level string field `title`, `subject` or `summary` of the body (first line, at most 200 bytes). If the body has none of these fields, the title is the webhook name.
+
 ## Delivery rules
 
 | Rule | Behavior |
@@ -199,7 +201,15 @@ Open Factory gives each delivery an identity. It uses the first value it finds, 
 3. The `X-OF-Delivery-Id` header, which any sender can set.
 4. `sha256:<hex>` of the body.
 
-Header values are cut to 200 characters. A delivery with the identity of an earlier accepted delivery is a duplicate and starts nothing, so provider retries do not start duplicate runs. Without a delivery ID, two identical bodies are duplicates.
+Header values are cut to 200 characters. A delivery with the identity of an earlier accepted delivery is a duplicate and starts nothing, so provider retries do not start duplicate runs.
+
+Without a delivery ID header, the identity is the body hash. Two deliveries with the same body are then one delivery: the second one is a duplicate and starts nothing, also when you send it on purpose. This stays true while the first delivery is in the delivery log: 7 days, see [Delivery retention](#delivery-retention). This is intended: a sender that retries without a delivery ID does not start a second run.
+
+If a sender can send the same body more than one time on purpose, for example a fixed "run now" payload from a scheduler, do one of these:
+
+- Set the `X-OF-Delivery-Id` header to a new value for each delivery, for example a UUID. Send the same value again only for a retry of the same delivery.
+- Set `deliveryIdHeader` to a header that the sender already fills with a unique value.
+- Put a unique value in the body, for example a timestamp or an event ID.
 
 ## Manage webhooks
 
@@ -217,7 +227,7 @@ Header values are cut to 200 characters. A delivery with the identity of an earl
 Notes:
 
 - The name, `auth_mode` and `signature_scheme` cannot change. Create a new webhook instead.
-- A disabled or deleted webhook returns `404` to senders. Automations that select a deleted webhook stop matching.
+- A disabled or deleted webhook returns `404` to senders. A delete is refused while an automation selects the webhook in `webhook_ids`: remove or change that trigger first.
 - `rotate-secret` generates and shows once a new secret for `token`, `url_token` and `standard_webhooks`. For other schemes, send the provider's new secret in `{"secret": "..."}`. The old secret stops working at once. For a rollover with no downtime, create a second webhook, move the sender to it, then delete the first.
 - These calls change the definition, so they work only for `managed` factories. For a `git` factory, change `webhooks/<name>.yaml` in the repository, and the secret value with `PUT /api/v1/secrets/{name}`.
 - The ingress reads the secret on each delivery, so a new value applies to the next delivery.

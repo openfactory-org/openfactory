@@ -511,6 +511,12 @@ func TestAutomationValidation(t *testing.T) {
 		f["factory.yaml"] = factoryWith("integrations:\n  - type: " + integ + "\n")
 		return f
 	}
+	withHooks := func(f map[string]string, names ...string) map[string]string {
+		for _, n := range names {
+			f["webhooks/"+n+".yaml"] = "secretName: HOOK\n"
+		}
+		return f
+	}
 	runErrCases(t, []errCase{
 		{"no frontmatter", defTree("automations/a/automation.md", "Just text\n"), "automations/a/automation.md", "must start with YAML frontmatter", 1},
 		{"empty body", defTree("automations/a/automation.md", "---\ntriggers:\n  - provider: schedule\n    event: cron_fired\n    schedule: {cron: \"@daily\"}\n---\n\n"), "automations/a/automation.md", "starting prompt", 0},
@@ -553,7 +559,10 @@ func TestAutomationValidation(t *testing.T) {
 		// Webhook
 		{"webhook requires filter", trig("- provider: webhook\n  event: received\n"), "automations/a/automation.md", "filter is required", 0},
 		{"webhook requires webhook_ids", trig("- provider: webhook\n  event: received\n  filter:\n    payload: {a: [1]}\n"), "automations/a/automation.md", "webhook_ids is required", 0},
-		{"webhook one id", trig("- provider: webhook\n  event: received\n  filter:\n    webhook_ids: [a, b]\n"), "automations/a/automation.md", "one-item list", 6},
+		{"webhook one id", withHooks(trig("- provider: webhook\n  event: received\n  filter:\n    webhook_ids: [a, b]\n"), "a", "b"), "automations/a/automation.md", "one-item list", 6},
+		{"webhook unknown name", withHooks(trig("- provider: webhook\n  event: received\n  filter:\n    webhook_ids: [nope]\n"), "b", "a"), "automations/a/automation.md", `webhook "nope" does not exist; known: a, b`, 6},
+		{"webhook unknown name in", withHooks(trig("- provider: webhook\n  event: received\n  filter:\n    webhook_ids:\n      in: [nope]\n"), "a"), "automations/a/automation.md", `webhook "nope" does not exist; known: a`, 7},
+		{"webhook none defined", trig("- provider: webhook\n  event: received\n  filter:\n    webhook_ids: [nope]\n"), "automations/a/automation.md", "known: none", 6},
 		{"webhook file name", trig("- provider: webhook\n  event: received\n  filter:\n    webhook_ids: [ci.yaml]\n"), "automations/a/automation.md", "not a file name", 0},
 		{"payload scalar leaf", trig("- provider: webhook\n  event: received\n  filter:\n    webhook_ids: [w]\n    payload:\n      status: failed\n"), "automations/a/automation.md", "must be a list of allowed values", 8},
 		{"payload exists false with in", trig("- provider: webhook\n  event: received\n  filter:\n    webhook_ids: [w]\n    payload:\n      env: {exists: false, in: [prod]}\n"), "automations/a/automation.md", "exists: false with a non-empty in", 0},

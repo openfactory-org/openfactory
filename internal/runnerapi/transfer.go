@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"slices"
 	"strconv"
@@ -160,33 +159,33 @@ func (s *Service) parseUploadID(id string) (key string, ok bool) {
 func (s *Service) handleUpload(w http.ResponseWriter, r *http.Request) {
 	sess, _, aerr := s.authSession(r)
 	if aerr != nil {
-		writeError(w, aerr)
+		s.writeError(w, aerr)
 		return
 	}
 	if s.files == nil && s.snapFiles == nil {
-		writeError(w, errNotImplemented())
+		s.writeError(w, errNotImplemented())
 		return
 	}
 	var req runnerproto.UploadRequest
 	if aerr := decodeBody(r, &req); aerr != nil {
-		writeError(w, aerr)
+		s.writeError(w, aerr)
 		return
 	}
 	if err := req.Validate(); err != nil {
-		writeError(w, errBad("%v", err))
+		s.writeError(w, errBad("%v", err))
 		return
 	}
 	if req.Bytes <= 0 {
-		writeError(w, errBad("bytes must be more than 0"))
+		s.writeError(w, errBad("bytes must be more than 0"))
 		return
 	}
 	if max := s.maxUploadFor(req.Kind); req.Bytes > max {
-		writeError(w, &apiError{status: http.StatusRequestEntityTooLarge, code: codeTooLarge,
+		s.writeError(w, &apiError{status: http.StatusRequestEntityTooLarge, code: codeTooLarge,
 			msg: fmt.Sprintf("a %s upload is limited to %d bytes", req.Kind, max)})
 		return
 	}
 	if req.Kind == runnerproto.UploadSnapshot && s.snapMax > 0 && req.Bytes > s.snapMax {
-		writeError(w, &apiError{status: http.StatusRequestEntityTooLarge, code: codeTooLarge,
+		s.writeError(w, &apiError{status: http.StatusRequestEntityTooLarge, code: codeTooLarge,
 			msg: fmt.Sprintf("a %s upload is limited to %d bytes", req.Kind, s.snapMax)})
 		return
 	}
@@ -195,22 +194,22 @@ func (s *Service) handleUpload(w http.ResponseWriter, r *http.Request) {
 		files, putHeaders = s.snapFiles, s.snapHeaders
 	}
 	if files == nil {
-		writeError(w, errNotImplemented())
+		s.writeError(w, errNotImplemented())
 		return
 	}
 	run, err := s.store.GetRun(r.Context(), sess.RunID)
 	if err != nil {
-		writeError(w, errInternal("get run", err))
+		s.writeError(w, s.errInternal("get run", err))
 		return
 	}
 	key := objectPrefix(run, sess.Session, req.Kind, req.Part) + req.Name
 	if err := objectstore.ValidateKey(key); err != nil {
-		writeError(w, errBad("invalid name: %v", err))
+		s.writeError(w, errBad("invalid name: %v", err))
 		return
 	}
 	url, err := files.PresignPut(r.Context(), key, s.ttl(), req.ContentType)
 	if err != nil {
-		writeError(w, errInternal("presign put", err))
+		s.writeError(w, s.errInternal("presign put", err))
 		return
 	}
 	headers := map[string]string{}
@@ -221,7 +220,7 @@ func (s *Service) handleUpload(w http.ResponseWriter, r *http.Request) {
 	} else if req.ContentType != "" {
 		headers["Content-Type"] = req.ContentType
 	}
-	writeJSON(w, http.StatusOK, runnerproto.UploadResponse{
+	s.writeJSON(w, http.StatusOK, runnerproto.UploadResponse{
 		UploadID:  s.uploadID(key),
 		Method:    http.MethodPut,
 		URL:       url,
@@ -233,7 +232,7 @@ func (s *Service) handleUpload(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleDownloads(w http.ResponseWriter, r *http.Request) {
 	sess, _, aerr := s.authSession(r)
 	if aerr != nil {
-		writeError(w, aerr)
+		s.writeError(w, aerr)
 		return
 	}
 	if r.URL.Query().Get("kind") == "attachment" {
@@ -241,26 +240,26 @@ func (s *Service) handleDownloads(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.snapFiles == nil {
-		writeError(w, errNotImplemented())
+		s.writeError(w, errNotImplemented())
 		return
 	}
 	switch kind := r.URL.Query().Get("kind"); kind {
 	case string(runnerproto.UploadSnapshot):
 	default:
-		writeError(w, errBad("unknown kind %q", kind))
+		s.writeError(w, errBad("unknown kind %q", kind))
 		return
 	}
 	run, err := s.store.GetRun(r.Context(), sess.RunID)
 	if err != nil {
-		writeError(w, errInternal("get run", err))
+		s.writeError(w, s.errInternal("get run", err))
 		return
 	}
 	files, err := s.snapshotFiles(r.Context(), run, sess.Session)
 	if err != nil {
-		writeError(w, errInternal("snapshot downloads", err))
+		s.writeError(w, s.errInternal("snapshot downloads", err))
 		return
 	}
-	writeJSON(w, http.StatusOK, runnerproto.DownloadsResponse{Files: files})
+	s.writeJSON(w, http.StatusOK, runnerproto.DownloadsResponse{Files: files})
 }
 
 // snapshotFiles returns the files of the newest snapshot before a session.
@@ -291,7 +290,7 @@ func (s *Service) snapshotFiles(ctx context.Context, run *core.Run, before int) 
 			}
 			var d runnerproto.SnapshotSavedData
 			if err := json.Unmarshal(ev.Data, &d); err != nil {
-				slog.Warn("runnerapi: bad snapshot.saved event", "run", run.ID, "session", n, "seq", ev.Seq, "err", err)
+				s.log.Warn("runnerapi: bad snapshot.saved event", "run", run.ID, "session", n, "seq", ev.Seq, "err", err)
 				continue
 			}
 			latest[d.Part] = d.UploadIDs
@@ -324,12 +323,12 @@ func (s *Service) partFiles(ctx context.Context, run *core.Run, session int, par
 		key, ok := s.parseUploadID(id)
 		name, inPart := strings.CutPrefix(key, prefix)
 		if !ok || !ownsKey(run, key) || !inPart || name == "" {
-			slog.Warn("runnerapi: skip a bad snapshot upload ID", "run", run.ID, "session", session, "part", part)
+			s.log.Warn("runnerapi: skip a bad snapshot upload ID", "run", run.ID, "session", session, "part", part)
 			continue
 		}
 		info, err := s.snapFiles.Stat(ctx, key)
 		if errors.Is(err, objectstore.ErrNotFound) {
-			slog.Warn("runnerapi: snapshot object is missing", "run", run.ID, "session", session, "key", key)
+			s.log.Warn("runnerapi: snapshot object is missing", "run", run.ID, "session", session, "key", key)
 			continue
 		}
 		if err != nil {
@@ -355,24 +354,24 @@ func (s *Service) attachmentDownload(w http.ResponseWriter, r *http.Request, run
 		files = s.files
 	}
 	if s.attachments == nil || files == nil {
-		writeError(w, errNotImplemented())
+		s.writeError(w, errNotImplemented())
 		return
 	}
 	id := r.URL.Query().Get("id")
 	if id == "" {
-		writeError(w, errBad("id is required"))
+		s.writeError(w, errBad("id is required"))
 		return
 	}
 	notFound := &apiError{status: http.StatusNotFound, code: codeNotFound, msg: "attachment not found"}
 	ctx := r.Context()
 	run, err := s.store.GetRun(ctx, runID)
 	if err != nil {
-		writeError(w, errInternal("get run", err))
+		s.writeError(w, s.errInternal("get run", err))
 		return
 	}
 	inputs, err := s.runner.ListRunInputs(ctx, runID, 0)
 	if err != nil {
-		writeError(w, errInternal("list run inputs", err))
+		s.writeError(w, s.errInternal("list run inputs", err))
 		return
 	}
 	named := false
@@ -383,37 +382,37 @@ func (s *Service) attachmentDownload(w http.ResponseWriter, r *http.Request, run
 		}
 	}
 	if !named {
-		writeError(w, notFound)
+		s.writeError(w, notFound)
 		return
 	}
 	att, err := s.attachments(ctx, id)
 	if errors.Is(err, core.ErrNotFound) {
-		writeError(w, notFound)
+		s.writeError(w, notFound)
 		return
 	}
 	if err != nil {
-		writeError(w, errInternal("get attachment", err))
+		s.writeError(w, s.errInternal("get attachment", err))
 		return
 	}
 	if att.TeamID != teamOf(run) || att.Key == "" {
-		writeError(w, notFound)
+		s.writeError(w, notFound)
 		return
 	}
 	info, err := files.Stat(ctx, att.Key)
 	if errors.Is(err, objectstore.ErrNotFound) {
-		writeError(w, notFound)
+		s.writeError(w, notFound)
 		return
 	}
 	if err != nil {
-		writeError(w, errInternal("stat attachment", err))
+		s.writeError(w, s.errInternal("stat attachment", err))
 		return
 	}
 	url, err := files.PresignGet(ctx, att.Key, s.ttl())
 	if err != nil {
-		writeError(w, errInternal("presign attachment", err))
+		s.writeError(w, s.errInternal("presign attachment", err))
 		return
 	}
-	writeJSON(w, http.StatusOK, runnerproto.DownloadsResponse{Files: []runnerproto.DownloadFile{{
+	s.writeJSON(w, http.StatusOK, runnerproto.DownloadsResponse{Files: []runnerproto.DownloadFile{{
 		Part: "attachment", Name: att.Name, URL: url, Bytes: info.Size, ExpiresAt: s.now().Add(s.ttl()),
 	}}})
 }

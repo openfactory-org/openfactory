@@ -130,6 +130,9 @@ func (s *Server) handleCreateMCPServer(w http.ResponseWriter, r *http.Request, p
 	if err := mcpregistry.Validate(m); err != nil {
 		return err
 	}
+	if err := s.checkMCPServerNameFree(r.Context(), p.TeamID, m.Name, ""); err != nil {
+		return err
+	}
 	if err := s.opts.Store.CreateMCPServer(r.Context(), m); err != nil {
 		return err
 	}
@@ -174,6 +177,9 @@ func (s *Server) handleUpdateMCPServer(w http.ResponseWriter, r *http.Request, p
 	if err := mcpregistry.Validate(m); err != nil {
 		return err
 	}
+	if err := s.checkMCPServerNameFree(ctx, p.TeamID, m.Name, m.ID); err != nil {
+		return err
+	}
 	if authChanged && connected && m.OAuth != nil {
 		// The stored token was issued for the old server or client.
 		m.OAuth.Status, m.OAuth.ConnectedBy, m.OAuth.ConnectedAt, m.OAuth.Error = core.MCPOAuthNotConnected, "", nil, ""
@@ -193,6 +199,15 @@ func (s *Server) handleDeleteMCPServer(w http.ResponseWriter, r *http.Request, p
 	ctx := r.Context()
 	m, err := s.mcpServerFor(ctx, p, r.PathValue("id"))
 	if err != nil {
+		return err
+	}
+	uses, err := s.teamResourceUses(ctx, p.TeamID, func(def *core.CompiledDefinition) []string {
+		return mcpServerUses(def, m.ID, m.Name)
+	})
+	if err != nil {
+		return err
+	}
+	if err := inUseError("MCP server", m.Name, uses); err != nil {
 		return err
 	}
 	if err := s.opts.Store.DeleteMCPServer(ctx, m.ID); err != nil {
@@ -276,6 +291,23 @@ func (s *Server) handleMCPOAuthCallback(w http.ResponseWriter, r *http.Request, 
 		v.Set("oauth", "connected")
 	}
 	http.Redirect(w, r, s.opts.PublicURL+target+"?"+v.Encode(), http.StatusFound)
+	return nil
+}
+
+// checkMCPServerNameFree refuses a second MCP server whose name differs from
+// an existing one only in case, as for environments. The store's unique
+// index compares the exact name; this check also catches "QA-MCP" next to
+// "qa-mcp".
+func (s *Server) checkMCPServerNameFree(ctx context.Context, teamID, name, exceptID string) error {
+	list, err := s.opts.Store.ListMCPServers(ctx, teamID)
+	if err != nil {
+		return err
+	}
+	for _, m := range list {
+		if m.ID != exceptID && strings.EqualFold(m.Name, name) {
+			return Errf(CodeConflict, "an MCP server named %q already exists", m.Name)
+		}
+	}
 	return nil
 }
 

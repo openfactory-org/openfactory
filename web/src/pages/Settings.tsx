@@ -1,15 +1,50 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { api, errorMessage, unwrap, type Schemas } from "../api/client";
+import { api, unwrap, type Schemas } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { factoryKey, fpath, useFactory } from "../components/FactoryLayout";
 import { FACTORIES_KEY } from "../components/Layout";
-import { Alert, Badge, Button, Card, Field, PageHeader, Query } from "../components/ui";
+import { Alert, Badge, Button, Card, ErrorAlert, Field, PageHeader, Query } from "../components/ui";
 import { useMutate } from "../lib/mutate";
 import { INTEGRATION_TYPES } from "./Factories";
 
 type UpdateFactory = Schemas["UpdateFactoryRequest"];
+
+/**
+ * Checks a git repository of a definition source with the rule of the server
+ * (internal/server/defsync.go ParseGitRepo): it must name owner/repository,
+ * with or without a host. It returns an error text, or null when it is valid.
+ */
+export function gitRepoError(raw: string): string | null {
+  const s = raw.trim();
+  if (!s) return "Enter the repository that holds factory.yaml.";
+  let path = s;
+  try {
+    const u = new URL(s);
+    if (u.host) path = u.pathname;
+  } catch {
+    const i = s.indexOf("/");
+    if (i > 0 && s.slice(0, i).includes(".")) path = s.slice(i + 1);
+  }
+  path = path.replace(/^\/+|\/+$/g, "").replace(/\.git$/, "");
+  const i = path.lastIndexOf("/");
+  if (i <= 0 || i === path.length - 1) return `The repository must name owner/repository, for example acme/factory-def (you entered "${s}").`;
+  return null;
+}
+
+/** The identity fields that differ from the saved factory. */
+export function changedIdentity(
+  form: { name: string; alias: string; description: string; credential_strategy: string },
+  saved: { name: string; alias: string; description: string; credential_strategy: string },
+): UpdateFactory {
+  const body: UpdateFactory = {};
+  if (form.name.trim() !== saved.name) body.name = form.name.trim();
+  if (form.alias.trim() !== saved.alias) body.alias = form.alias.trim();
+  if (form.description.trim() !== saved.description) body.description = form.description.trim();
+  if (form.credential_strategy !== saved.credential_strategy) body.credential_strategy = form.credential_strategy as UpdateFactory["credential_strategy"];
+  return body;
+}
 
 export function SettingsPage() {
   const f = useFactory();
@@ -25,16 +60,19 @@ export function SettingsPage() {
   const [identity, setIdentity] = useState({ name: f.name, alias: f.alias, description: f.description ?? "", credential_strategy: "EXECUTOR" });
   const [source, setSource] = useState({ source: f.source, git_repo: f.git_repo ?? "", git_branch: f.git_branch ?? "main", git_path: f.git_path ?? "" });
   const [confirm, setConfirm] = useState("");
-  const [idError, setIdError] = useState<string | null>(null);
-  const [srcError, setSrcError] = useState<string | null>(null);
+  const [idError, setIdError] = useState<unknown>(null);
+  const [srcError, setSrcError] = useState<unknown>(null);
+  const [idNote, setIdNote] = useState<string | null>(null);
+  const [srcNote, setSrcNote] = useState<string | null>(null);
+  const savedStrategy = settings.data?.credential_strategy || "EXECUTOR";
   useEffect(() => {
     if (settings.data) setIdentity((s) => ({ ...s, credential_strategy: settings.data.credential_strategy || "EXECUTOR" }));
   }, [settings.data]);
 
-  const patch = useMutate((body: UpdateFactory) => unwrap(api.PATCH("/factories/{uid}", { params: { path: { uid: f.id } }, body })), {
-    invalidate: [factoryKey(f.id), FACTORIES_KEY, ["settings", f.id], ["definition", f.id]],
-    quietErrors: true,
-  });
+  const patchFactory = (body: UpdateFactory) => unwrap(api.PATCH("/factories/{uid}", { params: { path: { uid: f.id } }, body }));
+  const invalidate = [factoryKey(f.id), FACTORIES_KEY, ["settings", f.id], ["definition", f.id]];
+  const patchIdentity = useMutate(patchFactory, { invalidate, quietErrors: true, success: "Settings saved." });
+  const patchSource = useMutate(patchFactory, { invalidate, quietErrors: true, success: "Definition source updated." });
   const del = useMutate(() => unwrap(api.DELETE("/factories/{uid}", { params: { path: { uid: f.id } } })), {
     invalidate: [FACTORIES_KEY],
     success: `Factory ${f.name} deleted.`,
@@ -44,33 +82,42 @@ export function SettingsPage() {
   async function saveIdentity(e: FormEvent) {
     e.preventDefault();
     setIdError(null);
+    setIdNote(null);
     if (!identity.name.trim()) return setIdError("Enter a factory name.");
     if (identity.alias && !/^[A-Za-z0-9 ._-]{1,60}$/.test(identity.alias)) return setIdError("Foreman name: use up to 60 letters, numbers, spaces, '.', '_' and '-'.");
+    // Send only the changed fields: each save writes a new definition version.
+    const body = changedIdentity(identity, { name: f.name, alias: f.alias, description: f.description ?? "", credential_strategy: savedStrategy });
+    if (Object.keys(body).length === 0) return setIdNote("Nothing changed, so nothing was saved.");
     try {
-      await patch.mutateAsync({
-        name: identity.name.trim(),
-        alias: identity.alias.trim(),
-        description: identity.description.trim(),
-        credential_strategy: identity.credential_strategy as UpdateFactory["credential_strategy"],
-      });
-      setIdError(null);
+      await patchIdentity.mutateAsync(body);
+      setIdNote("Saved.");
     } catch (err) {
-      setIdError(errorMessage(err));
+      setIdError(err);
     }
   }
 
   async function saveSource(e: FormEvent) {
     e.preventDefault();
     setSrcError(null);
-    if (source.source === "git" && !source.git_repo.trim()) return setSrcError("Enter the repository that holds factory.yaml.");
+    setSrcNote(null);
+    if (source.source === "git") {
+      const bad = gitRepoError(source.git_repo);
+      if (bad) return setSrcError(bad);
+    }
+    const unchanged =
+      source.source === f.source &&
+      (source.source !== "git" ||
+        (source.git_repo.trim() === (f.git_repo ?? "") && (source.git_branch.trim() || "main") === (f.git_branch || "main") && source.git_path.trim().replace(/^\/+|\/+$/g, "") === (f.git_path ?? "")));
+    if (unchanged) return setSrcNote("Nothing changed, so nothing was saved.");
     try {
-      await patch.mutateAsync(
+      await patchSource.mutateAsync(
         source.source === "git"
           ? { source: "git", git_repo: source.git_repo.trim(), git_branch: source.git_branch.trim() || "main", git_path: source.git_path.trim() }
           : { source: "managed" },
       );
+      setSrcNote("Saved.");
     } catch (err) {
-      setSrcError(errorMessage(err));
+      setSrcError(err);
     }
   }
 
@@ -85,7 +132,8 @@ export function SettingsPage() {
             </Alert>
           )}
           <form className="stack" onSubmit={saveIdentity}>
-            {idError && <Alert kind="error">{idError}</Alert>}
+            <ErrorAlert error={idError} />
+            {idNote && <Alert kind={idNote === "Saved." ? "success" : "info"}>{idNote}</Alert>}
             <fieldset disabled={!canEdit || !managed} className="plain-fieldset stack">
               <Field label="Name" htmlFor="st-name">
                 <input id="st-name" required value={identity.name} onChange={(e) => setIdentity({ ...identity, name: e.target.value })} />
@@ -105,7 +153,7 @@ export function SettingsPage() {
             </fieldset>
             {canEdit && managed && (
               <div className="form-actions">
-                <Button type="submit" variant="primary" busy={patch.isPending}>
+                <Button type="submit" variant="primary" busy={patchIdentity.isPending}>
                   Save
                 </Button>
               </div>
@@ -173,21 +221,24 @@ export function SettingsPage() {
         </Query>
         <Card title="Definition source">
           <form className="stack" onSubmit={saveSource}>
-            {srcError && <Alert kind="error">{srcError}</Alert>}
+            <ErrorAlert error={srcError} />
+            {srcNote && <Alert kind={srcNote === "Saved." ? "success" : "info"}>{srcNote}</Alert>}
             <fieldset disabled={!canEdit} className="plain-fieldset stack">
               <fieldset className="field">
                 <legend>Where the definition lives</legend>
-                <label className="check">
-                  <input type="radio" name="source" checked={source.source !== "git"} onChange={() => setSource({ ...source, source: "managed" })} /> Managed here (edit in the dashboard and API)
-                </label>
-                <label className="check">
-                  <input type="radio" name="source" checked={source.source === "git"} onChange={() => setSource({ ...source, source: "git" })} /> A git repository (changes through pull requests)
-                </label>
+                <div className="check">
+                  <input id="st-src-managed" type="radio" name="source" value="managed" checked={source.source !== "git"} onChange={() => setSource({ ...source, source: "managed" })} />
+                  <label htmlFor="st-src-managed">Managed here (edit in the dashboard and API)</label>
+                </div>
+                <div className="check">
+                  <input id="st-src-git" type="radio" name="source" value="git" checked={source.source === "git"} onChange={() => setSource({ ...source, source: "git" })} />
+                  <label htmlFor="st-src-git">A git repository (changes through pull requests)</label>
+                </div>
               </fieldset>
               {source.source === "git" && (
                 <div className="grid-2">
-                  <Field label="Repository" htmlFor="st-repo">
-                    <input id="st-repo" className="mono" value={source.git_repo} onChange={(e) => setSource({ ...source, git_repo: e.target.value })} placeholder="github.com/acme/factory-def" />
+                  <Field label="Repository" htmlFor="st-repo" hint="owner/repository, with or without a host, for example acme/factory-def.">
+                    <input id="st-repo" className="mono" value={source.git_repo} onChange={(e) => setSource({ ...source, git_repo: e.target.value })} placeholder="acme/factory-def" />
                   </Field>
                   <Field label="Branch" htmlFor="st-branch">
                     <input id="st-branch" value={source.git_branch} onChange={(e) => setSource({ ...source, git_branch: e.target.value })} />
@@ -200,7 +251,7 @@ export function SettingsPage() {
             </fieldset>
             {canEdit && (
               <div className="form-actions">
-                <Button type="submit" busy={patch.isPending}>
+                <Button type="submit" busy={patchSource.isPending}>
                   Update source
                 </Button>
               </div>
@@ -241,7 +292,7 @@ export function FactoryIntegrationsPage() {
   });
   const team = useQuery({ queryKey: ["integrations"], queryFn: () => unwrap(api.GET("/integrations")).then((r) => r.items ?? []) });
   const [selected, setSelected] = useState<string[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const current = selected ?? Object.keys(attached.data ?? {});
   const editable = canEditFactory(f.id) && f.source !== "git";
   const save = useMutate(
@@ -257,7 +308,7 @@ export function FactoryIntegrationsPage() {
     try {
       await save.mutateAsync(current);
     } catch (err) {
-      setError(errorMessage(err));
+      setError(err);
     }
   }
 
@@ -274,7 +325,7 @@ export function FactoryIntegrationsPage() {
       <Query q={attached}>
         {() => (
           <form className="stack narrow" onSubmit={submit}>
-            {error && <Alert kind="error">{error}</Alert>}
+            <ErrorAlert error={error} />
             <fieldset disabled={!editable} className="plain-fieldset">
               <legend className="sr-only">Integrations</legend>
               <ul className="option-list">
@@ -282,15 +333,21 @@ export function FactoryIntegrationsPage() {
                   const conns = connected(it.type);
                   return (
                     <li key={it.type} className="option-row">
-                      <label className="check">
+                      <label className="check" htmlFor={`fi-${it.type}`}>
                         <input
+                          id={`fi-${it.type}`}
                           type="checkbox"
+                          value={it.type}
+                          aria-labelledby={`fi-${it.type}-l`}
+                          aria-describedby={`fi-${it.type}-d`}
                           checked={current.includes(it.type)}
                           onChange={(e) => setSelected(e.target.checked ? [...current, it.type] : current.filter((x) => x !== it.type))}
                         />
                         <span>
-                          <strong>{it.label}</strong>
-                          <span className="muted small">{it.hint}</span>
+                          <strong id={`fi-${it.type}-l`}>{it.label}</strong>
+                          <span id={`fi-${it.type}-d`} className="muted small">
+                            {it.hint}
+                          </span>
                         </span>
                       </label>
                       <span className="option-status">

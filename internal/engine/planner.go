@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/harness"
 	"github.com/openfactory-org/openfactory/internal/secrets"
 	"github.com/openfactory-org/openfactory/internal/skills"
 )
@@ -350,22 +351,65 @@ func (x *Planner) expandMap(ctx context.Context, r *core.Run, m map[string]strin
 	return out, nil
 }
 
-// harnessAuth resolves harness credentials from a managed secret into the
-// environment variables the harness expects.
-func (x *Planner) harnessAuth(ctx context.Context, r *core.Run) (map[string]string, error) {
-	a := r.Config.Harness.Auth
-	if a == nil || a.SecretName == "" || (a.Source != "" && a.Source != "managedSecret") {
-		return nil, nil
+// harnessAuth resolves the harness credential of a run into the environment
+// variables the harness expects. env is the environment of the run (runEnv).
+// See resolveHarnessAuth.
+func (x *Planner) harnessAuth(ctx context.Context, r *core.Run, env map[string]string) (map[string]string, error) {
+	auth, _, err := x.resolveHarnessAuth(ctx, r, env)
+	return auth, err
+}
+
+// resolveHarnessAuth resolves the harness credential of a run. The order is:
+//
+//  1. harness.auth of the effective configuration (definition and
+//     overrides): managedSecret maps the named secret, workerEnvironment
+//     passes nothing.
+//  2. Without harness.auth, when env (environment variables and agent
+//     secrets of the run) already holds a model credential, nothing: the
+//     CLI uses that credential, as before.
+//  3. Otherwise the default credential (findDefaultCredential): the one
+//     factory or team secret whose type the harness accepts.
+//  4. Otherwise nothing.
+//
+// The HarnessCredential result names the source and never holds a value.
+func (x *Planner) resolveHarnessAuth(ctx context.Context, r *core.Run, env map[string]string) (map[string]string, HarnessCredential, error) {
+	if a := r.Config.Harness.Auth; a != nil {
+		if a.Source == CredentialWorkerEnvironment {
+			return nil, HarnessCredential{Source: CredentialWorkerEnvironment}, nil
+		}
+		if a.SecretName == "" || (a.Source != "" && a.Source != CredentialManagedSecret) {
+			return nil, HarnessCredential{Source: CredentialNone}, nil
+		}
+		auth, typ, err := x.secretAuth(ctx, r, r.FactoryID, a.SecretName)
+		return auth, HarnessCredential{Source: CredentialManagedSecret, SecretName: a.SecretName, Type: typ}, err
 	}
+	if harness.HasCredentialEnv(r.Config.Harness.Type, env) {
+		return nil, HarnessCredential{Source: CredentialNone, Reason: CredentialReasonRunEnv}, nil
+	}
+	cred, err := findDefaultCredential(ctx, x.opts.Secrets, r.TeamID, r.FactoryID, r.Config.Harness.Type)
+	if err != nil || !cred.IsDefault() {
+		return nil, cred, err
+	}
+	factoryID := ""
+	if cred.Scope == CredentialScopeFactory {
+		factoryID = r.FactoryID
+	}
+	auth, _, err := x.secretAuth(ctx, r, factoryID, cred.SecretName)
+	return auth, cred, err
+}
+
+// secretAuth maps the managed secret name to harness environment variables.
+// An empty factoryID reads the team secret.
+func (x *Planner) secretAuth(ctx context.Context, r *core.Run, factoryID, name string) (map[string]string, core.SecretType, error) {
 	if x.opts.Secrets == nil {
-		return nil, fmt.Errorf("harness auth secret %q: no secret store configured", a.SecretName)
+		return nil, "", fmt.Errorf("harness auth secret %q: no secret store configured", name)
 	}
-	val, err := x.opts.Secrets.Get(ctx, r.TeamID, r.FactoryID, a.SecretName)
+	val, err := x.opts.Secrets.Get(ctx, r.TeamID, factoryID, name)
 	if err != nil {
-		return nil, fmt.Errorf("harness auth secret %q: %w", a.SecretName, err)
+		return nil, "", fmt.Errorf("harness auth secret %q: %w", name, err)
 	}
-	typ := secrets.TypeOf(ctx, x.opts.Secrets, r.TeamID, r.FactoryID, a.SecretName)
-	return HarnessAuthEnv(r.Config.Harness.Type, r.Config.Harness.Model, typ, val), nil
+	typ := secrets.TypeOf(ctx, x.opts.Secrets, r.TeamID, factoryID, name)
+	return HarnessAuthEnv(r.Config.Harness.Type, r.Config.Harness.Model, typ, val), typ, nil
 }
 
 // HarnessAuthEnv maps a credential to harness environment variables.

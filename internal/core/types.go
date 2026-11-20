@@ -690,11 +690,32 @@ type Run struct {
 	QueuedAt *time.Time `json:"queued_at,omitempty"`
 }
 
+// Usage is the token, cost and time accounting of a run, a session or one
+// harness turn. DurationMS is agent time: the sum of the turn durations.
 type Usage struct {
 	InputTokens  int64   `json:"input_tokens"`
 	OutputTokens int64   `json:"output_tokens"`
 	CostUSD      float64 `json:"cost_usd"`
 	DurationMS   int64   `json:"duration_ms"`
+	// Coverage is empty when the counts are complete, or UsagePartial when
+	// at least one turn ended before its harness reported totals (for
+	// example a cancelled turn). Partial counts are estimates.
+	Coverage string `json:"coverage,omitempty"`
+}
+
+// Usage coverage values.
+const (
+	UsageKnown   = "known"
+	UsagePartial = "partial"
+)
+
+// CoverageLabel returns the coverage for the API: UsageKnown when Coverage
+// is empty.
+func (u Usage) CoverageLabel() string {
+	if u.Coverage == "" {
+		return UsageKnown
+	}
+	return u.Coverage
 }
 
 // RunMessage is one entry in a run's transcript/conversation.
@@ -857,6 +878,11 @@ type WebhookDelivery struct {
 	RunIDs     []string          `json:"run_ids,omitempty"`
 	ReceivedAt time.Time         `json:"received_at"`
 }
+
+// WebhookDeliveryDeduplicated is the status of a delivery log entry for a
+// repeated delivery. Such entries share the delivery ID of the accepted
+// entry; only one accepted entry exists per webhook and delivery ID.
+const WebhookDeliveryDeduplicated = "deduplicated"
 
 // ---------- Integrations ----------
 

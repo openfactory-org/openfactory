@@ -3,6 +3,7 @@ package api
 import (
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/openfactory-org/openfactory/internal/core"
@@ -164,7 +165,7 @@ func (s *Server) runView(r *core.Run) RunView {
 		SourceRef:     ref,
 		StatusMessage: statusMessage(r),
 		RootRunID:     r.ID,
-		Usage:         UsageView{Usage: r.Usage, Coverage: "known"},
+		Usage:         UsageView{Usage: r.Usage, Coverage: r.Usage.CoverageLabel()},
 		UpdatedAt:     upd,
 		Run:           *r,
 	}
@@ -232,10 +233,22 @@ func deriveTitle(prompt string) string {
 	return "Untitled task"
 }
 
+// truncate shortens s to at most n runes. When s is longer, it keeps the
+// complete sentences that fit if they fill at least half of n; that text
+// ends at a sentence end and gets no ellipsis. Else it cuts mid-sentence
+// and adds "…".
 func truncate(s string, n int) string {
 	if utf8.RuneCountInString(s) <= n {
 		return s
 	}
 	r := []rune(s)
+	head := r[:n]
+	for i := len(head) - 1; i >= n/2; i-- {
+		if isSentenceEnd(head[i]) && (i+1 == len(r) || unicode.IsSpace(r[i+1])) {
+			return string(head[:i+1])
+		}
+	}
 	return strings.TrimSpace(string(r[:n-1])) + "…"
 }
+
+func isSentenceEnd(c rune) bool { return c == '.' || c == '!' || c == '?' }

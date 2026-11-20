@@ -419,7 +419,7 @@ func (s *Server) handleRunSessions(w http.ResponseWriter, r *http.Request, p *Pr
 		v := SessionView{Session: ss.Session, Number: ss.Session, State: ss.State, AssignedAt: ss.AssignedAt,
 			StartedAt: ss.StartedAt, ReadyAt: ss.ReadyAt, EndedAt: ss.EndedAt, EndReason: ss.EndReason,
 			FailureCode: ss.FailureCode, SandboxReason: ss.SandboxReason,
-			Usage: UsageView{Usage: ss.Usage, Coverage: "known"}}
+			Usage: UsageView{Usage: ss.Usage, Coverage: ss.Usage.CoverageLabel()}}
 		evs, err := runnerEvents(ctx, rs, run.ID, ss.Session)
 		if err != nil {
 			return err

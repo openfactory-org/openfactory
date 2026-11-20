@@ -147,8 +147,29 @@ export function apiURL(path: string, query?: Record<string, string | number | un
   return u.toString();
 }
 
+/** How many validation errors a one-line error message lists. */
+export const MAX_LISTED_ERRORS = 3;
+
+/** One validation error as "file:line field: message". */
+export function formatValidationError(e: ValidationError): string {
+  const loc = `${e.file ?? ""}${e.line ? `:${e.line}` : ""}`;
+  const where = [loc, e.field].filter(Boolean).join(" ");
+  return where ? `${where}: ${e.message}` : e.message;
+}
+
+/**
+ * The text of an error. For an API error with validation errors (a refused
+ * definition change), it adds the first few of them, so that the reason is
+ * not lost.
+ */
 export function errorMessage(err: unknown): string {
-  if (err instanceof ApiError) return err.message;
+  if (err instanceof ApiError) {
+    const errs = err.validationErrors;
+    if (errs.length === 0) return err.message;
+    const listed = errs.slice(0, MAX_LISTED_ERRORS).map(formatValidationError).join("; ");
+    const more = errs.length > MAX_LISTED_ERRORS ? ` (and ${errs.length - MAX_LISTED_ERRORS} more)` : "";
+    return `${err.message}: ${listed}${more}`;
+  }
   if (err instanceof Error) return err.message;
   return String(err);
 }

@@ -130,7 +130,7 @@ The foreman links the pull request to the work item. The work item completes whe
 |---|---|
 | `OF_SECRET_KEY is required` at start | Set `OF_DEV=true`, or set `OF_SECRET_KEY` to the output of `openssl rand -base64 32`. |
 | The server printed no API key | The team exists already; the key prints only on the first start. Create a key with `POST /api/v1/api-keys` and an existing key, or delete `~/.openfactory` to start again. |
-| The run fails with `the agent has no harness credential` | Store the key as in step 2 and keep `harness.auth` in `agentDefaults`. |
+| The run fails with `the agent has no harness credential` | Store the key as in step 2 and keep `harness.auth` in `agentDefaults`. Without `harness.auth`, keep exactly one secret of a model credential type. See [Default credential](harnesses.md#default-credential). |
 | The run fails because `claude` is not found | Install Claude Code so that `claude` is on your `PATH`. |
 | The run fails at checkout | Check that the GitHub integration record exists and that the token can read the repository. |
 

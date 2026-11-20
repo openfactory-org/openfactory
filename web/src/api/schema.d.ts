@@ -1442,7 +1442,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Start a self-improvement check now */
+        /**
+         * Start self-improvement now
+         * @description Starts one self-improvement run for each agent with unreviewed failed scores, whatever failedRunThreshold is. Returns 202 with the started runs, or 200 with started false and a reason when there is nothing to review.
+         */
         post: operations["runSelfImprovement"];
         delete?: never;
         options?: never;
@@ -2573,6 +2576,8 @@ export interface components {
             /** @description Shown once. */
             secret?: string;
             awaiting_secret?: boolean;
+            /** @description True when the webhook uses an existing team secret (webhook.secret_name) whose value is not shown. */
+            secret_reused?: boolean;
         };
         WebhookSecretRotated: {
             webhook: components["schemas"]["Webhook"];
@@ -2986,7 +2991,12 @@ export interface components {
         };
         SelfImprovementStarted: {
             factory_id: string;
+            /** @description True when at least one self-improvement run started. */
             started: boolean;
+            /** @description IDs of the started runs. */
+            run_ids: string[];
+            /** @description Why no run started. Set only when started is false. */
+            reason?: string;
         };
         /** @description Dashboard metrics of a factory over [since, until). */
         FactoryMetrics: {
@@ -6409,6 +6419,15 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Nothing to review: no run was started */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SelfImprovementStarted"];
+                };
+            };
             /** @description Accepted */
             202: {
                 headers: {
