@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
@@ -27,7 +27,7 @@ import { fpath, useFactory } from "../components/FactoryLayout";
 import { confirm } from "../components/overlays";
 import { useShell } from "../components/shell";
 import { Button, Empty, ErrorAlert, Keys, PageHeader, Query, Segmented, Skeleton, StateBadge, StatusIcon, TimeAgo } from "../components/ui";
-import { firstLine, humanizeError, money, shortID, stateLabel } from "../lib/format";
+import { bodyWithoutTitle, firstLine, humanizeError, money, shortID, sourceLabel, stateLabel } from "../lib/format";
 import { useMutate } from "../lib/mutate";
 import { isSubmitChord, MOD } from "../lib/queries";
 import { InboxItemCard } from "./Inbox";
@@ -62,7 +62,7 @@ function PRChip({ pr }: { pr: PR }) {
 
 function WorkRow({ wi, fid, showStage = true }: { wi: WorkItem; fid: string; showStage?: boolean }) {
   const src = wi.source;
-  const ref = src?.repo && src.number ? `${src.repo}#${src.number}` : src?.external_id || src?.provider;
+  const ref = src?.repo && src.number ? `${src.repo}#${src.number}` : src?.external_id || (src?.provider ? sourceLabel(src.provider) : undefined);
   return (
     <li>
       <div className="list-row">
@@ -298,7 +298,35 @@ type Actors = {
   itemCreatorID?: string;
   /** Maps an automation ID to its name. */
   automationName?: (automationID: string) => string | undefined;
+  /** Maps an inbox item ID to the kind of the item, for example "handoff". */
+  inboxKind?: (inboxID: string) => string | undefined;
 };
+
+// The object of "You resolved the …" for inbox kinds that a person closes
+// without an answer.
+const RESOLVED_OBJECT: Record<string, string> = {
+  handoff: "the handoff",
+  failure: "the failure",
+  answered: "the note",
+  spend_limit: "the spend limit notice",
+};
+
+// Resolutions that only close an item and carry no text of a person.
+const PLAIN_RESOLUTIONS = new Set(["resolved", "seen", "dismissed"]);
+
+/**
+ * Maps the inbox item IDs of a work item to their kinds. It reads the items
+ * and the timeline events that created them.
+ */
+export function inboxKinds(inbox: { id: string; kind: string }[], timeline: TimelineEvent[]): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const e of timeline) {
+    const d = (e.data ?? {}) as Record<string, unknown>;
+    if (str(d.inbox_id) && str(d.kind) && e.kind !== "message_out") m.set(str(d.inbox_id), str(d.kind));
+  }
+  for (const it of inbox) m.set(it.id, it.kind);
+  return m;
+}
 
 // Platform actors of automations: "<prefix>:<automation ID>".
 const AUTOMATION_ACTORS = ["automation:", "schedule:", "webhook:"];
@@ -400,6 +428,33 @@ export function describeEvent(e: TimelineEvent, actors: Actors = {}): { icon: Re
       return { icon: <RotateCcw size={size} />, text: <>{who} opened this again</> };
     case "sender_checked":
       return { icon: <ShieldCheck size={size} />, text: <>{who} checked the sender</> };
+    case "question": {
+      const title = str(d.title);
+      return {
+        icon: <MessageSquare size={size} />,
+        text: (
+          <>
+            {who} asked{title ? `: ${title}` : " a question"}
+          </>
+        ),
+        body: bodyWithoutTitle(title, str(d.body) || str(d.question) || str(d.text)),
+      };
+    }
+    case "answer": {
+      const kind = str(d.inbox_kind) || actors.inboxKind?.(str(d.inbox_id)) || "";
+      const object = RESOLVED_OBJECT[kind];
+      if (!object) return describeOther(e, who, size);
+      const resolution = str(d.resolution).trim();
+      return {
+        icon: <Check size={size} />,
+        text: (
+          <>
+            {who} resolved {object}
+          </>
+        ),
+        body: PLAIN_RESOLUTIONS.has(resolution.toLowerCase()) ? undefined : resolution,
+      };
+    }
     case "note": {
       const title = str(d.title);
       const verb = str(d.kind) === "handoff" ? "handed off" : "noted";
@@ -411,23 +466,29 @@ export function describeEvent(e: TimelineEvent, actors: Actors = {}): { icon: Re
             {title ? `: ${title}` : ""}
           </>
         ),
-        body: str(d.text) || str(d.summary) || str(d.body),
+        body: bodyWithoutTitle(title, str(d.text) || str(d.summary) || str(d.body)),
       };
     }
-    default: {
-      const body = str(d.body) || str(d.text) || str(d.resolution) || str(d.question) || str(d.summary) || str(d.note) || str(d.message);
-      return {
-        icon: <MessageSquare size={size} />,
-        text: (
-          <>
-            {who} · <span className="timeline-kind">{(e.kind ?? "event").replace(/_/g, " ")}</span>
-            {str(d.title) ? `: ${str(d.title)}` : ""}
-          </>
-        ),
-        body,
-      };
-    }
+    default:
+      return describeOther(e, who, size);
   }
+}
+
+/** An event without its own sentence: the actor, the kind and the title. */
+function describeOther(e: TimelineEvent, who: ReactNode, size: number): { icon: ReactNode; text: ReactNode; body?: string } {
+  const d = (e.data ?? {}) as Record<string, unknown>;
+  const title = str(d.title);
+  const body = str(d.body) || str(d.text) || str(d.resolution) || str(d.question) || str(d.summary) || str(d.note) || str(d.message);
+  return {
+    icon: <MessageSquare size={size} />,
+    text: (
+      <>
+        {who} · <span className="timeline-kind">{(e.kind ?? "event").replace(/_/g, " ")}</span>
+        {title ? `: ${title}` : ""}
+      </>
+    ),
+    body: bodyWithoutTitle(title, body),
+  };
 }
 
 function TimelineItem({ e, actors }: { e: TimelineEvent; actors: Actors }) {
@@ -513,11 +574,12 @@ export function WorkItemPage() {
   };
 
   return (
-    <Query q={q}>
+    <Query q={q} notFound={{ title: "Work item not found", text: "This factory has no work item with this ID.", back: { label: "Go to work items", to: fpath(f, "work") } }}>
       {(wi) => {
         const terminal = wi.stage === "complete" || wi.stage === "cancelled";
         const pending = (wi.inbox ?? []).filter((i) => !i.resolved);
         const cost = (wi.runs ?? []).reduce((a, r) => a + (r.usage?.cost_usd ?? 0), 0);
+        const kinds = inboxKinds(wi.inbox ?? [], wi.timeline ?? []);
         return (
           <>
             <PageHeader
@@ -571,7 +633,13 @@ export function WorkItemPage() {
                         <TimelineItem
                           key={e.id}
                           e={e}
-                          actors={{ nameOf, automationName, itemCreatorID: wi.creator_id, runCreator: (id) => (wi.runs ?? []).find((r) => r.run_id === id)?.creator }}
+                          actors={{
+                            nameOf,
+                            automationName,
+                            itemCreatorID: wi.creator_id,
+                            runCreator: (id) => (wi.runs ?? []).find((r) => r.run_id === id)?.creator,
+                            inboxKind: (id) => kinds.get(id),
+                          }}
                         />
                       ))}
                     </ol>
@@ -630,7 +698,7 @@ export function WorkItemPage() {
                             {wi.source.title ? firstLine(wi.source.title, 40) : wi.source.repo && wi.source.number ? `${wi.source.repo}#${wi.source.number}` : firstLine(wi.source.url, 40)} <ExternalLink size={11} aria-hidden="true" />
                           </a>
                         ) : (
-                          wi.source?.provider || firstLine(wi.source?.title, 40) || "—"
+                          (wi.source?.provider ? sourceLabel(wi.source.provider) : "") || firstLine(wi.source?.title, 40) || "—"
                         )}
                       </dd>
                     </div>
@@ -647,7 +715,7 @@ export function WorkItemPage() {
                       <li key={run.run_id} style={{ paddingLeft: `${depth * 16}px` }}>
                         <StatusIcon state={run.state} />
                         <Link to={`/runs/${encodeURIComponent(run.run_id)}`}>{run.name || run.agent_name || shortID(run.run_id)}</Link>
-                        <span className="sr-only">{run.state}</span>
+                        <span className="sr-only">{stateLabel(run.state)}</span>
                         <span className="cost">{money(run.usage?.cost_usd)}</span>
                       </li>
                     ))}
@@ -677,6 +745,20 @@ export function WorkItemPage() {
           </>
         );
       }}
+    </Query>
+  );
+}
+
+/** /work-items/{id}: finds the factory of a work item and opens its page there. */
+export function WorkItemRedirect() {
+  const { wid = "" } = useParams();
+  const q = useQuery({
+    queryKey: ["workitem", wid],
+    queryFn: () => unwrap(api.GET("/work-items/{id}", { params: { path: { id: wid } } })),
+  });
+  return (
+    <Query q={q} notFound={{ title: "Work item not found", text: "No factory has a work item with this ID.", back: { label: "Go to factories", to: "/factories" } }}>
+      {(wi) => <Navigate to={fpath(wi.factory_id, `work/${encodeURIComponent(wi.id)}`)} replace />}
     </Query>
   );
 }

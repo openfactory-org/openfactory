@@ -36,6 +36,42 @@ export function stateLabel(state?: string | null): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+const SOURCE_LABELS: Record<string, string> = {
+  api: "API",
+  mcp: "MCP",
+  cli: "CLI",
+  dashboard: "Dashboard",
+  automation: "Automation",
+  schedule: "Schedule",
+  webhook: "Webhook",
+  mention: "Mention",
+  orchestration: "Orchestration",
+  scorer: "Scorer",
+  benchmark: "Benchmark",
+  self_improvement: "Self-improvement",
+};
+
+/** The origin of a run or work item as a label: "DASHBOARD" and "dashboard" become "Dashboard", "API" stays "API". */
+export function sourceLabel(source?: string | null): string {
+  const s = (source ?? "").trim();
+  return SOURCE_LABELS[s.toLowerCase()] ?? stateLabel(s);
+}
+
+/**
+ * The body of an item without a first line that repeats its title. The
+ * comparison ignores case and surrounding white space. The result is empty
+ * when the body only repeats the title.
+ */
+export function bodyWithoutTitle(title?: string | null, body?: string | null): string {
+  const b = (body ?? "").trim();
+  const t = (title ?? "").trim().toLowerCase();
+  if (!b || !t) return b;
+  const nl = b.indexOf("\n");
+  const first = (nl < 0 ? b : b.slice(0, nl)).trim();
+  if (first.toLowerCase() !== t) return b;
+  return nl < 0 ? "" : b.slice(nl + 1).trim();
+}
+
 /** A scorer sampling rate. The definition stores it as a percentage (0 to 100, default 10), not a ratio. */
 export function samplingLabel(rate?: number | null): string {
   const v = rate ?? 10;
@@ -52,6 +88,14 @@ export function fmtTime(t?: string | null): string {
   const d = new Date(t);
   if (Number.isNaN(d.getTime()) || d.getFullYear() < 1971) return "—";
   return d.toLocaleString();
+}
+
+/** A time in UTC to the minute, for example "2026-11-23 09:00 UTC". Schedules and webhook deliveries use it. */
+export function fmtUTC(t?: string | null): string {
+  if (!t) return "—";
+  const d = new Date(t);
+  if (Number.isNaN(d.getTime())) return "—";
+  return `${d.toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
 /** The time of day, for example 14:05:09. */
