@@ -13,9 +13,16 @@ export function useFactories() {
   });
 }
 
+/**
+ * The key of the sidebar inbox badge. It starts with "inbox", so the live
+ * stream's inbox events (lib/live.ts) and the inbox mutations refresh it at once;
+ * the interval is only a fallback.
+ */
+export const INBOX_COUNT_KEY = ["inbox", "count"] as const;
+
 export function useInboxCount() {
   return useQuery({
-    queryKey: ["inbox", "count"],
+    queryKey: INBOX_COUNT_KEY,
     queryFn: () => unwrap(api.GET("/inbox", { params: { query: { limit: 200 } } })).then((r) => r.items?.length ?? 0),
     refetchInterval: 60_000,
   });

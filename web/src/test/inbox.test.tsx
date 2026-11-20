@@ -128,7 +128,7 @@ describe("inbox actions", () => {
     expect(within(card).getByText("Unread")).toBeInTheDocument();
     await user.click(within(card).getByRole("button", { name: "Which branch?" }));
     await waitFor(() => expect(reads).toEqual([true]));
-    await user.click(await within(screen.getByText("Which branch?").closest("li")!).findByRole("button", { name: "dev (recommended)" }));
+    await user.click(await within(screen.getByText("Which branch?").closest("li")!).findByRole("button", { name: "Answer: dev (recommended)" }));
     // The resolved item and the toast both offer Undo.
     const undo = await screen.findAllByRole("button", { name: "Undo" });
     expect(undo.length).toBe(2);

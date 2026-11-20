@@ -27,7 +27,7 @@ import { fpath, useFactory } from "../components/FactoryLayout";
 import { confirm } from "../components/overlays";
 import { useShell } from "../components/shell";
 import { Button, Empty, ErrorAlert, Keys, PageHeader, Query, Segmented, Skeleton, StateBadge, StatusIcon, TimeAgo } from "../components/ui";
-import { firstLine, humanizeError, money, shortID } from "../lib/format";
+import { firstLine, humanizeError, money, shortID, stateLabel } from "../lib/format";
 import { useMutate } from "../lib/mutate";
 import { isSubmitChord, MOD } from "../lib/queries";
 import { InboxItemCard } from "./Inbox";
@@ -189,7 +189,8 @@ export function WorkItemsPage() {
           <option value="">Any stage</option>
           {STAGES.map((s) => (
             <option key={s} value={s}>
-              {stageLabel(s)}
+              {/* Sentence case, like the group headings of the board (.state-label). */}
+              {stateLabel(s)}
             </option>
           ))}
         </select>

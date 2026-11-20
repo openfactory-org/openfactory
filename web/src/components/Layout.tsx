@@ -88,11 +88,16 @@ function LiveUpdates() {
 function SideLink({ item, badge, active }: { item: NavItem; badge?: number; active?: boolean }) {
   return (
     <li>
-      <NavLink to={item.to} end={item.end} className={({ isActive }) => `nav-link ${(active ?? isActive) ? "active" : ""}`}>
+      <NavLink
+        to={item.to}
+        end={item.end}
+        className={({ isActive }) => `nav-link ${(active ?? isActive) ? "active" : ""}`}
+        aria-label={badge ? `${item.label}, ${badge} waiting` : item.label}
+      >
         <item.icon size={15} aria-hidden="true" />
         <span className="nav-label">{item.label}</span>
         {badge ? (
-          <span className="nav-badge" aria-label={`${badge} waiting`}>
+          <span className="nav-badge" aria-hidden="true">
             {badge > 99 ? "99+" : badge}
           </span>
         ) : null}
@@ -107,9 +112,16 @@ function FactoryItem({ factory, active, onRun }: { factory: Factory; active: boo
     if (active) setOpen(true);
   }, [active]);
   const nav = factoryNav(factory);
+  const listID = `nav-factory-${factory.id}`;
   return (
     <li>
-      <button type="button" className="nav-link" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+      <button
+        type="button"
+        className="nav-link"
+        aria-expanded={open}
+        aria-controls={open ? listID : undefined}
+        onClick={() => setOpen((o) => !o)}
+      >
         <span className="factory-dot" style={{ background: factoryColor(factory.id) }} aria-hidden="true">
           {factory.name.slice(0, 1)}
         </span>
@@ -117,7 +129,7 @@ function FactoryItem({ factory, active, onRun }: { factory: Factory; active: boo
         <ChevronRight size={13} className="nav-caret" aria-hidden="true" />
       </button>
       {open && (
-        <ul className="nav-list nav-sub" aria-label={`${factory.name} pages`}>
+        <ul id={listID} className="nav-list nav-sub" aria-label={`${factory.name} pages`}>
           {nav.work.map((n) => (
             <SideLink key={n.to} item={n} active={onRun && n.label === "Runs" ? true : undefined} />
           ))}
@@ -335,12 +347,18 @@ export function Layout() {
             )}
           </ul>
           <div className="nav-section">
-            <button type="button" className="btn-link-plain" aria-expanded={teamOpen || onTeamPage} onClick={() => setTeamOpen(!teamOpen)}>
+            <button
+              type="button"
+              className="btn-link-plain"
+              aria-expanded={teamOpen || onTeamPage}
+              aria-controls={teamOpen || onTeamPage ? "nav-team" : undefined}
+              onClick={() => setTeamOpen(!teamOpen)}
+            >
               Team settings
             </button>
           </div>
           {(teamOpen || onTeamPage) && (
-            <ul className="nav-list" aria-label="Team settings">
+            <ul id="nav-team" className="nav-list" aria-label="Team settings">
               {TEAM_NAV.map((n) => (
                 <SideLink key={n.to} item={n} />
               ))}

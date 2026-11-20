@@ -150,7 +150,7 @@ export function InboxItemCard({ item, factory, inWorkItem }: { item: InboxItem; 
           <TimeAgo t={item.created_at} />
         </span>
       </div>
-      {(open || !item.resolved) && item.body && <InboxBody item={item} />}
+      {(open || !item.resolved) && item.body && item.body.trim() !== item.title.trim() && <InboxBody item={item} />}
       <div className="inbox-foot">
         {item.resolved ? (
           <p className="muted small">
@@ -189,8 +189,14 @@ export function InboxItemCard({ item, factory, inWorkItem }: { item: InboxItem; 
               ) : item.kind === "question" || item.kind === "blocked" ? (
                 <form onSubmit={submitAnswer} className="input-row" aria-label={`Answer: ${item.title}`}>
                   {options.map((o) => (
-                    <Button key={o} variant={o === recommended ? "primary" : "secondary"} onClick={() => resolve.mutate({ id: item.id, resolution: o })} busy={resolve.isPending}>
-                      {o === recommended ? `${o} (recommended)` : o}
+                    <Button
+                      key={o}
+                      variant={o === recommended ? "primary" : "secondary"}
+                      onClick={() => resolve.mutate({ id: item.id, resolution: o })}
+                      busy={resolve.isPending}
+                      title={`Send "${o}" as the answer`}
+                    >
+                      Answer: {o === recommended ? `${o} (recommended)` : o}
                     </Button>
                   ))}
                   <label className="sr-only" htmlFor={`answer-${item.id}`}>
