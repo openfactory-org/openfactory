@@ -76,7 +76,7 @@ describe("run detail live transcript", () => {
     });
     await waitFor(() => expect(screen.queryByText(/● Live/)).not.toBeInTheDocument());
     expect(screen.getAllByText("Opened PR #12").length).toBeGreaterThan(0);
-    expect(screen.getByText("SUCCEEDED")).toBeInTheDocument();
+    expect(screen.getByText("Succeeded")).toBeInTheDocument();
     expect(screen.queryByLabelText(/follow-up message/i)).not.toBeInTheDocument();
     expect(es.readyState).toBe(MockEventSource.CLOSED);
   });
