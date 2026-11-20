@@ -272,6 +272,28 @@ var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[
 type triggerEnv struct {
 	integrationsSet bool
 	integrations    map[string]bool
+	// webhooks holds the names of the webhooks/<name>.yaml files. A
+	// webhook_ids entry must name one of them, or be a webhook UID, which
+	// the preflight checks against the stored webhooks.
+	webhooks map[string]bool
+}
+
+// WebhookUIDPrefix is the prefix of the UIDs that the server gives to
+// webhooks. A webhook_ids entry with this prefix that does not name a
+// webhook file is a UID; the preflight checks it.
+const WebhookUIDPrefix = "whk_"
+
+// knownWebhooks returns the webhook names of env for an error message.
+func (env triggerEnv) knownWebhooks() string {
+	if len(env.webhooks) == 0 {
+		return "none; add webhooks/<name>.yaml"
+	}
+	names := make([]string, 0, len(env.webhooks))
+	for n := range env.webhooks {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }
 
 func parseTrigger(c *doc, n *yaml.Node, path string, env triggerEnv) (core.Trigger, bool) {
@@ -662,6 +684,10 @@ func validateValue(c *doc, n *yaml.Node, path string, ks keySpec, env triggerEnv
 	case vWebhookIDs:
 		if strings.HasSuffix(s, ".yaml") || strings.HasSuffix(s, ".yml") || strings.Contains(s, "/") {
 			c.errf(n, path, "%s takes a webhook UID or webhook name, not a file name (got %q)", path, s)
+			return nil, false
+		}
+		if !env.webhooks[s] && !strings.HasPrefix(s, WebhookUIDPrefix) {
+			c.errf(n, path, "webhook %q does not exist; known: %s", s, env.knownWebhooks())
 			return nil, false
 		}
 	}

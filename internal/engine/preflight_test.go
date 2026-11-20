@@ -46,7 +46,7 @@ func TestPreflightChecksTheTeam(t *testing.T) {
 	}
 	for _, want := range []struct{ file, field, text string }{
 		{"agents/triage/agent.md", "secrets", `secret "MISSING"`},
-		{"agents/triage/agent.md", "environment", `environment "env_gone"`},
+		{"agents/triage/agent.md", "environmentId", `environment "env_gone"`},
 		{"agents/triage/agent.md", "workerHost", `worker host "build-box"`},
 		{"agents/triage/agent.md", "mcpServers.gone.managedId", `"mcp_gone"`},
 		{"webhooks/deploys.yaml", "secretName", "cannot be used in a URL"},

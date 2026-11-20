@@ -7,9 +7,12 @@ import (
 )
 
 func (c *compiler) compileAutomations() {
-	env := triggerEnv{integrationsSet: c.def.IntegrationsSet, integrations: map[string]bool{}}
+	env := triggerEnv{integrationsSet: c.def.IntegrationsSet, integrations: map[string]bool{}, webhooks: map[string]bool{}}
 	for _, i := range c.def.Integrations {
 		env.integrations[i.Type] = true
+	}
+	for name := range c.t.webhooks {
+		env.webhooks[name] = true
 	}
 	for _, name := range sortedNames(c.t.automations) {
 		p := c.t.automations[name]

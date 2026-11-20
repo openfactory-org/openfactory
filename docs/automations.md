@@ -379,6 +379,7 @@ triggers:
 ```
 
 - `webhook_ids` is a one-item list: the webhook UID or name (the `<name>` of `webhooks/<name>.yaml`, not the file name). For several webhooks, add one trigger per webhook.
+- The webhook must exist. A name must match a `webhooks/<name>.yaml` file of the definition. A UID must belong to a webhook of the factory whose file is still in the definition. Otherwise validation fails, for example `automations/deploys/automation.md:5 triggers[0].filter.webhook_ids[0]: webhook "nope" does not exist; known: ci, sentry-alerts`. Prefer the name: the UID changes when a webhook is deleted and created again.
 - `payload` is optional. Without it, every accepted delivery matches.
 
 To create webhooks and configure senders, see [Custom webhooks](webhooks.md).

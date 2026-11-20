@@ -79,8 +79,25 @@ func (e *Engine) checkDefinition(ctx context.Context, f *core.Factory, files map
 	}
 	chk.Definition = def
 	chk.Errors = append(chk.Errors, e.checkAlias(ctx, f, def)...)
-	resolved := e.preflight(ctx, f, def, chk)
+	resolved := e.preflight(ctx, f, def, files, chk)
+	addIssueLines(files, chk.Errors)
+	addIssueLines(files, chk.Warnings)
 	return chk, resolved
+}
+
+// addIssueLines gives a line to each issue that names a file and a key path
+// but has no line. The compiler sets the line of its own errors; the
+// preflight runs on the compiled definition and finds the line here.
+func addIssueLines(files map[string]string, issues []core.ValidationError) {
+	for i := range issues {
+		is := &issues[i]
+		if is.Line != 0 || is.Field == "" {
+			continue
+		}
+		if content, ok := files[is.File]; ok {
+			is.Line = definition.KeyLine(is.File, content, is.Field)
+		}
+	}
 }
 
 // resolvedFilters maps an automation name to the filters of its triggers
@@ -89,12 +106,13 @@ type resolvedFilters map[string][]json.RawMessage
 
 // preflight checks a compiled definition against the team of f. It adds
 // errors, warnings and skipped checks to chk.
-func (e *Engine) preflight(ctx context.Context, f *core.Factory, def *core.CompiledDefinition, chk *core.DefinitionCheck) resolvedFilters {
+func (e *Engine) preflight(ctx context.Context, f *core.Factory, def *core.CompiledDefinition, files map[string]string, chk *core.DefinitionCheck) resolvedFilters {
 	e.preflightSecrets(ctx, f, def, chk)
-	e.preflightEnvironments(ctx, f, def, chk)
+	e.preflightEnvironments(ctx, f, def, files, chk)
 	e.preflightWorkerHosts(ctx, f, def, chk)
 	e.preflightMCPServers(ctx, f, def, chk)
 	e.preflightWebhooks(ctx, f, def, chk)
+	e.preflightWebhookFilters(ctx, f, def, chk)
 	e.preflightRunAs(ctx, f, def, chk)
 	e.preflightApprovers(ctx, f, def, chk)
 	preflightMachines(def, chk)
@@ -218,16 +236,27 @@ func (e *Engine) preflightSecrets(ctx context.Context, f *core.Factory, def *cor
 
 // ---------- environments ----------
 
-func (e *Engine) preflightEnvironments(ctx context.Context, f *core.Factory, def *core.CompiledDefinition, chk *core.DefinitionCheck) {
+// envField is the key that sets the environment of an agent or an automation.
+const envField = "environmentId"
+
+func (e *Engine) preflightEnvironments(ctx context.Context, f *core.Factory, def *core.CompiledDefinition, files map[string]string, chk *core.DefinitionCheck) {
 	var refs []defRef
+	// An agent without its own environmentId inherits
+	// agentDefaults.environmentId of factory.yaml: report the error there.
+	defaultsSet := definition.KeyLine("factory.yaml", files["factory.yaml"], "agentDefaults."+envField) > 0
 	for _, a := range def.Agents {
-		if a.EnvironmentID != "" {
-			refs = append(refs, defRef{agentFile(a.Name), "environment", a.EnvironmentID})
+		if a.EnvironmentID == "" {
+			continue
 		}
+		file, field := agentFile(a.Name), envField
+		if defaultsSet && definition.KeyLine(file, files[file], envField) == 0 {
+			file, field = "factory.yaml", "agentDefaults."+envField
+		}
+		refs = append(refs, defRef{file, field, a.EnvironmentID})
 	}
 	for _, au := range def.Automations {
 		if au.Overrides != nil && au.Overrides.EnvironmentID != nil && *au.Overrides.EnvironmentID != "" {
-			refs = append(refs, defRef{automationFile(au.Name), "environment", *au.Overrides.EnvironmentID})
+			refs = append(refs, defRef{automationFile(au.Name), envField, *au.Overrides.EnvironmentID})
 		}
 	}
 	if len(refs) == 0 {
@@ -404,6 +433,86 @@ func (e *Engine) preflightWebhooks(ctx context.Context, f *core.Factory, def *co
 				Message: fmt.Sprintf("the value of secret %q cannot be used in a URL; a url_token secret accepts only letters, digits, '-', '.', '_' and '~'", w.SecretName)})
 		}
 	}
+}
+
+// preflightWebhookFilters checks the webhook UIDs in the webhook_ids filters
+// of webhook triggers. The compiler checks webhook names against the
+// webhooks/<name>.yaml files and leaves the entries that look like a UID to
+// this check. A UID is valid when it belongs to a stored webhook whose file is
+// still in the definition: the apply keeps the UID of a webhook while its
+// name stays, and a webhook file that was removed gets a new UID.
+func (e *Engine) preflightWebhookFilters(ctx context.Context, f *core.Factory, def *core.CompiledDefinition, chk *core.DefinitionCheck) {
+	type ref struct{ file, field, value string }
+	names := make(map[string]bool, len(def.Webhooks))
+	for _, w := range def.Webhooks {
+		names[w.Name] = true
+	}
+	var refs []ref
+	for _, au := range def.Automations {
+		for i, t := range au.Triggers {
+			if t.Provider != "webhook" || len(t.Filter) == 0 {
+				continue
+			}
+			field, ids := webhookFilterIDs(t.Filter)
+			for j, id := range ids {
+				if !names[id] && strings.HasPrefix(id, definition.WebhookUIDPrefix) {
+					refs = append(refs, ref{automationFile(au.Name), fmt.Sprintf("triggers[%d].filter.%s[%d]", i, field, j), id})
+				}
+			}
+		}
+	}
+	if len(refs) == 0 {
+		return
+	}
+	stored, err := e.store.ListWebhooks(ctx, f.ID)
+	if err != nil {
+		chk.Skipped = append(chk.Skipped, core.SkippedCheck{Check: "webhook filters", Reason: "could not list the webhooks: " + err.Error()})
+		return
+	}
+	known := map[string]bool{}
+	for _, w := range stored {
+		if names[w.Name] {
+			known[w.ID] = true
+		}
+	}
+	list := make([]string, 0, len(names))
+	for n := range names {
+		list = append(list, n)
+	}
+	sort.Strings(list)
+	hint := strings.Join(list, ", ")
+	if hint == "" {
+		hint = "none; add webhooks/<name>.yaml"
+	}
+	for _, r := range refs {
+		if !known[r.value] {
+			chk.Errors = append(chk.Errors, core.ValidationError{File: r.file, Field: r.field,
+				Message: fmt.Sprintf("webhook %q does not exist; known: %s", r.value, hint)})
+		}
+	}
+}
+
+// webhookFilterIDs returns the entries of the webhook_ids key of a compiled
+// webhook filter and the key path of the list ("webhook_ids" or
+// "webhook_ids.in").
+func webhookFilterIDs(filter json.RawMessage) (string, []string) {
+	var flt struct {
+		WebhookIDs json.RawMessage `json:"webhook_ids"`
+	}
+	if json.Unmarshal(filter, &flt) != nil || len(flt.WebhookIDs) == 0 {
+		return "", nil
+	}
+	var ids []string
+	if json.Unmarshal(flt.WebhookIDs, &ids) == nil {
+		return "webhook_ids", ids
+	}
+	var in struct {
+		In []string `json:"in"`
+	}
+	if json.Unmarshal(flt.WebhookIDs, &in) == nil {
+		return "webhook_ids.in", in.In
+	}
+	return "", nil
 }
 
 // ---------- approvers ----------
