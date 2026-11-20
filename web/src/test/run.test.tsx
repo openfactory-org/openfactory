@@ -128,4 +128,16 @@ describe("run states", () => {
     expect(screen.queryByText(/old text/)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/follow-up message/i)).not.toBeInTheDocument();
   });
+
+  it("says the agent did not start when a run ended before its first turn", async () => {
+    mockFetch({
+      "GET /api/v1/me": ME,
+      "GET /api/v1/runs/run_1": { ...RUN, state: "ERROR", usage: undefined, started_at: undefined, finished_at: new Date().toISOString() },
+      "GET /api/v1/runs": { items: [], page_info: { has_next_page: false } },
+      "GET /api/v1/factories/fac_1/scorers": { items: [], page_info: { has_next_page: false } },
+    });
+    renderAt(<RunPage />, { route: "/runs/run_1", path: "/runs/:id" });
+    const details = await screen.findByRole("complementary", { name: "Run details" });
+    expect(within(details).getAllByText("Agent did not start")).toHaveLength(2);
+  });
 });
