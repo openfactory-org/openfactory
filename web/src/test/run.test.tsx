@@ -1,7 +1,7 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { RunPage, isTerminal, mergeMessages } from "../pages/Runs";
+import { DONE_REFETCH_MS, RunPage, isTerminal, mergeMessages } from "../pages/Runs";
 import { ME, MockEventSource, installEventSource, mockFetch, renderAt } from "./utils";
 
 const RUN = {
@@ -79,6 +79,49 @@ describe("run detail live transcript", () => {
     expect(screen.getByText("Succeeded")).toBeInTheDocument();
     expect(screen.queryByLabelText(/follow-up message/i)).not.toBeInTheDocument();
     expect(es.readyState).toBe(MockEventSource.CLOSED);
+  });
+});
+
+describe("run detail after the run ends", () => {
+  beforeEach(() => installEventSource());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("loads the run again to show the usage that arrives after a stop", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const empty = { cost_usd: 0, input_tokens: 0, output_tokens: 0, duration_ms: 0 };
+    let current: Record<string, unknown> = { ...RUN, usage: empty };
+    let gets = 0;
+    mockFetch({
+      "GET /api/v1/me": ME,
+      "GET /api/v1/runs/run_1": () => {
+        gets++;
+        return { body: current };
+      },
+      "GET /api/v1/runs": { items: [], page_info: { has_next_page: false } },
+      "GET /api/v1/factories/fac_1/scorers": { items: [], page_info: { has_next_page: false } },
+    });
+    renderAt(<RunPage />, { route: "/runs/run_1", path: "/runs/:id" });
+    expect(await screen.findByRole("heading", { name: /fix login/i, level: 1 })).toBeInTheDocument();
+    const es = await waitFor(() => MockEventSource.latest("/runs/run_1/events")!);
+    const stopped = { ...RUN, state: "CANCELLED", phase: "cancelled", usage: empty };
+    current = stopped;
+    act(() => {
+      es.open();
+      es.emit("done", stopped);
+    });
+    await waitFor(() => expect(screen.getByText("Cancelled")).toBeInTheDocument());
+    const before = gets;
+    // The final partial usage lands after the state change.
+    current = { ...stopped, usage: { cost_usd: 0.05, input_tokens: 4321, output_tokens: 210, duration_ms: 12000, coverage: "partial" } };
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(DONE_REFETCH_MS[DONE_REFETCH_MS.length - 1] + 100);
+    });
+    await waitFor(() => expect(screen.getByText("4,321")).toBeInTheDocument());
+    expect(screen.getByText("12s")).toBeInTheDocument();
+    expect(gets).toBeGreaterThan(before);
   });
 });
 

@@ -8,7 +8,7 @@ import { useAuth } from "../auth/AuthContext";
 import { fpath } from "../components/FactoryLayout";
 import { confirm } from "../components/overlays";
 import { Alert, Button, Empty, ErrorAlert, isNotFound, Keys, KV, NotFound, PageHeader, Skeleton, StateBadge, StatusIcon, TimeAgo } from "../components/ui";
-import { count, duration, firstLine, fmtClock, fmtTime, humanizeError, money, shortID, stateLabel } from "../lib/format";
+import { count, duration, firstLine, fmtClock, fmtTime, humanizeError, money, shortID, sourceLabel, stateLabel } from "../lib/format";
 import { useMutate } from "../lib/mutate";
 import { isSubmitChord, MOD } from "../lib/queries";
 import { runTree } from "./Work";
@@ -207,8 +207,15 @@ export function mergeMessages(prev: RunMessage[], incoming: RunMessage[]): RunMe
 }
 
 /**
+ * The delays after the done event at which the run page loads the run again.
+ * The final usage of a stopped run arrives after its state change.
+ */
+export const DONE_REFETCH_MS = [0, 3000, 10000];
+
+/**
  * Live transcript: replays every message then streams new ones and state
- * changes from GET /runs/{id}/events until the run finishes.
+ * changes from GET /runs/{id}/events until the run finishes. After the run
+ * finishes, it loads the run again a few times to get the final usage.
  */
 export function useRunStream(runID: string, initial?: Run) {
   const qc = useQueryClient();
@@ -230,9 +237,26 @@ export function useRunStream(runID: string, initial?: Run) {
     done: (d) => {
       setRun(d as Run);
       setDone(true);
-      void qc.invalidateQueries({ queryKey: ["run", runID] });
     },
   });
+  useEffect(() => {
+    if (!done) return;
+    let stopped = false;
+    const reload = () =>
+      unwrap(api.GET("/runs/{runId}", { params: { path: { runId: runID } } }))
+        .then((r) => {
+          // A copy read before the state change landed would undo it.
+          if (stopped || !isTerminal(r.state)) return;
+          setRun(r);
+          qc.setQueryData(["run", runID], r);
+        })
+        .catch(() => undefined);
+    const timers = DONE_REFETCH_MS.map((ms) => setTimeout(reload, ms));
+    return () => {
+      stopped = true;
+      timers.forEach(clearTimeout);
+    };
+  }, [done, runID, qc]);
   return { messages, run, live: stream.status === "open" && !done, status: stream.status, done };
 }
 
@@ -439,7 +463,7 @@ export function RunPage() {
             <KV
               items={[
                 ["Run ID", <code key="id">{run.run_id}</code>],
-                ["Source", run.source_ref ? `${run.source} (${run.source_ref})` : run.source],
+                ["Source", run.source_ref ? `${sourceLabel(run.source)} (${run.source_ref})` : sourceLabel(run.source)],
                 ...(run.creator ? ([["Creator", run.creator.name || run.creator.id]] as [string, string][]) : []),
                 ...(run.run_as ? ([["Runs as", principalLabel(run.run_as)]] as [string, string][]) : []),
                 ...(run.config?.machine?.name ? ([["Machine", run.config.machine.name]] as [string, string][]) : []),
