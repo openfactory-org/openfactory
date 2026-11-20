@@ -149,6 +149,7 @@ export function AgentPage() {
       {(s) => (
         <>
           <PageHeader
+            docTitle={s.name}
             title={
               <>
                 {s.name} {agent && <Badge>{agent.type}</Badge>}

@@ -63,6 +63,12 @@ describe("not-found pages", () => {
     { path: "/f/fac_gone", heading: "Factory not found", link: "Go to factories", href: "/factories" },
     { path: "/f/fac_1/agents/nope", heading: "Agent not found", link: "Go to agents", href: "/f/fac_1/agents" },
     { path: "/runs/run_gone", heading: "Run not found", link: "Go to runs", href: "/runs" },
+    { path: "/f/fac_1/automations/nope", heading: "Automation not found", link: "Go to automations", href: "/f/fac_1/automations" },
+    { path: "/f/fac_1/webhooks/whk_x", heading: "Webhook not found", link: "Go to webhooks", href: "/f/fac_1/webhooks" },
+    { path: "/f/fac_1/work/wi_gone", heading: "Work item not found", link: "Go to work items", href: "/f/fac_1/work" },
+    { path: "/work-items/wi_gone", heading: "Work item not found", link: "Go to factories", href: "/factories" },
+    { path: "/environments/env_gone", heading: "Environment not found", link: "Go to environments", href: "/environments" },
+    { path: "/mcp-servers/mcp_gone", heading: "MCP server not found", link: "Go to MCP servers", href: "/mcp-servers" },
   ])("$path", async ({ path, heading, link, href }) => {
     // mockFetch answers 404 for every route it does not know.
     mockApp();
