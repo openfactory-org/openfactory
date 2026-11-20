@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mergeSecrets, useUsableSecrets } from "../lib/secrets";
+import { defaultCredential, factoryCredentialState, HARNESS_CREDENTIAL_TYPES, mergeSecrets, useUsableSecrets } from "../lib/secrets";
 import { SecretsPage } from "../pages/Team";
 import { ME, mockFetch, renderAt } from "./utils";
 
@@ -36,6 +36,29 @@ function Picker() {
     </ul>
   );
 }
+
+describe("defaultCredential", () => {
+  const claude = HARNESS_CREDENTIAL_TYPES.claude;
+  const sec = (name: string, type: string, scope: "team" | "factory") => ({ id: name, name, type, scope }) as never;
+
+  it("picks the one fitting team secret", () => {
+    expect(defaultCredential([sec("TOK", "anthropic_oauth_token", "team"), sec("GH", "generic", "team")], claude)).toEqual({ kind: "one", name: "TOK", scope: "team" });
+  });
+  it("prefers the factory scope and does not fall through when it is ambiguous", () => {
+    expect(defaultCredential([sec("F", "anthropic_api_key", "factory"), sec("T", "anthropic_api_key", "team")], claude)).toEqual({ kind: "one", name: "F", scope: "factory" });
+    expect(defaultCredential([sec("F2", "anthropic_api_key", "factory"), sec("F1", "anthropic_oauth_token", "factory"), sec("T", "anthropic_api_key", "team")], claude)).toEqual({
+      kind: "ambiguous",
+      scope: "factory",
+      names: ["F1", "F2"],
+    });
+  });
+  it("ignores secrets of other harnesses and generic secrets", () => {
+    expect(defaultCredential([sec("O", "openai_api_key", "team"), sec("ANTHROPIC_API_KEY", "generic", "team")], claude)).toEqual({ kind: "none" });
+  });
+  it("is covered when any harness has exactly one credential", () => {
+    expect(factoryCredentialState([sec("A", "anthropic_api_key", "team"), sec("B", "anthropic_api_key", "team"), sec("O", "openai_api_key", "team")]).kind).toBe("one");
+  });
+});
 
 describe("useUsableSecrets", () => {
   afterEach(() => vi.unstubAllGlobals());

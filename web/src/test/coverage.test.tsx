@@ -118,6 +118,20 @@ describe("get started checklist", () => {
     await screen.findByText("No code host covers acme/api.");
     expect(screen.queryByText(/A run needs a model credential/)).not.toBeInTheDocument();
   });
+
+  it("warns when more than one team secret can be the model credential", async () => {
+    dashboardRoutes({
+      "GET /api/v1/secrets": {
+        items: [
+          { id: "sec_1", name: "KEY_B", type: "anthropic_oauth_token" },
+          { id: "sec_2", name: "KEY_A", type: "anthropic_api_key" },
+        ],
+      },
+    });
+    renderDashboard();
+    expect(await screen.findByText(/More than one team secret can be the model credential \(KEY_A, KEY_B\)/)).toBeInTheDocument();
+    expect(screen.queryByText(/A run needs a model credential/)).not.toBeInTheDocument();
+  });
 });
 
 describe("new factory form", () => {

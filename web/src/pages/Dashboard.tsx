@@ -10,7 +10,7 @@ import { SpendCard } from "../components/SpendCard";
 import { Button, Card, ErrorAlert, Metric, PageHeader, Query, Segmented, StatusIcon } from "../components/ui";
 import { coverageGaps, describeGaps, hasApplicableForge } from "../lib/coverage";
 import { count, duration, money, percent } from "../lib/format";
-import { useUsableSecrets } from "../lib/secrets";
+import { factoryCredentialState, useUsableSecrets } from "../lib/secrets";
 import { WorkTable } from "./Work";
 
 type FactoryMetrics = Schemas["FactoryMetrics"];
@@ -20,9 +20,6 @@ const RANGES = [
   { key: "30d", label: "Last 30 days", short: "30 days", days: 30 },
   { key: "90d", label: "Last 90 days", short: "90 days", days: 90 },
 ];
-
-/** Secret types that hold a model credential for a harness. */
-const MODEL_CREDENTIAL_TYPES = ["anthropic_api_key", "anthropic_oauth_token", "anthropic_bedrock_api_key", "anthropic_bedrock_access_key", "openai_api_key"];
 
 function shortDate(d: string): string {
   const t = new Date(`${d}T00:00:00Z`);
@@ -274,7 +271,7 @@ export function DashboardPage() {
   const repos = settings.data?.repositories ?? [];
   const gaps = integrations.data && settings.data ? coverageGaps(repos, integrations.data, f.id) : [];
   const hasForge = !!integrations.data && (settings.data && repos.length > 0 ? gaps.length === 0 : hasApplicableForge(integrations.data, f.id));
-  const hasModelSecret = (secrets.data ?? []).some((s) => MODEL_CREDENTIAL_TYPES.includes(s.type));
+  const credential = secrets.data ? factoryCredentialState(secrets.data) : undefined;
   // A factory without work shows what to do first, in place of empty figures.
   const fresh = recent.data !== undefined && recent.data.length === 0;
 
@@ -348,9 +345,15 @@ export function DashboardPage() {
               )}
             </li>
           </ol>
-          {secrets.data !== undefined && !secrets.isLoading && !hasModelSecret && (
+          {credential && !secrets.isLoading && credential.kind === "none" && (
             <p className="muted small">
               A run needs a model credential. If the server does not provide one, add it under <Link to="/secrets">Secrets</Link>.
+            </p>
+          )}
+          {credential && !secrets.isLoading && credential.kind === "ambiguous" && (
+            <p className="muted small">
+              More than one {credential.scope} secret can be the model credential ({credential.names.join(", ")}), so runs get none. Set harness.auth on the agents, or keep one of them under{" "}
+              <Link to="/secrets">Secrets</Link>.
             </p>
           )}
         </section>
