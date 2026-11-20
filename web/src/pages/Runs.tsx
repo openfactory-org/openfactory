@@ -7,7 +7,7 @@ import { useEventStream } from "../api/sse";
 import { useAuth } from "../auth/AuthContext";
 import { fpath } from "../components/FactoryLayout";
 import { confirm } from "../components/overlays";
-import { Alert, Button, Empty, ErrorAlert, Keys, KV, PageHeader, Skeleton, StateBadge, StatusIcon, TimeAgo } from "../components/ui";
+import { Alert, Button, Empty, ErrorAlert, isNotFound, Keys, KV, NotFound, PageHeader, Skeleton, StateBadge, StatusIcon, TimeAgo } from "../components/ui";
 import { count, duration, firstLine, fmtClock, fmtTime, humanizeError, money, shortID, stateLabel } from "../lib/format";
 import { useMutate } from "../lib/mutate";
 import { isSubmitChord, MOD } from "../lib/queries";
@@ -157,9 +157,17 @@ const ROLE_LABEL: Record<string, string> = {
 
 const TOOL_KIND: Record<string, string> = { tool_call: "Tool", tool_result: "Result", log: "Log" };
 
+/** The number of non-empty lines after the first one, which the one-line summary of a tool row hides. */
+export function hiddenLines(s?: string | null): number {
+  const lines = (s ?? "").split("\n").filter((l) => l.trim() !== "");
+  return Math.max(0, lines.length - 1);
+}
+
 export function TranscriptMessage({ m }: { m: RunMessage }) {
   const collapsible = m.role === "tool_call" || m.role === "tool_result" || m.role === "log";
   const summary = firstLine(m.content, 160);
+  const more = hiddenLines(m.content);
+  const hasData = !!m.data && Object.keys(m.data).length > 0;
   return (
     <li className={`msg msg-${m.role}`} data-seq={m.seq}>
       <div className="msg-meta">
@@ -174,8 +182,15 @@ export function TranscriptMessage({ m }: { m: RunMessage }) {
             <ChevronRight size={12} aria-hidden="true" />
             <span className="tool-kind">{TOOL_KIND[m.role]}</span>
             <span className="tool-text">{summary || "(empty)"}</span>
+            {more > 0 && (
+              <span className="faint nowrap" style={{ flexShrink: 0, fontFamily: "var(--sans)" }}>
+                … {more} more {more === 1 ? "line" : "lines"}
+              </span>
+            )}
           </summary>
-          <pre className="code">{m.data && Object.keys(m.data).length > 0 ? JSON.stringify(m.data, null, 2) : m.content}</pre>
+          {/* A multi-line text is shown in full; the structured data follows it. */}
+          {more > 0 && hasData && <pre className="code">{m.content}</pre>}
+          <pre className="code">{hasData ? JSON.stringify(m.data, null, 2) : m.content}</pre>
         </details>
       ) : (
         <div className="msg-body">{m.content}</div>
@@ -267,6 +282,7 @@ export function RunPage() {
   }, [run?.factory_id, parent.data]);
 
   if (q.isLoading) return <Skeleton rows={6} />;
+  if (isNotFound(q.error)) return <NotFound title="Run not found" text="This run does not exist, or you cannot see it." back={{ label: "Go to runs", to: "/runs" }} />;
   if (q.isError || !run) return <ErrorAlert error={q.error ?? new Error("Run not found.")} />;
   const terminal = isTerminal(run.state);
   const notStarted = terminal && !run.started_at;

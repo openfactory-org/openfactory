@@ -345,7 +345,7 @@ export function DefinitionPage() {
 }
 
 /** Names the author of a version: a person, an agent run or the system. */
-function authorLabel(author: string | undefined, myID: string | undefined): string {
+export function authorLabel(author: string | undefined, myID: string | undefined): string {
   const a = author ?? "";
   if (a.startsWith("user:")) return a.slice(5) === myID ? "You" : "A team member";
   if (a.startsWith("run:")) return "An agent run";
@@ -362,7 +362,13 @@ export function VersionsPage() {
   });
   return (
     <>
-      <PageHeader title="Version history" crumbs={[{ label: "Factory definition", to: fpath(f, "definition") }]} />
+      <PageHeader
+        title="Version history"
+        crumbs={[
+          { label: f.name, to: fpath(f) },
+          { label: "Factory definition", to: fpath(f, "definition") },
+        ]}
+      />
       <Query q={q}>
         {(r) =>
           (r.items ?? []).length === 0 ? (
@@ -436,7 +442,7 @@ export function VersionPage() {
   const { vid = "" } = useParams();
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
-  const { canEditFactory } = useAuth();
+  const { me, canEditFactory } = useAuth();
   const canEdit = canEditFactory(f.id);
   const versions = useQuery({
     queryKey: ["versions", f.id, "files"],
@@ -461,7 +467,10 @@ export function VersionPage() {
   const active = vid === f.active_version_id;
 
   return (
-    <Query q={v}>
+    <Query
+      q={v}
+      notFound={{ title: "Version not found", text: "This factory has no version with this ID.", back: { label: "Go to version history", to: fpath(f, "definition/versions") } }}
+    >
       {(ver) => {
         const diffs = diffFiles(base.data?.files as Record<string, string> | undefined, (ver.files ?? {}) as Record<string, string>);
         return (
@@ -469,12 +478,13 @@ export function VersionPage() {
             <PageHeader
               title={`Version ${shortID(ver.id)}`}
               crumbs={[
+                { label: f.name, to: fpath(f) },
                 { label: "Factory definition", to: fpath(f, "definition") },
-                { label: "Versions", to: fpath(f, "definition/versions") },
+                { label: "Version history", to: fpath(f, "definition/versions") },
               ]}
               subtitle={
                 <>
-                  {ver.message || "no message"} · {ver.author} · <TimeAgo t={ver.created_at} /> {active && <Badge tone="info">active</Badge>} {!ver.valid && <Badge tone="bad">invalid</Badge>}
+                  {ver.message || "no message"} · {authorLabel(ver.author, me?.user.id)} · <TimeAgo t={ver.created_at} /> {active && <Badge tone="info">active</Badge>} {!ver.valid && <Badge tone="bad">invalid</Badge>}
                 </>
               }
               actions={

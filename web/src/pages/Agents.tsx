@@ -145,7 +145,7 @@ export function AgentPage() {
   }
 
   return (
-    <Query q={specQ}>
+    <Query q={specQ} notFound={{ title: "Agent not found", text: `This factory has no agent named "${name}".`, back: { label: "Go to agents", to: fpath(f, "agents") } }}>
       {(s) => (
         <>
           <PageHeader
