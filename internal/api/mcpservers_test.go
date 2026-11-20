@@ -66,6 +66,18 @@ func TestMCPServersCRUD(t *testing.T) {
 	if dup.Body["detail"] != `an MCP server named "sentry" already exists` || dup.Body["retryable"] != false {
 		t.Fatalf("duplicate name: %s", dup.Raw)
 	}
+	// Names are unique without regard to case, as environment names are.
+	for _, name := range []string{"SENTRY", "Sentry"} {
+		up := e.must(e.do("POST", "/mcp-servers", e.editor.Key, map[string]any{"name": name, "url": "https://other.test/mcp"}), 409)
+		if up.Body["detail"] != `an MCP server named "sentry" already exists` {
+			t.Fatalf("duplicate name %s: %s", name, up.Raw)
+		}
+	}
+	other := e.must(e.do("POST", "/mcp-servers", e.editor.Key, map[string]any{"name": "rename-me", "url": "https://other.test/mcp"}), 201)
+	e.must(e.do("PATCH", "/mcp-servers/"+str(other.Body, "id"), e.editor.Key, map[string]any{"name": "SENTRY"}), 409)
+	// A server can change the case of its own name.
+	e.must(e.do("PATCH", "/mcp-servers/"+str(other.Body, "id"), e.editor.Key, map[string]any{"name": "Rename-Me"}), 200)
+	e.must(e.do("DELETE", "/mcp-servers/"+str(other.Body, "id"), e.editor.Key, nil), 204)
 	e.must(e.do("POST", "/mcp-servers", e.editor.Key, map[string]any{"name": "y", "url": "https://a.test/mcp", "connection": "sideways"}), 400)
 	e.must(e.do("POST", "/mcp-servers", e.editor.Key, map[string]any{"name": "y", "url": "https://a.test/mcp", "connection": "direct", "oauth": map[string]any{}}), 400)
 	d := e.must(e.do("POST", "/mcp-servers", e.editor.Key, map[string]any{"name": "private", "url": "http://10.0.0.5/mcp", "connection": "direct"}), 201)

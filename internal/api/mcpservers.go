@@ -130,6 +130,9 @@ func (s *Server) handleCreateMCPServer(w http.ResponseWriter, r *http.Request, p
 	if err := mcpregistry.Validate(m); err != nil {
 		return err
 	}
+	if err := s.checkMCPServerNameFree(r.Context(), p.TeamID, m.Name, ""); err != nil {
+		return err
+	}
 	if err := s.opts.Store.CreateMCPServer(r.Context(), m); err != nil {
 		return err
 	}
@@ -172,6 +175,9 @@ func (s *Server) handleUpdateMCPServer(w http.ResponseWriter, r *http.Request, p
 		warning = mcpregistry.DefaultConnection(m)
 	}
 	if err := mcpregistry.Validate(m); err != nil {
+		return err
+	}
+	if err := s.checkMCPServerNameFree(ctx, p.TeamID, m.Name, m.ID); err != nil {
 		return err
 	}
 	if authChanged && connected && m.OAuth != nil {
@@ -285,6 +291,23 @@ func (s *Server) handleMCPOAuthCallback(w http.ResponseWriter, r *http.Request, 
 		v.Set("oauth", "connected")
 	}
 	http.Redirect(w, r, s.opts.PublicURL+target+"?"+v.Encode(), http.StatusFound)
+	return nil
+}
+
+// checkMCPServerNameFree refuses a second MCP server whose name differs from
+// an existing one only in case, as for environments. The store's unique
+// index compares the exact name; this check also catches "QA-MCP" next to
+// "qa-mcp".
+func (s *Server) checkMCPServerNameFree(ctx context.Context, teamID, name, exceptID string) error {
+	list, err := s.opts.Store.ListMCPServers(ctx, teamID)
+	if err != nil {
+		return err
+	}
+	for _, m := range list {
+		if m.ID != exceptID && strings.EqualFold(m.Name, name) {
+			return Errf(CodeConflict, "an MCP server named %q already exists", m.Name)
+		}
+	}
 	return nil
 }
 

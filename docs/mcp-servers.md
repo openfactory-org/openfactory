@@ -39,7 +39,7 @@ openfactory mcp-registry add docs --command npx --arg -y --arg @acme/docs-mcp
 
 | Field | Rules |
 |---|---|
-| `name` | 1 to 64 letters, digits, `.`, `_` or `-`. Unique in the team: a second server with the same name gets `409` (`an MCP server named "<name>" already exists`). Names that start with `builtin` are reserved. Agents use it as `managedId`. |
+| `name` | 1 to 64 letters, digits, `.`, `_` or `-`. Unique in the team, without regard to case: a second server with the same name, for example `QA-MCP` next to `qa-mcp`, gets `409` (`an MCP server named "<name>" already exists`). Names that start with `builtin` are reserved. Agents use it as `managedId`. |
 | `url` | An absolute `http` or `https` URL: streamable HTTP, or legacy SSE when the path ends in `/sse`. Set exactly one of `url` and `command`. |
 | `headers` | Only with `url`. |
 | `command`, `args`, `env` | A command that starts in the sandbox and speaks MCP over stdio. `args` and `env` only with `command`. |
