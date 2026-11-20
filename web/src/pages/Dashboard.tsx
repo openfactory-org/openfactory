@@ -10,6 +10,7 @@ import { SpendCard } from "../components/SpendCard";
 import { Button, Card, ErrorAlert, Metric, PageHeader, Query, Segmented, StatusIcon } from "../components/ui";
 import { coverageGaps, describeGaps, hasApplicableForge } from "../lib/coverage";
 import { count, duration, money, percent } from "../lib/format";
+import { useUsableSecrets } from "../lib/secrets";
 import { WorkTable } from "./Work";
 
 type FactoryMetrics = Schemas["FactoryMetrics"];
@@ -266,17 +267,14 @@ export function DashboardPage() {
     queryFn: () => unwrap(api.GET("/factories/{uid}/settings", { params: { path: { uid: f.id } } })),
     retry: false,
   });
-  const secrets = useQuery({
-    queryKey: ["secrets", f.id],
-    queryFn: () => unwrap(api.GET("/secrets", { params: { query: { factory_id: f.id } } })).then((r) => r.items ?? []),
-    retry: false,
-  });
+  // Team and factory secrets: GET /secrets?factory_id= alone lists only factory-scoped ones.
+  const secrets = useUsableSecrets(f.id);
   // A code host is connected when an active record that applies to this
   // factory serves each of its repositories (the server rule of forgeutil).
   const repos = settings.data?.repositories ?? [];
   const gaps = integrations.data && settings.data ? coverageGaps(repos, integrations.data, f.id) : [];
   const hasForge = !!integrations.data && (settings.data && repos.length > 0 ? gaps.length === 0 : hasApplicableForge(integrations.data, f.id));
-  const hasModelSecret = (secrets.data ?? []).some((s) => MODEL_CREDENTIAL_TYPES.includes(s.type) && (!s.factory_id || s.factory_id === f.id));
+  const hasModelSecret = (secrets.data ?? []).some((s) => MODEL_CREDENTIAL_TYPES.includes(s.type));
   // A factory without work shows what to do first, in place of empty figures.
   const fresh = recent.data !== undefined && recent.data.length === 0;
 
@@ -350,7 +348,7 @@ export function DashboardPage() {
               )}
             </li>
           </ol>
-          {secrets.isSuccess && !hasModelSecret && (
+          {secrets.data !== undefined && !secrets.isLoading && !hasModelSecret && (
             <p className="muted small">
               A run needs a model credential. If the server does not provide one, add it under <Link to="/secrets">Secrets</Link>.
             </p>
