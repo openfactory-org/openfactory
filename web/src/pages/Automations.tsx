@@ -13,6 +13,45 @@ import { TestFilterPanel } from "./Webhooks";
 
 type Automation = Schemas["Automation"];
 type ValidationResult = Schemas["ValidationResult"];
+type Schedule = Schemas["Schedule"];
+
+/** A time in UTC, for example "2026-11-20 09:00 UTC". Cron schedules run in UTC. */
+export function fmtUTC(t?: string | null): string {
+  if (!t) return "—";
+  const d = new Date(t);
+  if (Number.isNaN(d.getTime())) return "—";
+  return `${d.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+}
+
+/**
+ * Sets `enabled:` in the YAML frontmatter of automation.md. It adds the field
+ * when the frontmatter does not have it.
+ */
+export function setFrontmatterEnabled(content: string, enabled: boolean): string {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content);
+  if (!m) return `---\nenabled: ${enabled}\n---\n\n${content}`;
+  const front = m[1];
+  const next = /^enabled:.*$/m.test(front) ? front.replace(/^enabled:.*$/m, `enabled: ${enabled}`) : `enabled: ${enabled}\n${front}`;
+  return content.slice(0, m.index) + m[0].replace(front, next) + content.slice(m.index + m[0].length);
+}
+
+function useSchedules(fid: string) {
+  return useQuery({
+    queryKey: ["schedules", fid],
+    queryFn: () => unwrap(api.GET("/factories/{uid}/schedules", { params: { path: { uid: fid } } })).then((r) => (r.items ?? []) as Schedule[]),
+  });
+}
+
+function schedulesOf(all: Schedule[] | undefined, a: Pick<Automation, "id" | "name">): Schedule[] {
+  return (all ?? []).filter((s) => (a.id && s.automation_id === a.id) || s.automation_name === a.name);
+}
+
+/** The state of a schedule as one short text. */
+function scheduleState(s: Schedule): string {
+  if (!s.enabled) return "automation disabled";
+  if (s.paused) return "paused";
+  return "active";
+}
 
 export const NEW_AUTOMATION_TEMPLATE = `---
 enabled: true
@@ -43,6 +82,7 @@ export function AutomationsPage() {
     queryKey: ["webhooks", f.id],
     queryFn: () => unwrap(api.GET("/factories/{uid}/webhooks", { params: { path: { uid: f.id } } })).then((r) => r.items ?? []),
   });
+  const schedules = useSchedules(f.id);
   return (
     <>
       <PageHeader
@@ -88,6 +128,8 @@ export function AutomationsPage() {
                     <th scope="col">Status</th>
                     <th scope="col">Agent</th>
                     <th scope="col">Triggers</th>
+                    <th scope="col">Next run</th>
+                    <th scope="col">Last run</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -101,6 +143,7 @@ export function AutomationsPage() {
                         <td>{a.enabled ? <Badge tone="ok">enabled</Badge> : <Badge>disabled</Badge>}</td>
                         <td>{a.agent || "foreman"}</td>
                         <td className="small">{(a.triggers ?? []).map((t) => triggerSummary(t)).join(", ")}</td>
+                        <ScheduleTimes schedules={schedulesOf(schedules.data, a)} />
                       </tr>
                     ))}
                 </tbody>
@@ -110,6 +153,67 @@ export function AutomationsPage() {
         }
       </Query>
     </>
+  );
+}
+
+function ScheduleTimes({ schedules }: { schedules: Schedule[] }) {
+  if (schedules.length === 0) {
+    return (
+      <>
+        <td className="muted small">—</td>
+        <td className="muted small">—</td>
+      </>
+    );
+  }
+  return (
+    <>
+      <td className="small">
+        {schedules.map((s) => (
+          <div key={s.id}>{s.next_run_at ? fmtUTC(s.next_run_at) : scheduleState(s) === "active" ? "—" : `None (${scheduleState(s)})`}</div>
+        ))}
+      </td>
+      <td className="small">
+        {schedules.map((s) => (
+          <div key={s.id}>{s.last_run_at ? fmtUTC(s.last_run_at) : "Never"}</div>
+        ))}
+      </td>
+    </>
+  );
+}
+
+/** The schedules of one automation, with Pause and Resume. */
+function SchedulesCard({ factoryID, schedules, canPause }: { factoryID: string; schedules: Schedule[]; canPause: boolean }) {
+  const pause = useMutate(
+    ({ id, paused }: { id: string; paused: boolean }) =>
+      paused
+        ? unwrap(api.POST("/factories/{uid}/schedules/{id}/pause", { params: { path: { uid: factoryID, id } } }))
+        : unwrap(api.POST("/factories/{uid}/schedules/{id}/resume", { params: { path: { uid: factoryID, id } } })),
+    {
+      invalidate: [["schedules", factoryID]],
+      success: (_, v) => (v.paused ? "Schedule paused." : "Schedule resumed."),
+    },
+  );
+  if (schedules.length === 0) return null;
+  return (
+    <Card title="Schedules">
+      <ul className="stack stack-sm">
+        {schedules.map((s) => (
+          <li key={s.id} className="small">
+            <div>
+              <code>{s.cron}</code> {s.name ? <span className="muted">({s.name})</span> : null} <Badge tone={scheduleState(s) === "active" ? "ok" : "neutral"}>{scheduleState(s)}</Badge>
+            </div>
+            <div>Next run: {s.next_run_at ? fmtUTC(s.next_run_at) : "none"}</div>
+            <div>Last run: {s.last_run_at ? fmtUTC(s.last_run_at) : "never"}</div>
+            {s.last_error && <div>Last error: {s.last_error}</div>}
+            {canPause && (
+              <Button size="sm" onClick={() => pause.mutate({ id: s.id, paused: !s.paused })} busy={pause.isPending && pause.variables?.id === s.id}>
+                {s.paused ? "Resume" : "Pause"}
+              </Button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }
 
@@ -139,11 +243,12 @@ export function AutomationPage() {
     () => unwrap(api.POST("/factories/{uid}/automations/{name}/validate", { params: { path: { uid: f.id, name: target || "draft" } }, body: { content } })),
     { onSuccess: (r) => setResult(r) },
   );
+  const schedules = useSchedules(f.id);
   const save = useMutate(
-    () => unwrap(api.PUT("/factories/{uid}/automations/{name}", { params: { path: { uid: f.id, name: target } }, body: { content } })),
+    (body: { content: string; enabled?: boolean }) => unwrap(api.PUT("/factories/{uid}/automations/{name}", { params: { path: { uid: f.id, name: target } }, body: { content: body.content } })),
     {
-      invalidate: [["automations", f.id], ["automation", f.id, target], ["definition", f.id]],
-      success: `Automation ${target} saved.`,
+      invalidate: [["automations", f.id], ["automation", f.id, target], ["definition", f.id], ["schedules", f.id]],
+      success: (_, v) => (v.enabled === undefined ? `Automation ${target} saved.` : `Automation ${target} ${v.enabled ? "enabled" : "disabled"}.`),
       quietErrors: true,
       onSuccess: () => {
         setVerrs([]);
@@ -165,11 +270,25 @@ export function AutomationPage() {
       return;
     }
     try {
-      await save.mutateAsync(undefined);
+      await save.mutateAsync({ content });
     } catch (err) {
       setVerrs(err instanceof ApiError && err.validationErrors.length ? err.validationErrors : [{ file: path, message: (err as Error).message }]);
     }
   }
+
+  // Enable or disable: edit `enabled:` in the saved file and save it.
+  async function setEnabled(enabled: boolean) {
+    setVerrs([]);
+    setResult(null);
+    const next = setFrontmatterEnabled(q.data?.content ?? content, enabled);
+    try {
+      await save.mutateAsync({ content: next, enabled });
+      setContent(next);
+    } catch (err) {
+      setVerrs(err instanceof ApiError && err.validationErrors.length ? err.validationErrors : [{ file: path, message: (err as Error).message }]);
+    }
+  }
+  const active = q.data?.automation;
 
   const body = (
     <>
@@ -187,9 +306,16 @@ export function AutomationPage() {
         actions={
           editable &&
           !isNew && (
-            <Button variant="danger" onClick={() => void confirm({ title: `Delete automation ${routeName}?`, body: "Its triggers stop starting runs. You cannot undo this.", confirmLabel: "Delete automation", danger: true }).then((ok) => ok && del.mutate(undefined))} busy={del.isPending}>
-              Delete
-            </Button>
+            <>
+              {active && (
+                <Button onClick={() => void setEnabled(!active.enabled)} busy={save.isPending && save.variables?.enabled !== undefined}>
+                  {active.enabled ? "Disable" : "Enable"}
+                </Button>
+              )}
+              <Button variant="danger" onClick={() => void confirm({ title: `Delete automation ${routeName}?`, body: "Its triggers stop starting runs. You cannot undo this.", confirmLabel: "Delete automation", danger: true }).then((ok) => ok && del.mutate(undefined))} busy={del.isPending}>
+                Delete
+              </Button>
+            </>
           )
         }
       />
@@ -226,7 +352,7 @@ export function AutomationPage() {
               Validate
             </Button>
             {editable && (
-              <Button type="submit" variant="primary" busy={save.isPending}>
+              <Button type="submit" variant="primary" busy={save.isPending && save.variables?.enabled === undefined}>
                 Save and apply
               </Button>
             )}
@@ -240,7 +366,8 @@ export function AutomationPage() {
               </p>
             </Card>
           )}
-          <TestFilterPanel factoryID={f.id} automation={content} />
+          {active && <SchedulesCard factoryID={f.id} schedules={schedulesOf(schedules.data, { id: active.id, name: active.name || routeName })} canPause={canEditFactory(f.id)} />}
+          <TestFilterPanel factoryID={f.id} automation={content} automationEnabled={active ? active.enabled : undefined} />
         </aside>
       </div>
     </>

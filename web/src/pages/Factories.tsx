@@ -215,11 +215,21 @@ export function NewFactoryPage() {
           <fieldset className="option-list">
             <legend className="sr-only">Agents</legend>
             {AGENT_CATALOG.map((a) => (
-              <label key={a.name} className="check">
-                <input type="checkbox" checked={agents.includes(a.name)} onChange={() => toggle(agents, a.name, setAgents)} />
+              <label key={a.name} className="check" htmlFor={`nf-agent-${a.name}`}>
+                <input
+                  id={`nf-agent-${a.name}`}
+                  type="checkbox"
+                  value={a.name}
+                  aria-labelledby={`nf-agent-${a.name}-l`}
+                  aria-describedby={`nf-agent-${a.name}-d`}
+                  checked={agents.includes(a.name)}
+                  onChange={() => toggle(agents, a.name, setAgents)}
+                />
                 <span>
-                  <strong>{a.label}</strong>
-                  <span className="muted small">{a.description}</span>
+                  <strong id={`nf-agent-${a.name}-l`}>{a.label}</strong>
+                  <span id={`nf-agent-${a.name}-d`} className="muted small">
+                    {a.description}
+                  </span>
                 </span>
               </label>
             ))}
@@ -229,11 +239,21 @@ export function NewFactoryPage() {
           <fieldset className="option-list">
             <legend className="sr-only">Integrations</legend>
             {INTEGRATION_TYPES.map((it) => (
-              <label key={it.type} className="check">
-                <input type="checkbox" checked={integrations.includes(it.type)} onChange={() => toggle(integrations, it.type, setIntegrations)} />
+              <label key={it.type} className="check" htmlFor={`nf-int-${it.type}`}>
+                <input
+                  id={`nf-int-${it.type}`}
+                  type="checkbox"
+                  value={it.type}
+                  aria-labelledby={`nf-int-${it.type}-l`}
+                  aria-describedby={`nf-int-${it.type}-d`}
+                  checked={integrations.includes(it.type)}
+                  onChange={() => toggle(integrations, it.type, setIntegrations)}
+                />
                 <span>
-                  <strong>{it.label}</strong>
-                  <span className="muted small">{it.hint}</span>
+                  <strong id={`nf-int-${it.type}-l`}>{it.label}</strong>
+                  <span id={`nf-int-${it.type}-d`} className="muted small">
+                    {it.hint}
+                  </span>
                 </span>
               </label>
             ))}

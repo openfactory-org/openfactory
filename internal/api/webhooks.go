@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"slices"
@@ -120,6 +121,9 @@ type WebhookCreated struct {
 	// AwaitingSecret is true when the provider issues its signing secret only
 	// after it has the URL; send it with PATCH /webhooks/{id} {"secret": ...}.
 	AwaitingSecret bool `json:"awaiting_secret,omitempty"`
+	// SecretReused is true when the webhook uses an existing team secret
+	// (webhook.secret_name) whose value is not shown.
+	SecretReused bool `json:"secret_reused,omitempty"`
 }
 
 func defaultWebhookSecretName(name string) string {
@@ -198,27 +202,41 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request, p *
 	}
 	enabled := req.Enabled == nil || *req.Enabled
 
-	// Resolve the credential: reuse an existing secret, take the provider's, or generate one.
-	var reveal string
-	awaiting := false
-	_, getErr := s.opts.Secrets.Get(ctx, p.TeamID, "", secretName)
+	// Resolve the credential: take the provider's, reuse a team secret, or
+	// generate one.
+	explicitName := strings.TrimSpace(req.SecretName) != ""
+	old, getErr := s.opts.Secrets.Get(ctx, p.TeamID, "", secretName)
 	existing := getErr == nil
 	if getErr != nil && !isNotFound(getErr) {
 		return getErr
 	}
+	// generated is true when the server makes the credential.
+	generated := req.AuthMode != "signature" || req.SignatureScheme == "standard_webhooks"
+	reuse := false
 	switch {
-	case req.Secret != "":
-		if err := s.putSecret(ctx, p.TeamID, secretName, req.Secret); err != nil {
+	case !existing || req.Secret != "":
+	case !generated:
+		// The secret holds the provider's signing secret.
+		reuse = true
+	default:
+		// A secret that the caller named, or that another webhook of the team
+		// uses, is shared: keep it and do not reveal it. A secret with the
+		// default name that no webhook uses is left over (for example from an
+		// older failed create): replace it so that the caller gets the value.
+		used, err := s.webhookSecretInUse(ctx, p.TeamID, secretName)
+		if err != nil {
 			return err
 		}
-	case existing:
-		// Reuse the team secret (named or default); it is never overwritten
-		// and its value is not revealed.
-		if req.AuthMode == "url_token" {
-			v, _ := s.opts.Secrets.Get(ctx, p.TeamID, "", secretName)
-			if !urlSafeSecretRe.Match(v) {
-				return errInvalid("a url_token secret accepts only letters, digits, '-', '.', '_' and '~'")
-			}
+		reuse = explicitName || used
+	}
+	var store, reveal string
+	awaiting := false
+	switch {
+	case req.Secret != "":
+		store = req.Secret
+	case reuse:
+		if req.AuthMode == "url_token" && !urlSafeSecretRe.Match(old) {
+			return errInvalid("a url_token secret accepts only letters, digits, '-', '.', '_' and '~'")
 		}
 	case req.AuthMode == "signature" && slices.Contains(lateSecretSchemes, req.SignatureScheme):
 		// The provider issues its secret after it has the URL: store a placeholder
@@ -227,10 +245,7 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request, p *
 		if err != nil {
 			return err
 		}
-		if err := s.putSecret(ctx, p.TeamID, secretName, ph); err != nil {
-			return err
-		}
-		enabled, awaiting = false, true
+		store, enabled, awaiting = ph, false, true
 	case req.AuthMode == "signature" && req.SignatureScheme != "standard_webhooks":
 		return errInvalid("secret (the provider's signing secret) is required for the %s scheme", req.SignatureScheme)
 	default:
@@ -238,10 +253,7 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request, p *
 		if err != nil {
 			return err
 		}
-		if err := s.putSecret(ctx, p.TeamID, secretName, sec); err != nil {
-			return err
-		}
-		reveal = sec
+		store, reveal = sec, sec
 	}
 
 	doc := yamlMap()
@@ -255,27 +267,70 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request, p *
 	}
 	yamlSet(doc, "enabled", enabled)
 	files[webhookFile(req.Name)] = encodeYAMLNode(doc)
+	// The apply checks the secret, so write it first and undo the write when
+	// the apply fails. Otherwise a retry finds a secret that nobody has seen.
+	var written *core.Secret
+	if store != "" {
+		written, err = s.opts.Secrets.Put(ctx, p.TeamID, "", secretName, core.SecretGeneric, []byte(store))
+		if err != nil {
+			return err
+		}
+	}
 	if err := s.applyFiles(ctx, p, f, files, "Add webhook "+req.Name); err != nil {
+		if store != "" {
+			s.restoreSecret(ctx, p.TeamID, secretName, written, existing, old)
+		}
 		return err
 	}
 	wh, err := s.findWebhookByName(ctx, f.ID, req.Name)
 	if err != nil {
 		return err
 	}
-	resp := WebhookCreated{Webhook: s.webhookView(wh), IngressURL: s.WebhookIngressURL(wh.ID), Secret: reveal, AwaitingSecret: awaiting}
-	if req.AuthMode == "url_token" {
-		tok := reveal
-		if tok == "" {
-			v, _ := s.opts.Secrets.Get(ctx, p.TeamID, "", secretName)
-			tok = string(v)
-			resp.Secret = ""
-		}
-		if reveal != "" {
-			resp.IngressURL += "/" + tok
-		}
+	resp := WebhookCreated{
+		Webhook: s.webhookView(wh), IngressURL: s.WebhookIngressURL(wh.ID),
+		Secret: reveal, AwaitingSecret: awaiting, SecretReused: reuse,
+	}
+	if req.AuthMode == "url_token" && reveal != "" {
+		resp.IngressURL += "/" + reveal
 	}
 	writeJSON(w, http.StatusCreated, resp)
 	return nil
+}
+
+// webhookSecretInUse reports whether a webhook of a factory of the team uses
+// the secret.
+func (s *Server) webhookSecretInUse(ctx context.Context, teamID, name string) (bool, error) {
+	fs, err := s.opts.Store.ListFactories(ctx, teamID, "")
+	if err != nil {
+		return false, err
+	}
+	for i := range fs {
+		whs, err := s.opts.Store.ListWebhooks(ctx, fs[i].ID)
+		if err != nil {
+			return false, err
+		}
+		for j := range whs {
+			if whs[j].SecretName == name {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// restoreSecret undoes a secret write after a failed apply: it puts back the
+// previous value, or deletes a secret that did not exist before.
+func (s *Server) restoreSecret(ctx context.Context, teamID, name string, written *core.Secret, existed bool, old []byte) {
+	var err error
+	switch {
+	case existed:
+		_, err = s.opts.Secrets.Put(ctx, teamID, "", name, core.SecretGeneric, old)
+	case written != nil:
+		err = s.opts.Secrets.Delete(ctx, written.ID)
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "restore webhook secret after a failed apply", "secret", name, "err", err)
+	}
 }
 
 func (s *Server) putSecret(ctx context.Context, teamID, name, value string) error {

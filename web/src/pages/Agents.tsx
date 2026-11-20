@@ -190,40 +190,40 @@ export function AgentPage() {
               <fieldset disabled={!editable} className="plain-fieldset">
                 {tab === "prompt" ? (
                   <Card title="Instructions">
-                    <label className="sr-only" htmlFor="prompt">
+                    <label className="sr-only" htmlFor="ag-prompt">
                       Instructions
                     </label>
-                    <textarea id="prompt" rows={24} className="mono" value={form.prompt} onChange={(e) => set("prompt", e.target.value)} />
+                    <textarea id="ag-prompt" rows={24} className="mono" value={form.prompt} onChange={(e) => set("prompt", e.target.value)} />
                     <p className="hint">The Markdown body of the agent file. Settings are kept as they are.</p>
                   </Card>
                 ) : (
                   <Card className="narrow">
-                    <Field label="Description" htmlFor="description">
-                      <input id="description" value={form.description} onChange={(e) => set("description", e.target.value)} />
+                    <Field label="Description" htmlFor="ag-description">
+                      <input id="ag-description" value={form.description} onChange={(e) => set("description", e.target.value)} />
                     </Field>
                     <div className="grid-2">
-                      <Field label="Harness" htmlFor="harness_type">
-                        <select id="harness_type" value={form.harness_type} onChange={(e) => set("harness_type", e.target.value as Form["harness_type"])}>
+                      <Field label="Harness" htmlFor="ag-harness_type">
+                        <select id="ag-harness_type" value={form.harness_type} onChange={(e) => set("harness_type", e.target.value as Form["harness_type"])}>
                           <option value="">Inherit (factory default{agent?.harness?.type ? `: ${agent.harness.type}` : ""})</option>
                           <option value="claude">Claude Code (claude)</option>
                           <option value="codex">Codex (codex)</option>
                         </select>
                       </Field>
-                      <Field label="Model" htmlFor="model">
-                        <input id="model" value={form.model} onChange={(e) => set("model", e.target.value)} placeholder={agent?.harness?.model ? `Inherited: ${agent.harness.model}` : "e.g. claude-sonnet-5-5"} />
+                      <Field label="Model" htmlFor="ag-model">
+                        <input id="ag-model" value={form.model} onChange={(e) => set("model", e.target.value)} placeholder={agent?.harness?.model ? `Inherited: ${agent.harness.model}` : "e.g. claude-sonnet-5-5"} />
                       </Field>
                       {explicitHarness && (
                         <>
                           <Field
                             label="Auth"
-                            htmlFor="auth_secret"
+                            htmlFor="ag-auth_secret"
                             hint={
                               <>
                                 Claude Code accepts an Anthropic API key, Bedrock API key or Bedrock access key; Codex accepts an OpenAI API key. <Link to="/secrets">New auth secret</Link>
                               </>
                             }
                           >
-                            <select id="auth_secret" value={form.auth_secret} onChange={(e) => set("auth_secret", e.target.value)}>
+                            <select id="ag-auth_secret" value={form.auth_secret} onChange={(e) => set("auth_secret", e.target.value)}>
                               <option value="">None (inherit or worker environment)</option>
                               {(secrets.data ?? []).map((sec) => (
                                 <option key={sec.id ?? sec.name} value={sec.name}>
@@ -231,27 +231,27 @@ export function AgentPage() {
                                   {sec.scope === "factory" ? " · factory" : ""}
                                 </option>
                               ))}
-                              {form.auth_secret && !(secrets.data ?? []).some((x) => x.name === form.auth_secret) && <option value={form.auth_secret}>{form.auth_secret}</option>}
+                              {form.auth_secret && secrets.data && !secrets.data.some((x) => x.name === form.auth_secret) && <option value={form.auth_secret}>Missing secret ({form.auth_secret})</option>}
                             </select>
                           </Field>
-                          <Field label="Reasoning level" htmlFor="reasoning_level">
-                            <input id="reasoning_level" value={form.reasoning_level} onChange={(e) => set("reasoning_level", e.target.value)} placeholder="e.g. high" />
+                          <Field label="Reasoning level" htmlFor="ag-reasoning_level">
+                            <input id="ag-reasoning_level" value={form.reasoning_level} onChange={(e) => set("reasoning_level", e.target.value)} placeholder="e.g. high" />
                           </Field>
                         </>
                       )}
-                      <Field label="Machine" htmlFor="machine">
-                        <select id="machine" value={form.machine} onChange={(e) => set("machine", e.target.value)}>
+                      <Field label="Machine" htmlFor="ag-machine">
+                        <select id="ag-machine" value={form.machine} onChange={(e) => set("machine", e.target.value)}>
                           <option value="">Inherit{agent?.machine?.name ? ` (${agent.machine.name})` : ""}</option>
                           {s.machines.map((r) => (
                             <option key={r} value={r}>
                               {r}
                             </option>
                           ))}
-                          {form.machine && !s.machines.includes(form.machine) && <option value={form.machine}>{form.machine}</option>}
+                          {form.machine && !s.machines.includes(form.machine) && <option value={form.machine}>Missing machine ({form.machine})</option>}
                         </select>
                       </Field>
-                      <Field label="Host" htmlFor="worker_host">
-                        <input id="worker_host" list="workers-list" value={form.worker_host} onChange={(e) => set("worker_host", e.target.value)} placeholder={agent?.worker_host ? `Inherited: ${agent.worker_host}` : "server"} />
+                      <Field label="Host" htmlFor="ag-worker_host">
+                        <input id="ag-worker_host" list="workers-list" value={form.worker_host} onChange={(e) => set("worker_host", e.target.value)} placeholder={agent?.worker_host ? `Inherited: ${agent.worker_host}` : "server"} />
                         <datalist id="workers-list">
                           <option value="server" />
                           {(workers.data ?? []).map((w) => (
@@ -261,18 +261,20 @@ export function AgentPage() {
                           ))}
                         </datalist>
                       </Field>
-                      <Field label="Environment" htmlFor="environment_id">
-                        <select id="environment_id" value={form.environment_id} onChange={(e) => set("environment_id", e.target.value)}>
+                      <Field label="Environment" htmlFor="ag-environment_id">
+                        <select id="ag-environment_id" value={form.environment_id} onChange={(e) => set("environment_id", e.target.value)}>
                           <option value="">Inherit / managed from repositories</option>
                           {(envs.data ?? []).map((env) => (
                             <option key={env.id} value={env.id}>
                               {env.name}
                             </option>
                           ))}
+                          {/* A deleted environment stays visible, so that the user can change it. */}
+                          {form.environment_id && envs.data && !envs.data.some((env) => env.id === form.environment_id) && <option value={form.environment_id}>Missing environment ({form.environment_id})</option>}
                         </select>
                       </Field>
-                      <Field label="Idle timeout (minutes)" htmlFor="idle_timeout">
-                        <input id="idle_timeout" type="number" min={0} max={60} value={form.idle_timeout_minutes} onChange={(e) => set("idle_timeout_minutes", e.target.value)} placeholder="Inherit" />
+                      <Field label="Idle timeout (minutes)" htmlFor="ag-idle_timeout">
+                        <input id="ag-idle_timeout" type="number" min={0} max={60} value={form.idle_timeout_minutes} onChange={(e) => set("idle_timeout_minutes", e.target.value)} placeholder="Inherit" />
                       </Field>
                     </div>
                     <fieldset className="field">
@@ -282,33 +284,36 @@ export function AgentPage() {
                       </p>
                       <div className="checks-inline">
                         {Array.from(new Set([...(secrets.data ?? []).map((x) => x.name), ...(form.secrets ?? [])])).map((n) => (
-                          <label key={n} className="check">
+                          <div key={n} className="check">
                             <input
+                              id={`ag-secret-${n}`}
                               type="checkbox"
                               checked={(form.secrets ?? []).includes(n)}
                               onChange={(e) => set("secrets", e.target.checked ? [...(form.secrets ?? []), n] : (form.secrets ?? []).filter((x) => x !== n))}
-                            />{" "}
-                            {n}
-                            {secretScope.get(n) === "factory" && <span className="muted small"> (factory)</span>}
-                          </label>
+                            />
+                            <label htmlFor={`ag-secret-${n}`}>
+                              {n}
+                              {secretScope.get(n) === "factory" && <span className="muted small"> (factory)</span>}
+                            </label>
+                          </div>
                         ))}
                       </div>
-                      <label htmlFor="secrets_extra" className="small">
+                      <label htmlFor="ag-secrets_extra" className="small">
                         Other secret names (comma separated)
                       </label>
-                      <input id="secrets_extra" value={extraSecrets} onChange={(e) => setExtraSecrets(e.target.value)} />
+                      <input id="ag-secrets_extra" value={extraSecrets} onChange={(e) => setExtraSecrets(e.target.value)} />
                     </fieldset>
                     <Field
                       label="MCP servers"
-                      htmlFor="mcp_servers"
+                      htmlFor="ag-mcp_servers"
                       hint={
                         <>
-                          YAML map of server name to transport (<code>managedId</code>, <code>command</code>/<code>args</code>/<code>env</code>, or <code>url</code>/<code>headers</code>). Reference secrets as{" "}
+                          YAML map of server name to transport (<code>managedId</code> with the name of a team MCP server, <code>command</code>/<code>args</code>/<code>env</code>, or <code>url</code>/<code>headers</code>). Reference secrets as{" "}
                           <code>{"{{SECRET_NAME}}"}</code>.
                         </>
                       }
                     >
-                      <textarea id="mcp_servers" rows={6} className="mono" value={form.mcp_servers} onChange={(e) => set("mcp_servers", e.target.value)} placeholder={"sentry:\n  managedId: SENTRY_MCP_SERVER_ID"} />
+                      <textarea id="ag-mcp_servers" rows={6} className="mono" value={form.mcp_servers} onChange={(e) => set("mcp_servers", e.target.value)} placeholder={"docs-search:\n  managedId: docs-search"} />
                     </Field>
                   </Card>
                 )}

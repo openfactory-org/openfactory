@@ -856,25 +856,6 @@ func TestWebhooks(t *testing.T) {
 	e.must(e.do("POST", "/factories/"+str(gf.Body, "factory", "uid")+"/webhooks", e.editor.Key, map[string]any{"name": "x"}), 422)
 }
 
-// TestWebhookCreateReusesDefaultSecret checks that a webhook created without
-// secret_name reuses an existing secret with the default name and never
-// overwrites it.
-func TestWebhookCreateReusesDefaultSecret(t *testing.T) {
-	e := newTestEnv(t)
-	ctx := context.Background()
-	fid := e.createFactory("hooks")
-	if _, err := e.srv.opts.Secrets.Put(ctx, e.team.ID, "", "DEPLOYS_WEBHOOK_SECRET", core.SecretGeneric, []byte("kept-value")); err != nil {
-		t.Fatal(err)
-	}
-	c := e.must(e.do("POST", "/factories/"+fid+"/webhooks", e.editor.Key, map[string]any{"name": "deploys"}), 201)
-	if str(c.Body, "secret") != "" {
-		t.Fatalf("an existing secret is revealed or replaced: %s", c.Raw)
-	}
-	if v, _ := e.srv.opts.Secrets.Get(ctx, e.team.ID, "", "DEPLOYS_WEBHOOK_SECRET"); string(v) != "kept-value" {
-		t.Fatalf("default secret overwritten: %q", v)
-	}
-}
-
 func TestDeliveryViewLabels(t *testing.T) {
 	for reason, want := range map[string]string{
 		"auth": "Rejected (auth)", "invalid_json": "Rejected (invalid JSON)", "too_large": "Rejected (too large)",

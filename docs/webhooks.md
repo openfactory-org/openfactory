@@ -62,7 +62,7 @@ curl -X POST "$OF_PUBLIC_URL/api/v1/factories/$FACTORY_UID/webhooks" \
 | `name` | Yes | 1-63 lowercase letters, digits, `-` or `_`. It becomes `webhooks/<name>.yaml`. |
 | `auth_mode` | No | `token` (default), `url_token` or `signature`. |
 | `signature_scheme` | For `signature` | One of the schemes in the table above. |
-| `secret_name` | No | The team secret that holds the credential. Default: `<NAME>_WEBHOOK_SECRET` in uppercase, with `-` and `.` changed to `_`. If the secret exists, the webhook uses it unchanged and the response does not show its value. Otherwise, the server writes a new value to it. |
+| `secret_name` | No | The team secret that holds the credential. Default: `<NAME>_WEBHOOK_SECRET` in uppercase, with `-` and `.` changed to `_`. The server writes a new value to it and the response shows the value, with these exceptions. If you name an existing secret, or another webhook of the team uses it, the webhook uses it unchanged: the response does not show its value and has `secret_reused: true`. A `signature` webhook whose provider issues the secret uses an existing secret unchanged. If the definition does not apply, the server restores the secret to its previous state. |
 | `secret` | No | The provider's signing secret, for `signature` mode only. |
 | `delivery_id_header` | No | A header that the sender fills with its own event ID. |
 | `enabled` | No | `true` (default) or `false`. |

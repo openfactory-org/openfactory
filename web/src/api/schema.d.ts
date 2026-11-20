@@ -2576,6 +2576,8 @@ export interface components {
             /** @description Shown once. */
             secret?: string;
             awaiting_secret?: boolean;
+            /** @description True when the webhook uses an existing team secret (webhook.secret_name) whose value is not shown. */
+            secret_reused?: boolean;
         };
         WebhookSecretRotated: {
             webhook: components["schemas"]["Webhook"];

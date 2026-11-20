@@ -29,6 +29,18 @@ export function cleanDefPath(p: string): string {
 }
 
 /**
+ * The change message of a definition save when the user leaves it empty:
+ * "Add <path>" for a new file, "Delete <path>", "Rename <old> to <new>" or
+ * "Update <path>".
+ */
+export function defaultChangeMessage({ isNew, del, selected, path }: { isNew: boolean; del: boolean; selected: string; path: string }): string {
+  if (del) return `Delete ${selected || path}`;
+  if (isNew) return `Add ${path}`;
+  if (selected && path !== selected) return `Rename ${selected} to ${path}`;
+  return `Update ${path}`;
+}
+
+/**
  * A plain-text editor with line numbers. It grows with its content, marks the
  * lines that have validation errors, and saves on ⌘S.
  */
@@ -184,7 +196,7 @@ export function DefinitionPage() {
       setErrors([{ file: path || "(path)", message: (err as Error).message }]);
       return;
     }
-    const msg = message.trim() || `${del ? "Delete" : "Update"} ${clean}`;
+    const msg = message.trim() || defaultChangeMessage({ isNew, del, selected, path: clean });
     try {
       await save.mutateAsync({ fs, msg });
       setMessage("");
@@ -280,14 +292,15 @@ export function DefinitionPage() {
               {editable && (
                 <>
                   <Field label="Change message" htmlFor="msg">
-                    <input id="msg" value={message} onChange={(e) => setMessage(e.target.value)} placeholder={`Update ${path || "file"}`} />
+                    <input id="msg" value={message} onChange={(e) => setMessage(e.target.value)} placeholder={defaultChangeMessage({ isNew, del: false, selected, path: path.trim() || "file" })} />
                   </Field>
                   <div className="form-actions">
                     {dirty && <Button onClick={() => local(() => setReview(diffFiles(files, editedFiles(false)).filter((d) => d.added + d.removed > 0)))}>Review changes</Button>}
                     <Button onClick={() => local(() => validate.mutate(editedFiles(false)))} busy={validate.isPending}>
                       Validate
                     </Button>
-                    {!isNew && (
+                    {/* The server always refuses to delete factory.yaml. */}
+                    {!isNew && selected !== "factory.yaml" && (
                       <Button variant="danger" onClick={() => void confirm({ title: `Delete ${selected}?`, body: "The file is removed and the definition is applied as a new version.", confirmLabel: "Delete file", danger: true }).then((ok) => ok && void doSave(true))} busy={save.isPending}>
                         Delete file
                       </Button>

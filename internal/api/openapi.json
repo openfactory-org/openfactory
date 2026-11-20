@@ -8890,6 +8890,10 @@
           },
           "awaiting_secret": {
             "type": "boolean"
+          },
+          "secret_reused": {
+            "type": "boolean",
+            "description": "True when the webhook uses an existing team secret (webhook.secret_name) whose value is not shown."
           }
         },
         "required": [
