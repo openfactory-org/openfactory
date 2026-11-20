@@ -887,10 +887,31 @@ func (s *Server) handleSelfImprovement(w http.ResponseWriter, r *http.Request, p
 	if s.opts.RunSelfImprovement == nil {
 		return featureUnavailable("self-improvement")
 	}
-	if err := s.opts.RunSelfImprovement(r.Context(), f.ID); err != nil {
+	// Self-improvement reads failed scores of scorers that have
+	// selfImprovement turned on. Say so when no such scorer exists, so the
+	// caller does not wait for a run that never starts.
+	scorers, err := s.opts.Store.ListScorers(r.Context(), f.ID)
+	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusAccepted, map[string]any{"factory_id": f.ID, "started": true})
+	notStarted := func(reason string) error {
+		writeJSON(w, http.StatusOK, map[string]any{"factory_id": f.ID, "started": false, "run_ids": []string{}, "reason": reason})
+		return nil
+	}
+	if len(scorers) == 0 {
+		return notStarted("The factory has no scorers. Add a scorer with selfImprovement turned on.")
+	}
+	if !slices.ContainsFunc(scorers, func(sc core.Scorer) bool { return sc.SelfImprovement }) {
+		return notStarted("No scorer of the factory has selfImprovement turned on.")
+	}
+	runIDs, err := s.opts.RunSelfImprovement(r.Context(), f.ID)
+	if err != nil {
+		return err
+	}
+	if len(runIDs) == 0 {
+		return notStarted("No failed scores wait for review.")
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"factory_id": f.ID, "started": true, "run_ids": runIDs})
 	return nil
 }
 

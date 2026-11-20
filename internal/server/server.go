@@ -577,9 +577,15 @@ func New(ctx context.Context, cfg *config.Config, opts ...Option) (*Server, erro
 		Authenticate:    s.apiAuthenticate,
 		LoginProviders:  s.apiLoginProviders,
 		ScoreRun:        s.Scoring.ScoreRun,
-		RunSelfImprovement: func(ctx context.Context, factoryID string) error {
-			_, err := s.Scoring.CheckSelfImprovement(ctx, factoryID)
-			return err
+		RunSelfImprovement: func(ctx context.Context, factoryID string) ([]string, error) {
+			// "Run now" ignores failedRunThreshold: any agent with an
+			// unreviewed failure gets a run.
+			runs, err := s.Scoring.TriggerSelfImprovement(ctx, factoryID, "")
+			ids := make([]string, 0, len(runs))
+			for _, r := range runs {
+				ids = append(ids, r.ID)
+			}
+			return ids, err
 		},
 		Version:    api.VersionInfo{Version: o.version, Commit: o.commit, Date: o.date},
 		RunData:    runData,

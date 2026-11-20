@@ -30,6 +30,12 @@ export function duration(ms?: number | null): string {
   return `${Math.floor(h / 24)}d ${h % 24}h`;
 }
 
+/** A run or work item state as a label: "SUCCEEDED" and "in_progress" become "Succeeded" and "In progress". */
+export function stateLabel(state?: string | null): string {
+  const s = (state ?? "").replace(/_/g, " ").toLowerCase();
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 /** A scorer sampling rate. The definition stores it as a percentage (0 to 100, default 10), not a ratio. */
 export function samplingLabel(rate?: number | null): string {
   const v = rate ?? 10;

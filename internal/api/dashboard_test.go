@@ -276,17 +276,18 @@ func TestFactoryTestFilter(t *testing.T) {
 
 func TestScoreRunAndSelfImprovement(t *testing.T) {
 	var scored, improved string
+	var improveRuns []string
 	e := newTestEnv(t, func(o *Options) {
 		o.ScoreRun = func(_ context.Context, scorerID, runID string) (*core.Score, error) {
 			scored = scorerID + "/" + runID
 			return &core.Score{ID: "sc_1", ScorerID: scorerID, RunID: runID, Passed: true, Label: "good"}, nil
 		}
-		o.RunSelfImprovement = func(_ context.Context, fid string) error {
+		o.RunSelfImprovement = func(_ context.Context, fid string) ([]string, error) {
 			if fid == "" {
-				return errors.New("empty")
+				return nil, errors.New("empty")
 			}
 			improved = fid
-			return nil
+			return improveRuns, nil
 		}
 	})
 	ctx := context.Background()
@@ -306,9 +307,31 @@ func TestScoreRunAndSelfImprovement(t *testing.T) {
 	}
 	e.must(e.do("POST", "/runs/"+runID+"/score", e.editor.Key, map[string]any{"scorer_id": "nope"}), 404)
 	e.must(e.do("POST", "/runs/"+runID+"/score", e.viewer.Key, map[string]any{"scorer_id": "quality"}), 403)
-	e.must(e.do("POST", "/factories/"+fid+"/self-improvement", e.editor.Key, nil), 202)
-	if improved != fid {
-		t.Fatalf("improved = %q", improved)
+	// The only scorer has selfImprovement off: nothing starts and the
+	// response says why.
+	r = e.must(e.do("POST", "/factories/"+fid+"/self-improvement", e.editor.Key, nil), 200)
+	if b, _ := r.Body["started"].(bool); b || str(r.Body, "reason") == "" || improved != "" {
+		t.Fatalf("scorer without selfImprovement: improved %q body %s", improved, r.Raw)
+	}
+	scorer.SelfImprovement = true
+	if err := e.store.ReplaceFactoryResources(ctx, fid, nil, nil, []core.Scorer{scorer}, nil); err != nil {
+		t.Fatal(err)
+	}
+	// No failed score waits for review.
+	r = e.must(e.do("POST", "/factories/"+fid+"/self-improvement", e.editor.Key, nil), 200)
+	if b, _ := r.Body["started"].(bool); b || str(r.Body, "reason") == "" || improved != fid {
+		t.Fatalf("no failures: improved %q body %s", improved, r.Raw)
+	}
+	improveRuns = []string{"run_improve"}
+	r = e.must(e.do("POST", "/factories/"+fid+"/self-improvement", e.editor.Key, nil), 202)
+	if b, _ := r.Body["started"].(bool); !b || r.Body["reason"] != nil || !strings.Contains(string(r.Raw), "run_improve") {
+		t.Fatalf("started: body %s", r.Raw)
+	}
+	// A factory without scorers.
+	fidEmpty := e.createFactory("Empty")
+	r = e.must(e.do("POST", "/factories/"+fidEmpty+"/self-improvement", e.editor.Key, nil), 200)
+	if !strings.Contains(str(r.Body, "reason"), "no scorers") {
+		t.Fatalf("no scorers: body %s", r.Raw)
 	}
 	// Without the hooks the endpoints report feature_not_available.
 	e2 := newTestEnv(t)

@@ -425,15 +425,15 @@ export function IntegrationsPage() {
                         <td>
                           <IntegrationStatus status={i.status} reason={i.status_reason} />
                         </td>
-                        <td className="small">
+                        <td className="small cell-wrap">
                           {Object.entries(i.config ?? {}).map(([k, v]) => (
                             <code key={k}>
                               {k}={v}{" "}
                             </code>
                           ))}
                         </td>
-                        <td>{i.secret_ref ? <code>{i.secret_ref}</code> : "—"}</td>
-                        <td className="right">
+                        <td className="cell-wrap">{i.secret_ref ? <code>{i.secret_ref}</code> : "—"}</td>
+                        <td className="right nowrap">
                           {isAdmin && (
                             <>
                               {(i.status ?? "active") === "active" ? (
@@ -686,12 +686,12 @@ export function WorkersPage() {
   const q = useQuery({ queryKey: ["workers"], queryFn: () => unwrap(api.GET("/workers")).then((r) => r.items ?? []), refetchInterval: 30_000 });
   return (
     <>
-      <PageHeader title="Workers" subtitle="Hosts that run sandboxes: the server (its own backend), or remote workers connected over the worker protocol." />
+      <PageHeader title="Workers" subtitle="Remote workers that run sandboxes on other hosts over the worker protocol. The server also runs sandboxes with its own backend; it is not listed here." />
       <Query q={q}>
         {(ws) =>
           ws.length === 0 ? (
-            <Empty icon={<Server size={18} />} title="No workers have connected">
-              Start one with <code>openfactory worker</code>.
+            <Empty icon={<Server size={18} />} title="No remote workers have connected">
+              Runs use the sandbox backend of the server. To run sandboxes on another host, start <code>openfactory worker</code> there.
             </Empty>
           ) : (
             <div className="table-wrap">

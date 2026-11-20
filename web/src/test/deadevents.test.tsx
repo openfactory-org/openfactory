@@ -47,7 +47,7 @@ describe("dead-lettered events", () => {
       "GET /api/v1/workers": { items: [], page_info: { has_next_page: false } },
     });
     renderAt(<WorkersPage />, { route: "/workers", path: "/workers" });
-    expect(await screen.findByText("No workers have connected")).toBeInTheDocument();
+    expect(await screen.findByText("No remote workers have connected")).toBeInTheDocument();
     expect(screen.queryByText("Dead-lettered events")).not.toBeInTheDocument();
     expect(calls.some((c) => c.path === "/api/v1/outbox/dead")).toBe(false);
   });

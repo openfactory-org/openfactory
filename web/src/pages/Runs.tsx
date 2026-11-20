@@ -8,7 +8,7 @@ import { useAuth } from "../auth/AuthContext";
 import { fpath } from "../components/FactoryLayout";
 import { confirm } from "../components/overlays";
 import { Alert, Button, Empty, ErrorAlert, Keys, KV, PageHeader, Skeleton, StateBadge, StatusIcon, TimeAgo } from "../components/ui";
-import { count, duration, firstLine, fmtClock, fmtTime, humanizeError, money, shortID } from "../lib/format";
+import { count, duration, firstLine, fmtClock, fmtTime, humanizeError, money, shortID, stateLabel } from "../lib/format";
 import { useMutate } from "../lib/mutate";
 import { isSubmitChord, MOD } from "../lib/queries";
 import { runTree } from "./Work";
@@ -57,7 +57,7 @@ export function RunTable({ runs }: { runs: Run[] }) {
             </Link>
             <span className="row-meta">
               {run.state === "BLOCKED" && run.blocked_reason && <span className="state-label">{blockedLabel(run.blocked_reason)}</span>}
-              <span className={run.state === "SUCCEEDED" || (run.state === "BLOCKED" && run.blocked_reason) ? "sr-only" : "state-label"}>{(run.state ?? "").toLowerCase()}</span>
+              <span className={run.state === "SUCCEEDED" || (run.state === "BLOCKED" && run.blocked_reason) ? "sr-only" : "state-label"}>{stateLabel(run.state)}</span>
               {run.agent_name && <span className="chip hide-sm">{run.agent_name}</span>}
               <span className="hide-sm faint">{run.config?.harness?.model}</span>
               <span className="num" style={{ width: 52 }}>
@@ -269,6 +269,7 @@ export function RunPage() {
   if (q.isLoading) return <Skeleton rows={6} />;
   if (q.isError || !run) return <ErrorAlert error={q.error ?? new Error("Run not found.")} />;
   const terminal = isTerminal(run.state);
+  const notStarted = terminal && !run.started_at;
   const failure = run.state !== "BLOCKED" ? humanizeError(run.status_message?.message || run.error) : { message: "", detail: "" };
   const submitFollowUp = () => {
     if (followUp.trim() && !send.isPending) send.mutate(followUp.trim());
@@ -409,7 +410,7 @@ export function RunPage() {
                 ["Cost", <span key="c">{money(run.usage?.cost_usd)}</span>],
                 ["Tokens in", <span key="i">{count(run.usage?.input_tokens)}</span>],
                 ["Tokens out", <span key="o">{count(run.usage?.output_tokens)}</span>],
-                ["Duration", <span key="d">{duration(run.usage?.duration_ms)}</span>],
+                ["Duration", <span key="d">{run.usage?.duration_ms == null && notStarted ? "Agent did not start" : duration(run.usage?.duration_ms)}</span>],
               ]}
             />
           </section>
@@ -423,7 +424,9 @@ export function RunPage() {
                 ...(run.run_as ? ([["Runs as", principalLabel(run.run_as)]] as [string, string][]) : []),
                 ...(run.config?.machine?.name ? ([["Machine", run.config.machine.name]] as [string, string][]) : []),
                 ...(run.worker_id ? ([["Worker", run.worker_id]] as [string, string][]) : []),
-                ["Started", fmtTime(run.started_at)],
+                // started_at is the start of the first agent turn. A run
+                // can end in its sandbox setup, before any turn.
+                ["Started", run.started_at ? fmtTime(run.started_at) : notStarted ? "Agent did not start" : "Not yet"],
                 ["Finished", fmtTime(run.finished_at)],
               ]}
             />

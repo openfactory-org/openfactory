@@ -7,6 +7,7 @@ import { useAuth } from "../auth/AuthContext";
 import { StackBar } from "../components/Charts";
 import { fpath, useFactory } from "../components/FactoryLayout";
 import { confirm } from "../components/overlays";
+import { useToast } from "../components/Toast";
 import { Alert, Badge, Button, Card, Code, Empty, Field, PageHeader, Query, StateBadge, TimeAgo } from "../components/ui";
 import { fmtTime, percent, samplingLabel, shortID } from "../lib/format";
 import { useMutate } from "../lib/mutate";
@@ -100,10 +101,23 @@ export function ScorersPage() {
     queryKey: ["scores", f.id, "improvements"],
     queryFn: () => unwrap(api.GET("/factories/{uid}/scores", { params: { path: { uid: f.id }, query: { limit: 200 } } })).then((r) => Array.from(new Set(((r.items ?? []) as Score[]).map((s) => s.improvement_run_id).filter(Boolean))) as string[]),
   });
+  const toast = useToast();
   const improve = useMutate(() => unwrap(api.POST("/factories/{uid}/self-improvement", { params: { path: { uid: f.id } } })), {
-    success: "Self-improvement check started.",
-    invalidate: [["scores", f.id]],
+    invalidate: [["scores", f.id], ["work-items", f.id, "self-improvement"], ["proposals", f.id]],
+    onSuccess: (r) => {
+      const n = r.run_ids?.length ?? 0;
+      if (r.started) toast.show(n === 1 ? "Self-improvement started: 1 run." : `Self-improvement started: ${n} runs.`);
+      else toast.show(r.reason ? `No run started. ${r.reason}` : "No run started.", "info");
+    },
   });
+  // Self-improvement reads the failures of scorers with selfImprovement on.
+  const improveBlocked = !scorers.data
+    ? "Loading scorers"
+    : scorers.data.length === 0
+      ? "Add a scorer to the definition first"
+      : !scorers.data.some((s) => s.self_improvement)
+        ? "No scorer has selfImprovement turned on"
+        : undefined;
 
   const names = new Map((scorers.data ?? []).map((s) => [s.id, s.name || s.slug]));
   return (
@@ -114,7 +128,7 @@ export function ScorersPage() {
         subtitle="Classify finished runs against a rubric; failures can feed the self-improvement loop. Last 30 days."
         actions={
           canEdit && (
-            <Button onClick={() => improve.mutate(undefined)} busy={improve.isPending}>
+            <Button onClick={() => improve.mutate(undefined)} busy={improve.isPending} disabled={!!improveBlocked} title={improveBlocked}>
               Run self-improvement now
             </Button>
           )

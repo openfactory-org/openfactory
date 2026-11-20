@@ -288,19 +288,45 @@ function str(v: unknown): string {
 /** Maps a user ID to a name for the timeline. */
 type NameOf = (userID: string) => string | undefined;
 
-function actorName(e: TimelineEvent, nameOf?: NameOf): string {
+/** What the timeline knows about the people behind its events. */
+type Actors = {
+  nameOf?: NameOf;
+  /** The creator of a run of the work item, by run ID. */
+  runCreator?: (runID: string) => Schemas["Principal"] | undefined;
+  /** The user who created the work item. */
+  itemCreatorID?: string;
+};
+
+// Channel actors: a person acted through the dashboard, the API, the CLI
+// or MCP, and the event does not name the person.
+const CHANNEL_ACTORS = new Set(["dashboard", "api", "cli", "mcp"]);
+
+function personName(userID: string, actors: Actors): string {
+  return actors.nameOf?.(userID) ?? "A team member";
+}
+
+function actorName(e: TimelineEvent, actors: Actors = {}): string {
   const a = e.actor ?? "";
   if (!a || a === "system") return "The factory";
   if (a.startsWith("run:")) return "The foreman";
-  if (a.startsWith("user:")) return nameOf?.(a.slice(5)) ?? "A team member";
-  if (a === "dashboard" || a === "api") return "A team member";
+  if (a.startsWith("user:")) return personName(a.slice(5), actors);
+  if (CHANNEL_ACTORS.has(a.toLowerCase())) {
+    // A run records who started it: name that person.
+    const p = e.run_id ? actors.runCreator?.(e.run_id) : undefined;
+    if (p?.type === "user") return personName(p.id, actors);
+    if (p) return p.name || p.id;
+    // The first stage change is the creation of the work item.
+    const d = (e.data ?? {}) as Record<string, unknown>;
+    if (e.kind === "stage_changed" && !d.from && actors.itemCreatorID) return personName(actors.itemCreatorID, actors);
+    return "A team member";
+  }
   return a;
 }
 
 /** One timeline event as a sentence, an icon and an optional block of text. */
-export function describeEvent(e: TimelineEvent, nameOf?: NameOf): { icon: ReactNode; text: ReactNode; body?: string } {
+export function describeEvent(e: TimelineEvent, actors: Actors = {}): { icon: ReactNode; text: ReactNode; body?: string } {
   const d = (e.data ?? {}) as Record<string, unknown>;
-  const who = <strong>{actorName(e, nameOf)}</strong>;
+  const who = <strong>{actorName(e, actors)}</strong>;
   const size = 13;
   switch (e.kind) {
     case "stage_changed": {
@@ -369,8 +395,8 @@ export function describeEvent(e: TimelineEvent, nameOf?: NameOf): { icon: ReactN
   }
 }
 
-function TimelineItem({ e, nameOf }: { e: TimelineEvent; nameOf?: NameOf }) {
-  const { icon, text, body } = describeEvent(e, nameOf);
+function TimelineItem({ e, actors }: { e: TimelineEvent; actors: Actors }) {
+  const { icon, text, body } = describeEvent(e, actors);
   return (
     <li>
       <span className="tl-icon" aria-hidden="true">
@@ -498,7 +524,7 @@ export function WorkItemPage() {
                   ) : (
                     <ol className="timeline">
                       {wi.timeline.map((e) => (
-                        <TimelineItem key={e.id} e={e} nameOf={nameOf} />
+                        <TimelineItem key={e.id} e={e} actors={{ nameOf, itemCreatorID: wi.creator_id, runCreator: (id) => (wi.runs ?? []).find((r) => r.run_id === id)?.creator }} />
                       ))}
                     </ol>
                   )}
