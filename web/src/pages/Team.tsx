@@ -10,6 +10,7 @@ import { useFactories } from "../lib/queries";
 import { Alert, Badge, Button, Card, Empty, Field, PageHeader, Query, TimeAgo } from "../components/ui";
 import { kvLines, lines, parseKVLines } from "../lib/format";
 import { useMutate } from "../lib/mutate";
+import { factorySecretsQuery, teamSecretsQuery } from "../lib/secrets";
 
 type Secret = Schemas["Secret"];
 
@@ -31,13 +32,9 @@ export function SecretsPage() {
   const { canEdit } = useAuth();
   const factories = useFactories();
   const [params] = useSearchParams();
-  const team = useQuery({ queryKey: ["secrets", "team"], queryFn: () => unwrap(api.GET("/secrets")).then((r) => (r.items ?? []) as Secret[]) });
-  const perFactory = useQueries({
-    queries: (factories.data ?? []).map((f) => ({
-      queryKey: ["secrets", f.id],
-      queryFn: () => unwrap(api.GET("/secrets", { params: { query: { factory_id: f.id } } })).then((r) => ((r.items ?? []) as Secret[]).filter((s) => s.factory_id === f.id)),
-    })),
-  });
+  const team = useQuery(teamSecretsQuery);
+  const perFactory = useQueries({ queries: (factories.data ?? []).map((f) => factorySecretsQuery(f.id)) });
+  const [replacing, setReplacing] = useState<Secret | null>(null);
   const [form, setForm] = useState({ name: "", type: "generic", value: "", factory_id: params.get("factory") ?? "" });
   const [error, setError] = useState<string | null>(null);
   const create = useMutate((body: Schemas["SecretRequest"]) => unwrap(api.POST("/secrets", { body })), {
@@ -132,6 +129,11 @@ export function SecretsPage() {
                               </td>
                               <td className="right">
                                 {canEdit && (
+                                  <Button variant="ghost" onClick={() => setReplacing(s)}>
+                                    Replace value
+                                  </Button>
+                                )}
+                                {canEdit && (
                                   <Button variant="ghost" onClick={() => void confirm({ title: `Delete secret ${s.name}?`, body: "Agents that use it will fail. You cannot undo this.", confirmLabel: "Delete secret", danger: true }).then((ok) => ok && del.mutate(s))}>
                                     Delete
                                   </Button>
@@ -186,8 +188,65 @@ export function SecretsPage() {
             </form>
           </Dialog>
         )}
+        {canEdit && <ReplaceSecretDialog secret={replacing} onClose={() => setReplacing(null)} />}
       </div>
     </>
+  );
+}
+
+/** Replaces the value of an existing secret. The name, type and scope stay the same. */
+function ReplaceSecretDialog({ secret, onClose }: { secret: Secret | null; onClose: () => void }) {
+  const [value, setValue] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setValue("");
+    setError(null);
+  }, [secret]);
+  const update = useMutate(
+    (s: Secret) => unwrap(api.PUT("/secrets/{name}", { params: { path: { name: s.name }, query: { factory_id: s.factory_id || undefined } }, body: { value, factory_id: s.factory_id || undefined } })),
+    {
+      invalidate: [["secrets"]],
+      quietErrors: true,
+      success: (s) => `Secret ${s.name} updated.`,
+      onSuccess: () => {
+        setValue("");
+        onClose();
+      },
+    },
+  );
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!secret) return;
+    setError(null);
+    if (!value) return setError("Enter the new value.");
+    try {
+      await update.mutateAsync(secret);
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  return (
+    <Dialog
+      open={!!secret}
+      onOpenChange={(o) => !o && onClose()}
+      title={secret ? `Replace value of ${secret.name}` : "Replace value"}
+      description="The new value is encrypted and replaces the old one. New runs receive the new value."
+    >
+      <form className="stack stack-sm" onSubmit={submit} autoComplete="off">
+        {error && <Alert kind="error">{error}</Alert>}
+        <Field label="New value" htmlFor="s-new-value">
+          <input id="s-new-value" type="password" className="mono" required autoComplete="new-password" value={value} onChange={(e) => setValue(e.target.value)} />
+        </Field>
+        <div className="dialog-footer">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button type="submit" variant="primary" busy={update.isPending}>
+            Save value
+          </Button>
+        </div>
+      </form>
+    </Dialog>
   );
 }
 

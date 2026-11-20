@@ -5,6 +5,7 @@ import { Check, ChevronRight, ChevronsUpDown, Info, Keyboard, LogOut, Monitor, M
 import { api, apiURL, unwrap, type Factory } from "../api/client";
 import { useEventStream } from "../api/sse";
 import { useAuth } from "../auth/AuthContext";
+import { STREAM_TOPICS, streamInvalidations } from "../lib/live";
 import { FACTORIES_KEY, MOD, useFactories, useInboxCount } from "../lib/queries";
 import { BrandLogo } from "./BrandMark";
 import { CommandPalette, type Theme } from "./CommandPalette";
@@ -67,24 +68,19 @@ function useStored(key: string, initial: boolean): [boolean, (v: boolean) => voi
 /** Invalidates cached queries when the team's live stream reports changes. */
 function LiveUpdates() {
   const qc = useQueryClient();
-  useEventStream(apiURL("/stream", { topics: "inbox,workitem,run,definition" }), {
-    inbox: () => void qc.invalidateQueries({ queryKey: ["inbox"] }),
-    workitem: (data) => {
-      const wi = data as { id?: string; factory_id?: string };
-      void qc.invalidateQueries({ queryKey: ["workitems", wi.factory_id] });
-      if (wi.id) void qc.invalidateQueries({ queryKey: ["workitem", wi.id] });
-    },
-    run: (data) => {
-      const r = data as { run_id?: string };
-      void qc.invalidateQueries({ queryKey: ["runs"] });
-      if (r.run_id) void qc.invalidateQueries({ queryKey: ["run", r.run_id] });
-    },
-    definition: (data) => {
-      const f = data as { id?: string };
-      void qc.invalidateQueries({ queryKey: FACTORIES_KEY });
-      if (f.id) void qc.invalidateQueries({ queryKey: ["factory", f.id] });
-    },
-  });
+  const handlers = useMemo(
+    () =>
+      Object.fromEntries(
+        STREAM_TOPICS.map((topic) => [
+          topic,
+          (data: unknown) => {
+            for (const queryKey of streamInvalidations(topic, data)) void qc.invalidateQueries({ queryKey });
+          },
+        ]),
+      ),
+    [qc],
+  );
+  useEventStream(apiURL("/stream", { topics: STREAM_TOPICS.join(",") }), handlers);
   return null;
 }
 

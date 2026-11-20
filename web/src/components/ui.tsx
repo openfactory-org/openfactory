@@ -1,4 +1,4 @@
-import { Fragment, useId, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { Fragment, useId, useSyncExternalStore, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { UseQueryResult } from "@tanstack/react-query";
 import * as RTooltip from "@radix-ui/react-tooltip";
@@ -375,7 +375,39 @@ export function KV({ items }: { items: [ReactNode, ReactNode][] }) {
   );
 }
 
+/** How often relative times such as "2 minutes ago" advance. */
+export const CLOCK_TICK_MS = 30_000;
+
+// One timer serves every mounted TimeAgo. It runs only while one is mounted.
+const clockListeners = new Set<() => void>();
+let clockNow = Date.now();
+let clockTimer: ReturnType<typeof setInterval> | undefined;
+
+function subscribeClock(fn: () => void): () => void {
+  clockListeners.add(fn);
+  if (clockTimer === undefined) {
+    clockNow = Date.now();
+    clockTimer = setInterval(() => {
+      clockNow = Date.now();
+      clockListeners.forEach((l) => l());
+    }, CLOCK_TICK_MS);
+  }
+  return () => {
+    clockListeners.delete(fn);
+    if (clockListeners.size === 0 && clockTimer !== undefined) {
+      clearInterval(clockTimer);
+      clockTimer = undefined;
+    }
+  };
+}
+
+/** The current time, updated every CLOCK_TICK_MS by a timer that all callers share. */
+export function useNow(): number {
+  return useSyncExternalStore(subscribeClock, () => clockNow);
+}
+
 export function TimeAgo({ t }: { t?: string | null }) {
+  useNow(); // re-render on each tick so the text advances
   if (!t) return <span className="muted">—</span>;
   return (
     <time dateTime={t} title={fmtTime(t)}>
