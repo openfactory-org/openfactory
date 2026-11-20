@@ -295,7 +295,23 @@ type Actors = {
   runCreator?: (runID: string) => Schemas["Principal"] | undefined;
   /** The user who created the work item. */
   itemCreatorID?: string;
+  /** Maps an automation ID to its name. */
+  automationName?: (automationID: string) => string | undefined;
 };
+
+// Platform actors of automations: "<prefix>:<automation ID>".
+const AUTOMATION_ACTORS = ["automation:", "schedule:", "webhook:"];
+
+// The engine sends the resolution of an inbox item to the run as a message
+// that starts with one of these markers. The timeline already shows the
+// answer or decision, so the message is not shown again.
+const FOLLOW_UP_MARKER = /^\[human (answer|decision|response|correction)\]/;
+
+/** Reports whether a timeline event is the platform's copy of an inbox resolution. */
+export function isInboxFollowUp(e: TimelineEvent): boolean {
+  const d = (e.data ?? {}) as Record<string, unknown>;
+  return e.kind === "message_in" && FOLLOW_UP_MARKER.test(str(d.text));
+}
 
 // Channel actors: a person acted through the dashboard, the API, the CLI
 // or MCP, and the event does not name the person.
@@ -310,6 +326,11 @@ function actorName(e: TimelineEvent, actors: Actors = {}): string {
   if (!a || a === "system") return "The factory";
   if (a.startsWith("run:")) return "The foreman";
   if (a.startsWith("user:")) return personName(a.slice(5), actors);
+  const auto = AUTOMATION_ACTORS.find((p) => a.startsWith(p));
+  if (auto) {
+    const name = actors.automationName?.(a.slice(auto.length));
+    return name ? `The automation ${name}` : "An automation";
+  }
   if (CHANNEL_ACTORS.has(a.toLowerCase())) {
     // A run records who started it: name that person.
     const p = e.run_id ? actors.runCreator?.(e.run_id) : undefined;
@@ -352,7 +373,8 @@ export function describeEvent(e: TimelineEvent, actors: Actors = {}): { icon: Re
         icon: state === "succeeded" ? <Check size={size} /> : state === "cancelled" ? <Square size={size} /> : <X size={size} />,
         text: (
           <>
-            <strong>{str(d.name) || "The run"}</strong> {state === "succeeded" ? "finished its turn" : state ? `ended: ${state}` : "ended"}
+            <strong>{str(d.name) || "The run"}</strong>{" "}
+            {state === "succeeded" ? "finished its turn" : state === "blocked" ? "is waiting on a person" : state ? `ended: ${state}` : "ended"}
           </>
         ),
         body: humanizeError(str(d.error) || str(d.message) || str(d.text)).message,
@@ -377,8 +399,20 @@ export function describeEvent(e: TimelineEvent, actors: Actors = {}): { icon: Re
       return { icon: <RotateCcw size={size} />, text: <>{who} opened this again</> };
     case "sender_checked":
       return { icon: <ShieldCheck size={size} />, text: <>{who} checked the sender</> };
-    case "note":
-      return { icon: <StickyNote size={size} />, text: <>{who} noted</>, body: str(d.text) || str(d.summary) };
+    case "note": {
+      const title = str(d.title);
+      const verb = str(d.kind) === "handoff" ? "handed off" : "noted";
+      return {
+        icon: <StickyNote size={size} />,
+        text: (
+          <>
+            {who} {verb}
+            {title ? `: ${title}` : ""}
+          </>
+        ),
+        body: str(d.text) || str(d.summary) || str(d.body),
+      };
+    }
     default: {
       const body = str(d.body) || str(d.text) || str(d.resolution) || str(d.question) || str(d.summary) || str(d.note) || str(d.message);
       return {
@@ -450,6 +484,15 @@ export function WorkItemPage() {
     if (me && id === me.user.id) return "You";
     const u = (users.data ?? []).find((x) => x.id === id);
     return u ? u.name || u.email : undefined;
+  };
+  const automations = useQuery({
+    queryKey: ["automations", f.id],
+    queryFn: () => unwrap(api.GET("/factories/{uid}/automations", { params: { path: { uid: f.id } } })).then((r) => r.items ?? []),
+    retry: false,
+  });
+  const automationName = (id: string) => {
+    const a = (automations.data ?? []).find((x) => x.id === id);
+    return a ? a.display_name || a.name : undefined;
   };
   const [message, setMessage] = useState("");
   const send = useMutate(
@@ -523,8 +566,12 @@ export function WorkItemPage() {
                     <p className="muted small">No events yet.</p>
                   ) : (
                     <ol className="timeline">
-                      {wi.timeline.map((e) => (
-                        <TimelineItem key={e.id} e={e} actors={{ nameOf, itemCreatorID: wi.creator_id, runCreator: (id) => (wi.runs ?? []).find((r) => r.run_id === id)?.creator }} />
+                      {wi.timeline.filter((e) => !isInboxFollowUp(e)).map((e) => (
+                        <TimelineItem
+                          key={e.id}
+                          e={e}
+                          actors={{ nameOf, automationName, itemCreatorID: wi.creator_id, runCreator: (id) => (wi.runs ?? []).find((r) => r.run_id === id)?.creator }}
+                        />
                       ))}
                     </ol>
                   )}

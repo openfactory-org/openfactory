@@ -137,7 +137,9 @@ The inbox collects requests that wait for a person: `/inbox` for all factories, 
 | `review` | Review | For a definition change, read the diff and click **Approve and apply** or **Reject**. For a self-improvement pull request, review it at the forge, then click **Mark resolved**. |
 | `answered`, `spend_limit` | For your information, Spend limit | Click **Dismiss**. |
 
-When you resolve a question, blocked item or approval, the engine sends your answer to the waiting agent, which continues from where it stopped.
+When you resolve a question, blocked item or approval, the engine sends your answer to the waiting agent, which continues from where it stopped. The message names you by your name or email.
+
+When you resolve a handoff or dismiss a "For your information" item, the engine sends nothing to the agent and starts no new agent turn. The agent finished its part; the resolve only closes the item. To give the agent more work, send a message on the work item.
 
 **Undo** shows for 10 minutes after a resolve, while the agent has not read the answer. The agent then gets a message that withdraws the answer, and the item opens again. A handoff closed by a review or merge cannot be undone.
 

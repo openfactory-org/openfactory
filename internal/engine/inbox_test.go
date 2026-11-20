@@ -157,3 +157,65 @@ func TestUnresolveInbox(t *testing.T) {
 		t.Fatalf("unresolve after window = %v", err)
 	}
 }
+
+func TestResolveInboxFollowUpUsesNameAndSkipsBookkeeping(t *testing.T) {
+	tests := []struct {
+		name    string
+		kind    core.InboxKind
+		actor   string
+		resumes bool
+		want    string
+	}{
+		{name: "question by user with name", kind: core.InboxQuestion, actor: "user:usr_dana", resumes: true, want: "[human answer] Dana Lee answered"},
+		{name: "question by user without name", kind: core.InboxQuestion, actor: "user:usr_mail", resumes: true, want: "[human answer] mail@example.com answered"},
+		{name: "question by unknown user", kind: core.InboxQuestion, actor: "user:usr_gone", resumes: true, want: "[human answer] a team member answered"},
+		{name: "question by automation", kind: core.InboxQuestion, actor: "webhook:aut_1", resumes: true, want: "[human answer] an automation answered"},
+		{name: "approval", kind: core.InboxApproval, actor: "user:usr_dana", resumes: true, want: "resolved by Dana Lee: ok"},
+		{name: "blocked", kind: core.InboxBlocked, actor: "user:usr_dana", resumes: true, want: "[human response] Dana Lee responded"},
+		{name: "handoff", kind: core.InboxHandoff, actor: "user:usr_dana", resumes: false},
+		{name: "answered", kind: core.InboxAnswered, actor: "user:usr_dana", resumes: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := NewTestEnv(t)
+			ctx := context.Background()
+			for _, u := range []*core.User{
+				{ID: "usr_dana", TeamID: "team1", Name: "Dana Lee", Email: "dana@example.com", Role: core.RoleUser},
+				{ID: "usr_mail", TeamID: "team1", Email: "mail@example.com", Role: core.RoleUser},
+			} {
+				env.Store.PutUser(u)
+			}
+			root := creatorRun(t, env)
+			it, err := env.Engine.RequestHuman(ctx, root.ID, tt.kind, "Title", "Body", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, _ := env.Store.ListRunMessages(ctx, root.ID, 0)
+			rctx := core.WithResolver(ctx, core.Resolver{UserID: "usr_dana", Via: core.InboxViaDashboard})
+			if err := env.Engine.ResolveInbox(rctx, it.ID, "ok", tt.actor); err != nil {
+				t.Fatal(err)
+			}
+			after, _ := env.Store.ListRunMessages(ctx, root.ID, 0)
+			if !tt.resumes {
+				if len(after) != len(before) {
+					t.Fatalf("a %s resolve must not message the run: %+v", tt.kind, after[len(before):])
+				}
+				// Undo sends no correction either: nothing was sent.
+				if _, err := env.Engine.UnresolveInbox(ctx, it.ID, tt.actor); err != nil {
+					t.Fatal(err)
+				}
+				if again, _ := env.Store.ListRunMessages(ctx, root.ID, 0); len(again) != len(before) {
+					t.Fatalf("undo of a %s resolve must not message the run", tt.kind)
+				}
+				return
+			}
+			if len(after) != len(before)+1 {
+				t.Fatalf("messages = %d, want %d", len(after), len(before)+1)
+			}
+			got := after[len(after)-1].Content
+			if !strings.Contains(got, tt.want) || strings.Contains(got, "usr_") {
+				t.Fatalf("follow-up = %q, want %q and no raw user ID", got, tt.want)
+			}
+		})
+	}
+}

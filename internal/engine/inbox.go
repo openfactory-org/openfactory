@@ -245,8 +245,8 @@ func (e *Engine) UnresolveInbox(ctx context.Context, inboxID, actor string) (*co
 	if it.WorkItemID != "" {
 		e.timeline(ctx, it.WorkItemID, "note", it.RunID, actor, map[string]any{"inbox_id": it.ID, "text": "resolve undone"})
 	}
-	if it.RunID != "" && it.Kind != core.InboxAnswered {
-		who := nonEmpty(actor, "a team member")
+	if it.RunID != "" && resumesRun(it.Kind) {
+		who := e.actorLabel(ctx, actor)
 		msg := fmt.Sprintf("[human correction] %s withdrew the answer to %q (it was: %s). Ignore that answer. A new answer will arrive as a follow-up message.", who, it.Title, truncate(old, 500))
 		if err := e.FollowUp(ctx, it.RunID, msg, actor); err != nil {
 			e.log.Warn("deliver inbox unresolve", "inbox_id", it.ID, "run_id", it.RunID, "err", err)

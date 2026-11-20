@@ -166,6 +166,8 @@ Say in the prompt which fields of the body matter. For example: "Read `build.sta
 
 Each accepted delivery starts new runs or nothing. Deliveries do not continue earlier work items, and deliveries have no order.
 
+The work item of a delivery gets its title from the first non-empty top-level string field `title`, `subject` or `summary` of the body (first line, at most 200 bytes). If the body has none of these fields, the title is the webhook name.
+
 ## Delivery rules
 
 | Rule | Behavior |
