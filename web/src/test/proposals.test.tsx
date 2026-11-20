@@ -78,6 +78,39 @@ describe("self-improvement proposals", () => {
     await waitFor(() => expect(decided.comment).toBe("Keep it"));
   });
 
+  it("disables self-improvement without a scorer and shows the answer of the server", async () => {
+    let scorers: unknown[] = [];
+    let started = false;
+    mockFetch({
+      "GET /api/v1/me": ME,
+      "GET /api/v1/factories/fac_1": FACTORY,
+      "GET /api/v1/factories/fac_1/scorers": () => ({ body: { items: scorers, page_info: { has_next_page: false } } }),
+      "GET /api/v1/factories/fac_1/scores": { items: [], page_info: { has_next_page: false } },
+      "GET /api/v1/factories/fac_1/work-items": { items: [], page_info: { has_next_page: false } },
+      "GET /api/v1/factories/fac_1/definition/proposals": { items: [], page_info: { has_next_page: false } },
+      "POST /api/v1/factories/fac_1/self-improvement": () => {
+        started = true;
+        return { status: 200, body: { factory_id: "fac_1", started: false, run_ids: [], reason: "No failed scores wait for review." } };
+      },
+    });
+    const user = userEvent.setup();
+    const view = renderFactoryPage(<ScorersPage />, "/f/fac_1/scorers", "scorers");
+    await screen.findByText("No scorers yet");
+    const button = screen.getByRole("button", { name: "Run self-improvement now" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "Add a scorer to the definition first");
+    view.unmount();
+
+    scorers = [{ id: "scr_1", slug: "quality", name: "Quality", self_improvement: true }];
+    renderFactoryPage(<ScorersPage />, "/f/fac_1/scorers", "scorers");
+    await screen.findByText("Quality");
+    const enabled = screen.getByRole("button", { name: "Run self-improvement now" });
+    await waitFor(() => expect(enabled).toBeEnabled());
+    await user.click(enabled);
+    await waitFor(() => expect(started).toBe(true));
+    expect(await screen.findByText("No run started. No failed scores wait for review.")).toBeInTheDocument();
+  });
+
   it("cancels a running benchmark", async () => {
     let cancelled = false;
     mockFetch({

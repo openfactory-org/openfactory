@@ -95,9 +95,11 @@ type Options struct {
 	LoginProviders func(r *http.Request) []LoginProvider
 	// ScoreRun scores one run on demand with a scorer (POST /runs/{id}/score).
 	ScoreRun func(ctx context.Context, scorerID, runID string) (*core.Score, error)
-	// RunSelfImprovement triggers an ad hoc self-improvement check
-	// (POST /factories/{uid}/self-improvement).
-	RunSelfImprovement func(ctx context.Context, factoryID string) error
+	// RunSelfImprovement starts self-improvement now for every agent with
+	// unreviewed failed scores (POST /factories/{uid}/self-improvement). It
+	// returns the IDs of the runs it started, which is empty when no failed
+	// score waits for review.
+	RunSelfImprovement func(ctx context.Context, factoryID string) ([]string, error)
 	// Version describes the running build (GET /version).
 	Version VersionInfo
 	// Authorize replaces the built-in role check of authenticated routes
