@@ -410,7 +410,9 @@ export function RunPage() {
                 ["Cost", <span key="c">{money(run.usage?.cost_usd)}</span>],
                 ["Tokens in", <span key="i">{count(run.usage?.input_tokens)}</span>],
                 ["Tokens out", <span key="o">{count(run.usage?.output_tokens)}</span>],
-                ["Duration", <span key="d">{run.usage?.duration_ms == null && notStarted ? "Agent did not start" : duration(run.usage?.duration_ms)}</span>],
+                // The API reports usage with duration_ms 0 for a run whose
+                // agent did not start, so 0 counts as no duration.
+                ["Duration", <span key="d">{!run.usage?.duration_ms && notStarted ? "Agent did not start" : duration(run.usage?.duration_ms)}</span>],
               ]}
             />
           </section>
