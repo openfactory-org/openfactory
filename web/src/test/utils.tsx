@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { vi } from "vitest";
 import { ROUTER_FUTURE } from "../App";
 import { AuthProvider } from "../auth/AuthContext";
+import { FactoryLayout } from "../components/FactoryLayout";
 import { ToastProvider } from "../components/Toast";
 
 export type Call = { method: string; path: string; search: string; body: unknown; headers: Headers; credentials?: RequestCredentials };
@@ -112,6 +113,26 @@ export function renderAt(ui: ReactElement, { route, path }: { route: string; pat
           <MemoryRouter initialEntries={[route]} future={ROUTER_FUTURE}>
             <Routes>
               <Route path={path} element={ui} />
+            </Routes>
+          </MemoryRouter>
+        </AuthProvider>
+      </ToastProvider>
+    </QueryClientProvider>,
+  );
+}
+
+/** Renders a page inside FactoryLayout: route "/f/fac_1/<sub>", path "<sub pattern>". */
+export function renderFactoryPage(ui: ReactElement, { route, path }: { route: string; path: string }) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <ToastProvider>
+        <AuthProvider>
+          <MemoryRouter initialEntries={[route]} future={ROUTER_FUTURE}>
+            <Routes>
+              <Route path="/f/:fid" element={<FactoryLayout />}>
+                <Route path={path} element={ui} />
+              </Route>
             </Routes>
           </MemoryRouter>
         </AuthProvider>
