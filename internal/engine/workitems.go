@@ -355,14 +355,10 @@ func (e *Engine) ResolveInbox(ctx context.Context, inboxID, resolution, actor st
 	if err != nil {
 		return err
 	}
-	if it.RunID == "" || it.Kind == core.InboxAnswered {
-		// An answered item is information only: the run needs no reply.
+	if it.RunID == "" || !resumesRun(it.Kind) {
 		return nil
 	}
-	who := actor
-	if who == "" {
-		who = "a team member"
-	}
+	who := e.actorLabel(ctx, actor)
 	var msg string
 	switch it.Kind {
 	case core.InboxApproval:
@@ -378,6 +374,50 @@ func (e *Engine) ResolveInbox(ctx context.Context, inboxID, resolution, actor st
 		e.recordAnswer(ctx, it.ID, it.RunID, msg)
 	}
 	return nil
+}
+
+// resumesRun reports whether resolving an item of kind k sends the
+// resolution to the run as a follow-up, which starts another agent turn. A
+// handoff and an information-only item are bookkeeping: the agent already
+// finished its part, so resolving them does not resume it.
+func resumesRun(k core.InboxKind) bool {
+	switch k {
+	case core.InboxHandoff, core.InboxAnswered:
+		return false
+	}
+	return true
+}
+
+// actorLabel returns a readable name of an actor for text that people and
+// the model read. A "user:<id>" actor gives the user's name or email, never
+// the raw ID. Other platform actors (automations, webhooks, runs) give a
+// generic label. A plain handle, for example from a chat message, is kept.
+func (e *Engine) actorLabel(ctx context.Context, actor string) string {
+	actor = strings.TrimSpace(actor)
+	if actor == "" || actor == "api" {
+		return "a team member"
+	}
+	prefix, id, ok := strings.Cut(actor, ":")
+	if !ok {
+		return actor
+	}
+	switch prefix {
+	case "user":
+		if u, err := e.store.GetUser(ctx, id); err == nil {
+			if n := strings.TrimSpace(u.Name); n != "" {
+				return n
+			}
+			if m := strings.TrimSpace(u.Email); m != "" {
+				return m
+			}
+		}
+		return "a team member"
+	case "webhook", "automation", "trigger", "schedule":
+		return "an automation"
+	case "run", "agent", "system":
+		return "the factory"
+	}
+	return actor
 }
 
 // PostUpdate posts a progress update from a run back to its work source. An

@@ -365,7 +365,7 @@ curl -s -X POST "$OF_PUBLIC_URL/api/v1/inbox/inbox_123/resolve" \
   -d '{"answers": [{"question_id": "q1", "selected": ["Postgres"]}]}'
 ```
 
-- The engine sends the resolution to the waiting agent as a user message. An `answered` item sends nothing.
+- The engine sends the resolution to the waiting agent as a user message, which starts a new agent turn. The message names the person by name or email, not by user ID. A `handoff` or `answered` item sends nothing and starts no turn.
 - Resolving a resolved item returns `409 conflict`.
 - The item records `resolved_by` and `resolved_via` (`api`, `dashboard` or `chat`).
 - If `factory.yaml` has `approvers`, only a listed user can resolve an `approval`.
