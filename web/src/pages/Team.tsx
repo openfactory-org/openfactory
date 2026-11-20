@@ -366,15 +366,15 @@ export function IntegrationsPage() {
                         <td>
                           <IntegrationStatus status={i.status} reason={i.status_reason} />
                         </td>
-                        <td className="small">
+                        <td className="small cell-wrap">
                           {Object.entries(i.config ?? {}).map(([k, v]) => (
                             <code key={k}>
                               {k}={v}{" "}
                             </code>
                           ))}
                         </td>
-                        <td>{i.secret_ref ? <code>{i.secret_ref}</code> : "—"}</td>
-                        <td className="right">
+                        <td className="cell-wrap">{i.secret_ref ? <code>{i.secret_ref}</code> : "—"}</td>
+                        <td className="right nowrap">
                           {isAdmin && (
                             <>
                               {(i.status ?? "active") === "active" ? (

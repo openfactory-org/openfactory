@@ -602,6 +602,10 @@ ul.option-list {
 /* ---------- tables and list rows ---------- */
 
 .table-wrap {
+  /* Wide tables scroll inside the wrapper, never the page. position
+     keeps absolutely positioned cell content inside the scroll area. */
+  position: relative;
+  max-width: 100%;
   overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -621,6 +625,12 @@ ul.option-list {
   padding: var(--s2) var(--s3);
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
+}
+/* A cell with long unbroken text (key=value settings, IDs) wraps
+   instead of widening the table. */
+.table td.cell-wrap {
+  min-width: 14ch;
+  overflow-wrap: anywhere;
 }
 .table th.num,
 .table td.num {
