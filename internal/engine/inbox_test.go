@@ -163,6 +163,7 @@ func TestResolveInboxFollowUpUsesNameAndSkipsBookkeeping(t *testing.T) {
 		name    string
 		kind    core.InboxKind
 		actor   string
+		options []string
 		resumes bool
 		want    string
 	}{
@@ -174,6 +175,12 @@ func TestResolveInboxFollowUpUsesNameAndSkipsBookkeeping(t *testing.T) {
 		{name: "blocked", kind: core.InboxBlocked, actor: "user:usr_dana", resumes: true, want: "[human response] Dana Lee responded"},
 		{name: "handoff", kind: core.InboxHandoff, actor: "user:usr_dana", resumes: false},
 		{name: "answered", kind: core.InboxAnswered, actor: "user:usr_dana", resumes: false},
+		// A failure notice is bookkeeping: retrying is a separate follow-up.
+		{name: "failure", kind: core.InboxFailure, actor: "user:usr_dana", resumes: false},
+		// The review of a self-improvement pull request has no options.
+		{name: "pull request review", kind: core.InboxReview, actor: "user:usr_dana", resumes: false},
+		// The review of a definition change: the author run needs the decision.
+		{name: "definition change review", kind: core.InboxReview, options: []string{"approve", "reject"}, actor: "user:usr_dana", resumes: true, want: "[human response] Dana Lee responded"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -186,7 +193,7 @@ func TestResolveInboxFollowUpUsesNameAndSkipsBookkeeping(t *testing.T) {
 				env.Store.PutUser(u)
 			}
 			root := creatorRun(t, env)
-			it, err := env.Engine.RequestHuman(ctx, root.ID, tt.kind, "Title", "Body", nil)
+			it, err := env.Engine.RequestHuman(ctx, root.ID, tt.kind, "Title", "Body", tt.options)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -355,7 +355,7 @@ curl -s -X POST "$OF_PUBLIC_URL/api/v1/inbox/inbox_123/resolve" \
 | `approval` | Required. If the item has `options`, one of them (case-insensitive). |
 | `question`, `blocked` | Required. Your answer. |
 | `review` of a definition change | Required. `approve` applies the version. `reject` or `reject: <reason>` rejects it and sends the reason to the agent. Needs `editor`. See [Review](measure-and-improve.md#review). |
-| `handoff`, `failure`, `review` of a pull request, `answered`, `spend_limit` | Optional. Default `resolved`. |
+| `handoff`, `failure`, `review` of a pull request, `answered`, `spend_limit` | Optional. Default `resolved`. The resolve only closes the item: it sends nothing to the agent and starts no turn. To retry after a failure, send a [follow-up](#follow-ups-and-cancellation). |
 
 A question item also accepts `answers`, one per question, in place of `resolution`. The API checks each choice against the options; a `single_select` question takes one choice:
 

@@ -355,7 +355,7 @@ func (e *Engine) ResolveInbox(ctx context.Context, inboxID, resolution, actor st
 	if err != nil {
 		return err
 	}
-	if it.RunID == "" || !resumesRun(it.Kind) {
+	if it.RunID == "" || !resumesRun(it) {
 		return nil
 	}
 	who := e.actorLabel(ctx, actor)
@@ -376,14 +376,22 @@ func (e *Engine) ResolveInbox(ctx context.Context, inboxID, resolution, actor st
 	return nil
 }
 
-// resumesRun reports whether resolving an item of kind k sends the
-// resolution to the run as a follow-up, which starts another agent turn. A
-// handoff and an information-only item are bookkeeping: the agent already
-// finished its part, so resolving them does not resume it.
-func resumesRun(k core.InboxKind) bool {
-	switch k {
-	case core.InboxHandoff, core.InboxAnswered:
+// resumesRun reports whether resolving it sends the resolution to the run as
+// a follow-up, which starts another agent turn (a paid turn). Only an item
+// that the agent waits on resumes it: a question, an approval, a blocked
+// run, and the review of a definition change (an item with the options
+// approve and reject, whose decision the author run needs).
+//
+// The other items are bookkeeping: a handoff, an information-only item, a
+// failure notice and the review of a self-improvement pull request. The
+// agent already finished its part, so resolving them only closes the item.
+// To retry after a failure, a person sends a follow-up message.
+func resumesRun(it *core.InboxItem) bool {
+	switch it.Kind {
+	case core.InboxHandoff, core.InboxAnswered, core.InboxFailure, core.InboxSpendLimit:
 		return false
+	case core.InboxReview:
+		return len(it.Options) > 0
 	}
 	return true
 }
