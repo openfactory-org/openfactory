@@ -8,7 +8,7 @@ import { AutomationPage, AutomationsPage, fmtUTC, setFrontmatterEnabled } from "
 import { defaultChangeMessage } from "../pages/Definition";
 import { changedIdentity, gitRepoError, SettingsPage } from "../pages/Settings";
 import { EnvironmentPage } from "../pages/Team";
-import { filterHeadline, WebhookPage, WebhooksPage, webhookUsage } from "../pages/Webhooks";
+import { deliveryReason, filterHeadline, WebhookPage, WebhooksPage, webhookUsage } from "../pages/Webhooks";
 import { ME, mockFetch, renderAt, renderFactoryPage } from "./utils";
 
 const FACTORY = { uid: "fac_1", id: "fac_1", name: "Payments", alias: "pay", description: "", source: "managed", active_version_id: "defv_1" };
@@ -70,6 +70,50 @@ describe("webhooks", () => {
     expect(webhookUsage({ auth_mode: "signature", signature_scheme: "vercel", ingress_url: url }).lines[1]).toContain("HMAC-SHA1");
   });
 
+  it("sends the delivery ID header in the curl example when the webhook sets one", () => {
+    const url = "https://factory.example.test/webhooks/w/wh_1";
+    for (const h of [
+      { auth_mode: "token" as const, ingress_url: url, delivery_id_header: "X-CI-Run-Id" },
+      { auth_mode: "url_token" as const, ingress_url: `${url}/{token}`, delivery_id_header: "X-CI-Run-Id" },
+      { auth_mode: "signature" as const, signature_scheme: "github" as const, ingress_url: url, delivery_id_header: "X-CI-Run-Id" },
+    ]) {
+      const u = webhookUsage(h);
+      expect(u.curl).toContain('DELIVERY_ID="test-$(date +%s)"');
+      expect(u.curl).toContain('-H "X-CI-Run-Id: $DELIVERY_ID"');
+      expect(u.lines[u.lines.length - 1]).toContain("X-CI-Run-Id");
+      // The ID is declared before curl uses it.
+      expect(u.curl.indexOf("DELIVERY_ID=")).toBeLessThan(u.curl.indexOf("curl "));
+    }
+    expect(webhookUsage({ auth_mode: "token", ingress_url: url }).curl).not.toContain("DELIVERY_ID");
+  });
+
+  it("does not repeat a delivery reason that the label already says", () => {
+    expect(deliveryReason({ status: "deduplicated", label: "Duplicate delivery", reason: "duplicate" })).toBe("");
+    expect(deliveryReason({ status: "deduplicated", reason: "Deduplicated" })).toBe("");
+    expect(deliveryReason({ status: "rejected", label: "Rejected", reason: "bad signature" })).toBe("bad signature");
+    expect(deliveryReason({ status: "accepted", label: "Accepted" })).toBe("");
+  });
+
+  it("names the managed secret of a signature webhook in the created panel", async () => {
+    mockFetch({
+      "GET /api/v1/me": ME,
+      "GET /api/v1/factories/fac_1": FACTORY,
+      "GET /api/v1/factories/fac_1/webhooks": EMPTY,
+      "POST /api/v1/factories/fac_1/webhooks": {
+        webhook: { id: "wh_2", name: "gh", auth_mode: "signature", signature_scheme: "github", secret_name: "GH_WEBHOOK_SECRET", enabled: true, ingress_url: "https://factory.example.test/webhooks/w/wh_2" },
+        ingress_url: "https://factory.example.test/webhooks/w/wh_2",
+      },
+    });
+    const user = userEvent.setup();
+    renderFactoryPage(<WebhooksPage />, { route: "/f/fac_1/webhooks", path: "webhooks" });
+    await user.click((await screen.findAllByRole("button", { name: /Add webhook/ }))[0]);
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Name"), "gh");
+    await user.click(within(dialog).getByRole("button", { name: "Create webhook" }));
+    const created = await screen.findByRole("status", { name: "Webhook created" });
+    expect(created).toHaveTextContent("stored in the managed secret GH_WEBHOOK_SECRET");
+  });
+
   it("says that a match does not trigger a disabled automation", () => {
     expect(filterHeadline({ would_trigger: true, result: "Would trigger" }, false)).toEqual({ text: "Would match, but the automation is disabled", ok: false });
     expect(filterHeadline({ would_trigger: true, result: "Would trigger" }, true)).toEqual({ text: "Would trigger", ok: true });
@@ -106,6 +150,8 @@ describe("webhooks", () => {
     expect(usage).toHaveTextContent('curl -X POST "https://factory.example.test/webhooks/w/wh_1"');
     const row = await screen.findByRole("button", { name: /dlv_1/ });
     expect(row.textContent).not.toMatch(/Accepted\s*Accepted/i);
+    expect(row.parentElement!.textContent).toMatch(/UTC/);
+    expect(document.title).toMatch(/^ci · /);
   });
 });
 
@@ -166,6 +212,23 @@ describe("automation page", () => {
     await user.click(screen.getByRole("button", { name: "Disable" }));
     await waitFor(() => expect(calls.some((c) => c.method === "PUT")).toBe(true));
     expect((calls.find((c) => c.method === "PUT")!.body as { content: string }).content).toContain("enabled: false\nagent: foreman");
+  });
+});
+
+describe("automation state card", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("titles the state card with the real state", async () => {
+    mockFetch({
+      "GET /api/v1/me": ME,
+      "GET /api/v1/factories/fac_1": FACTORY,
+      "GET /api/v1/factories/fac_1/webhooks": EMPTY,
+      "GET /api/v1/factories/fac_1/schedules": EMPTY,
+      "GET /api/v1/factories/fac_1/automations/off": { content: "---\nenabled: false\n---\nDo it.\n", automation: { id: "aut_2", name: "off", enabled: false } },
+    });
+    renderFactoryPage(<AutomationPage />, { route: "/f/fac_1/automations/off", path: "automations/:name" });
+    expect(await screen.findByRole("heading", { name: "Disabled" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Active" })).not.toBeInTheDocument();
   });
 });
 

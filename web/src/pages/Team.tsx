@@ -687,7 +687,13 @@ export function EnvironmentPage() {
       </form>
     </>
   );
-  return isNew ? body : <Query q={q}>{() => body}</Query>;
+  return isNew ? (
+    body
+  ) : (
+    <Query q={q} notFound={{ title: "Environment not found", text: "The team has no environment with this ID.", back: { label: "Go to environments", to: "/environments" } }}>
+      {() => body}
+    </Query>
+  );
 }
 
 // ---------- workers ----------

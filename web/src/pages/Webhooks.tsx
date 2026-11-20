@@ -6,14 +6,21 @@ import { useAuth } from "../auth/AuthContext";
 import { fpath, useFactory } from "../components/FactoryLayout";
 import { Plus, Webhook as WebhookIcon } from "lucide-react";
 import { confirm, Dialog } from "../components/overlays";
-import { Alert, Badge, Button, Card, Code, Empty, ErrorAlert, Field, KV, PageHeader, Query, TimeAgo } from "../components/ui";
-import { fmtTime } from "../lib/format";
+import { Alert, Badge, Button, Card, Code, Empty, ErrorAlert, Field, KV, PageHeader, Query } from "../components/ui";
+import { fmtUTC } from "../lib/format";
 import { useMutate } from "../lib/mutate";
 import { ReadOnlyNotice } from "./Agents";
 
 type Webhook = Schemas["Webhook"];
 type Delivery = Schemas["Delivery"];
 type TestFilterResult = Schemas["TestFilterResult"];
+
+/** The reason of a delivery, or "" when its label already says it, as in "Duplicate delivery · duplicate". */
+export function deliveryReason(d: Pick<Delivery, "status" | "label" | "reason">): string {
+  const reason = (d.reason ?? "").trim();
+  const shown = (d.label || d.status || "").toLowerCase();
+  return reason && !shown.includes(reason.toLowerCase()) ? reason : "";
+}
 
 const TONES_BY_STATUS: Record<string, string> = { accepted: "ok", rejected: "bad", deduplicated: "neutral", duplicate: "neutral" };
 
@@ -82,10 +89,26 @@ const SIGNATURES: Record<string, { header: string; how: string; sign: string[] }
   },
 };
 
-type UsageHook = Pick<Webhook, "auth_mode" | "signature_scheme" | "ingress_url">;
+type UsageHook = Pick<Webhook, "auth_mode" | "signature_scheme" | "ingress_url" | "delivery_id_header">;
 
 /** How to call a webhook: what to send, and a curl example with a placeholder credential. */
 export function webhookUsage(h: UsageHook): { lines: string[]; curl: string } {
+  const u = webhookUsageBase(h);
+  const hdr = h.delivery_id_header;
+  if (!hdr) return u;
+  const lines = [...u.lines, `Send a unique delivery ID in the header ${hdr}. The factory skips a delivery whose ID it already received.`];
+  if (!u.curl) return { lines, curl: "" };
+  // Declare the ID after the body and send its header after Content-Type.
+  const out: string[] = [];
+  for (const l of u.curl.split("\n")) {
+    out.push(l);
+    if (l.startsWith("BODY=")) out.push(`DELIVERY_ID="test-$(date +%s)"`);
+    if (l.includes("Content-Type: application/json")) out.push(`  -H "${hdr}: $DELIVERY_ID" \\`);
+  }
+  return { lines, curl: out.join("\n") };
+}
+
+function webhookUsageBase(h: UsageHook): { lines: string[]; curl: string } {
   const base = (h.ingress_url ?? "").replace(/\/\{token\}$/, "");
   const body = `BODY='{"event":"test"}'`;
   const json = `  -H "Content-Type: application/json" \\`;
@@ -227,6 +250,11 @@ export function WebhooksPage() {
             {created.secret && (
               <>
                 The secret is not shown again; it is stored in the managed secret <code>{created.webhook.secret_name}</code>.
+              </>
+            )}
+            {!created.secret && !created.secret_reused && !created.awaiting_secret && created.webhook.secret_name && (
+              <>
+                The provider secret is stored in the managed secret <code>{created.webhook.secret_name}</code>.
               </>
             )}
             {created.secret_reused && (
@@ -455,7 +483,7 @@ export function TestFilterPanel({
             {(deliveries.data ?? []).length === 0 && <option value="">No accepted deliveries yet</option>}
             {(deliveries.data ?? []).map((d) => (
               <option key={d.id} value={d.id}>
-                {d.label || d.delivery_id || d.id} · {fmtTime(d.received_at)}
+                {d.label || d.delivery_id || d.id} · {fmtUTC(d.received_at)}
               </option>
             ))}
           </select>
@@ -508,10 +536,11 @@ export function WebhookPage() {
   });
 
   return (
-    <Query q={q}>
+    <Query q={q} notFound={{ title: "Webhook not found", text: "This factory has no webhook with this ID.", back: { label: "Go to webhooks", to: fpath(f, "webhooks") } }}>
       {(h) => (
         <>
           <PageHeader
+            docTitle={h.name}
             title={
               <>
                 {h.name} {h.enabled ? <Badge tone="ok">Enabled</Badge> : <Badge>Disabled</Badge>}
@@ -555,8 +584,8 @@ export function WebhookPage() {
                           <Badge tone={TONES_BY_STATUS[d.status] ?? "neutral"}>{d.label || d.status}</Badge> {d.delivery_id || d.id}
                         </button>{" "}
                         <span className="muted small">
-                          <TimeAgo t={d.received_at} />
-                          {d.reason ? ` · ${d.reason}` : ""}
+                          <time dateTime={d.received_at}>{fmtUTC(d.received_at)}</time>
+                          {deliveryReason(d) ? ` · ${deliveryReason(d)}` : ""}
                           {(d.run_ids ?? []).length > 0 && ` · ${d.run_ids!.length} run(s)`}
                         </span>
                         {openDelivery === d.id && delivery.data && (
@@ -585,7 +614,7 @@ export function WebhookPage() {
                     ["Authentication", `${h.auth_mode}${h.signature_scheme ? ` · ${h.signature_scheme}` : ""}`],
                     ["Secret", <code key="s">{h.secret_name}</code>],
                     ["Delivery ID header", h.delivery_id_header || "—"],
-                    ["Created", fmtTime(h.created_at)],
+                    ["Created", fmtUTC(h.created_at)],
                   ]}
                 />
                 <WebhookUsage h={h} />

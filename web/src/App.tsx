@@ -21,7 +21,7 @@ import { RunPage, RunsPage } from "./pages/Runs";
 import { FactoryIntegrationsPage, SettingsPage } from "./pages/Settings";
 import { EnvironmentPage, EnvironmentsPage, IntegrationsPage, SecretsPage, WorkersPage } from "./pages/Team";
 import { WebhookPage, WebhooksPage } from "./pages/Webhooks";
-import { WorkItemPage, WorkItemsPage } from "./pages/Work";
+import { WorkItemPage, WorkItemRedirect, WorkItemsPage } from "./pages/Work";
 
 /** Opt in to React Router v7 behaviour now (silences the v6 deprecation warnings). */
 export const ROUTER_FUTURE = { v7_startTransition: true, v7_relativeSplatPath: true } as const;
@@ -67,6 +67,7 @@ export function AppRoutes() {
         <Route path="inbox" element={<InboxPage />} />
         <Route path="runs" element={<RunsPage />} />
         <Route path="runs/:id" element={<RunPage />} />
+        <Route path="work-items/:wid" element={<WorkItemRedirect />} />
         <Route path="secrets" element={<SecretsPage />} />
         <Route path="integrations" element={<IntegrationsPage />} />
         <Route path="environments" element={<EnvironmentsPage />} />

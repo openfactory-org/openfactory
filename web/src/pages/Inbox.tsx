@@ -7,7 +7,7 @@ import { useAuth } from "../auth/AuthContext";
 import { fpath } from "../components/FactoryLayout";
 import { Inbox as InboxIcon } from "lucide-react";
 import { Badge, Button, Empty, InlineText, PageHeader, Query, TimeAgo } from "../components/ui";
-import { FAILURE_TEXT, humanizeError } from "../lib/format";
+import { bodyWithoutTitle, FAILURE_TEXT, humanizeError } from "../lib/format";
 import { useMutate } from "../lib/mutate";
 import { useFactories } from "../lib/queries";
 
@@ -69,14 +69,14 @@ export function useReadInbox() {
 }
 
 /** The text of an item. A failure shows the message for people first and keeps the raw text behind a disclosure. */
-function InboxBody({ item }: { item: InboxItem }) {
+function InboxBody({ item, text }: { item: InboxItem; text: string }) {
   if (item.kind !== "failure")
     return (
       <div className="prose inbox-body">
-        <InlineText text={item.body ?? ""} />
+        <InlineText text={text} />
       </div>
     );
-  const { message, detail } = humanizeError(item.body);
+  const { message, detail } = humanizeError(text);
   if (FAILURE_TEXT[detail]) {
     return (
       <div className="inbox-body">
@@ -113,6 +113,8 @@ export function InboxItemCard({ item, factory, inWorkItem }: { item: InboxItem; 
   const options = question?.options ?? item.options ?? [];
   const recommended = question?.recommended_option;
   const multi = question?.type === "multi_select";
+  // An agent often repeats the title as the first line of the body.
+  const body = bodyWithoutTitle(item.title, item.body);
   const canUndo =
     item.resolved && !!item.resolved_by && item.resolved_via !== "forge" && !!item.resolved_at && Date.now() - Date.parse(item.resolved_at) < UNDO_MS;
 
@@ -150,7 +152,7 @@ export function InboxItemCard({ item, factory, inWorkItem }: { item: InboxItem; 
           <TimeAgo t={item.created_at} />
         </span>
       </div>
-      {(open || !item.resolved) && item.body && item.body.trim() !== item.title.trim() && <InboxBody item={item} />}
+      {(open || !item.resolved) && body && <InboxBody item={item} text={body} />}
       <div className="inbox-foot">
         {item.resolved ? (
           <p className="muted small">
@@ -195,10 +197,16 @@ export function InboxItemCard({ item, factory, inWorkItem }: { item: InboxItem; 
                       onClick={() => resolve.mutate({ id: item.id, resolution: o })}
                       busy={resolve.isPending}
                       title={`Send "${o}" as the answer`}
+                      aria-describedby={`answer-hint-${item.id}`}
                     >
                       Answer: {o === recommended ? `${o} (recommended)` : o}
                     </Button>
                   ))}
+                  {options.length > 0 && (
+                    <span id={`answer-hint-${item.id}`} className="sr-only">
+                      Sends the option as your answer.
+                    </span>
+                  )}
                   <label className="sr-only" htmlFor={`answer-${item.id}`}>
                     Answer
                   </label>

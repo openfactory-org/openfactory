@@ -420,5 +420,11 @@ export function McpServerPage() {
       </div>
     </>
   );
-  return isNew ? body : <Query q={q}>{() => body}</Query>;
+  return isNew ? (
+    body
+  ) : (
+    <Query q={q} notFound={{ title: "MCP server not found", text: "The team has no MCP server with this ID.", back: { label: "Go to MCP servers", to: "/mcp-servers" } }}>
+      {() => body}
+    </Query>
+  );
 }
