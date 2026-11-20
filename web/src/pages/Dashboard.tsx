@@ -8,6 +8,7 @@ import { fpath, useFactory } from "../components/FactoryLayout";
 import { useShell } from "../components/shell";
 import { SpendCard } from "../components/SpendCard";
 import { Button, Card, ErrorAlert, Metric, PageHeader, Query, Segmented, StatusIcon } from "../components/ui";
+import { coverageGaps, describeGaps, hasApplicableForge } from "../lib/coverage";
 import { count, duration, money, percent } from "../lib/format";
 import { WorkTable } from "./Work";
 
@@ -19,8 +20,8 @@ const RANGES = [
   { key: "90d", label: "Last 90 days", short: "90 days", days: 90 },
 ];
 
-/** Integration providers that host code. */
-const FORGES = ["github", "gitlab", "azure_devops", "azure-devops"];
+/** Secret types that hold a model credential for a harness. */
+const MODEL_CREDENTIAL_TYPES = ["anthropic_api_key", "anthropic_oauth_token", "anthropic_bedrock_api_key", "anthropic_bedrock_access_key", "openai_api_key"];
 
 function shortDate(d: string): string {
   const t = new Date(`${d}T00:00:00Z`);
@@ -259,7 +260,23 @@ export function DashboardPage() {
     queryFn: () => unwrap(api.GET("/integrations")).then((r) => r.items ?? []),
     retry: false,
   });
-  const hasForge = (integrations.data ?? []).some((i) => FORGES.includes(i.provider));
+  // The same query as the Settings page: the repositories of the active definition.
+  const settings = useQuery({
+    queryKey: ["settings", f.id, f.active_version_id],
+    queryFn: () => unwrap(api.GET("/factories/{uid}/settings", { params: { path: { uid: f.id } } })),
+    retry: false,
+  });
+  const secrets = useQuery({
+    queryKey: ["secrets", f.id],
+    queryFn: () => unwrap(api.GET("/secrets", { params: { query: { factory_id: f.id } } })).then((r) => r.items ?? []),
+    retry: false,
+  });
+  // A code host is connected when an active record that applies to this
+  // factory serves each of its repositories (the server rule of forgeutil).
+  const repos = settings.data?.repositories ?? [];
+  const gaps = integrations.data && settings.data ? coverageGaps(repos, integrations.data, f.id) : [];
+  const hasForge = !!integrations.data && (settings.data && repos.length > 0 ? gaps.length === 0 : hasApplicableForge(integrations.data, f.id));
+  const hasModelSecret = (secrets.data ?? []).some((s) => MODEL_CREDENTIAL_TYPES.includes(s.type) && (!s.factory_id || s.factory_id === f.id));
   // A factory without work shows what to do first, in place of empty figures.
   const fresh = recent.data !== undefined && recent.data.length === 0;
 
@@ -298,6 +315,11 @@ export function DashboardPage() {
               <span className="step-text">
                 <strong>Connect a code host</strong>
                 <span className="muted small">The factory needs it to read the repositories and open pull requests.</span>
+                {describeGaps(gaps).map((line) => (
+                  <span key={line} className="small">
+                    {line}
+                  </span>
+                ))}
               </span>
               {!hasForge && (
                 <Link to="/integrations" className="btn btn-sm">
@@ -328,9 +350,11 @@ export function DashboardPage() {
               )}
             </li>
           </ol>
-          <p className="muted small">
-            A run needs a model credential. Set it on the server, or add it under <Link to="/secrets">Secrets</Link>.
-          </p>
+          {secrets.isSuccess && !hasModelSecret && (
+            <p className="muted small">
+              A run needs a model credential. If the server does not provide one, add it under <Link to="/secrets">Secrets</Link>.
+            </p>
+          )}
         </section>
       )}
       {!fresh && <SpendCard fid={f.id} />}
