@@ -604,8 +604,18 @@ export function EnvironmentPage() {
   const del = useMutate(() => unwrap(api.DELETE("/environments/{id}", { params: { path: { id } } })), {
     invalidate: [["environments"]],
     success: "Environment deleted.",
+    quietErrors: true,
     onSuccess: () => navigate("/environments"),
   });
+  // The server refuses (409) to delete an environment that an agent uses; show why.
+  async function removeIt() {
+    setError(null);
+    try {
+      await del.mutateAsync(undefined);
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -639,7 +649,7 @@ export function EnvironmentPage() {
         actions={
           canEdit &&
           !isNew && (
-            <Button variant="danger" onClick={() => void confirm({ title: "Delete this environment?", body: "Agents that use it fall back to the default environment.", confirmLabel: "Delete environment", danger: true }).then((ok) => ok && del.mutate(undefined))} busy={del.isPending}>
+            <Button variant="danger" onClick={() => void confirm({ title: "Delete this environment?", body: "You cannot delete it while an agent uses it.", confirmLabel: "Delete environment", danger: true }).then((ok) => (ok ? removeIt() : undefined))} busy={del.isPending}>
               Delete
             </Button>
           )

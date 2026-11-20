@@ -213,8 +213,18 @@ export function McpServerPage() {
   const del = useMutate(() => unwrap(api.DELETE("/mcp-servers/{id}", { params: { path: { id } } })), {
     invalidate: [["mcp-servers"]],
     success: "MCP server deleted.",
+    quietErrors: true,
     onSuccess: () => navigate("/mcp-servers"),
   });
+  // The server refuses (409) to delete a server that an agent uses; show why.
+  async function removeIt() {
+    setError(null);
+    try {
+      await del.mutateAsync(undefined);
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
   const connect = useMutate(() => unwrap(api.POST("/mcp-servers/{id}/oauth/connect", { params: { path: { id } } })), {
     onSuccess: (r) => window.location.assign(r.authorization_url),
   });
@@ -274,7 +284,7 @@ export function McpServerPage() {
         actions={
           canEdit &&
           !isNew && (
-            <Button variant="danger" onClick={() => void confirm({ title: "Delete this MCP server?", body: "Its stored tokens are deleted too. Agents that use it lose its tools.", confirmLabel: "Delete server", danger: true }).then((ok) => ok && del.mutate(undefined))} busy={del.isPending}>
+            <Button variant="danger" onClick={() => void confirm({ title: "Delete this MCP server?", body: "Its stored tokens are deleted too. You cannot delete it while an agent uses it.", confirmLabel: "Delete server", danger: true }).then((ok) => (ok ? removeIt() : undefined))} busy={del.isPending}>
               Delete
             </Button>
           )
