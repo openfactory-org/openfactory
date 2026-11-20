@@ -204,12 +204,13 @@ func copyIf(dst, src map[string]string, keys ...string) {
 }
 
 // CredentialHint returns a note for the error of a failed turn when the run
-// has no harness credential, or "" when it has one. A factory needs a
-// credential (harness.auth) before its first run. Without one the CLI uses
-// only the credentials that the sandbox already has.
+// has no harness credential, or "" when it has one. A run needs a
+// credential: harness.auth, or the default credential (the one factory or
+// team secret whose type the harness accepts). Without one the CLI uses only
+// the credentials that the sandbox already has.
 func CredentialHint(req core.HarnessRequest) string {
 	if len(req.Auth) > 0 || (req.Run != nil && req.Run.Config.Harness.Auth != nil) {
 		return ""
 	}
-	return " (the agent has no harness credential: set harness.auth in the definition, for example a managed secret of type anthropic_api_key or openai_api_key)"
+	return " (the agent has no harness credential: add one secret of a model credential type, for example anthropic_api_key, anthropic_oauth_token or openai_api_key, or set harness.auth in the definition)"
 }

@@ -10,7 +10,7 @@ You create a secret with a name, a type and a value; the API never shows the val
 |---|---|---|
 | Agent environment | `secrets` in `factory.yaml`, `agentDefaults`, an agent or an automation | An environment variable with the secret's name, in the sandbox and for the harness. |
 | MCP server credentials | `{{NAME}}` in an MCP server's `env` or `headers` | Replaced with the value when the run starts. See [{{SECRET}} templating](definition-reference.md#secret-templating). |
-| Harness authentication | `harness.auth.secretName` | Mapped to the harness's provider variables. See [Authentication](harnesses.md#authentication). |
+| Harness authentication | `harness.auth.secretName`, or no reference: the one secret of a model credential type is the default credential | Mapped to the harness's provider variables. See [Authentication](harnesses.md#authentication) and [Default credential](harnesses.md#default-credential). |
 | Webhook verification | `secretName` in `webhooks/<name>.yaml` | Verifies inbound deliveries. See [Webhooks](webhooks.md). |
 | Machine registry credential | `platform.linux.registryCredentialSecretName` | Ignored by the `kubernetes` backend, where the kubelet pulls images. Use `imagePullSecrets` in the pod template instead. See [Private registries](self-hosting/private-registries.md). |
 

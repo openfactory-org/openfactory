@@ -40,7 +40,7 @@ The compiler checks the files; the preflight checks them against the team. Apply
 | Each entry of `approvers` is the email of a person of the team, or the name of a service account of the team. | error |
 | A person in `runAs` of an automation whose agent uses `credentialStrategy: CREATOR` has a linked forge account. | warning |
 | Each `model` is in the model list of its harness. The lists are advisory: an unlisted name can still work. | warning |
-| Each agent has a harness credential (`harness.auth`). | warning |
+| Each agent has a harness credential: `harness.auth`, or exactly one factory or team secret of a model credential type (see [Default credential](harnesses.md#default-credential)). | warning |
 
 The server resolves filter names through the integration's API, with the integration record's credential:
 

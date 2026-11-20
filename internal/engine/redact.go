@@ -15,10 +15,11 @@ import (
 // run. It never returns nil.
 func (x *Planner) RedactFor(ctx context.Context, r *core.Run) func(string) string {
 	red := redact.New()
-	if env, err := x.runEnv(ctx, r); err == nil {
+	env, err := x.runEnv(ctx, r)
+	if err == nil {
 		red.Add(secretValues(r, env, nil, nil)...)
 	}
-	if auth, err := x.harnessAuth(ctx, r); err == nil {
+	if auth, err := x.harnessAuth(ctx, r, env); err == nil {
 		red.Add(secretValues(r, nil, auth, nil)...)
 	}
 	if mcp, err := x.mcpServers(ctx, r); err == nil {

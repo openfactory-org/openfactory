@@ -99,14 +99,40 @@ Models and reasoning level:
 
 ## Authentication
 
-Set the model credential with `harness.auth` before the first run of the factory.
+A run needs a model credential. Set it with `harness.auth`, or save one secret of a credential type and let the run use it as the [default credential](#default-credential).
 
 | `auth.source` | Where the credential comes from | Rules |
 |---|---|---|
 | `managedSecret` | A secret in the Open Factory secret store, named by `secretName`. | `secretName` is required. |
 | `workerEnvironment` | The environment of a self-hosted worker. | `secretName` is not allowed. The effective `workerHost` must be a self-hosted worker. |
 
-If `auth` is not set, Open Factory passes no credential, and the CLI uses whatever credentials the sandbox has. The definition check gives a warning for each agent without `auth`. A run without a credential fails with the CLI error, and the run error says that `harness.auth` is not set.
+### Default credential
+
+When the effective harness of a run has no `auth` (after `agentDefaults`, the agent, the automation and the run overrides are merged), Open Factory selects the credential in this order:
+
+1. The environment of the run already holds a model credential: Open Factory passes nothing, and the CLI uses that credential. This covers the variables of the [environment](machines-and-environments.md), the agent's `secrets` (for example a secret named `ANTHROPIC_API_KEY`), and the environment of the sandbox process (for example `ANTHROPIC_API_KEY` set for the server with the `local` backend). The variables are `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `AWS_BEARER_TOKEN_BEDROCK`, `CLAUDE_CODE_USE_BEDROCK` and `CLAUDE_CODE_USE_VERTEX` for `claude`, and `OPENAI_API_KEY` and `CODEX_API_KEY` for `codex`.
+2. Exactly one factory secret has a type that the harness accepts: the run uses it.
+3. No factory secret fits, and exactly one team secret fits: the run uses it. A team secret does not count when a factory secret has the same name.
+4. Otherwise the run gets no credential. The CLI uses the credentials that the sandbox has, for example a signed-in CLI.
+
+| Harness | Secret types of the default credential |
+|---|---|
+| `claude` | `anthropic_api_key`, `anthropic_oauth_token`, `anthropic_bedrock_api_key`, `anthropic_bedrock_access_key` |
+| `codex` | `openai_api_key` |
+
+A `generic` secret is never a default credential. Other harness types have no default credential.
+
+If more than one secret fits at the first scope that has one, Open Factory uses none of them, because the choice decides which account pays for the model. Set `harness.auth` to the secret you want, or delete the others. The definition check names the candidates in a warning, and the server logs a warning when the run starts.
+
+The run shows which secret it uses:
+
+- The `secrets.delivered` event of the run timeline (`GET /api/v1/runs/{runId}/timeline`) has `harness_credential`, for example `{"source": "default", "secret": "CLAUDE_OAUTH_TOKEN", "scope": "team", "type": "anthropic_oauth_token"}`. `source` is `managedSecret`, `workerEnvironment`, `default` or `none`. With `none`, `reason` is `run_environment`, `ambiguous` (with `candidates`) or `no_secret`.
+- The server logs `model credential: default secret` at info level with the secret name.
+- The audit event `runner.secrets.read` has `harness_credential`, for example `default:team:CLAUDE_OAUTH_TOKEN`.
+
+None of them hold the secret value. If the sandbox process already has a credential variable, the runner drops the default credential and writes a `diagnostic` event with the code `default_credential_not_used`.
+
+The definition check gives a warning for each agent without `auth` when no secret fits or more than one fits. A run without a credential fails with the CLI error, and the run error says that the agent has no harness credential.
 
 ### Use a managed secret
 
@@ -179,7 +205,7 @@ When a run starts a turn, Open Factory prepares the sandbox and calls the harnes
 |---|---|
 | Secrets | Each name in the agent's `secrets` becomes an environment variable with the secret's value. |
 | Run identity and metadata | `OF_RUN_ID`, `OF_FACTORY_ID`, `OF_WORK_ITEM_ID`, `OF_PARENT_RUN_ID`, `OF_AGENT_NAME`, `OF_PUBLIC_URL` and `OF_METADATA_*`. See [Run metadata](agents.md#run-metadata). |
-| Harness auth | Mapped to provider variables (see [Use a managed secret](#use-a-managed-secret)). Set only for the harness process. |
+| Harness auth | `harness.auth` or the [default credential](#default-credential), mapped to provider variables (see [Use a managed secret](#use-a-managed-secret)). Set only for the harness process. |
 | MCP servers | `{{SECRET}}` placeholders in `env` and `headers` are expanded, and the `factory` orchestration server is added. Claude Code gets `.openfactory/claude/mcp.json`. Codex gets `CODEX_HOME/config.toml`. |
 | Skills | Written to `.openfactory/skills/<name>/`. Claude Code also gets `.claude/skills/<name>/` (an existing repository skill is not overwritten). Codex also gets `CODEX_HOME/skills/`. The system prompt lists every skill. See [Skills](skills.md). |
 | System prompt | Composed from the agent type, instructions, work item context, skills and agents. The workflow policy is in the agent instructions (see [Workflow policy](agents.md#workflow-policy)). |
