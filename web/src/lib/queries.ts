@@ -25,7 +25,8 @@ export function useInboxCount() {
 export function useDispatch(onDone: (r: Schemas["Run"], fid: string) => void) {
   return useMutate(
     ({ fid, prompt, title }: { fid: string; prompt: string; title?: string }) =>
-      unwrap(api.POST("/factories/{uid}/runs", { params: { path: { uid: fid } }, body: { prompt, title } })),
+      // The work item records that it came from the dashboard, like its run.
+      unwrap(api.POST("/factories/{uid}/runs", { params: { path: { uid: fid } }, body: { prompt, title, source: { provider: "dashboard", kind: "task" } } })),
     { invalidate: [["workitems"], ["runs"]], success: "Sent to the foreman.", onSuccess: (r, v) => onDone(r, v.fid) },
   );
 }

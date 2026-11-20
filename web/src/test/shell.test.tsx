@@ -51,7 +51,7 @@ describe("app shell", () => {
     await user.click(screen.getByRole("button", { name: /send to foreman/i }));
 
     await waitFor(() => expect(window.location.pathname).toBe("/f/fac_1/work/wi_9"));
-    expect(calls.find((c) => c.method === "POST" && c.path === "/api/v1/factories/fac_1/runs")!.body).toEqual({ prompt: "Fix the flaky test" });
+    expect(calls.find((c) => c.method === "POST" && c.path === "/api/v1/factories/fac_1/runs")!.body).toEqual({ prompt: "Fix the flaky test", source: { provider: "dashboard", kind: "task" } });
     expect(await screen.findByRole("heading", { name: "Fix the flaky test", level: 1 })).toBeInTheDocument();
   });
 
