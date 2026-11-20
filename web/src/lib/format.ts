@@ -83,7 +83,20 @@ export function firstLine(s?: string | null, max = 80): string {
       .split("\n")
       .map((l) => l.trim())
       .find((l) => l !== "") ?? "";
-  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+  return clip(line, max);
+}
+
+/**
+ * Shortens s to at most max characters. It keeps the complete sentences that
+ * fit when they fill at least half of max; that text ends at a sentence end
+ * and gets no ellipsis. Else it cuts mid-sentence and adds "…".
+ */
+export function clip(s: string, max: number): string {
+  if (s.length <= max) return s;
+  for (let i = max - 1; i >= Math.floor(max / 2); i--) {
+    if (".!?".includes(s[i]) && (i + 1 === s.length || /\s/.test(s[i + 1]))) return s.slice(0, i + 1);
+  }
+  return `${s.slice(0, max - 1).trimEnd()}…`;
 }
 
 /**
