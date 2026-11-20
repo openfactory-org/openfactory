@@ -1088,6 +1088,20 @@ func testWebhookDeliveries(t *testing.T, s core.Store) {
 	list, err = s.ListWebhookDeliveries(ctx, wh, 0)
 	ok(t, err)
 	eq(t, len(list), 4, "default limit")
+
+	// Repeated deliveries are logged with the delivery ID of the accepted
+	// entry; a second accepted entry still conflicts.
+	for i := 0; i < 2; i++ {
+		ok(t, s.CreateWebhookDelivery(ctx, &core.WebhookDelivery{WebhookID: wh, DeliveryID: "abc", Status: core.WebhookDeliveryDeduplicated,
+			Reason: "duplicate", ReceivedAt: base.Add(time.Duration(10+i) * time.Second)}))
+	}
+	isErr(t, s.CreateWebhookDelivery(ctx, &core.WebhookDelivery{WebhookID: wh, DeliveryID: "abc", Status: "accepted", ReceivedAt: base.Add(20 * time.Second)}), core.ErrConflict)
+	got, err = s.FindWebhookDelivery(ctx, wh, "abc")
+	ok(t, err)
+	eq(t, got.Status, core.WebhookDeliveryDeduplicated, "find returns the newest entry")
+	list, err = s.ListWebhookDeliveries(ctx, wh, 0)
+	ok(t, err)
+	eq(t, len(list), 6, "duplicates are listed")
 }
 
 // ---------- integrations ----------

@@ -827,7 +827,11 @@ func deliveryRow(d *core.WebhookDelivery) (*row, error) {
 	if err != nil {
 		return nil, err
 	}
-	r.set("webhook_id", d.WebhookID).set("delivery_id", d.DeliveryID).set("received_ns", d.ReceivedAt.UnixNano())
+	dup := 0
+	if d.Status == core.WebhookDeliveryDeduplicated {
+		dup = 1 // outside the unique (webhook_id, delivery_id) index
+	}
+	r.set("webhook_id", d.WebhookID).set("delivery_id", d.DeliveryID).set("received_ns", d.ReceivedAt.UnixNano()).set("duplicate", dup)
 	return r, nil
 }
 

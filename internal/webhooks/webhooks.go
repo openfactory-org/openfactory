@@ -35,7 +35,7 @@ const (
 const (
 	StatusAccepted     = "accepted"
 	StatusRejected     = "rejected"
-	StatusDeduplicated = "deduplicated"
+	StatusDeduplicated = core.WebhookDeliveryDeduplicated
 )
 
 // Rejection reasons recorded in core.WebhookDelivery.Reason.

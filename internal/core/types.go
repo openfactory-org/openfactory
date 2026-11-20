@@ -858,6 +858,11 @@ type WebhookDelivery struct {
 	ReceivedAt time.Time         `json:"received_at"`
 }
 
+// WebhookDeliveryDeduplicated is the status of a delivery log entry for a
+// repeated delivery. Such entries share the delivery ID of the accepted
+// entry; only one accepted entry exists per webhook and delivery ID.
+const WebhookDeliveryDeduplicated = "deduplicated"
+
 // ---------- Integrations ----------
 
 type Integration struct {
