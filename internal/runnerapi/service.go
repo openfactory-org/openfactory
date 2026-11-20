@@ -44,6 +44,12 @@ type Config struct {
 	Secrets SecretsProvider    // may be nil: then secrets returns an empty SecretsResponse
 	Hooks   Hooks              // may be nil
 	Now     func() time.Time   // nil means time.Now
+	// Logger gets the log lines of the service. Nil means slog.Default().
+	Logger *slog.Logger
+	// Redact returns a function that removes the secret values of a run
+	// from text. The service uses it for the configuration error that it
+	// shows in the run status. Nil, or a nil result, keeps the text.
+	Redact func(ctx context.Context, run *core.Run) func(string) string
 
 	// GitCredentials answers the git credential requests. Nil means that the
 	// route answers 501.
@@ -134,6 +140,8 @@ type Service struct {
 	pollInterval time.Duration
 	major        string
 	wake         *wakeRegistry
+	log          *slog.Logger
+	redact       func(ctx context.Context, run *core.Run) func(string) string
 }
 
 // New checks the config and makes a Service.
@@ -170,9 +178,14 @@ func New(cfg Config) (*Service, error) {
 		pollInterval: cfg.PollInterval,
 		major:        "1",
 		wake:         newWakeRegistry(),
+		log:          cfg.Logger,
+		redact:       cfg.Redact,
 	}
 	if s.snapFiles == nil {
 		s.snapFiles, s.snapHeaders = s.files, s.putHeaders
+	}
+	if s.log == nil {
+		s.log = slog.Default()
 	}
 	if s.hooks == nil {
 		s.hooks = noHooks{}
@@ -204,11 +217,11 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("POST "+runnerproto.PathSessionUploads, s.handleUpload)
 	mux.HandleFunc("GET "+runnerproto.PathSessionDownloads, s.handleDownloads)
 	mux.HandleFunc(runnerproto.PathPrefix+"/", func(w http.ResponseWriter, r *http.Request) {
-		writeError(w, &apiError{status: http.StatusNotImplemented, code: codeNotImpl, msg: "not implemented"})
+		s.writeError(w, &apiError{status: http.StatusNotImplemented, code: codeNotImpl, msg: "not implemented"})
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := s.checkVersion(r); err != nil {
-			writeError(w, err)
+			s.writeError(w, err)
 			return
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
@@ -239,20 +252,20 @@ func errGap(ack int64) *apiError {
 }
 
 // errInternal logs err and hides its text from the runner.
-func errInternal(what string, err error) *apiError {
-	slog.Error("runnerapi: "+what, "err", err)
+func (s *Service) errInternal(what string, err error) *apiError {
+	s.log.Error("runnerapi: "+what, "err", err)
 	return &apiError{status: http.StatusInternalServerError, code: codeInternal, msg: "internal error"}
 }
 
-func writeError(w http.ResponseWriter, e *apiError) {
-	writeJSON(w, e.status, runnerproto.ErrorBody{Code: e.code, Message: e.msg, Ack: e.ack})
+func (s *Service) writeError(w http.ResponseWriter, e *apiError) {
+	s.writeJSON(w, e.status, runnerproto.ErrorBody{Code: e.code, Message: e.msg, Ack: e.ack})
 }
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
+func (s *Service) writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
-		slog.Warn("runnerapi: write response", "err", err)
+		s.log.Warn("runnerapi: write response", "err", err)
 	}
 }
 
@@ -317,7 +330,7 @@ func (s *Service) authSession(r *http.Request) (*core.RunSession, runnertoken.Cl
 		if errors.Is(err, core.ErrNotFound) {
 			return nil, runnertoken.Claims{}, errUnauthorized("unknown session")
 		}
-		return nil, runnertoken.Claims{}, errInternal("touch session", err)
+		return nil, runnertoken.Claims{}, s.errInternal("touch session", err)
 	}
 	return sess, claims, nil
 }
@@ -330,7 +343,7 @@ func (s *Service) activeSession(ctx context.Context, runID string, session int) 
 		return nil, errUnauthorized("unknown session")
 	}
 	if err != nil {
-		return nil, errInternal("get session", err)
+		return nil, s.errInternal("get session", err)
 	}
 	if sess.State == core.SessionEnded {
 		return nil, errUnauthorized("session ended")
@@ -340,7 +353,7 @@ func (s *Service) activeSession(ctx context.Context, runID string, session int) 
 		if errors.Is(err, core.ErrNotFound) {
 			return nil, errUnauthorized("unknown session")
 		}
-		return nil, errInternal("get latest session", err)
+		return nil, s.errInternal("get latest session", err)
 	}
 	if latest.Session > session {
 		return nil, &apiError{
@@ -363,7 +376,7 @@ func (s *Service) issueToken(run *core.Run, session int) (string, time.Time, *ap
 	c := runnertoken.Claims{Version: runnertoken.SessionVersion, Team: run.TeamID, Run: run.ID, Session: session, Subject: sub}
 	tok, exp, err := runnertoken.Mint(s.keys, c, s.now())
 	if err != nil {
-		return "", time.Time{}, errInternal("mint token", err)
+		return "", time.Time{}, s.errInternal("mint token", err)
 	}
 	return tok, exp, nil
 }
@@ -389,45 +402,45 @@ func (s *Service) updateSession(ctx context.Context, sess *core.RunSession, chan
 func (s *Service) handleSecrets(w http.ResponseWriter, r *http.Request) {
 	sess, _, aerr := s.authSession(r)
 	if aerr != nil {
-		writeError(w, aerr)
+		s.writeError(w, aerr)
 		return
 	}
 	if s.secrets == nil {
-		writeJSON(w, http.StatusOK, runnerproto.SecretsResponse{})
+		s.writeJSON(w, http.StatusOK, runnerproto.SecretsResponse{})
 		return
 	}
 	run, err := s.store.GetRun(r.Context(), sess.RunID)
 	if err != nil {
-		writeError(w, errInternal("get run", err))
+		s.writeError(w, s.errInternal("get run", err))
 		return
 	}
 	resp, err := s.secrets.Secrets(r.Context(), run, sess)
 	if err != nil {
-		writeError(w, errInternal("secrets", err))
+		s.writeError(w, s.errInternal("secrets", err))
 		return
 	}
-	writeJSON(w, http.StatusOK, resp)
+	s.writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Service) handleToken(w http.ResponseWriter, r *http.Request) {
 	sess, claims, aerr := s.authSession(r)
 	if aerr != nil {
-		writeError(w, aerr)
+		s.writeError(w, aerr)
 		return
 	}
 	run, err := s.store.GetRun(r.Context(), sess.RunID)
 	if err != nil || run.TeamID != claims.Team {
 		if err == nil || errors.Is(err, core.ErrNotFound) {
-			writeError(w, errUnauthorized("unknown run"))
+			s.writeError(w, errUnauthorized("unknown run"))
 			return
 		}
-		writeError(w, errInternal("get run", err))
+		s.writeError(w, s.errInternal("get run", err))
 		return
 	}
 	tok, exp, aerr := s.issueToken(run, sess.Session)
 	if aerr != nil {
-		writeError(w, aerr)
+		s.writeError(w, aerr)
 		return
 	}
-	writeJSON(w, http.StatusOK, runnerproto.TokenResponse{SessionToken: tok, SessionTokenExpiresAt: exp})
+	s.writeJSON(w, http.StatusOK, runnerproto.TokenResponse{SessionToken: tok, SessionTokenExpiresAt: exp})
 }

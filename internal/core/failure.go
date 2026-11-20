@@ -24,7 +24,8 @@ type FailureInfo struct {
 const MaxRetrySessions = 3
 
 const (
-	// FailureInvalidConfiguration means a secret, machine or MCP server is missing at the start.
+	// FailureInvalidConfiguration means a secret, machine, MCP server or
+	// code-forge integration is missing or not valid at the start.
 	FailureInvalidConfiguration FailureCode = "invalid_configuration"
 	// FailureEnvironmentSetupFailed means a clone, a setup command or an MCP server start failed.
 	FailureEnvironmentSetupFailed FailureCode = "environment_setup_failed"

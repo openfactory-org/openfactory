@@ -497,6 +497,24 @@ func TestSessionEnded(t *testing.T) {
 			t.Errorf("run = %+v", r)
 		}
 	})
+	t.Run("setup_failed with a configuration error at session start", func(t *testing.T) {
+		// runnerapi sends this request when StartConfig fails with a
+		// configuration error, for example a repository without a
+		// code-forge integration.
+		e := newEnv(t)
+		run := e.newRun(core.RunQueued, "p")
+		e.tick()
+		e.d.SessionStarted(e.ctx, e.session(run.ID, 1))
+		msg := `session plan: repository acme/api: no github integration record for the owner "acme": no code-forge integration configured`
+		e.d.SessionEnded(e.ctx, e.session(run.ID, 1), runnerproto.EndRequest{Reason: runnerproto.EndSetupFailed, FailureCode: string(core.FailureInvalidConfiguration), Message: msg})
+		r := e.run(run.ID)
+		if r.State != core.RunFailed || r.FailureCode != core.FailureInvalidConfiguration || r.Error != "invalid_configuration: "+msg {
+			t.Errorf("run = %+v", r)
+		}
+		if info, _ := core.LookupFailure(r.FailureCode); info.Class != core.FailureClassUser || info.Retry {
+			t.Errorf("failure info = %+v", info)
+		}
+	})
 	t.Run("setup_failed message is bounded", func(t *testing.T) {
 		e := newEnv(t)
 		run := e.newRun(core.RunQueued, "p")

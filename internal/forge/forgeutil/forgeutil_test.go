@@ -145,6 +145,10 @@ func TestSelectIntegration(t *testing.T) {
 		if !errors.Is(err, ErrNoIntegration) || !strings.Contains(err.Error(), `"other"`) {
 			t.Errorf("factory %q owner other: err = %v, want ErrNoIntegration naming other", fac, err)
 		}
+		// A missing record is a configuration error: the runner API does not retry it.
+		if !errors.Is(err, core.ErrInvalid) || errors.Is(err, core.ErrNotFound) {
+			t.Errorf("factory %q owner other: err = %v, want it to match core.ErrInvalid only", fac, err)
+		}
 	}
 	// No owner (Azure DevOps "project/name"): one record of the tier.
 	az := []core.Integration{{ID: "a", Config: org("org1")}}

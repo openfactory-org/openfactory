@@ -105,7 +105,7 @@ export function humanizeError(raw?: string | null): { message: string; detail: s
 
 /** Sentences for the run failure codes (internal/core/failure.go), for a run error that is only a code. */
 export const FAILURE_TEXT: Record<string, string> = {
-  invalid_configuration: "A secret, machine or MCP server that the agent needs is missing.",
+  invalid_configuration: "A secret, machine, MCP server or code-forge integration that the agent needs is missing or not valid.",
   environment_setup_failed: "The environment setup failed: a clone, a setup command or an MCP server did not start.",
   harness_auth_failed: "The harness credential is missing or was refused. Check the API key secret.",
   external_authentication_required: "The user that the run acts as has no linked account for this integration.",

@@ -119,7 +119,7 @@ To find the cause:
 
 ## No integration record for the owner
 
-The error is `no github integration record for the owner "x"` (or `gitlab`, `azure_devops`). The run fails at the clone, or a comment or check is not posted.
+The error is `no github integration record for the owner "x"` (or `gitlab`, `azure_devops`). The run fails at the start of its session with the failure code `invalid_configuration` and this error, or a comment or check is not posted. The runner does not retry a configuration error.
 
 **Cause:** The server selects the forge record by the owner of the repository: the record whose `config.org` is the owner. Neither the factory nor the team has a record for that owner. The server never uses a record of a different owner.
 

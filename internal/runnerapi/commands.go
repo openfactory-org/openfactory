@@ -85,18 +85,18 @@ func (s *Service) EnqueueCommand(ctx context.Context, runID string, session int,
 func (s *Service) handleCommands(w http.ResponseWriter, r *http.Request) {
 	sess, _, aerr := s.authSession(r)
 	if aerr != nil {
-		writeError(w, aerr)
+		s.writeError(w, aerr)
 		return
 	}
 	after, wait, aerr := parseCommandQuery(r)
 	if aerr != nil {
-		writeError(w, aerr)
+		s.writeError(w, aerr)
 		return
 	}
 	ctx := r.Context()
 	if after > 0 {
 		if err := s.runner.AckRunnerCommands(ctx, sess.RunID, sess.Session, after); err != nil {
-			writeError(w, errInternal("ack commands", err))
+			s.writeError(w, s.errInternal("ack commands", err))
 			return
 		}
 	}
@@ -105,10 +105,10 @@ func (s *Service) handleCommands(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if aerr != nil {
-		writeError(w, aerr)
+		s.writeError(w, aerr)
 		return
 	}
-	writeJSON(w, http.StatusOK, runnerproto.CommandsResponse{Commands: cmds})
+	s.writeJSON(w, http.StatusOK, runnerproto.CommandsResponse{Commands: cmds})
 }
 
 func parseCommandQuery(r *http.Request) (after int64, wait time.Duration, aerr *apiError) {
@@ -147,7 +147,7 @@ func (s *Service) pollCommands(ctx context.Context, sess *core.RunSession, after
 			if ctx.Err() != nil {
 				return nil, nil
 			}
-			return nil, errInternal("list commands", err)
+			return nil, s.errInternal("list commands", err)
 		}
 		if len(cmds) > 0 {
 			unsubscribe()

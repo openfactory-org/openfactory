@@ -26,43 +26,43 @@ type CloudTokenSource interface {
 func (s *Service) handleCloudToken(w http.ResponseWriter, r *http.Request) {
 	sess, _, aerr := s.authSession(r)
 	if aerr != nil {
-		writeError(w, aerr)
+		s.writeError(w, aerr)
 		return
 	}
 	if s.cloudTokens == nil {
-		writeError(w, &apiError{status: http.StatusNotImplemented, code: codeNotImpl, msg: "not implemented"})
+		s.writeError(w, &apiError{status: http.StatusNotImplemented, code: codeNotImpl, msg: "not implemented"})
 		return
 	}
 	var req runnerproto.CloudTokenRequest
 	if aerr := decodeBody(r, &req); aerr != nil {
-		writeError(w, aerr)
+		s.writeError(w, aerr)
 		return
 	}
 	if req.Audience == "" {
-		writeError(w, errBad("audience is required"))
+		s.writeError(w, errBad("audience is required"))
 		return
 	}
 	if req.TTLSeconds == 0 {
 		req.TTLSeconds = defaultCloudTokenTTL
 	}
 	if req.TTLSeconds < minCloudTokenTTL || req.TTLSeconds > maxCloudTokenTTL {
-		writeError(w, errBad("ttl_seconds must be from %d to %d", minCloudTokenTTL, maxCloudTokenTTL))
+		s.writeError(w, errBad("ttl_seconds must be from %d to %d", minCloudTokenTTL, maxCloudTokenTTL))
 		return
 	}
 	run, err := s.store.GetRun(r.Context(), sess.RunID)
 	if err != nil {
-		writeError(w, errInternal("get run", err))
+		s.writeError(w, s.errInternal("get run", err))
 		return
 	}
 	tok, exp, err := s.cloudTokens.CloudToken(r.Context(), run, sess, req.Audience, time.Duration(req.TTLSeconds)*time.Second)
 	switch {
 	case errors.Is(err, core.ErrForbidden):
-		writeError(w, &apiError{status: http.StatusForbidden, code: codeForbidden, msg: "no cloud token for this audience"})
+		s.writeError(w, &apiError{status: http.StatusForbidden, code: codeForbidden, msg: "no cloud token for this audience"})
 	case errors.Is(err, core.ErrInvalid):
-		writeError(w, errBad("invalid cloud token request"))
+		s.writeError(w, errBad("invalid cloud token request"))
 	case err != nil:
-		writeError(w, errInternal("cloud token", err))
+		s.writeError(w, s.errInternal("cloud token", err))
 	default:
-		writeJSON(w, http.StatusOK, runnerproto.CloudTokenResponse{Token: tok, ExpiresAt: exp})
+		s.writeJSON(w, http.StatusOK, runnerproto.CloudTokenResponse{Token: tok, ExpiresAt: exp})
 	}
 }

@@ -1,7 +1,6 @@
 package runnerapi
 
 import (
-	"log/slog"
 	"net/http"
 
 	"github.com/openfactory-org/openfactory/internal/core"
@@ -11,20 +10,20 @@ import (
 func (s *Service) handleEnd(w http.ResponseWriter, r *http.Request) {
 	sess, _, aerr := s.authSession(r)
 	if aerr != nil {
-		writeError(w, aerr)
+		s.writeError(w, aerr)
 		return
 	}
 	var req runnerproto.EndRequest
 	if aerr := decodeBody(r, &req); aerr != nil {
-		writeError(w, aerr)
+		s.writeError(w, aerr)
 		return
 	}
 	if err := req.Validate(); err != nil {
-		writeError(w, errBad("%v", err))
+		s.writeError(w, errBad("%v", err))
 		return
 	}
 	if req.LastEventSeq > sess.EventAck {
-		writeError(w, errGap(sess.EventAck))
+		s.writeError(w, errGap(sess.EventAck))
 		return
 	}
 	ctx := r.Context()
@@ -43,13 +42,13 @@ func (s *Service) handleEnd(w http.ResponseWriter, r *http.Request) {
 		x.ActiveTurnID = ""
 	})
 	if err != nil {
-		writeError(w, errInternal("end session", err))
+		s.writeError(w, s.errInternal("end session", err))
 		return
 	}
 	if _, err := s.runner.ResetRunInputsOfSession(ctx, sess.RunID, sess.Session); err != nil {
-		slog.Warn("runnerapi: reset inputs of session", "run", sess.RunID, "session", sess.Session, "err", err)
+		s.log.Warn("runnerapi: reset inputs of session", "run", sess.RunID, "session", sess.Session, "err", err)
 	}
 	s.hooks.SessionEnded(ctx, sess, req)
 	s.wake.notify(sessionKey{sess.RunID, sess.Session})
-	writeJSON(w, http.StatusOK, struct{}{})
+	s.writeJSON(w, http.StatusOK, struct{}{})
 }

@@ -374,6 +374,8 @@ func newRunnerMode(cfg *config.Config, signKey []byte, signPrev [][]byte, st cor
 		GitCredentials: content,
 		CloudTokens:    cloud,
 		Hooks:          d,
+		Logger:         log,
+		Redact:         content.redactFor,
 	}
 	if runData != nil {
 		// Artifacts and transcripts of the runner share one store. Snapshots
@@ -498,6 +500,16 @@ func (c *runnerContent) planner() (*engine.Planner, error) {
 
 // setPlanner gives the content provider the planner.
 func (m *runnerMode) setPlanner(x *engine.Planner) { m.content.plan.Store(x) }
+
+// redactFor returns a function that removes the secret values of a run from
+// text. It returns nil before the planner is ready.
+func (c *runnerContent) redactFor(ctx context.Context, run *core.Run) func(string) string {
+	x, err := c.planner()
+	if err != nil {
+		return nil
+	}
+	return x.RedactFor(ctx, run)
+}
 
 // StartConfig implements runnerapi.SessionConfigurer.
 func (c *runnerContent) StartConfig(ctx context.Context, run *core.Run, _ *core.RunSession) (runnerproto.StartResponse, error) {

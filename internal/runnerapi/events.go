@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"time"
 
@@ -18,12 +17,12 @@ const processEventsTimeout = 30 * time.Second
 func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	sess, _, aerr := s.authSession(r)
 	if aerr != nil {
-		writeError(w, aerr)
+		s.writeError(w, aerr)
 		return
 	}
 	var batch runnerproto.EventBatch
 	if aerr := decodeBody(r, &batch); aerr != nil {
-		writeError(w, aerr)
+		s.writeError(w, aerr)
 		return
 	}
 	events := make([]core.RunnerEvent, len(batch.Events))
@@ -34,16 +33,16 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	ack, err := s.runner.AppendRunnerEvents(r.Context(), sess.RunID, sess.Session, events)
 	switch {
 	case errors.Is(err, core.ErrSeqGap):
-		writeError(w, errGap(ack))
+		s.writeError(w, errGap(ack))
 		return
 	case errors.Is(err, core.ErrInvalid):
-		writeError(w, errBad("%v", err))
+		s.writeError(w, errBad("%v", err))
 		return
 	case errors.Is(err, core.ErrConflict), errors.Is(err, core.ErrNotFound):
-		writeError(w, errUnauthorized("session ended"))
+		s.writeError(w, errUnauthorized("session ended"))
 		return
 	case err != nil:
-		writeError(w, errInternal("append events", err))
+		s.writeError(w, s.errInternal("append events", err))
 		return
 	}
 	var fresh []core.RunnerEvent
@@ -59,7 +58,7 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	pctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), processEventsTimeout)
 	defer cancel()
 	s.processEvents(pctx, sess, fresh)
-	writeJSON(w, http.StatusOK, runnerproto.EventAck{Ack: ack})
+	s.writeJSON(w, http.StatusOK, runnerproto.EventAck{Ack: ack})
 }
 
 // processEvents applies the effect of new events. The events are stored
@@ -70,7 +69,7 @@ func (s *Service) processEvents(ctx context.Context, sess *core.RunSession, even
 	}
 	for _, e := range events {
 		if err := s.processEvent(ctx, sess, e); err != nil {
-			slog.Warn("runnerapi: process event", "run", sess.RunID, "session", sess.Session,
+			s.log.Warn("runnerapi: process event", "run", sess.RunID, "session", sess.Session,
 				"seq", e.Seq, "type", e.Type, "err", err)
 		}
 	}
