@@ -560,6 +560,11 @@ func (e *Engine) preflightCredentials(ctx context.Context, f *core.Factory, def 
 			continue
 		}
 		h := harness.NormalizeType(string(a.Harness.Type))
+		if harness.HasCredentialEnv(h, e.preflightRunEnvNames(ctx, f.TeamID, a)) {
+			// The run's environment or agent secrets hold the credential:
+			// resolveHarnessAuth leaves it to the CLI (run_environment).
+			continue
+		}
 		cred, ok := found[h]
 		if !ok {
 			var err error
@@ -583,6 +588,26 @@ func (e *Engine) preflightCredentials(ctx context.Context, f *core.Factory, def 
 		}
 		chk.Warnings = append(chk.Warnings, core.ValidationError{File: agentFile(a.Name), Field: "harness.auth", Message: msg})
 	}
+}
+
+// preflightRunEnvNames returns the names of the variables that the run of an
+// agent gets from its environment and agent secrets, with placeholder values.
+// It mirrors Planner.runEnv without reading secret values.
+func (e *Engine) preflightRunEnvNames(ctx context.Context, teamID string, a core.AgentConfig) map[string]string {
+	env := map[string]string{}
+	if a.EnvironmentID != "" {
+		if envr, err := teamEnvironment(ctx, e.store, teamID, a.EnvironmentID); err == nil {
+			for k, v := range envr.EnvVars {
+				if v != "" {
+					env[k] = "set"
+				}
+			}
+		}
+	}
+	for _, name := range a.Secrets {
+		env[name] = "set"
+	}
+	return env
 }
 
 // credentialTypeList names the credential secret types of a harness for a

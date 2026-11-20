@@ -169,15 +169,18 @@ func TestPreflightWarnsAboutUnknownModels(t *testing.T) {
 // fits as its default credential. An agent with harness.auth gets none.
 func TestPreflightWarnsAboutMissingCredential(t *testing.T) {
 	tests := []struct {
-		name    string
-		secrets []testSecret
-		want    string // "" means no warning
+		name         string
+		secrets      []testSecret
+		agentSecrets []string
+		want         string // "" means no warning
 	}{
 		{name: "no secret", want: "has no credential; add a secret of type anthropic_api_key, anthropic_oauth_token"},
 		{name: "generic secret", secrets: []testSecret{{"", "ANTHROPIC_API_KEY", core.SecretGeneric, ""}}, want: "has no credential"},
 		{name: "one team secret", secrets: []testSecret{{"", "CLAUDE_OAUTH_TOKEN", core.SecretAnthropicOAuth, ""}}},
 		{name: "two team secrets", secrets: []testSecret{{"", "B", core.SecretAnthropicOAuth, ""}, {"", "A", core.SecretAnthropicKey, ""}},
 			want: "more than one team secret fits (A, B)"},
+		{name: "agent secret holds the key", secrets: []testSecret{{"", "ANTHROPIC_API_KEY", core.SecretGeneric, ""}},
+			agentSecrets: []string{"ANTHROPIC_API_KEY"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -188,6 +191,7 @@ func TestPreflightWarnsAboutMissingCredential(t *testing.T) {
 				def.Agents[i].Harness.Auth = &core.HarnessAuth{Source: "workerEnvironment"}
 			}
 			def.Agents[0].Harness.Auth = nil
+			def.Agents[0].Secrets = tc.agentSecrets
 			chk := pf.checkWith(t, def)
 			got := hasIssue(chk.Warnings, agentFile(def.Agents[0].Name), "harness.auth", tc.want)
 			if tc.want == "" {
