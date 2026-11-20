@@ -423,7 +423,7 @@ Some errors add `reason` (a second code), `provider`, `auth_url` and `setup_url`
 | `external_authentication_required` | 401 | No | The run needs your account at `provider`, and you did not link it. `auth_url` is where you store a personal token. `reason` is `no_linked_account`. |
 | `not_authorized` | 403 | No | Your role is too low. |
 | `resource_not_found` | 404 | No | The resource does not exist, or belongs to another team. |
-| `conflict` | 409 | Yes | The resource changed or its state blocks the request. Read it again, then retry. |
+| `conflict` | 409 | No | The resource changed, a resource with the same name exists, or its state blocks the request. Read `detail`, read the resource again and change the request before you send it again. |
 | `operation_not_supported` | 422 | No | Not possible for this resource or state, for example a definition change on a git-backed factory. |
 | `integration_not_configured` | 424 | No | The integration setup is not complete. |
 | `integration_disabled` | 424 | No | The integration is disabled. |

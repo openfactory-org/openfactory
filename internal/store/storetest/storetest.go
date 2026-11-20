@@ -1274,7 +1274,9 @@ func testMCPServers(t *testing.T, s core.Store) {
 	if m.ID == "" {
 		t.Fatal("CreateMCPServer did not assign an id")
 	}
-	isErr(t, s.CreateMCPServer(ctx, &core.RegisteredMCPServer{TeamID: tm, Name: "sentry", Command: "x"}), core.ErrConflict)
+	err := s.CreateMCPServer(ctx, &core.RegisteredMCPServer{TeamID: tm, Name: "sentry", Command: "x"})
+	isErr(t, err, core.ErrConflict)
+	eq(t, err.Error(), `conflict: an MCP server named "sentry" already exists`, "conflict message has no SQL")
 	ok(t, s.CreateMCPServer(ctx, &core.RegisteredMCPServer{TeamID: uid("team"), Name: "sentry", Command: "x"}))
 	other := &core.RegisteredMCPServer{TeamID: tm, Name: "docs", Command: "npx", Args: []string{"-y", "docs-mcp"}}
 	ok(t, s.CreateMCPServer(ctx, other))

@@ -122,11 +122,31 @@ func (s *Store) mapErr(err error) error {
 	case errors.Is(err, sql.ErrNoRows):
 		return core.ErrNotFound
 	case s.d.IsUniqueViolation != nil && s.d.IsUniqueViolation(err):
-		return fmt.Errorf("%w: %w", core.ErrConflict, err)
+		return &conflictError{msg: "a record with the same name or key already exists", cause: err}
 	case s.d.IsForeignKeyViolation != nil && s.d.IsForeignKeyViolation(err):
 		return fmt.Errorf("%w: referenced record does not exist: %w", core.ErrNotFound, err)
 	}
 	return fmt.Errorf("%s: %w", s.d.Name, err)
+}
+
+// conflictError is a unique violation. Its message is for people and holds
+// no SQL; the driver error stays reachable with errors.As.
+type conflictError struct {
+	msg   string
+	cause error
+}
+
+func (e *conflictError) Error() string   { return core.ErrConflict.Error() + ": " + e.msg }
+func (e *conflictError) Unwrap() []error { return []error{core.ErrConflict, e.cause} }
+
+// withConflictMessage replaces the message of a unique violation with msg.
+// Other errors are returned unchanged.
+func withConflictMessage(err error, msg string) error {
+	var ce *conflictError
+	if errors.As(err, &ce) {
+		return &conflictError{msg: msg, cause: ce.cause}
+	}
+	return err
 }
 
 func (s *Store) exec(ctx context.Context, q querier, query string, args ...any) (sql.Result, error) {

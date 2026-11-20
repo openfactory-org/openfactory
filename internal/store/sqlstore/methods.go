@@ -1165,7 +1165,7 @@ func (s *Store) CreateMCPServer(ctx context.Context, m *core.RegisteredMCPServer
 	if err != nil {
 		return err
 	}
-	return s.insert(ctx, s.conn(ctx), "mcp_servers", r)
+	return withConflictMessage(s.insert(ctx, s.conn(ctx), "mcp_servers", r), fmt.Sprintf("an MCP server named %q already exists", m.Name))
 }
 
 func (s *Store) UpdateMCPServer(ctx context.Context, m *core.RegisteredMCPServer) error {
@@ -1173,7 +1173,7 @@ func (s *Store) UpdateMCPServer(ctx context.Context, m *core.RegisteredMCPServer
 	if err != nil {
 		return err
 	}
-	return s.update(ctx, s.conn(ctx), "mcp_servers", r)
+	return withConflictMessage(s.update(ctx, s.conn(ctx), "mcp_servers", r), fmt.Sprintf("an MCP server named %q already exists", m.Name))
 }
 
 func (s *Store) GetMCPServer(ctx context.Context, id string) (*core.RegisteredMCPServer, error) {

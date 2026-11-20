@@ -61,6 +61,11 @@ func TestMCPServersCRUD(t *testing.T) {
 	if c.Body["connection"] != core.MCPConnectionProxy || c.Body["created_by"] == "" {
 		t.Fatal(c.Body)
 	}
+	// A duplicate name is a conflict with a plain message and no SQL.
+	dup := e.must(e.do("POST", "/mcp-servers", e.editor.Key, map[string]any{"name": "sentry", "url": "https://other.test/mcp"}), 409)
+	if dup.Body["detail"] != `an MCP server named "sentry" already exists` || dup.Body["retryable"] != false {
+		t.Fatalf("duplicate name: %s", dup.Raw)
+	}
 	e.must(e.do("POST", "/mcp-servers", e.editor.Key, map[string]any{"name": "y", "url": "https://a.test/mcp", "connection": "sideways"}), 400)
 	e.must(e.do("POST", "/mcp-servers", e.editor.Key, map[string]any{"name": "y", "url": "https://a.test/mcp", "connection": "direct", "oauth": map[string]any{}}), 400)
 	d := e.must(e.do("POST", "/mcp-servers", e.editor.Key, map[string]any{"name": "private", "url": "http://10.0.0.5/mcp", "connection": "direct"}), 201)
