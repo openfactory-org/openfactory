@@ -3,6 +3,7 @@ package claude
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -194,6 +195,82 @@ func TestRunProcessCrash(t *testing.T) {
 	evs := collect(t, ch)
 	if len(evs) != 1 || evs[0].Kind != harness.EventError || !strings.Contains(evs[0].Content, "Invalid API key") {
 		t.Fatalf("evs = %+v", evs)
+	}
+}
+
+// TestRunUsage checks the usage of recorded streams: the result totals win
+// when a result message comes, and the sum of the assistant messages is
+// reported as partial when the turn ends without one.
+func TestRunUsage(t *testing.T) {
+	cases := []struct {
+		name      string
+		stream    string // inline stream or testdata file
+		code      int
+		wantKinds []string
+		want      *core.Usage // usage event, nil for none
+	}{
+		{
+			name:      "normal turn",
+			stream:    fixture,
+			wantKinds: []string{"session", "log", "message", "tool_call", "tool_result", "log", "message", "usage", "done"},
+			want:      &core.Usage{InputTokens: 1110, OutputTokens: 50, CostUSD: 0.0123, DurationMS: 4567},
+		},
+		{
+			name:      "result after partial messages",
+			stream:    "testdata/turn_result_after_messages.jsonl",
+			wantKinds: []string{"session", "message", "tool_call", "tool_result", "message", "usage", "done"},
+			want:      &core.Usage{InputTokens: 425, OutputTokens: 43, CostUSD: 0.02, DurationMS: 3210},
+		},
+		{
+			name:      "interrupted turn",
+			stream:    "testdata/turn_interrupted.jsonl",
+			code:      143,
+			wantKinds: []string{"session", "message", "tool_call", "message", "usage", "error"},
+			// msg_a counts once with its newest usage; the sub-agent message counts too.
+			want: &core.Usage{InputTokens: 210 + 10, OutputTokens: 40 + 2, Coverage: core.UsagePartial},
+		},
+		{
+			name:      "ended without tokens",
+			stream:    "testdata/turn_no_usage.jsonl",
+			code:      1,
+			wantKinds: []string{"session", "message", "error"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stream := tc.stream
+			if strings.HasPrefix(stream, "testdata/") {
+				b, err := os.ReadFile(stream)
+				if err != nil {
+					t.Fatal(err)
+				}
+				stream = string(b)
+			}
+			sb := harnesstest.New("/w")
+			sb.StartFunc = func(context.Context, core.ExecRequest) (core.Process, error) {
+				return harnesstest.NewProcess(stream, "", tc.code), nil
+			}
+			ch, err := New(Options{}).Run(context.Background(), sb, core.HarnessRequest{Run: &core.Run{}, Prompt: "x"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			evs := collect(t, ch)
+			if !slices.Equal(kinds(evs), tc.wantKinds) {
+				t.Fatalf("kinds = %v, want %v", kinds(evs), tc.wantKinds)
+			}
+			var got *core.Usage
+			for _, ev := range evs {
+				if ev.Kind == harness.EventUsage {
+					got = ev.Usage
+				}
+			}
+			switch {
+			case tc.want == nil && got != nil:
+				t.Fatalf("usage = %+v, want none", got)
+			case tc.want != nil && (got == nil || *got != *tc.want):
+				t.Fatalf("usage = %+v, want %+v", got, tc.want)
+			}
+		})
 	}
 }
 

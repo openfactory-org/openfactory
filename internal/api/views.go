@@ -164,7 +164,7 @@ func (s *Server) runView(r *core.Run) RunView {
 		SourceRef:     ref,
 		StatusMessage: statusMessage(r),
 		RootRunID:     r.ID,
-		Usage:         UsageView{Usage: r.Usage, Coverage: "known"},
+		Usage:         UsageView{Usage: r.Usage, Coverage: r.Usage.CoverageLabel()},
 		UpdatedAt:     upd,
 		Run:           *r,
 	}

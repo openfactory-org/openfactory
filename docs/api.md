@@ -197,7 +197,7 @@ See [Harnesses](harnesses.md), [Machines and environments](machines-and-environm
 | `creator`, `run_as` | Principals, each `{"type", "id", "name"}`; `type` is `user`, `service_account` or `factory`. No `creator` for a schedule, webhook, scorer or benchmark. See [Run principals](definition-reference.md#run-principals). |
 | `active_child_runs` | Runs under this run that are not finished (`idle` and `blocked` count as not finished). Reads at most 1000 runs and 10 levels. |
 | `session` | Number of the newest session. `0` without a session or runner store. |
-| `usage` | `input_tokens`, `output_tokens`, `cost_usd`, `duration_ms`, `coverage` (`known`). |
+| `usage` | `input_tokens`, `output_tokens`, `cost_usd`, `duration_ms` (agent time over all turns), `coverage` (`known`, or `partial` when a turn ended before the harness reported its totals). See [Run usage](harnesses.md#run-usage). |
 | `judge_usage` | Usage of the judge runs of the run's scores, added to its cost. `GET /runs/{runId}` returns it when the run has scores. |
 | `source`, `source_ref` | How the run started (below), and the ID of its automation, schedule, webhook, parent run, scorer or benchmark. |
 
