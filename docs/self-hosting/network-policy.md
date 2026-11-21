@@ -202,7 +202,7 @@ A refused connection counts as blocked, because a plugin can reject instead of d
 Limits of the wait:
 
 - If a node firewall refuses port 10250 from Pods, the wait ends at once and gives no guarantee. Test with `openfactory netprobe dial --addr <node IP>:10250` in a Pod without a policy: it must connect.
-- A plugin that always allows Pod-to-node traffic never blocks the target. Every restricted sandbox then ends with `network_policy_timeout` after 30 seconds.
+- A plugin that always allows Pod-to-node traffic never blocks the target. Every restricted sandbox then ends with `network_policy_timeout` after 30 seconds. The Amazon VPC CNI on EKS is such a plugin: on EKS, set `OF_K8S_EGRESS_WAIT_ADDR` (Helm `sandbox.k8s.networkPolicy.waitAddr`), for example to the ClusterIP and port of a Service in another namespace.
 
 | Setting | Default | Effect |
 |---|---|---|

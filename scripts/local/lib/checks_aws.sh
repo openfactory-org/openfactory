@@ -4,6 +4,7 @@
 # ---------- A1 ----------
 
 check_A1() {
+	[ "$LOCAL_TARGET" != eks ] || skip "LOCAL_TARGET=eks: the stack was made outside deploy/aws/provision.sh"
 	need_cmd aws jq sh
 	need_file "$LOCAL_DIR/outputs.json"
 	need_file "$REPO/deploy/aws/provision.sh"
@@ -96,6 +97,14 @@ check_A2() {
 	printf '%s\n' "$_a2_keys" | grep -q "$ARTIFACT_RUN" || fail "the bucket $(out_json bucket) has no object for the run $ARTIFACT_RUN"
 	evidence "the bucket has objects of the run $ARTIFACT_RUN: $(printf '%s\n' "$_a2_keys" | grep -c "$ARTIFACT_RUN") key(s)"
 	# 5. The broker issued credentials to the server service account.
+	if [ "$LOCAL_TARGET" = eks ]; then
+		_a2_assoc=$(aws_real eks list-pod-identity-associations --cluster-name "$(out_json clusterName)" \
+			--namespace of-local --service-account openfactory --query 'associations[0].associationId' --output text 2>&1)
+		case $_a2_assoc in a-*) ;; *) fail "no Pod Identity association for of-local/openfactory: $_a2_assoc" ;; esac
+		evidence "Pod Identity association $_a2_assoc gives of-local/openfactory its credentials"
+		pass
+		return
+	fi
 	_a2_log=$(kc -n aws-local logs deploy/aws-emulator --tail=-1 2>&1)
 	_a2_n=$(printf '%s\n' "$_a2_log" | grep -c 'issued ns=of-local sa=openfactory')
 	[ "$_a2_n" -ge 1 ] || {
@@ -109,6 +118,7 @@ check_A2() {
 # ---------- A3 ----------
 
 check_A3() {
+	[ "$LOCAL_TARGET" != eks ] || skip "LOCAL_TARGET=eks: real Pod Identity credentials last hours, so a renewal does not happen within the check"
 	need_chart
 	need_cmd kubectl jq curl
 	_a3_t0=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -150,6 +160,18 @@ check_A3() {
 check_A4() {
 	need_chart
 	need_cmd kubectl jq
+	if [ "$LOCAL_TARGET" = eks ]; then
+		# The Pod Identity webhook gives credential variables only to service accounts with an association.
+		_a4_script='env | grep -q "^AWS_CONTAINER_CREDENTIALS_FULL_URI=" && echo HAS-CREDENTIAL-URI || echo NO-CREDENTIAL-URI'
+		kc -n of-local create serviceaccount of-local-check-other --dry-run=client -o yaml | kc apply -f - >/dev/null || fail "cannot make the service account of-local-check-other"
+		run_check_pod of-local of-local-check-a4 of-local-check-other "$_a4_script"
+		printf '%s\n' "$POD_LOG" | grep -q '^NO-CREDENTIAL-URI$' || fail "a service account without an association got AWS_CONTAINER_CREDENTIALS_FULL_URI"
+		run_check_pod of-local of-local-check-a4-control openfactory "$_a4_script"
+		printf '%s\n' "$POD_LOG" | grep -q '^HAS-CREDENTIAL-URI$' || fail "the service account openfactory got no AWS_CONTAINER_CREDENTIALS_FULL_URI"
+		evidence "of-local-check-other: no credential URI; openfactory: credential URI set"
+		pass
+		return
+	fi
 	_a4_url="https://aws.$LOCAL_DOMAIN:9443/__pod-identity/v1/credentials"
 	# shellcheck disable=SC2016 # $URL and $(...) run in the check Pod; they expand later, not here
 	_a4_script='code=$(curl -sS -m 20 --cacert /etc/aws-local-ca/ca.crt -o /tmp/body -w "%{http_code}" -H "Authorization: $(cat /var/run/secrets/pods.eks.amazonaws.com/serviceaccount/token)" "$URL"); echo "HTTP=$code"; if grep -q AccessKeyId /tmp/body; then echo "BODY-HAS-CREDENTIALS"; else head -c 300 /tmp/body; echo; fi'
@@ -180,7 +202,10 @@ check_S1_run() {
 		unset AWS_PROFILE AWS_ROLE_ARN AWS_WEB_IDENTITY_TOKEN_FILE AWS_SESSION_TOKEN \
 			AWS_CONTAINER_CREDENTIALS_FULL_URI AWS_CONTAINER_CREDENTIALS_RELATIVE_URI \
 			AWS_CONTAINER_AUTHORIZATION_TOKEN AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE
-		if [ -f "$LOCAL_DIR/aws/server.env" ]; then
+		if [ "$LOCAL_TARGET" = eks ]; then
+			# The Go driver reads static keys: export the keys of the CLI session.
+			eval "$(aws_real configure export-credentials --format env)"
+		elif [ -f "$LOCAL_DIR/aws/server.env" ]; then
 			# shellcheck source=/dev/null
 			. "$LOCAL_DIR/aws/server.env"
 		else
@@ -204,6 +229,7 @@ check_S1() {
 	_s1_bucket=$(out_json bucket)
 	_s1_region=$(out_json region)
 	_s1_url="s3://$_s1_bucket/check-s1?region=${_s1_region:-us-east-1}&endpoint=https://aws.$LOCAL_DOMAIN:9443&path_style=true"
+	[ "$LOCAL_TARGET" != eks ] || _s1_url="s3://$_s1_bucket/check-s1?region=$_s1_region"
 	_s1_out=$WORK/s1.out
 	_s1_try=0
 	while :; do
@@ -238,12 +264,14 @@ check_S2() {
 	[ -n "$_s2_url" ] || fail "the artifact list of run $ARTIFACT_RUN has no presigned url (the store cannot presign?)"
 	_s2_host=$(printf '%s' "$_s2_url" | sed 's|^[a-z]*://\([^/]*\)/.*|\1|')
 	log "presigned URL host: $_s2_host (the signature is not logged)"
+	_s2_ca="--cacert /etc/aws-local-ca/ca.crt"
 	case $_s2_host in
 	"aws.$LOCAL_DOMAIN:9443") ;;
+	*.amazonaws.com) [ "$LOCAL_TARGET" = eks ] || fail "the presigned URL has the host $_s2_host outside LOCAL_TARGET=eks"; _s2_ca= ;;
 	*) fail "the presigned URL has the host $_s2_host, not aws.$LOCAL_DOMAIN:9443: Pods and clients cannot share it" ;;
 	esac
 	# shellcheck disable=SC2016 # $URL and $(...) run in the check Pod; they expand later, not here
-	_s2_script='code=$(curl -sS -m 30 --cacert /etc/aws-local-ca/ca.crt -o /tmp/obj -w "%{http_code}" "$URL"); echo "HTTP=$code"; echo "SIZE=$(wc -c </tmp/obj | tr -d " ")"; echo "CONTENT=$(head -c 200 /tmp/obj)"'
+	_s2_script='code=$(curl -sS -m 30 '"$_s2_ca"' -o /tmp/obj -w "%{http_code}" "$URL"); echo "HTTP=$code"; echo "SIZE=$(wc -c </tmp/obj | tr -d " ")"; echo "CONTENT=$(head -c 200 /tmp/obj)"'
 	run_check_pod "$TASK_NAMESPACE" of-local-check-s2 default "$_s2_script" URL "$_s2_url"
 	printf '%s\n' "$POD_LOG" | sed 's/X-Amz-[A-Za-z-]*=[^& ]*/X-Amz-...=***/g' | sed 's/^/    /'
 	printf '%s\n' "$POD_LOG" | grep -q '^HTTP=200$' || fail "a Pod in $TASK_NAMESPACE got $(printf '%s\n' "$POD_LOG" | grep '^HTTP=' | head -n 1) from the presigned URL, not HTTP=200"

@@ -331,6 +331,11 @@ func (e *netEnv) backend(opts Options) *Backend {
 	if opts.EgressWaitImage == "" {
 		opts.EgressWaitImage = e.proxyImage
 	}
+	// A plugin that always allows Pod-to-node traffic (the Amazon VPC CNI)
+	// never blocks the default target, the kubelet of the node.
+	if opts.EgressWaitAddr == "" {
+		opts.EgressWaitAddr = os.Getenv("OF_E2E_EGRESS_WAIT_ADDR")
+	}
 	switch {
 	case os.Getenv("OF_E2E_NO_WAIT") == "1":
 		opts.EgressWaitTimeout = -1

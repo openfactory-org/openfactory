@@ -10,7 +10,7 @@ CHECK_FACTORY_ALIAS=of-local-check
 RULE_MARKER=OF-RULE-7421
 
 # git_url_host / git_url_cluster  The two URLs of the same repository.
-git_url_host() { printf 'git://git.%s:9418/%s.git\n' "$LOCAL_DOMAIN" "$1"; }
+git_url_host() { printf 'git://git.%s:%s/%s.git\n' "$LOCAL_DOMAIN" "${LOCAL_GIT_PORT:-9418}" "$1"; }
 git_url_cluster() { printf 'git://git.%s.svc:9418/%s.git\n' "$GIT_NAMESPACE" "$1"; }
 
 # ---------- tools ----------
@@ -345,7 +345,7 @@ run_check_pod() {
 			restartPolicy: "Never", serviceAccountName: $sa, terminationGracePeriodSeconds: 1,
 			securityContext: {runAsNonRoot: true, runAsUser: 1000, seccompProfile: {type: "RuntimeDefault"}},
 			containers: [{
-				name: "check", image: $image, imagePullPolicy: "Never",
+				name: "check", image: $image, imagePullPolicy: ($ENV.LOCAL_PULL_POLICY // "Never"),
 				command: ["sh", "-c", $script], env: $env,
 				securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: ["ALL"]}},
 				volumeMounts: [
@@ -357,7 +357,12 @@ run_check_pod() {
 				{name: "ca", configMap: {name: "aws-local-ca"}},
 				{name: "pi-token", projected: {sources: [{serviceAccountToken: {audience: "pods.eks.amazonaws.com", expirationSeconds: 3600, path: "token"}}]}}
 			]
-		}}' | kc apply -f - >/dev/null || fail "cannot create the Pod $_pod_ns/$_pod_name"
+		}}
+		# On EKS the Pod Identity webhook mounts the token itself, at the same path.
+		| if $ENV.LOCAL_TARGET == "eks" then
+			.spec.containers[0].volumeMounts |= map(select(.name != "pi-token"))
+			| .spec.volumes |= map(select(.name != "pi-token"))
+		else . end' | kc apply -f - >/dev/null || fail "cannot create the Pod $_pod_ns/$_pod_name"
 	POD_PHASE=
 	_pod_t0=$(now)
 	while [ $(($(now) - _pod_t0)) -lt 150 ]; do

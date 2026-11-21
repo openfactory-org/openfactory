@@ -26,6 +26,11 @@
 #   LOCAL_CHECKS       Comma-separated IDs. Only these checks run.
 #   LOCAL_GITHUB_REPO, GITHUB_TOKEN   Only for G1 to G4 (set them in the environment of
 #                      this script). Without them the G checks are SKIP.
+#   LOCAL_TARGET       local (default) or eks. eks: a real EKS cluster with real S3 and Pod
+#                      Identity. A1 and A3 are SKIP; A2, A4, S1 and S2 use the real services.
+#   LOCAL_CHECK_IMAGE, LOCAL_PULL_POLICY, LOCAL_PG_HOST   Image and pull policy of the check
+#                      Pods, and the PostgreSQL host for psql (default 127.0.0.1 in the Pod).
+#   LOCAL_GIT_PORT     Port of the git server on the workstation. Default: 9418.
 #   LOCAL_R3_WAIT=1    R3 waits for the hourly retention sweep (up to LOCAL_R3_WAIT_MAX seconds,
 #                      default 10800) instead of failing as "not observed yet".
 #
@@ -57,6 +62,13 @@ fi
 LOCAL_SERVER_MODE=${LOCAL_SERVER_MODE:-chart}
 LOCAL_MODEL=${LOCAL_MODEL:-fake}
 LOCAL_FORGE=${LOCAL_FORGE:-none}
+# LOCAL_TARGET=eks runs the checks against a real EKS cluster (see docs/self-hosting/local-testing.md).
+LOCAL_TARGET=${LOCAL_TARGET:-local}
+case $LOCAL_TARGET in local | eks) ;; *)
+	echo "error: LOCAL_TARGET must be local or eks, not $LOCAL_TARGET" >&2
+	exit 2
+	;;
+esac
 LOCAL_DOMAIN=${LOCAL_DOMAIN:-k8s.orb.local}
 KUBE_CONTEXT=${KUBE_CONTEXT:-orbstack}
 OF_SERVER=${OF_SERVER:-http://of.$LOCAL_DOMAIN}
@@ -70,7 +82,7 @@ case $LOCAL_SERVER_MODE in chart | host) ;; *)
 	exit 2
 	;;
 esac
-export LOCAL_DIR LOCAL_SERVER_MODE LOCAL_MODEL LOCAL_FORGE LOCAL_DOMAIN KUBE_CONTEXT OF_SERVER OF_API_KEY
+export LOCAL_GIT_PORT LOCAL_CHECK_IMAGE LOCAL_PULL_POLICY LOCAL_PG_HOST LOCAL_TARGET LOCAL_DIR LOCAL_SERVER_MODE LOCAL_MODEL LOCAL_FORGE LOCAL_DOMAIN KUBE_CONTEXT OF_SERVER OF_API_KEY
 
 # shellcheck source=lib/common.sh
 . "$HERE/lib/common.sh"

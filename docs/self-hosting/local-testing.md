@@ -193,6 +193,22 @@ LOCAL_CHECKS=R1,R2,A2 make local-check    # some checks
 
 Runs use the stand-in and cost nothing, except one short R4 turn on your Claude subscription. The checks never print a secret.
 
+### Run the checks on Amazon EKS
+
+`LOCAL_TARGET=eks` runs `scripts/local/check.sh` against an install on a real EKS cluster, with real S3 and EKS Pod Identity. `make local-up` does not make this install. Install the chart yourself with the namespaces of the local stack: the server in `of-local` (release `openfactory`), sandboxes in `of-local-sandboxes`, and the git server of `deploy/local/infra.yaml` in `of-local-infra`.
+
+Write `$LOCAL_DIR/env` (use a separate `LOCAL_DIR`) with `OF_SERVER`, `OF_API_KEY`, `KUBE_CONTEXT`, `LOCAL_TARGET=eks`, and these settings:
+
+| Variable | Value |
+|---|---|
+| `LOCAL_CHECK_IMAGE` | The testkit image (`deploy/local/testkit/Dockerfile`) in your registry. |
+| `LOCAL_PULL_POLICY`, `E2E_PULL_POLICY` | `IfNotPresent`. |
+| `LOCAL_PG_HOST` | The database host. The checks run `psql` in a Deployment `postgres` in `of-local-infra`, for example the image `postgres:16` with the command `sleep infinity`. |
+| `LOCAL_GIT_PORT` | The local port of a `kubectl port-forward` to the git Service, with `LOCAL_DOMAIN=127.0.0.1.nip.io`. |
+| `E2E_EGRESS_WAIT_ADDR` | The same value as `OF_K8S_EGRESS_WAIT_ADDR` of the server. See [Network policy](network-policy.md). |
+
+`$LOCAL_DIR` also holds `db.password`, `webhook.secret` and `outputs.json` (`accountId`, `region`, `clusterName`, `bucket`). `KUBE_CONTEXT` must use a static token, because the Go cluster tests refuse a kubeconfig with an exec plugin. The checks A1 and A3 are `SKIP` on EKS. A2, A4, S1 and S2 use the real services.
+
 ## Cluster tests without the stack
 
 The Go tests of `make e2e-k8s` (`internal/sandbox/k8stask`, build tag `e2e_k8s`) check the limits of sandbox Jobs. Checks N1 to N3 run them on the stack. They also run on any cluster where you may create a namespace, with no Helm and no model. For the backend, see [Kubernetes](kubernetes.md).

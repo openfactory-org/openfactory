@@ -16,6 +16,10 @@ check_P1() {
 		kc -n of-local get pods -l app.kubernetes.io/instance=openfactory,app.kubernetes.io/component=server -o json |
 			jq -r '.items[] | "\(.metadata.name) phase=\(.status.phase) containers_ready=\([.status.containerStatuses[]?.ready] | all)"' | tee "$WORK/p1-pods.txt"
 		[ "$(grep -c 'phase=Running containers_ready=true' "$WORK/p1-pods.txt")" -ge 2 ] || fail "fewer than 2 server Pods run with all containers ready"
+		if [ "$LOCAL_TARGET" = eks ]; then
+			evidence "2 server Pods are Running and ready (EKS: the Pod Identity agent is a node add-on, not a sidecar)"
+			pass
+		fi
 		_p1_side=$(kc -n of-local get pods -l app.kubernetes.io/instance=openfactory,app.kubernetes.io/component=server -o json |
 			jq -r '[.items[] | select([.spec.containers[].name] | index("pod-identity-agent"))] | length')
 		[ "$_p1_side" -ge 2 ] || fail "only $_p1_side server Pod(s) have the container pod-identity-agent"

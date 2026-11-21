@@ -102,13 +102,26 @@ kc() { kubectl --context "$KUBE_CONTEXT" "$@"; }
 # aws_emu ARGS...  The AWS CLI against the emulator, in a subshell that
 # removes real AWS credentials (connect.env does that).
 aws_emu() {
+	if [ "$LOCAL_TARGET" = eks ]; then
+		aws_real "$@"
+		return
+	fi
 	# shellcheck source=/dev/null
 	( . "$LOCAL_DIR/aws/connect.env" && aws "$@" )
 }
 
+# aws_real ARGS...  The AWS CLI with the real credentials of the workstation.
+# Only LOCAL_TARGET=eks may use it.
+aws_real() { [ "$LOCAL_TARGET" = eks ] || fail "aws_real needs LOCAL_TARGET=eks"; aws "$@"; }
+
 # aws_guard  Stop the check unless the AWS CLI talks to the emulator account.
 aws_guard() {
 	need_cmd aws
+	if [ "$LOCAL_TARGET" = eks ]; then
+		_ag=$(aws_real sts get-caller-identity --query Account --output text 2>&1) || fail "aws sts get-caller-identity failed: $_ag"
+		[ "$_ag" = "$(out_json accountId)" ] || fail "aws sts get-caller-identity shows account $_ag, not $(out_json accountId) of outputs.json"
+		return 0
+	fi
 	need_file "$LOCAL_DIR/aws/connect.env"
 	# The first lookup of a host name can fail on OrbStack: try three times.
 	_ag_try=0
@@ -169,7 +182,7 @@ runner_image() {
 
 # check_pod_image  The image of the Pods that the checks start: the testkit image
 # of the stack (TESTKIT_IMAGE in deploy/local/lib.sh). It holds sh and curl.
-check_pod_image() { echo of-local/testkit:latest; }
+check_pod_image() { echo "${LOCAL_CHECK_IMAGE:-of-local/testkit:latest}"; }
 
 # psql_query SQL  Run a query in PostgreSQL (kubectl exec into the database
 # Pod). The password goes in on standard input, never in the arguments.
@@ -178,8 +191,8 @@ psql_query() {
 	_pq_target=deploy/postgres
 	kc -n of-local-infra get deploy postgres >/dev/null 2>&1 || _pq_target=statefulset/postgres
 	# shellcheck disable=SC2016 # $0 belongs to the inner sh -c in the Pod; it must expand later, not here
-	printf '%s\n' "$_pq_pw" | kc -n of-local-infra exec -i "$_pq_target" -- sh -c \
-		'IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -h 127.0.0.1 -U openfactory -d openfactory -X -q -t -A -F "|" -c "$0"' "$1"
+	printf '%s\n' "$_pq_pw" | kc -n of-local-infra exec -i "$_pq_target" -- env PGHOST="${LOCAL_PG_HOST:-127.0.0.1}" sh -c \
+		'IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -h "${PGHOST:-127.0.0.1}" -U openfactory -d openfactory -X -q -t -A -F "|" -c "$0"' "$1"
 }
 
 # ---------- HTTP ----------
