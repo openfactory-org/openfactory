@@ -22,7 +22,7 @@ func gitEnv(t *testing.T) {
 
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd := exec.Command("git", append(append([]string{"-C", dir}, noAutoMaintenance...), args...)...)
 	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_TERMINAL_PROMPT=0")
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
@@ -176,6 +176,34 @@ func TestCaptureDetachedHead(t *testing.T) {
 	cmd := exec.Command("git", "-C", second, "symbolic-ref", "-q", "HEAD")
 	if err := cmd.Run(); err == nil {
 		t.Error("HEAD must be detached")
+	}
+}
+
+// TestNoBackgroundMaintenance checks that capture and restore start no
+// background git process. A detached "git maintenance run --auto" can still
+// write in the repository after the command returns.
+func TestNoBackgroundMaintenance(t *testing.T) {
+	remote, work, first := newRepo(t)
+	trace := filepath.Join(t.TempDir(), "trace.txt")
+	t.Setenv("GIT_TRACE", trace)
+	writeFile(t, filepath.Join(work, "a.txt"), "local\n", 0o644)
+	runGit(t, work, "commit", "-q", "-am", "local")
+	e, _, out, err := capture(t, work, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := cloneOf(t, remote)
+	if err := RestoreRepo(context.Background(), second, e, out); err != nil {
+		t.Fatal(err)
+	}
+	got := readFile(t, trace)
+	if !strings.Contains(got, "fetch") {
+		t.Fatalf("trace has no fetch; GIT_TRACE did not work:\n%s", got)
+	}
+	for _, s := range []string{"maintenance run", "gc --auto"} {
+		if strings.Contains(got, s) {
+			t.Errorf("git started %q:\n%s", s, got)
+		}
 	}
 }
 

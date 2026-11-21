@@ -19,10 +19,17 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 	return strings.TrimRight(string(out), "\n"), nil
 }
 
+// noAutoMaintenance turns off the automatic maintenance of git. Without it,
+// "git fetch" and other commands start "git maintenance run --auto --detach"
+// (or "git gc --auto" in old versions) in the background. That process can
+// still repack or write files in the repository after the command returns,
+// while the runner archives or removes the directory.
+var noAutoMaintenance = []string{"-c", "maintenance.auto=false", "-c", "gc.auto=0"}
+
 // gitRaw runs "git -C dir args..." and returns the exact bytes of standard
 // output.
 func gitRaw(ctx context.Context, dir string, args ...string) ([]byte, error) {
-	full := append([]string{"-C", dir}, args...)
+	full := append(append([]string{"-C", dir}, noAutoMaintenance...), args...)
 	cmd := exec.CommandContext(ctx, "git", full...)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
 	cmd.Env = append(cmd.Env, identityEnv()...)
