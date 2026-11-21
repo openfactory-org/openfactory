@@ -356,7 +356,8 @@ check_N1() {
 # ---------- N2 and N3 ----------
 
 # e2e_k8s_test TEST_REGEX  Run the e2e_k8s Go tests of make e2e-k8s on the
-# cluster of the stack. E2E_PROXY_IMAGE, E2E_PULL_POLICY (default Never) and
+# cluster of the stack. E2E_PROXY_IMAGE, E2E_PULL_POLICY (default Never),
+# E2E_EGRESS_WAIT_ADDR (target of the egress wait, default the kubelet) and
 # E2E_TIMEOUT (default 12m) change the settings of the tests.
 e2e_k8s_test() {
 	need_cmd go kubectl
@@ -371,6 +372,7 @@ e2e_k8s_test() {
 		cd "$REPO" || exit 1
 		OF_E2E_KUBE_CONTEXT=$KUBE_CONTEXT OF_E2E_RUNNER_IMAGE=$_e2_ri \
 			OF_E2E_PULL_POLICY=${E2E_PULL_POLICY:-Never} OF_E2E_PROXY_IMAGE=${E2E_PROXY_IMAGE:-} \
+			OF_E2E_EGRESS_WAIT_ADDR=${E2E_EGRESS_WAIT_ADDR:-} \
 			OF_E2E_CA_FILE=${_e2_ca:-} \
 			go test -tags e2e_k8s -run "$1" -count=1 -v -timeout "${E2E_TIMEOUT:-12m}" ./internal/sandbox/k8stask
 	) >"$WORK/e2e.out" 2>&1

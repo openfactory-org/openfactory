@@ -238,7 +238,7 @@ func TestFactoryDefinitionsCompile(t *testing.T) {
 }
 
 // Every kubectl call has the context, and the AWS CLI is used only through the
-// connect.env of the stack. Nothing disables TLS verification.
+// connect.env of the stack, or through aws_real with LOCAL_TARGET=eks. Nothing disables TLS verification.
 func TestScriptRules(t *testing.T) {
 	kubectlCall := regexp.MustCompile(`(^|[|;&(]|\$\()\s*kubectl\s`)
 	awsCall := regexp.MustCompile(`(^|[|;&(]|\$\()\s*aws\s`)
@@ -251,7 +251,8 @@ func TestScriptRules(t *testing.T) {
 			if kubectlCall.MatchString(l) && !strings.Contains(l, `kubectl --context "$KUBE_CONTEXT" "$@"`) {
 				t.Errorf("%s:%d calls kubectl without kc: %s", f, i+1, l)
 			}
-			if awsCall.MatchString(l) && !strings.Contains(l, `. "$LOCAL_DIR/aws/connect.env" && aws "$@"`) {
+			if awsCall.MatchString(l) && !strings.Contains(l, `. "$LOCAL_DIR/aws/connect.env" && aws "$@"`) &&
+				!strings.Contains(l, `[ "$LOCAL_TARGET" = eks ] || fail "aws_real needs LOCAL_TARGET=eks"; aws "$@"`) {
 				t.Errorf("%s:%d calls aws outside aws_emu: %s", f, i+1, l)
 			}
 			for _, bad := range []string{"--insecure", "curl -k", " -sk ", "--no-verify-ssl", "InsecureSkipVerify", "set -x", "--context orbstack", "--context=", "git daemon"} {
@@ -267,7 +268,7 @@ func TestScriptRules(t *testing.T) {
 // image is the testkit image of the stack, and its default stage installs curl.
 // The runner image (the server image) has no curl.
 func TestCheckPodImageHasCurl(t *testing.T) {
-	m := regexp.MustCompile(`(?m)^check_pod_image\(\) \{ echo (\S+); \}$`).FindStringSubmatch(readFile(t, "lib/common.sh"))
+	m := regexp.MustCompile(`(?m)^check_pod_image\(\) \{ echo "\$\{LOCAL_CHECK_IMAGE:-(\S+)\}"; \}$`).FindStringSubmatch(readFile(t, "lib/common.sh"))
 	if m == nil {
 		t.Fatal("lib/common.sh has no check_pod_image")
 	}
