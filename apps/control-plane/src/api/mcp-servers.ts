@@ -1,4 +1,4 @@
-// REST handlers: mcp-servers (WS11). Port of internal/api/mcpservers.go.
+// REST handlers: mcp-servers. Port of internal/api/mcpservers.go.
 // CRUD runs in TeamDO (module mcp). The OAuth routes read in TeamDO (which
 // also authorizes), run the discovery and token calls here in the Worker, and
 // store the result in TeamDO.

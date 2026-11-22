@@ -1,7 +1,7 @@
-// DispatchDO (key team:<t>|dispatch): admission only (C9). A FIFO per
+// DispatchDO (key team:<t>|dispatch): admission only. A FIFO per
 // target, open-session leases by (run, session), the factory limit, provider
 // start-rate buckets, spend per (run, session) bucketed by the run's created
-// day and month (C5), the queue timeout, lease reconcile and the orphan sweep.
+// day and month, the queue timeout, lease reconcile and the orphan sweep.
 import { doName, parseTaskId, partitionOf } from "@openfactory/core";
 import type { DispatchTarget, OutboxPayloads } from "../../contracts/do-messages";
 import type { Env } from "../../contracts/env";
@@ -30,6 +30,7 @@ import {
   type Limit,
 } from "../../spend/spend";
 import { m0001 } from "./migrations/0001_init";
+import { m0002 } from "./migrations/0002_drop_hold_key";
 import { providerFor, registeredProviders, targetKey } from "./providers";
 
 const SWEEP_EVERY_MS = 60_000;
@@ -138,7 +139,7 @@ export class DispatchDO extends BaseDO {
   }
 
   protected migrations(): readonly Migration[] {
-    return [m0001];
+    return [m0001, m0002];
   }
 
   protected override init(): void {
@@ -322,7 +323,7 @@ export class DispatchDO extends BaseDO {
     }
     for (const w of res.spendHolds) {
       this.sql.exec("UPDATE waiting SET hold = 'spend' WHERE run_id = ? AND session = ?", w.run_id, w.session);
-      // Not armed while on spend hold (03 §7.2 step 3).
+      // The queue timeout is not armed while the request is on spend hold.
       this.clearTimer(qtName(w.run_id, w.session));
       const wd = byKey.get(`${w.run_id}.${w.session}`)!.work_do;
       this.enqueue({
@@ -365,7 +366,7 @@ export class DispatchDO extends BaseDO {
       : { provider, window_s: windowS, tokens: cap, cap, updated_ms: now };
   }
 
-  // ---------- spend (C5) ----------
+  // ---------- spend (a run's cost stays in the day and month it was created) ----------
 
   private limitsOf(factoryId: string, now: number): Limit[] {
     const fl = first<{ daily_usd: number; monthly_usd: number }>(

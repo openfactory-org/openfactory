@@ -34,6 +34,9 @@ import {
 } from "./engine";
 import { onGrant, type Grant } from "./grant";
 import { m0001 } from "./migrations/0001_init";
+import { m0002 } from "./migrations/0002_drop_work_item_state";
+import { m0003 } from "./migrations/0003_run_messages_role";
+import { m0004 } from "./migrations/0004_drop_unread_tables";
 import { compactRunMessages, type CompactionRpc } from "../../compaction/compact";
 import { retentionMs, type RetentionRpc } from "../../retention/sweep";
 import { Repo } from "./repo";
@@ -50,7 +53,7 @@ import {
 } from "./runner";
 import { runTool, type ToolCall, type ToolResult } from "./tools";
 import { applyAction as applyIntake, type ApplyActionInput, type ApplyActionResult } from "./intake";
-import { apiOp, scopeFactory, type ApiCall } from "./api-handlers";
+import { actorOfMeta, apiOp, scopeFactory, type ApiCall } from "./api-handlers";
 import {
   deliverNotice,
   deliverProvider,
@@ -181,7 +184,7 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
   }
 
   protected migrations(): readonly Migration[] {
-    return [m0001];
+    return [m0001, m0002, m0003, m0004];
   }
 
   async ping(): Promise<string> {
@@ -294,12 +297,13 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
       return this.txFx((fx) => {
         if (input.dispatch) {
           const out = dispatchRoot(fx, input.dispatch);
-          // saveWorkItemState: the pins of a trial apply to the children that run_agents starts.
+          // saveWorkItemState: the pins and the starting repo refs of a trial apply to
+          // every run of the work item, also the children that run_agents starts.
           const pins = input.dispatch.agentPins;
           if (pins && Object.keys(pins).length > 0)
             fx.repo.setMeta(`agent_pins:${out.workItem.id}`, JSON.stringify(pins));
           const refs = input.dispatch.startingRepoRefs;
-          if (refs?.length && !out.followUp) fx.repo.setRunState(out.run.id, "repo_refs", JSON.stringify(refs));
+          if (refs?.length) fx.repo.setMeta(`repo_refs:${out.workItem.id}`, JSON.stringify(refs));
           return { run: out.run, workItemId: out.workItem.id, followUp: out.followUp };
         }
         const r = input.run;
@@ -329,7 +333,7 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
     return this.rpc(() => {
       this.authorize(meta, this.runFactory(runId), "user");
       return this.txFx((fx) => {
-        const actor = meta.principal?.userId ?? meta.principal?.id ?? "api";
+        const actor = actorOfMeta(meta);
         const done = cancel(fx, runId, actor, cascade);
         return { cancelled: [...done], run: fx.repo.mustRun(runId) };
       });
@@ -362,7 +366,7 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
     return this.rpc(() => this.txFx((fx) => runAgents(fx, parentRunId, plans, summary)));
   }
 
-  /** Orchestration tool call with its idempotency row in the same transaction (C8). */
+  /** Orchestration tool call with its idempotency row in the same transaction. */
   async toolCall(call: ToolCall): Promise<ToolResult> {
     return this.rpc(() => this.txFx((fx) => runTool(fx, call)));
   }
@@ -372,7 +376,7 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
     return this.rpc(() => new Repo(this.sql, Date.now).latestSession(runId)?.active_turn_id ?? "");
   }
 
-  // ---------- data upkeep (WS13: compaction and retention) ----------
+  // ---------- data upkeep (compaction and retention) ----------
 
   /** CompactionRpc: one step that moves the messages of a finished run to R2. */
   async compactRun(runId: string): Promise<{ more: boolean }> {
@@ -554,7 +558,10 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
       const repo = new Repo(this.sql, Date.now);
       const r = repo.mustRun(runId);
       const wi = r.work_item_id ? repo.getWorkItem(r.work_item_id) : undefined;
-      const raw = repo.getRunState(runId, "repo_refs") ?? repo.getWorkItemState("repo_refs");
+      // The refs of the run itself (a judge run), else the refs of its work item.
+      const raw =
+        repo.getRunState(runId, "repo_refs") ??
+        (r.work_item_id ? repo.getMeta(`repo_refs:${r.work_item_id}`) : undefined);
       const start = repo.getRunState(runId, "start_commits");
       return {
         ...(wi ? { workItem: wi } : {}),
@@ -686,7 +693,7 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
           reason: "event for a reference of the completed work item",
           provider: ev.provider,
           event: ev.type,
-          key: sourceKey(ev.source as never),
+          key: sourceKey(ev.source),
           ...(completedAt ? { completed_at: completedAt } : {}),
         });
         projectWorkItem(fx, wi);
@@ -714,7 +721,7 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
 // ---------- helpers ----------
 
 function createRunOnly(fx: Fx, r: NonNullable<CreateRunInput["run"]>, meta: CallMeta): Run {
-  const actor = r.actor ?? meta.principal?.userId ?? "api";
+  const actor = r.actor ?? (meta.principal?.userId ? actorOfMeta(meta) : "api");
   return engineCreateRun(
     fx,
     {

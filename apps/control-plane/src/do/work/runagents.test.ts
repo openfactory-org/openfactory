@@ -80,7 +80,7 @@ describe("orchestration depth", () => {
 
 describe("run_agents overrides", () => {
   // Go: a run names the environment of another team as an override; the child
-  // must not get it. The TS tool has no per-child overrides (one team, D3), so
+  // must not get it. The TS tool has no per-child overrides (one team per install), so
   // the field is ignored and the child runs with the configuration of its agent.
   it("ignores an environment named by the run", async () => {
     setAgentSource(async () => AGENTS);

@@ -1,6 +1,6 @@
 // Synchronous SQL repository of WorkDO. Every function runs inside the
-// caller's transactionSync (03 §4.2: all RunnerStore methods join the
-// calling transaction). Semantics follow core.RunnerStore and core.Store.
+// caller's transactionSync: all RunnerStore methods join the calling
+// transaction. Semantics follow core.RunnerStore and core.Store.
 import { conflict, invalid, newRoutedId, notFound, partitionOf } from "@openfactory/core";
 import { all, first } from "../../lib/sql/query";
 import { iso, ms } from "../../engine/sessions";
@@ -16,7 +16,6 @@ import type {
   TimelineEvent,
   WorkItem,
   WorkItemEvent,
-  WorkItemRef,
 } from "../../engine/types";
 
 type Data = { data: string };
@@ -589,20 +588,7 @@ export class Repo {
     }));
   }
 
-  // ---------- run uploads and snapshot parts ----------
-
-  /** An upload that the runner reported (an artifact or the transcript); a later report of the same name wins. */
-  putUpload(runId: string, session: number, kind: string, name: string, uploadId: string): void {
-    this.sql.exec(
-      "INSERT OR REPLACE INTO run_uploads (run_id, session, kind, name, upload_id, at_ms) VALUES (?, ?, ?, ?, ?, ?)",
-      runId,
-      session,
-      kind,
-      name,
-      uploadId,
-      this.now(),
-    );
-  }
+  // ---------- snapshot parts ----------
 
   /** A saved part of a workspace snapshot (workspace, harness_state); a later save of the same part wins. */
   putSnapshotPart(runId: string, session: number, part: string, uploadIds: unknown[], bytes: number): void {
@@ -691,22 +677,6 @@ export class Repo {
       JSON.stringify(wi),
       wi.id,
     );
-  }
-
-  /** Indexes a reference of the work item by its key. The caller adds it to wi.references. */
-  addWorkItemRef(ref: WorkItemRef): void {
-    this.sql.exec(
-      "INSERT OR IGNORE INTO work_item_refs (key, kind, added_ms, data) VALUES (?, ?, ?, ?)",
-      ref.key,
-      ref.kind,
-      ms(typeof ref["added_at"] === "string" ? ref["added_at"] : undefined) ?? this.now(),
-      JSON.stringify(ref),
-    );
-  }
-
-  /** A value of work_item_state (repo_refs: the starting repository refs of the work item). */
-  getWorkItemState(k: string): string | undefined {
-    return first<{ v: string }>(this.sql, "SELECT v FROM work_item_state WHERE k = ?", k)?.v;
   }
 
   appendWorkItemEvent(ev: WorkItemEvent): void {

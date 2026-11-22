@@ -1,5 +1,5 @@
 // Long-polls (25 s) and SSE (15 s heartbeat) held in the Worker, woken by a
-// DO hibernatable WebSocket (plan rule 8, 01 §5.4). When the socket closes
+// DO hibernatable WebSocket. When the socket closes
 // (DO reset, deploy), the long-poll returns and the client polls again.
 
 export const MAX_WAIT_S = 25;

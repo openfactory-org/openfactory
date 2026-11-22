@@ -22,7 +22,7 @@ export interface IntegrationRecord {
   [k: string]: unknown;
 }
 
-/** Integration clients and selection (WS10 modules). Injected. */
+/** Integration clients and selection (the integration modules). Injected. */
 export interface IntegrationBackend {
   /**
    * factoryIntegration: the team's record for provider, provided the run's
@@ -57,7 +57,7 @@ const notWired = async (): Promise<never> => {
   throw new Error("the integration clients are not available on this server");
 };
 
-/** Default until the integration modules are wired (see the WS11 report). */
+/** Default until the integration modules are wired: every call fails. */
 export const unavailableIntegrations: IntegrationBackend = {
   factoryIntegration: notWired,
   credential: notWired,

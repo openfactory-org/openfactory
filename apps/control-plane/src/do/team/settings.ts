@@ -1,5 +1,5 @@
-// TeamDO module: settings (WS4). Team environments (internal/api/platform.go)
-// and run-time settings that admins change (D31: TeamDO settings; deploy-time
+// TeamDO module: settings. Team environments (internal/api/platform.go)
+// and run-time settings that admins change (TeamDO settings; deploy-time
 // settings are Worker vars and secrets, see src/config.ts). Also the
 // "resource in use" helpers that other modules reuse (MCP servers).
 import { OfError, newId } from "@openfactory/core";
@@ -238,22 +238,17 @@ function putEnvironment(kit: TeamKit, e: Environment, createdMs = Date.now()): v
   );
 }
 
+/** Drops empty optional fields and keeps the Go field order (the JSON key order of the API). */
 function clean(e: Environment): Environment {
-  const out: Environment = { id: e.id, team_id: e.team_id, name: e.name, repos: e.repos ?? [] };
-  if (e.description) out.description = e.description;
-  if (e.image) out.image = e.image;
-  if (e.setup_commands?.length) out.setup_commands = e.setup_commands;
-  if (e.env_vars && Object.keys(e.env_vars).length) out.env_vars = e.env_vars;
-  // Go field order: id, team_id, name, description, repos, image, setup_commands, env_vars.
   return {
-    id: out.id,
-    team_id: out.team_id,
-    name: out.name,
-    ...(out.description ? { description: out.description } : {}),
-    repos: out.repos,
-    ...(out.image ? { image: out.image } : {}),
-    ...(out.setup_commands ? { setup_commands: out.setup_commands } : {}),
-    ...(out.env_vars ? { env_vars: out.env_vars } : {}),
+    id: e.id,
+    team_id: e.team_id,
+    name: e.name,
+    ...(e.description ? { description: e.description } : {}),
+    repos: e.repos ?? [],
+    ...(e.image ? { image: e.image } : {}),
+    ...(e.setup_commands?.length ? { setup_commands: e.setup_commands } : {}),
+    ...(e.env_vars && Object.keys(e.env_vars).length ? { env_vars: e.env_vars } : {}),
   };
 }
 
@@ -322,5 +317,3 @@ export const ops: Record<string, TeamOp> = {
   /** Internal: read a team setting. */
   settingsGet: (kit, c) => ({ value: getSetting(kit, String(bodyObject(c.body)["key"] ?? "")) ?? null }),
 };
-
-export function setup(_kit: TeamKit): void {}

@@ -1,7 +1,7 @@
 // Chunked multi-row inserts under the DO SQLite limits: at most 100 bound
 // parameters per statement and at most 100 KB of statement text.
 
-/** DO SQLite limits (01 §1.1). */
+/** DO SQLite limits: bound parameters per statement and statement size. */
 export const MAX_BOUND_PARAMS = 100;
 export const MAX_STATEMENT_BYTES = 100_000;
 

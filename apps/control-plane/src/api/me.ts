@@ -1,4 +1,4 @@
-// REST handler: GET /me (WS4).
+// REST handler: GET /me.
 import { loginProviders } from "../auth/routes";
 import { callTeam, json, type Handler } from "../http/handler";
 

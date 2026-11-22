@@ -1,7 +1,7 @@
 // Worker-side authentication: turns a request into a Principal. Order of the
 // Go server: session cookie (with CSRF on unsafe methods) when no API-key
 // bearer is present, then the bearer API key (of_/ofa_). The owner DO
-// authorizes (plan rule 6).
+// authorizes: the Worker only passes the Principal.
 import { DEFAULT_TEAM, OfError, doName } from "@openfactory/core";
 import type { ApiKeyLookup, Principal } from "../contracts/do-messages";
 import type { Env } from "../contracts/env";
@@ -11,7 +11,7 @@ import { bearerToken, hashKey, isApiKey, parseKey } from "./apikeys";
 import { isSafeMethod } from "./roles";
 import { readSession, SESSION_COOKIE, getCookie } from "./session";
 
-/** Extra bearer schemes (for example ofm_ Factory MCP tokens, WS11). Return null to pass. */
+/** Extra bearer schemes (for example ofm_ Factory MCP tokens). Return null to pass. */
 export type BearerAuthenticator = (env: Env, token: string) => Promise<Principal | null>;
 
 const bearerAuthenticators: { prefix: string; fn: BearerAuthenticator }[] = [];

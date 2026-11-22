@@ -1,6 +1,5 @@
 // Transcript compaction: the messages of a finished run move from the WorkDO
-// table `run_messages` to one R2 object, so a long-lived WorkDO stays small
-// (plan rule 9; table `run_messages` "compaction to R2").
+// table `run_messages` to one R2 object, so a long-lived WorkDO stays small.
 //
 // Layout: `runs/<runId>/messages.ndjson`, one RunMessage JSON per line, in
 // sequence order. The object exists once a run has been compacted. WorkDO keeps

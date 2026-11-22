@@ -1,6 +1,6 @@
 // Builds the chat and tracker integrations from one set of dependencies and
-// routes their inbound paths. WS10a registers the responders, trackers, name
-// resolvers and context builders in its notify and eventctx registries.
+// routes their inbound paths. The responders, trackers, name resolvers and
+// context builders are registered in the notify and eventctx registries.
 import { JiraHandler, WEBHOOK_PATH as JIRA_PATH } from "./jira/jira";
 import { JiraNameResolver } from "./jira/resolver";
 import { LinearHandler, WEBHOOK_PATH as LINEAR_PATH } from "./linear/linear";

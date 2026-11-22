@@ -1,4 +1,4 @@
-// Named timers multiplexed onto the one DO alarm (01 §5.3). A timer is a row
+// Named timers multiplexed onto the one DO alarm. A timer is a row
 // (name, kind, due_ms, payload, seq). BaseDO.alarm runs the due timers through
 // the handler registered for their kind.
 //

@@ -1,4 +1,4 @@
-// TeamDO module: mcp (WS11). The team MCP server registry (with the stored
+// TeamDO module: mcp. The team MCP server registry (with the stored
 // OAuth tokens of registered servers, refresh serialized here) and the state
 // of the Factory MCP authorization server (mcpauth). Network calls (OAuth
 // discovery, token requests, the proxy) happen in the Worker; this module
@@ -201,7 +201,7 @@ const internalOps: Record<string, TeamOp> = {
   },
 
   /**
-   * Single-flight refresh (appendix 04 gap 19). Grants a lease to one caller;
+   * Single-flight refresh. Grants a lease to one caller;
    * others get "busy" and read the token again after a short wait.
    */
   "mcp.oauth.refreshBegin": (kit, call) => {
@@ -250,7 +250,7 @@ const internalOps: Record<string, TeamOp> = {
     });
   },
 
-  /** Resolve (planner, WS5): managedId -> transport. Body {run: {id, mcpServers}, managedId}. */
+  /** Resolve (called by the session planner): managedId -> transport. Body {run: {id, mcpServers}, managedId}. */
   "mcp.resolve": (kit, call) => {
     const o = obj(call.body);
     const run = optObject(o, "run") ?? {};

@@ -1,4 +1,4 @@
-// REST handlers: scores. Owner: WS13.
+// REST handlers: scores.
 import { OfError, workDOName, type Score } from "@openfactory/core";
 import { requireRole } from "../auth/roles";
 import { callTeam, errorResponse, json, readJson, teamApi, teamOf, type Handler } from "../http/handler";

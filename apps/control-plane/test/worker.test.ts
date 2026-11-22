@@ -5,7 +5,7 @@ import { TeamDO } from "../src/index";
 import { Router } from "../src/http/router";
 import { ROUTES } from "../src/http/routes";
 
-describe("control-plane Worker (C0 skeleton)", () => {
+describe("control-plane Worker", () => {
   it("answers 401 problem+json without credentials", async () => {
     const res = await exports.default.fetch("http://localhost/api/v1/runs/run_x", {
       headers: { "x-request-id": "req-test-1" },

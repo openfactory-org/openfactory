@@ -288,7 +288,7 @@ export function taskIdFromLabel(label: string): string {
   return m ? `${m[1]}_${m[2]}.${m[3]}` : label;
 }
 
-/** Labels every hosted sandbox carries; the orphan sweep keys on them (02 §2.1). */
+/** Labels every hosted sandbox carries; the orphan sweep keys on them. */
 export function sandboxLabels(installId: string, task: SandboxTask): Record<string, string> {
   return {
     ...(task.labels ?? {}),

@@ -1,5 +1,5 @@
 // @openfactory/daytona: the Daytona sandbox provider (a library the control
-// plane runs in-process). Spec: .owner/refactor/02-sandbox-providers.md §4.
+// plane runs in-process). See docs/sandbox-providers.md.
 //
 // Facts that shape it:
 // - Tiers 1 and 2 are refused: their org policy allows only Daytona's
@@ -151,7 +151,7 @@ const STARTING = new Set([
 const STOPPED = new Set(["stopping", "stopped", "archiving", "archived", "destroying", "destroyed"]);
 const TRANSIENT_RUNNING = new Set(["resizing", "snapshotting", "forking", "pausing", "resuming"]);
 
-/** Maps a Daytona sandbox (and the entrypoint exit code) to a TaskStatus (02 §4.4). */
+/** Maps a Daytona sandbox (and the entrypoint exit code) to a TaskStatus. */
 export function mapDaytonaSandbox(
   taskId: string,
   sb: DaytonaSandbox,
@@ -243,7 +243,7 @@ export class DaytonaProvider implements SandboxProvider {
     return caps;
   }
 
-  /** Chooses the egress mode for one task (02 §2.2 decision table). Throws ProviderError("invalid"). */
+  /** Chooses the egress mode for one task. Throws ProviderError("invalid"). */
   planEgress(policy: TaskNetworkPolicy | undefined): DaytonaEgressPlan {
     if (!isRestricted(policy)) return { egress: "none" };
     const mode = this.cfg.egress ?? "auto";
@@ -367,7 +367,7 @@ export class DaytonaProvider implements SandboxProvider {
     await this.http.json(await this.http.call("POST", "/snapshots", body), "create snapshot");
   }
 
-  /** The create body for one task (02 §4.3). */
+  /** The create body for one task. */
   async createBody(task: SandboxTask): Promise<Record<string, unknown>> {
     const caps = await this.capabilities();
     const type = resolveInstanceType(caps, task.resources);

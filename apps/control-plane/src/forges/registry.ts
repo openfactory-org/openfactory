@@ -58,14 +58,14 @@ export function forgeFromProvider(provider: string): string {
 /** Integration providers served by first-party plugin Workers: provider -> plugin name. */
 export const PLUGIN_FORGES: Record<string, string> = { gitlab: "gitlab", azure_devops: "azuredevops" };
 
-/** Read access to the integration records of a team (TeamDO integrations module, WS10b). */
+/** Read access to the integration records of a team (the TeamDO integrations module). */
 export interface IntegrationSource {
   list(teamId: string, provider?: string): Promise<Integration[]>;
   /** Sets the status; returns true when it changed. */
   setStatus?(id: string, status: string, reason: string): Promise<boolean>;
 }
 
-/** Secret values of a team (TeamDO secrets module, WS4). */
+/** Secret values of a team (the TeamDO secrets module). */
 export interface SecretSource {
   get(teamId: string, factoryId: string, name: string): Promise<string | undefined>;
 }
@@ -326,9 +326,8 @@ export class PluginForge implements Forge {
     private readonly p: ForgePlugin,
     private readonly t: PluginTarget,
   ) {}
-  private forgeName = "";
   name(): string {
-    return this.forgeName || forgeFromProvider(this.t.provider);
+    return forgeFromProvider(this.t.provider);
   }
   cloneURL(owner: string, repo: string) {
     return this.p.cloneUrl(this.t, owner, repo);

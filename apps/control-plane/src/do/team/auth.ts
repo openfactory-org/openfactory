@@ -1,4 +1,4 @@
-// TeamDO module: auth (WS4). Team record, users, external identities, API
+// TeamDO module: auth. Team record, users, external identities, API
 // keys and service accounts. Ports internal/api/platform.go (me, teams,
 // users, API keys, bootstrap), internal/api/serviceaccounts.go, the session
 // and API-key checks of internal/auth/service.go and internal/api/auth.go,
@@ -106,8 +106,14 @@ function getUserByEmail(kit: TeamKit, email: string): User | undefined {
   return r ? (JSON.parse(r.data) as User) : undefined;
 }
 
-export function listUsers(kit: TeamKit): User[] {
-  return all<{ data: string }>(kit.sql, "SELECT data FROM users ORDER BY created_ms, id").map(
+/**
+ * The users of the team, oldest first. only: just the people or just the
+ * service accounts (the kind column, written with the data on every put).
+ */
+export function listUsers(kit: TeamKit, only?: "people" | "service_accounts"): User[] {
+  const where = only === "people" ? " WHERE kind <> ?" : only === "service_accounts" ? " WHERE kind = ?" : "";
+  const args = only ? [USER_KIND_SERVICE_ACCOUNT] : [];
+  return all<{ data: string }>(kit.sql, `SELECT data FROM users${where} ORDER BY created_ms, id`, ...args).map(
     (r) => JSON.parse(r.data) as User,
   );
 }
@@ -297,15 +303,6 @@ export interface Identity {
   defaultRole?: string;
 }
 
-export class LoginError extends OfError {
-  constructor(
-    readonly loginCode: string,
-    detail: string,
-  ) {
-    super("invalid_request", detail, { reason: loginCode });
-  }
-}
-
 function displayName(id: Identity): string {
   return id.name || id.handle || id.email;
 }
@@ -375,8 +372,8 @@ export function provision(kit: TeamKit, id: Identity): User {
 /** normalizeEmail: one bare address, lower-cased. */
 export function normalizeEmail(e: string): string {
   const t = e.trim();
-  // net/mail.ParseAddress accepts more, but the API also requires a.Address == input (a bare address).
-  if (!/^[^\s@<>()[\]\\,;:"]+@[^\s@<>()[\]\\,;:"]+$/.test(t) || t !== e.trim()) {
+  // Only a bare address: no display name, no angle brackets, no comments.
+  if (!/^[^\s@<>()[\]\\,;:"]+@[^\s@<>()[\]\\,;:"]+$/.test(t)) {
     throw new OfError("invalid_request", `invalid email address ${JSON.stringify(e)}`);
   }
   return t.toLowerCase();
@@ -486,11 +483,7 @@ export const ops: Record<string, TeamOp> = {
     return team;
   },
 
-  listUsers: (kit) =>
-    listResponse(
-      listUsers(kit).filter((u) => !isServiceAccount(u)),
-      "",
-    ),
+  listUsers: (kit) => listResponse(listUsers(kit, "people"), ""),
 
   getUser: (kit, c) => userOf(kit, c.params["id"]!),
 
@@ -599,7 +592,7 @@ export const ops: Record<string, TeamOp> = {
       return noContent();
     }),
 
-  listServiceAccounts: (kit) => listResponse(listUsers(kit).filter(isServiceAccount).map(viewServiceAccount), ""),
+  listServiceAccounts: (kit) => listResponse(listUsers(kit, "service_accounts").map(viewServiceAccount), ""),
 
   createServiceAccount: async (kit, c) => {
     const b = bodyObject(c.body);
@@ -737,5 +730,3 @@ export const ops: Record<string, TeamOp> = {
     return { user: u ?? null, team: getTeamRecord(kit) ?? null, role: p.role };
   },
 };
-
-export function setup(_kit: TeamKit): void {}

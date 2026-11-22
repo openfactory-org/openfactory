@@ -29,9 +29,6 @@ import {
   type ScoringStore,
 } from "./types";
 
-// do/team/factories.ts reads the track of a Self-improvement run.
-export { improveTrackKey, type ImprovementTrack } from "./self-improvement";
-
 /** What the service tells BenchmarkDO. */
 export interface BenchmarkPort {
   /** A root run of the benchmark finished or waits for input. */

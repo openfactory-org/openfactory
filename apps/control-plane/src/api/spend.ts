@@ -1,4 +1,4 @@
-// REST handlers: spend. Owner: WS13 (reads from DispatchDO, limits from TeamDO).
+// REST handlers: spend (reads from DispatchDO, limits from TeamDO).
 import { doName } from "@openfactory/core";
 import { json, teamOf, type Handler } from "../http/handler";
 import { factoryAccess } from "./measure";

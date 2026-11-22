@@ -1,8 +1,8 @@
 // Routes outbound notices back to their work source: chat threads, tracker
 // issues, forge issues and pull requests. Port of internal/notify.
 //
-// Notices leave the WorkDO outbox in order (lane "notice:<wiId>", plan rule
-// 11) and arrive here one at a time: deliverNotice makes one attempt. A
+// Notices leave the WorkDO outbox in order (lane "notice:<wiId>"; Queues carry
+// only unordered fan-out) and arrive here one at a time: deliverNotice makes one attempt. A
 // transient error throws, so the outbox retries with backoff; a permanent
 // error is logged, reported through the failure hook, and not retried.
 import {

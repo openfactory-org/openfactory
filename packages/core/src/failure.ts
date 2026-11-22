@@ -1,4 +1,4 @@
-// Frozen contract (C0). Port of internal/core/failure.go.
+// Failure codes of a run. Port of internal/core/failure.go.
 // Checked against schemas/testdata/failure-map.json.
 
 export const FAILURE_CODES = [

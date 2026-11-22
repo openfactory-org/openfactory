@@ -1,4 +1,4 @@
-// Slot grant and task start (03 §7.2 steps 4-6; replaces claimRun).
+// Slot grant and task start (replaces claimRun).
 // prepareGrant runs outside a transaction (provider capabilities, the
 // capability gate, provider preflight, bootstrap hash). commitGrant is one
 // transaction: session, prompt input, assigned, timeline, provider.start.

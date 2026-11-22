@@ -195,7 +195,7 @@ describe("liveness and deadline", () => {
   });
 });
 
-describe("tool idempotency key (rule 3)", () => {
+describe("tool idempotency key", () => {
   it("does not depend on key order", async () => {
     const a = await toolIdempotencyKey("r", "t", "run_agents", { b: 1, a: [{ y: 2, x: 1 }] });
     const b = await toolIdempotencyKey("r", "t", "run_agents", { a: [{ x: 1, y: 2 }], b: 1 });
@@ -282,7 +282,7 @@ describe("text and hosts", () => {
   });
   it("required hosts add the control plane and the R2 S3 host", () => {
     const h = requiredHosts(
-      { harness: { type: "claude" } },
+      { harness: { type: "claude", model: "" } },
       { controlUrl: "https://factory.example.com", r2AccountId: "ABC123" },
     );
     expect(h).toEqual(["factory.example.com", "abc123.r2.cloudflarestorage.com", "api.anthropic.com"]);

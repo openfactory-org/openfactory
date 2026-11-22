@@ -1,6 +1,7 @@
 // RouterDO (key team:<t>|router): source keys and references -> work item,
-// with the work-item status (C6). resolveOrReserve is atomic and returns the
-// same token while a route is reserved or active (plan rule 4).
+// with the work-item status. resolveOrReserve is atomic and returns the
+// same token while a route is reserved or active, so a retried action
+// reaches the same WorkDO.
 import { hashToken, newRoutedId } from "@openfactory/core";
 import type { OutboxPayloads } from "../../contracts/do-messages";
 import type { Env } from "../../contracts/env";

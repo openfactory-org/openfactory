@@ -1,5 +1,5 @@
-// Port of internal/mcpregistry/validate.go, plus the private-host warning of
-// appendix 04 gap 20: a proxy-mode server on a private network cannot be
+// Port of internal/mcpregistry/validate.go, plus a private-host warning: a
+// proxy-mode server on a private network cannot be
 // reached from Cloudflare.
 import {
   isOneOf,

@@ -207,7 +207,7 @@ export async function handleOAuthRequest(request: Request, env: Env): Promise<Re
 
 /**
  * Checks a Factory MCP access token (ofm_) and returns the principal of its
- * user, or null. Registered with WS4's authenticate() for ofm_ bearers.
+ * user, or null. Registered with authenticate() for ofm_ bearers.
  */
 export async function verifyFactoryMcpToken(env: Env, token: string): Promise<Principal | null> {
   if (!token.startsWith(ACCESS_TOKEN_PREFIX)) return null;

@@ -1,4 +1,4 @@
-// DispatchDO admission decision (03 §7.2 step 2): pure. Oldest waiting
+// DispatchDO admission decision: pure. Oldest waiting
 // request first. A worker run needs a free worker slot; the factory limit
 // (maxConcurrentRuns) and the provider start-rate buckets are exact, because
 // DispatchDO is the only writer and decides in one transaction.

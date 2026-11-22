@@ -91,7 +91,7 @@ export async function postOnboardingNotice(
   reason: OnboardingReason,
   factoryId: string,
 ): Promise<boolean> {
-  const src = ev.source as { repo?: string; number?: number };
+  const src = ev.source;
   if (!src.repo || !src.number) return false;
   const key = onboardingKey(teamId, ev.actor.external_id, reason);
   if (await env.DATA.head(key)) return false;

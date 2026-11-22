@@ -8,7 +8,6 @@ import { OfError, isOfError, type Run, type Score, type Scorer, type Usage } fro
 import { errMsg, type ScoringContext } from "./context";
 import { deterministicRunId, isJudgeRun, judgeAnswer, judgeRequest, scorerExec, scorerName, treeUsage } from "./judge";
 import { resolveLabel, shouldSample } from "./sample";
-import { buildTranscript } from "./transcript";
 import {
   JUDGE_SCORE,
   MAX_ANCESTOR_DEPTH,
@@ -73,13 +72,14 @@ export class ScoringEvaluator {
     if (eligible.length === 0) return;
     // Benchmark trials (and their descendants) are scored by the benchmark.
     if (await this.isBenchmarkRun(run)) return;
+    // Every score comes from a judge run, so scoreOnce stores nothing here.
+    // finishScoreJudge stores the score and runs the self-improvement check
+    // for a failed one. (Go checked here only for scores that a classifier
+    // gave inline, without a judge run; the judge path checked later too.)
     const errs: string[] = [];
     for (const sc of eligible) {
       try {
-        const { score, created } = await this.scoreOnce(sc, run, false);
-        if (created && score && !score.passed && sc.self_improvement) {
-          await this.onFailedScore(run.factory_id, run.agent_name);
-        }
+        await this.scoreOnce(sc, run, false);
       } catch (e) {
         errs.push(`scorer ${sc.slug}: ${errMsg(e)}`);
       }
@@ -112,16 +112,8 @@ export class ScoringEvaluator {
     if (!run) throw new OfError("resource_not_found", `run ${runId} not found`);
     const sc = await this.findScorer(run.factory_id, scorerIdOrSlug);
     if (isJudgeRun(run)) throw new OfError("invalid_request", "a judge run is not scored");
-    const { score } = await this.scoreOnce(sc, run, true);
-    if (score.id === "") return score; // the judge run works
-    if (!score.passed && sc.self_improvement && run.agent_name) {
-      try {
-        await this.onFailedScore(run.factory_id, run.agent_name);
-      } catch (e) {
-        this.ctx.log("error", "self-improvement check after manual score", { run_id: runId, err: String(e) });
-      }
-    }
-    return score;
+    // A pending score: finishScoreJudge stores it and runs the self-improvement check.
+    return this.scoreOnce(sc, run, true);
   }
 
   async findScorer(factoryId: string, idOrSlug: string): Promise<Scorer> {
@@ -148,11 +140,11 @@ export class ScoringEvaluator {
 
   /**
    * Starts the judge of (scorer, run) unless a result exists (replace = false)
-   * or a judge works. Returns a pending score (no ID, created = false).
+   * or a judge works. Returns the existing score, or a pending score (no ID).
    */
-  private async scoreOnce(sc: Scorer, run: Run, replace: boolean): Promise<{ score: Score; created: boolean }> {
+  private async scoreOnce(sc: Scorer, run: Run, replace: boolean): Promise<Score> {
     const existing = await this.store.getScore(sc.id, run.id);
-    if (existing && !replace) return { score: existing, created: false };
+    if (existing && !replace) return existing;
     const marker = await this.getMarker(sc.id, run.id);
     let judgeId: string;
     const pending = marker?.active ? await this.runs.getRun(marker.run_id) : null;
@@ -168,19 +160,16 @@ export class ScoringEvaluator {
       await this.startScoreJudge(sc, run, judgeId);
     }
     return {
-      score: {
-        id: "",
-        scorer_id: sc.id,
-        run_id: run.id,
-        agent_name: run.agent_name ?? "",
-        label: "",
-        score: 0,
-        passed: false,
-        rationale: "",
-        created_at: "",
-        judge_run_id: judgeId,
-      },
-      created: false,
+      id: "",
+      scorer_id: sc.id,
+      run_id: run.id,
+      agent_name: run.agent_name ?? "",
+      label: "",
+      score: 0,
+      passed: false,
+      rationale: "",
+      created_at: "",
+      judge_run_id: judgeId,
     };
   }
 
@@ -302,10 +291,5 @@ export class ScoringEvaluator {
   /** The usage of a run and its descendants. */
   treeUsage(run: Run): Promise<Usage> {
     return treeUsage(this.runs, run);
-  }
-
-  /** The transcript of a run for a judge, capped. */
-  buildTranscript(run: Run, includeDescendants: boolean): Promise<string> {
-    return buildTranscript(this.runs, run, includeDescendants, 4000, this.ctx.o.maxTranscriptBytes);
   }
 }

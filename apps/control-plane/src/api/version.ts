@@ -1,4 +1,4 @@
-// REST handler: GET /version (public, WS4).
+// REST handler: GET /version (public).
 import { BUILD } from "../config";
 import { json, type Handler } from "../http/handler";
 

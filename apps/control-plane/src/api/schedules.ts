@@ -1,4 +1,4 @@
-// REST handlers: schedules and manual automation runs (owner WS10a).
+// REST handlers: schedules and manual automation runs.
 import { OfError, doName, type Automation, type Event } from "@openfactory/core";
 import type { Principal } from "../contracts/do-messages";
 import type { Env } from "../contracts/env";
@@ -14,7 +14,7 @@ export const resumeSchedule: Handler = teamApi();
 
 /**
  * Starts the automation's run for a manual event and returns the run (201).
- * Registered by the engine (WS5). Without it the event goes to IngressDO and
+ * Registered by the engine. Without it the event goes to IngressDO and
  * the call answers 202.
  */
 export type ManualRunDispatcher = (

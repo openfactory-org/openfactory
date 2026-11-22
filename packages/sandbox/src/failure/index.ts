@@ -2,7 +2,7 @@
 //
 // - failureForSandboxReason: port of core.FailureForSandboxReason
 //   (internal/core/failure.go), checked against schemas/testdata/failure-map.json.
-// - reasonForExitCode: the bootstrap exit codes (02 §2.3).
+// - reasonForExitCode: the bootstrap exit codes.
 // - failureForProviderError: the DispatchDO mapping of a failed start
 //   (startFailed in internal/dispatch/claim.go at go-final).
 

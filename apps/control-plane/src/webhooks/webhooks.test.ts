@@ -145,6 +145,10 @@ describe("delivery identity and title", () => {
     expect(l.allow("w", 1).ok).toBe(true);
     expect(l.allow("w", 2)).toEqual({ ok: false, retryMs: 59_998 });
     expect(l.allow("w", 60_000).ok).toBe(true);
+    l.allow("w", 60_001);
+    expect(l.allow("w", 60_002).ok).toBe(false);
+    l.clear();
+    expect(l.allow("w", 60_003).ok).toBe(true);
   });
 });
 

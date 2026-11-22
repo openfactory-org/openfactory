@@ -1,4 +1,4 @@
-// Egress decisions of the Worker intercept (02 §5.2). Pure functions, so the
+// Egress decisions of the Worker intercept. Pure functions, so the
 // Egress WorkerEntrypoint and the tests share them.
 //
 // The container starts with enableInternet:false. The provider registers

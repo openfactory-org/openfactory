@@ -103,7 +103,7 @@ import { isOpError } from "./lib/rpc";
 
 const META: CallMeta = { requestId: "integrations" };
 
-// ---------- integrations (WS10b) ----------
+// ---------- integrations ----------
 
 /** Partition of a chat or tracker event: one per source thread or issue, so events of one thread stay in order. */
 export async function integrationPartition(ev: Event): Promise<string> {
@@ -252,7 +252,7 @@ const eventContextBuilders: BuildersFor = (env) => [
   })),
 ];
 
-// ---------- built-in MCP integration servers (WS11) ----------
+// ---------- built-in MCP integration servers ----------
 
 function asIntegration(rec: IntegrationRecord): Integration {
   return rec as unknown as Integration;

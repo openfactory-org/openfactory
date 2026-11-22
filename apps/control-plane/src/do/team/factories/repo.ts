@@ -45,7 +45,7 @@ CREATE INDEX factories_alias_nocase ON factories (alias COLLATE NOCASE);
   },
 ];
 
-/** Definition trees above this size go to R2 by hash (plan rule 9). */
+/** Definition trees above this size go to R2 by hash (a DO row holds at most 8 MB). */
 const INLINE_FILES_LIMIT = 1 << 20;
 
 // ---------- records ----------

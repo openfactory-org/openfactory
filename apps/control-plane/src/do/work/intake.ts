@@ -1,4 +1,4 @@
-// The WorkDO side of event intake (03 §7.1 steps 7-9): one action applied in
+// The WorkDO side of event intake: one action applied in
 // the caller's transaction, deduplicated by the dispatch ledger
 // (actionKey, target). Port of engine/events.go routeToWorkItem,
 // handlePullRequestClosed, deliverToRoot, startSideRun, dispatchMention and
@@ -201,7 +201,7 @@ function routeToWorkItem(fx: Fx, input: ApplyActionInput, rec: (ref: string) => 
     closeHandoffs(fx, wi, ev, actor);
 
   if (c.kind === CONTINUE_EVENT) {
-    const num = Number((ev.source as { number?: number })?.number ?? 0);
+    const num = Number(ev.source?.number ?? 0);
     if (num !== 0 && (isMergeEvent(ev) || isCloseEvent(ev))) handlePullRequestClosed(fx, wi, ev, actor);
     else followUp(fx, wi, formatFollowUp(ev, { trusted: false, reason: "" }), "system", input.bundle);
     rec(wi.root_run_id ?? "");
@@ -290,6 +290,14 @@ export interface AnswerOptions {
  * answerInbox (Engine.ResolveInbox): resolves an open item, writes the
  * answer or approval_decided event and sends the resolution to the run that
  * waits on it. The caller checks the approvers of an approval.
+ *
+ * The resolution and its follow-up message commit together: when the run
+ * cannot take the message (sendMessage throws, for example a conflict because
+ * the run cannot continue), nothing is stored and the caller gets the error.
+ * Go stored the resolution first and only logged a failed follow-up. This
+ * keeps one transaction per request, because a caught error inside
+ * transactionSync would keep the half-written message and input rows. The
+ * case is narrow: cancelling a run already resolves its open items.
  */
 export function answerInbox(
   fx: Fx,
@@ -358,7 +366,6 @@ export function linkPullRequest(fx: Fx, wi: WorkItem, input: PullRequestRef): Li
         added_at: new Date(fx.now()).toISOString(),
       };
       wi.references = [...refs, ref];
-      fx.repo.addWorkItemRef(ref);
     }
   }
   wi.pull_requests = list;
@@ -376,7 +383,7 @@ export function linkPullRequest(fx: Fx, wi: WorkItem, input: PullRequestRef): Li
 /** handlePullRequestClosed: record the PR; after the last merge the foreman gets a turn, then completion. */
 function handlePullRequestClosed(fx: Fx, wi0: WorkItem, ev: CoreEvent, actor: string): void {
   const merged = isMergeEvent(ev);
-  const src = ev.source as { repo?: string; number?: number; url?: string };
+  const src = ev.source;
   const pr: PullRequestRef = {
     forge: normalizeProvider(ev.provider).toUpperCase(),
     repo: src.repo ?? "",
@@ -385,7 +392,7 @@ function handlePullRequestClosed(fx: Fx, wi0: WorkItem, ev: CoreEvent, actor: st
     branch: "",
     state: merged ? "merged" : "closed",
   };
-  const prKey = sourceKey(pullRequestSource(pr as never));
+  const prKey = sourceKey(pullRequestSource(pr));
   const isSourcePR = !!wi0.source_key && wi0.source_key === prKey;
   const cur = isSourcePR ? wi0 : linkPullRequest(fx, wi0, pr).workItem;
   const ref = pr.url || `${pr.repo}#${pr.number}`;

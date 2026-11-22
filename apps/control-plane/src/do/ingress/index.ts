@@ -1,6 +1,6 @@
 // IngressDO (key team:<t>|ingress:<partition>): inbound events of one
 // partition, deduplicated and delivered in order with backoff, dead letter
-// and redrive (03 §7.1, §11.6). One event at a time: a pending head blocks
+// and redrive. One event at a time: a pending head blocks
 // the partition; a dead event does not.
 //
 // The intake step (HandleEvent: automations, routing, continuations) is a
@@ -12,6 +12,7 @@ import type { Env } from "../../contracts/env";
 import { BaseDO, type Migration } from "../../lib/base";
 import { outboxBackoff } from "../../lib/outbox/outbox";
 import { all, first } from "../../lib/sql/query";
+import { m0003 } from "./migrations/0003_drop_unused";
 
 export const INGRESS_MAX_ATTEMPTS = 12;
 const EVENT_TTL_MS = 7 * 24 * 3_600_000;
@@ -64,7 +65,7 @@ CREATE TABLE action_targets (action_key TEXT NOT NULL, target TEXT NOT NULL, ref
 };
 
 // The delivery log of a webhook partition and the shared accepted-delivery
-// limit (WS10a: webhooks.go ListWebhookDeliveries / GetWebhookDelivery).
+// limit (webhooks.go ListWebhookDeliveries / GetWebhookDelivery).
 const m0002: Migration = {
   version: 2,
   name: "deliveries",
@@ -131,7 +132,7 @@ export class IngressDO extends BaseDO {
   }
 
   protected migrations(): readonly Migration[] {
-    return [m0001, m0002];
+    return [m0001, m0002, m0003];
   }
 
   async ping(): Promise<string> {

@@ -1,9 +1,9 @@
 // Event intake: port of internal/engine.HandleEvent (events.go) in the
-// IngressDO alarm (03 §7.1). One action at a time per partition. Each step is
+// IngressDO alarm. One action at a time per partition. Each step is
 // idempotent: RouterDO.resolveOrReserve gives a retried action the same work
-// item token (plan rule 4), and the WorkDO ledger (actionKey, target)
+// item token, and the WorkDO ledger (actionKey, target)
 // deduplicates the dispatch, so a retry creates no second run.
-import { doName, newId, OfError, sourceKey, toOfError, type Automation, type Event } from "@openfactory/core";
+import { doName, newId, OfError, sourceKey, toOfError, type Automation } from "@openfactory/core";
 import type { CallMeta, CoreEvent, Principal } from "../../contracts/do-messages";
 import type { Env } from "../../contracts/env";
 import { unwrapOp } from "../../lib/rpc";
@@ -21,9 +21,9 @@ import {
   trustOfMessage,
 } from "../../engine/intake";
 import { buildDispatchPrompt, workItemTitle } from "../../engine/text";
-import type { AgentConfig, Principal as RunPrincipal } from "../../engine/types";
+import type { AgentConfig, MachineSpec, Principal as RunPrincipal } from "../../engine/types";
 import { dispatchPrincipals, factoryPrincipal, isApprover as approverMatch } from "../../engine/principal";
-import { prFactsKey } from "../../metrics/build";
+import { factsKeyOf } from "../../metrics/facts";
 import { applyOverrides } from "../../scoring/overrides";
 import { matchingAutomations } from "../../triggers/match";
 import type { IntakeHandler, IntakeResult } from "./index";
@@ -63,7 +63,7 @@ function contextBuilders(env: Env): Builder[] {
 export async function storeEventBundle(env: Env, ev: CoreEvent, withContext: boolean): Promise<BundleRef | undefined> {
   try {
     const messageId = newId("msg");
-    const b = await buildBundle(messageId, ev as unknown as Event, withContext, contextBuilders(env));
+    const b = await buildBundle(messageId, ev, withContext, contextBuilders(env));
     if (!b) return undefined;
     return { ref: await storeBundle(env.DATA, b), messageId, promptSection: promptSection(b) };
   } catch (e) {
@@ -83,7 +83,7 @@ interface Snapshot {
     restrict_followups_to_starter?: boolean;
     github_onboarding_notices?: boolean;
     approvers?: string[];
-    machines?: Record<string, unknown>;
+    machines?: Record<string, MachineSpec>;
   };
   agents: AgentConfig[];
   automations: Automation[];
@@ -190,11 +190,9 @@ export function platformIntakeDeps(env: Env, teamId: string): IntakeDeps {
       }
     },
     prFacts: async (ev) => {
-      const src = ev.source as { repo?: string; number?: number; kind?: string };
-      if (!src?.repo || !src.number) return;
-      const p = normalizeProvider(ev.provider);
-      if (!["github", "gitlab", "azure_devops"].includes(p)) return;
-      const prKey = prFactsKey({ forge: p.toUpperCase(), repo: src.repo, number: src.number });
+      // Pull request events and pushes (a push has no number; it is stored under its branch).
+      const prKey = factsKeyOf(ev);
+      if (!prKey) return;
       await env.INDEX.getByName(doName.index(teamId)).receive({
         msgId: `prf:${ev.id}`,
         kind: "index.prFacts",
@@ -283,7 +281,7 @@ export async function handleEvent(d: IntakeDeps, teamId: string, ev: CoreEvent):
   if (!ev) throw new OfError("invalid_request", "nil event");
   if (!ev.actor) ev.actor = { provider: ev.provider, external_id: "", handle: "", is_bot: false };
   ev.attributes ??= {};
-  ev.source ??= {};
+  ev.source ??= { provider: "", kind: "" };
   const akey = actionKey(ev);
   if (akey) ev.action_key = akey;
   try {
@@ -348,7 +346,7 @@ async function dispatchMention(
   const agent = resolveAgent(snap, "");
   if (!agent) throw new OfError("invalid_request", `factory ${snap.factory.id} has no foreman`);
   const target = `mention:${snap.factory.id}`;
-  const key = sourceKey(ev.source as never);
+  const key = sourceKey(ev.source);
   const r = await d.router.resolveOrReserve({
     factoryId: snap.factory.id,
     sourceKeys: key ? [key] : [],
@@ -429,7 +427,7 @@ function dispatchPlan(
     config: agent,
     prompt,
     actor: ev.actor.user_id || ev.actor.handle || "system",
-    title: workItemTitle({ prompt: o.prompt, source: ev.source as never, event: ev }),
+    title: workItemTitle({ prompt: o.prompt, source: ev.source, event: ev }),
     source: ev.source,
     ...(o.sourceKey ? { sourceKey: o.sourceKey } : {}),
     ...(o.automationId ? { automationId: o.automationId } : {}),
@@ -459,7 +457,7 @@ async function handleForFactory(
     return true;
   }
   // 4. Work item.
-  const key = sourceKey(ev.source as never);
+  const key = sourceKey(ev.source);
   let wi: { wiId: string; token: string } | undefined;
   if (key) {
     const r = await d.router.resolve(fid, key);
@@ -500,7 +498,7 @@ async function handleForFactory(
   }
 
   // 6. Automations, one dispatch for each match, in definition order.
-  const matches = matchingAutomations(ev as unknown as Event, snap.automations ?? []);
+  const matches = matchingAutomations(ev, snap.automations ?? []);
   const local: unknown[] = [];
   for (const a of matches) {
     const target = `auto:${a.id}`;
@@ -513,13 +511,7 @@ async function handleForFactory(
     }
     let agent: AgentConfig;
     try {
-      agent = a.overrides
-        ? (applyOverrides(
-            base as never,
-            a.overrides as never,
-            (rt.machines ?? null) as never,
-          ) as unknown as AgentConfig)
-        : base;
+      agent = a.overrides ? applyOverrides(base, a.overrides, rt.machines ?? null) : base;
     } catch (e) {
       local.push(e);
       continue;
@@ -637,13 +629,7 @@ export async function dispatchAutomation(
   const base = resolveAgent(snap, a.agent);
   if (!base)
     throw new OfError("invalid_request", `automation ${a.name}: agent ${JSON.stringify(a.agent)} does not exist`);
-  const agent = a.overrides
-    ? (applyOverrides(
-        base as never,
-        a.overrides as never,
-        (snap.runtime.machines ?? null) as never,
-      ) as unknown as AgentConfig)
-    : base;
+  const agent = a.overrides ? applyOverrides(base, a.overrides, snap.runtime.machines ?? null) : base;
   const target = `auto:${a.id}`;
   const akey = actionKey(ev) || ev.id;
   const triggeredBy = triggeredByFor(ev.provider, a.id);

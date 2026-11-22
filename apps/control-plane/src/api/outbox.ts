@@ -1,4 +1,4 @@
-// REST handlers: outbox dead letters. Owner: WS5. The dead-letter index is in
+// REST handlers: outbox dead letters. The dead-letter index is in
 // IndexDO; redrive goes to the DO named in the row.
 import { doName, notFound, OfError } from "@openfactory/core";
 import { callMeta, json, teamOf, type Handler } from "../http/handler";

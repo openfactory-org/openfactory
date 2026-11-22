@@ -1,9 +1,9 @@
 // Canonical JSON, SHA-256 hashing (WebCrypto) and lossless JSON numbers.
 //
-// Canonical JSON is the key of idempotency rows (plan rule 3): JavaScript key
+// Canonical JSON is the key of idempotency rows: JavaScript key
 // order differs from Go json.Marshal, so keys are sorted at every level (Go
 // sort order: UTF-8 bytes) and strings use Go escaping. Payload filters parse
-// JSON losslessly (plan rule 12): Go compares numbers above 2^53 exactly.
+// JSON losslessly: Go compares numbers above 2^53 exactly.
 
 import {
   isLosslessNumber,

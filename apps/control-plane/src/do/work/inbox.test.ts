@@ -386,7 +386,8 @@ describe("approvers", () => {
         { id },
         { resolution: "approved", via: "chat" },
       )) as InboxItem;
-      expect(done).toMatchObject({ resolved: true, resolved_by: "usr_ada", resolved_via: "chat" });
+      // The actor of a person is "user:<id>", as Go recorded it.
+      expect(done).toMatchObject({ resolved: true, resolved_by: "user:usr_ada", resolved_via: "chat" });
       // The list applies to approvals only.
       const q = await tool(w, run.id, "ask_human", { question: "Required?" });
       expect((await resolve(w, userMeta("usr_bob"), q, "No")).resolved).toBe(true);

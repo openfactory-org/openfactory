@@ -1,16 +1,16 @@
 # @openfactory/control-plane
 
-The Open Factory control plane: one Cloudflare Worker with Durable Objects (DO), R2, a Queue and a Cron trigger. See `.owner/cloudflare-rearchitecture-plan.md` for the design.
+The Open Factory control plane: one Cloudflare Worker with Durable Objects (DO), R2, a Queue and a Cron trigger. See [How factories work](../../docs/how-factories-work.md) for the concepts.
 
 ## Layout
 
 | Path | Contents |
 |---|---|
-| `wrangler.jsonc` | Worker config: DO classes (`exports`), R2 `DATA`, Queue `JOBS`, Cron, Static Assets (`../../web/dist`), service bindings, vars, required secrets. Frozen at C0. |
+| `wrangler.jsonc` | Worker config: DO classes (`exports`), R2 `DATA`, Queue `JOBS`, Cron, Static Assets (`../../web/dist`), service bindings, vars, required secrets. |
 | `src/index.ts` | `fetch` (probes, `/api/v1` router, other server paths, assets), `scheduled`, `queue`. Exports every DO class. |
-| `src/contracts/env.ts` | `Env`: every binding, var and secret. Frozen at C0. |
-| `src/contracts/do-messages.ts` | DO RPC interfaces, outbox kinds and payloads, Queue messages. Frozen at C0. |
-| `src/http/routes.ts` | Every operation of `api/openapi.json` with its minimum role and handler. Frozen at C0. |
+| `src/contracts/env.ts` | `Env`: every binding, var and secret. |
+| `src/contracts/do-messages.ts` | DO RPC interfaces, outbox kinds and payloads, Queue messages. |
+| `src/http/routes.ts` | Every operation of `api/openapi.json` with its minimum role and handler. |
 | `src/http/router.ts`, `src/http/handler.ts` | Path matcher and handler types. |
 | `src/api/<resource>.ts` | REST handlers, one file per owner. Stubs answer 501 until the owner fills them in. |
 | `src/do/<name>/index.ts` | DO classes: `team`, `work`, `dispatch`, `router`, `index`, `ingress`, `workerhub`, `benchmark`. |

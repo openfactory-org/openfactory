@@ -1,4 +1,4 @@
-// WorkDO data upkeep (WS13 hooks): compaction of a finished run's messages to
+// WorkDO data upkeep: compaction of a finished run's messages to
 // R2, message reads that merge the compacted object, retention without a
 // retention period, and the agent pins of a trial.
 import { env } from "cloudflare:workers";
@@ -7,6 +7,8 @@ import { describe, expect, it } from "vitest";
 import { compactedKey } from "../../compaction/compact";
 import { readRunMessages } from "../../api/runs";
 import type { AgentConfig, Run } from "../../engine/types";
+import { withFx } from "../../orchestration/fixture.test-util";
+import { createRun } from "./engine";
 import type { WorkDO } from "./index";
 
 const TEAM = "default";
@@ -79,5 +81,44 @@ describe("WorkDO upkeep", () => {
     } as never)) as { run: Run; workItemId: string };
     const pins = (await w.api(meta, "getAgentPins", { id: out.workItemId }, null)) as { pins: Record<string, unknown> };
     expect(pins.pins).toEqual({ coder: { model: "pinned" } });
+  });
+
+  it("applies the starting repo refs of a dispatch to every run of the work item", async () => {
+    const token = newToken("w");
+    const w = work(token);
+    const refs = [{ codeForge: "GITHUB", owner: "acme", repo: "api", ref: "a".repeat(40) }];
+    const out = (await w.runsCreate(meta, {
+      dispatch: {
+        factoryId: "fac_up",
+        config: foreman,
+        prompt: "trial",
+        actor: "bench",
+        title: "trial",
+        startingRepoRefs: refs,
+      },
+    } as never)) as { run: Run; workItemId: string };
+    const child = await withFx(
+      token,
+      (fx) =>
+        createRun(
+          fx,
+          {
+            factoryId: "fac_up",
+            workItemId: out.workItemId,
+            parentRunId: out.run.id,
+            config: foreman,
+            name: "coder",
+            prompt: "x",
+          },
+          "usr_1",
+        ).id,
+    );
+    expect((await w.plannerState(out.run.id)).repoRefs).toEqual(refs);
+    expect((await w.plannerState(child)).repoRefs).toEqual(refs);
+    // A run without a work item keeps its own refs (a judge run).
+    const { run } = await w.runsCreate(meta, {
+      run: { factoryId: "fac_up", config: foreman, prompt: "judge", actor: "api", startingRepoRefs: refs },
+    } as never);
+    expect((await w.plannerState(run.id)).repoRefs).toEqual(refs);
   });
 });

@@ -59,6 +59,11 @@ export class WindowLimiter {
     return w.count >= this.limit ? { over: true, retryMs: w.start + this.windowMs - now } : { over: false, retryMs: 0 };
   }
 
+  /** Forgets every key. */
+  clear(): void {
+    this.m.clear();
+  }
+
   add(key: string, now: number): void {
     if (this.limit > 0) this.get(key, now).count++;
   }
@@ -146,8 +151,8 @@ const localRate = new WindowLimiter(DEFAULT_RATE_LIMIT);
 
 /** Resets the isolate limiters (tests). */
 export function resetWebhookLimiters(): void {
-  (authFailures as unknown as { m: Map<string, unknown> }).m.clear();
-  (localRate as unknown as { m: Map<string, unknown> }).m.clear();
+  authFailures.clear();
+  localRate.clear();
 }
 
 function errJSON(status: number, code: string, message: string, headers?: Record<string, string>): Response {

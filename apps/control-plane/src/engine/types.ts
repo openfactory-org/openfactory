@@ -1,21 +1,45 @@
-// Domain types of the engine. JSON shapes follow the Go json tags
-// (internal/core/types.go, internal/core/runnerstore.go) so that REST bodies
-// and stored `data` columns port 1:1.
-import type { FailureCode, PullRequestState } from "@openfactory/core";
+// Types of the engine. The domain types are the ones of @openfactory/core;
+// this file adds the WorkDO storage shapes (sessions, inputs, runner events
+// and commands) and the few stored shapes that differ from core on purpose.
+// JSON shapes follow the Go json tags (internal/core/types.go,
+// internal/core/runnerstore.go) so that REST bodies and stored `data`
+// columns port 1:1.
+import type {
+  FailureCode,
+  InboxItem as CoreInboxItem,
+  MessageReceipt as CoreMessageReceipt,
+  Run as CoreRun,
+  Usage,
+} from "@openfactory/core";
 
-export type RunState =
-  | "queued"
-  | "pending"
-  | "claimed"
-  | "running"
-  | "blocked"
-  | "succeeded"
-  | "failed"
-  | "error"
-  | "cancelled"
-  // Old names that stored runs may still carry (core.RunIdle, core.RunStarting).
-  | "idle"
-  | "starting";
+export type {
+  AgentConfig,
+  EffectiveNetworkPolicy,
+  InboxKind,
+  MachineSpec,
+  Principal,
+  PullRequestRef,
+  Question,
+  RunMessage,
+  RunState,
+  SourceRef,
+  Stage,
+  Usage,
+  WorkItem,
+  WorkItemEvent,
+  WorkItemRef,
+} from "@openfactory/core";
+export { STAGES } from "@openfactory/core";
+
+/** core.Run as stored: applyResult writes failure_code "" for a failed turn without a code. */
+export interface Run extends Omit<CoreRun, "failure_code"> {
+  failure_code?: FailureCode | "";
+}
+
+/** core.InboxItem as stored: resolved_via is the caller's value; WorkDO does not check it against InboxVia. */
+export interface InboxItem extends Omit<CoreInboxItem, "resolved_via"> {
+  resolved_via?: string;
+}
 
 /** core.RunState.Terminal */
 export function isTerminal(s: string): boolean {
@@ -27,128 +51,11 @@ export function waitsForInput(s: string): boolean {
   return s === "idle" || s === "blocked";
 }
 
-export type Stage =
-  | "intake"
-  | "triage"
-  | "planning"
-  | "awaiting_approval"
-  | "building"
-  | "reviewing"
-  | "handoff"
-  | "complete"
-  | "cancelled";
-
-export const STAGES: readonly Stage[] = [
-  "intake",
-  "triage",
-  "planning",
-  "awaiting_approval",
-  "building",
-  "reviewing",
-  "handoff",
-  "complete",
-  "cancelled",
-];
-
 export function stageTerminal(s: string): boolean {
   return s === "complete" || s === "cancelled";
 }
 
-export interface Usage {
-  input_tokens: number;
-  output_tokens: number;
-  cost_usd: number;
-  duration_ms: number;
-  coverage?: string;
-}
-
 export const ZERO_USAGE: Usage = { input_tokens: 0, output_tokens: 0, cost_usd: 0, duration_ms: 0 };
-
-/** Who a run is for (core.Principal JSON): its creator and its run_as. */
-export interface Principal {
-  type: "user" | "service_account" | "factory";
-  id: string;
-  name?: string;
-}
-
-export interface EffectiveNetworkPolicy {
-  restricted: boolean;
-  allowed_hosts: string[] | null;
-  denied_hosts: string[] | null;
-}
-
-export interface MachineSpec {
-  name: string;
-  description?: string;
-  setupCommands?: string[];
-  vcpus?: number;
-  memoryGb?: number;
-  os: string;
-  arch: string;
-  image?: string;
-  user?: string;
-  failureSessionRetentionMinutes?: number;
-}
-
-/** core.AgentConfig (resolved configuration of one agent). */
-export interface AgentConfig {
-  id: string;
-  factory_id: string;
-  name: string;
-  description: string;
-  type: string;
-  instructions: string;
-  harness: { type: string; model?: string; reasoning_level?: string; [k: string]: unknown };
-  machine?: MachineSpec;
-  environment_id?: string;
-  worker_host?: string;
-  secrets?: string[];
-  mcp_servers?: Record<string, unknown>;
-  network_policy: EffectiveNetworkPolicy;
-  spawnable_by: string[] | null;
-  idle_timeout_minutes?: number;
-  idle_timeout_set?: boolean;
-  credential_strategy?: string;
-  skills?: unknown[];
-  snapshot?: boolean;
-}
-
-export interface Run {
-  id: string;
-  version: number;
-  team_id: string;
-  factory_id: string;
-  work_item_id?: string;
-  parent_run_id?: string;
-  agent_id?: string;
-  agent_name?: string;
-  name?: string;
-  state: RunState;
-  prompt: string;
-  config: AgentConfig;
-  metadata?: Record<string, string>;
-  session_id?: string;
-  consumed_seq: number;
-  sandbox_id?: string;
-  worker_id?: string;
-  result?: string;
-  error?: string;
-  failure_code?: FailureCode | "";
-  blocked_reason?: string;
-  queued_reason?: string;
-  turns?: number;
-  cancelled_by?: string;
-  usage: Usage;
-  triggered_by?: string;
-  source?: string;
-  source_ref?: string;
-  creator?: Principal;
-  run_as?: Principal;
-  created_at: string;
-  started_at?: string;
-  finished_at?: string;
-  queued_at?: string;
-}
 
 export type SessionState = "assigned" | "active" | "ended";
 
@@ -217,16 +124,6 @@ export interface RunInput {
   accepted?: boolean;
 }
 
-export interface RunMessage {
-  id: string;
-  run_id: string;
-  seq: number;
-  role: string;
-  content: string;
-  data?: unknown;
-  created_at: string;
-}
-
 export interface RunnerEvent {
   run_id: string;
   session: number;
@@ -255,102 +152,10 @@ export interface TimelineEvent {
   data?: unknown;
 }
 
-export interface SourceRef {
-  provider?: string;
-  kind?: string;
-  repo?: string;
-  number?: number;
-  external_id?: string;
-  channel?: string;
-  thread?: string;
-  title?: string;
-  url?: string;
-  [k: string]: unknown;
-}
+/** Message outcomes of Dispatcher.Send (internal/dispatch/send.go): core's outcomes plus "stored" for a message that starts no turn. */
+export type SendOutcome = CoreMessageReceipt["outcome"] | "stored";
 
-export interface WorkItemRef {
-  kind: string;
-  key: string;
-  [k: string]: unknown;
-}
-
-export interface PullRequestRef {
-  forge: string;
-  repo: string;
-  number: number;
-  url: string;
-  branch: string;
-  state: PullRequestState;
-}
-
-export interface WorkItem {
-  id: string;
-  factory_id: string;
-  title: string;
-  stage: Stage;
-  source: SourceRef;
-  source_key?: string;
-  automation_id?: string;
-  creator_id?: string;
-  root_run_id?: string;
-  pull_requests?: PullRequestRef[];
-  references?: WorkItemRef[];
-  labels?: Record<string, string>;
-  local_owner?: string;
-  created_at: string;
-  updated_at: string;
-  completed_at?: string;
-  version: number;
-}
-
-export interface WorkItemEvent {
-  id: string;
-  work_item_id: string;
-  kind: string;
-  run_id?: string;
-  actor?: string;
-  data?: unknown;
-  created_at: string;
-}
-
-export type InboxKind =
-  "approval" | "question" | "handoff" | "failure" | "review" | "spend_limit" | "blocked" | "answered";
-
-export interface Question {
-  question_id: string;
-  text: string;
-  type: string;
-  options?: string[];
-  recommended_option?: string;
-}
-
-export interface InboxItem {
-  id: string;
-  factory_id: string;
-  work_item_id?: string;
-  run_id?: string;
-  kind: InboxKind;
-  title: string;
-  body: string;
-  options?: string[];
-  questions?: Question[];
-  assignee_id?: string;
-  recipients?: string[];
-  read_by?: string[];
-  answer_message_id?: string;
-  resolved: boolean;
-  resolution?: string;
-  resolved_by?: string;
-  resolved_via?: string;
-  created_at: string;
-  resolved_at?: string;
-  version: number;
-}
-
-/** Message outcomes of Dispatcher.Send (internal/dispatch/send.go). */
-export type SendOutcome = "live_session" | "new_session" | "queued" | "stored";
-
-export interface MessageReceipt {
-  message_id: string;
+/** core.MessageReceipt with the WorkDO outcome "stored". */
+export interface MessageReceipt extends Omit<CoreMessageReceipt, "outcome"> {
   outcome: SendOutcome;
 }

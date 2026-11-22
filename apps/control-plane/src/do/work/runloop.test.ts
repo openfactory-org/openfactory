@@ -1,4 +1,4 @@
-// C2 gate scenarios in the Workers runtime: foreman -> child -> lifecycle ->
+// Run-loop scenarios in the Workers runtime: foreman -> child -> lifecycle ->
 // parent turn with a fake runner; a DO reset mid-turn repeats no turn and no
 // tool call; a runner version mismatch is refused.
 import { env } from "cloudflare:workers";
@@ -54,7 +54,7 @@ class FakeProvider implements SandboxProvider {
   }
 }
 
-const agent = (name: string, type: string, extra: Partial<AgentConfig> = {}): AgentConfig => ({
+const agent = (name: string, type: AgentConfig["type"], extra: Partial<AgentConfig> = {}): AgentConfig => ({
   id: `agt_${name}`,
   factory_id: "fac_test",
   name,
@@ -178,7 +178,7 @@ function taskFor(runId: string): SandboxTask {
   return t;
 }
 
-describe("run loop (C2)", () => {
+describe("run loop", () => {
   it("foreman -> child -> lifecycle message -> parent turn", async () => {
     const token = newToken("w");
     const root = await newRootRun(token);

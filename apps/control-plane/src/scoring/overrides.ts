@@ -1,8 +1,7 @@
 // ApplyOverrides and the judge/dispatch configuration: port of
 // internal/engine/overrides.go and the config part of internal/engine/judge.go.
-// WS5 owns the engine; this copy exists so that benchmark trials and judge
-// runs can be started through WorkDO.runsCreate until the engine exports its
-// own dispatch preparation (see the report).
+// Benchmark trials and judge runs start through WorkDO.runsCreate, so the
+// scoring service prepares their dispatch configuration here.
 import { JUDGE_SKILL_NAME, OfError, type AgentConfig, type MachineSpec, type MCPServer } from "@openfactory/core";
 import type { JudgeRunRequest, Overrides } from "./types";
 

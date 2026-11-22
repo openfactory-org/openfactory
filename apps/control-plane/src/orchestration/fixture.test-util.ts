@@ -10,14 +10,18 @@ import type { AgentConfig, Run, RunState, Stage } from "../engine/types";
 export const TEAM = "default";
 export const FACTORY = "fac_o";
 
-export const agent = (name: string, type = "IMPLEMENT", extra: Partial<AgentConfig> = {}): AgentConfig => ({
+export const agent = (
+  name: string,
+  type: AgentConfig["type"] = "IMPLEMENT",
+  extra: Partial<AgentConfig> = {},
+): AgentConfig => ({
   id: `agt_${name}`,
   factory_id: FACTORY,
   name,
   description: `${name} agent`,
   type,
   instructions: "",
-  harness: { type: "claude" },
+  harness: { type: "claude", model: "" },
   network_policy: { restricted: false, allowed_hosts: null, denied_hosts: null },
   spawnable_by: null,
   ...extra,
@@ -58,7 +62,7 @@ export async function withFx<T>(token: string, fn: (fx: Fx, sql: SqlStorage) => 
 
 export interface RunSpec {
   agent?: string;
-  type?: string;
+  type?: AgentConfig["type"];
   workItem?: string;
   parent?: string;
   state: RunState;

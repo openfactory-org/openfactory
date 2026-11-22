@@ -1,4 +1,4 @@
-// REST handlers: stream (SSE). Owner: WS5. Port of internal/api/stream.go.
+// REST handlers: stream (SSE). Port of internal/api/stream.go.
 // The Worker holds the stream and a 15 s heartbeat. Team events come from
 // the IndexDO socket (run, inbox, workitem, definition). With run_id, the
 // WorkDO of the run wakes the stream; the Worker then reads the run and its

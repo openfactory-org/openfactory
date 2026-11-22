@@ -2,7 +2,7 @@
 // in process (api.Server); here each tool calls the same REST operation of
 // /api/v1 through the route table, as the authenticated principal, so the
 // owners of those routes (TeamDO, WorkDO, IndexDO) stay the only writers.
-// Work-item changes without a REST route go to WorkDO ops (see the report).
+// Work-item changes without a REST route go to WorkDO ops.
 import { OfError, doName, partitionOf, type ErrorCode } from "@openfactory/core";
 import { compile } from "@openfactory/definition";
 import type { Principal } from "../../contracts/do-messages";

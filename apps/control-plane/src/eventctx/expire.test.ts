@@ -1,5 +1,5 @@
 // Port of internal/eventctx/expire_test.go. The Go keys of the store become
-// bundles in R2 (plan rule 9). Runs share a bundle key, so a run end does not
+// bundles in R2 (a DO row holds at most 8 MB). Runs share a bundle key, so a run end does not
 // remove bundles: expire removes the bundles older than the retention time.
 // The WorkDO rows that name the bundles are removed at the run end
 // (src/do/work/eventfiles.test.ts).

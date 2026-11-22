@@ -1,4 +1,4 @@
-// The state machine of one task sandbox (OfTaskSandbox, 02 §5.2–§5.4).
+// The state machine of one task sandbox (OfTaskSandbox).
 // Platform objects are injected, so tests run it with a fake container.
 
 import { sha256Hex } from "@openfactory/core";

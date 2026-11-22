@@ -16,7 +16,7 @@ export interface RouteContext {
   requestId: string;
   route: RouteDef;
   executionCtx: ExecutionContext;
-  /** Set by the authentication step (WS4) for every non-public route. */
+  /** Set by the authentication step for every non-public route. */
   principal?: Principal;
 }
 
@@ -27,7 +27,7 @@ export interface RouteDef extends RouteMeta {
   handler: Handler;
 }
 
-/** The C0 stub of every handler: 501 feature_not_available. */
+/** The handler of an operation without an implementation: 501 feature_not_available. */
 export const notImplementedHandler: Handler = async (_request, _env, ctx) =>
   problemResponse(notImplemented(`${ctx.route.operationId} is not implemented yet`), {
     instance: ctx.url.pathname,

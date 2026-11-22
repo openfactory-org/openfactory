@@ -1,6 +1,6 @@
-// DO side of live updates (01 §5.4): the Worker opens a hibernatable WebSocket
+// DO side of live updates: the Worker opens a hibernatable WebSocket
 // to the DO; the DO sends LiveFrame JSON on it. The Worker-side helpers that
-// hold long-polls and SSE streams live in src/stream/ (WS5).
+// hold long-polls and SSE streams live in src/stream/.
 import type { LiveFrame } from "../../contracts/do-messages";
 
 export class LiveHub {

@@ -1,7 +1,7 @@
 // Port of the pure parts of internal/spend/spend.go. Periods are UTC calendar
 // days and months. The spend of a period is the cost of the runs created in
-// that period (C5: the whole cost of a run stays in the day and month of its
-// created time).
+// that period: the whole cost of a run stays in the day and month of its
+// created time.
 
 export const WARN_FRACTION = 0.8;
 

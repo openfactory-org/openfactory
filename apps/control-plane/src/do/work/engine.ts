@@ -77,7 +77,7 @@ export interface NewRun {
   triggeredBy?: string;
   creator?: Run["creator"];
   runAs?: Run["run_as"];
-  source?: string;
+  source?: Run["source"];
   sourceRef?: string;
 }
 
@@ -185,7 +185,7 @@ export function dispatchRoot(fx: Fx, p: DispatchPlan): { workItem: WorkItem; run
   if (p.ledger) {
     const ref = fx.repo.hasDispatch(p.ledger.actionKey, p.ledger.target);
     if (ref) {
-      const run = fx.repo.mustRun(ref) ?? fx.repo.getRun(ref);
+      const run = fx.repo.mustRun(ref);
       const wi = fx.repo.getWorkItem(run.work_item_id);
       if (wi) return { workItem: wi, run, followUp: false };
     }

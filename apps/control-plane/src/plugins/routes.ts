@@ -1,6 +1,6 @@
 // The server route of plugin webhooks: /plugins/{name}/webhook. The plugin
 // Worker verifies and maps the delivery; the events go to IngressDO.
-import { DEFAULT_TEAM, OfError, doName } from "@openfactory/core";
+import { DEFAULT_TEAM, OfError, doName, type SourceRef } from "@openfactory/core";
 import type { ServerRouteHandler } from "../builder";
 import type { CallMeta } from "../contracts/do-messages";
 import type { Env } from "../contracts/env";
@@ -45,7 +45,7 @@ export function pluginHostBackend(env: Env): PluginHostBackend {
 }
 
 /** Partition of a plugin event: hash of plugin name and source (IngressDO name). */
-async function pluginPartition(name: string, source: Record<string, unknown>): Promise<string> {
+async function pluginPartition(name: string, source: Partial<SourceRef>): Promise<string> {
   const key = `plugin:${name}:${JSON.stringify(source, Object.keys(source).sort())}`;
   return b64url(await sha256(key)).slice(0, 22);
 }

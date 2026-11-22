@@ -26,7 +26,7 @@ import { dest } from "../../../lib/outbox/dest";
 import { listResponse, pageFrom, sqlPage } from "../../../lib/page";
 import { all, first } from "../../../lib/sql/query";
 import { diffFiles, mergeProposal, proposalError } from "../../../scoring/proposals";
-import { improveTrackKey, type ImprovementTrack } from "../../../scoring/service";
+import { improveTrackKey, type ImprovementTrack } from "../../../scoring/self-improvement";
 import { builtinPreflight } from "../preflight";
 import { syncSchedules } from "../schedules";
 import { syncWebhooks } from "../webhooks";

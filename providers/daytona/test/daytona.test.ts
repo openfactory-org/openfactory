@@ -190,7 +190,7 @@ describe("preflight", () => {
   });
 });
 
-describe("state mapping (02 §4.4)", () => {
+describe("state mapping", () => {
   const sb = (o: Partial<DaytonaSandbox>): DaytonaSandbox => ({ id: "s1", state: "started", ...o });
   const now = Date.parse("2026-11-22T12:00:00Z");
   it.each<

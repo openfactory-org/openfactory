@@ -1,4 +1,4 @@
-// The per-DO outbox (03 §6.1). Rows are written with enqueue() inside the
+// The per-DO outbox. Rows are written with enqueue() inside the
 // same transactionSync as the state change, and delivered by the alarm
 // (BaseDO) with backoff. Delivery is at least once; receivers dedupe on msgId.
 //

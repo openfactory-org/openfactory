@@ -1,4 +1,4 @@
-// TeamDO module: worker records and enrollment (WS6). Migrations 300-399.
+// TeamDO module: worker records and enrollment. Migrations 300-399.
 //
 // A worker is an enrolled host (kind "microvm": Firecracker per session) or a
 // development process worker (kind "process", only with
@@ -151,7 +151,7 @@ const MAX_TTL_S = 86400;
 const MAX_SLOTS = 256;
 /** A worker the hub has not confirmed for this long reads as offline. */
 const STALE_MS = 3 * 60_000;
-/** Repositories sent to a worker in the last 7 days may get a git credential (06 §18). */
+/** Repositories sent to a worker in the last 7 days may get a git credential. */
 const REPO_WINDOW_MS = 7 * 24 * 3600_000;
 const WORKER_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._ -]{0,63}$/;
@@ -531,7 +531,7 @@ export async function workersRevoke(kit: TeamKit, meta: CallMeta, workerId: stri
 
 // ---------- git credential ----------
 
-/** Mints a read-only, single-repository credential. Registered by the forge module (WS10). */
+/** Mints a read-only, single-repository credential. Registered by the forge module. */
 export type GitCredentialMinter = (
   kit: TeamKit,
   input: { workerId: string; repo: string; factories: string[] },

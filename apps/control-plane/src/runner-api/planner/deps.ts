@@ -6,6 +6,7 @@ import {
   newId,
   OfError,
   partitionOf,
+  type AgentType,
   type Environment as CoreEnvironment,
   type Skill,
 } from "@openfactory/core";
@@ -41,7 +42,8 @@ export interface Snapshot {
       audiences?: string[];
     };
   };
-  agents: { name: string; type: string; description?: string; spawnable_by?: string[] | null }[];
+  /** The roster fields of core.AgentConfig that the system prompt lists; description and spawnable_by may be absent. */
+  agents: { name: string; type: AgentType; description?: string; spawnable_by?: string[] | null }[];
   integrations?: Record<string, unknown>;
 }
 
@@ -68,15 +70,6 @@ export interface PlannerDeps {
   sandboxUrl: string;
   now(): number;
 }
-
-/** The agent configuration of a run with the fields the planner reads. */
-export type Cfg = Run["config"] & {
-  harness: Run["config"]["harness"] & { auth?: { source?: string; secretName?: string }; reasoningLevel?: string };
-  mcp_servers?: Record<string, McpServer>;
-  skills?: Skill[];
-};
-
-export const cfgOf = (r: Run): Cfg => r.config as Cfg;
 
 /** wrap: an error with a context prefix; an OfError keeps its code and reason. */
 export function wrap(e: unknown, ctx: string): Error {
@@ -158,11 +151,11 @@ export function platformDeps(env: Env, run: Run): PlannerDeps {
           meta,
           "mcp.resolve",
           {},
-          { run: { id: r.id, mcpServers: cfgOf(r).mcp_servers ?? {} }, managedId },
+          { run: { id: r.id, mcpServers: r.config.mcp_servers ?? {} }, managedId },
         ),
         "mcp.resolve",
       ),
-    forges: resolverFor(env) as unknown as PlannerDeps["forges"],
+    forges: resolverFor(env),
     sandboxUrl: (env.OF_PUBLIC_URL ?? "").replace(/\/+$/, ""),
     now: () => Date.now(),
   };

@@ -1,4 +1,4 @@
-// Canonical JSON and the tool idempotency key (plan rule 3). JavaScript key
+// Canonical JSON and the tool idempotency key. JavaScript key
 // order differs from Go's json.Marshal, so the key hashes a canonical form:
 // object keys sorted by UTF-16 code units, no whitespace, undefined dropped.
 import { sha256Hex } from "@openfactory/core";

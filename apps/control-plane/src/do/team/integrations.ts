@@ -1,4 +1,4 @@
-// TeamDO module: integrations (WS10b). The integration records of a team,
+// TeamDO module: integrations. The integration records of a team,
 // the REST handlers of /integrations, and the internal ops that the Worker
 // side of the chat and tracker integrations calls (store reads, account
 // links, Teams service URLs). Migrations 0100-0149.
@@ -407,5 +407,3 @@ export const ops: Record<string, TeamOp> = {
       return {};
     }),
 };
-
-export function setup(_kit: TeamKit): void {}

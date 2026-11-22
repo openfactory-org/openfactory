@@ -24,7 +24,7 @@ export const TAGS = {
   workerEnrollment: "worker-enrollment",
   /** POST /secrets/rewrap. */
   secretsRewrap: "secrets-rewrap",
-  /** C2 scenarios with the fake runner (foreman, child, lifecycle, concurrency). */
+  /** Run-loop scenarios with the fake runner (foreman, child, lifecycle, concurrency). */
   scenario: "scenario",
   /** The real Go runner with the exec harness. Opt-in: OF_CONTRACT_REAL_RUNNER=1. */
   realRunner: "real-runner",

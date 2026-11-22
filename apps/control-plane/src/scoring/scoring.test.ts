@@ -400,6 +400,21 @@ describe("self-improvement", () => {
     expect(await svc.triggerSelfImprovement("fac_1", "implement")).toHaveLength(0);
   });
 
+  it("runs the check when the judge of a manual score fails the run", async () => {
+    w.definition = { name: "demo", selfImprovement: { failedRunThreshold: 3 } } as never;
+    w.files = { "factory.yaml": "name: demo\n", "agents/implement/agent.md": "Always write code." };
+    w.scorers.push(scorer({ id: "sc_si", slug: "tests-run", self_improvement: true }));
+    for (const id of ["run_m1", "run_m2", "run_m3"]) {
+      finished(w, id, "implement", "succeeded", "skipped tests");
+      // The manual score is pending; the check runs when its judge finishes.
+      expect((await svc.scoreRun("tests-run", id)).id).toBe("");
+      expect(w.dispatches).toHaveLength(0);
+    }
+    await finishAll();
+    expect(w.scores.filter((s) => !s.passed)).toHaveLength(3);
+    expect(w.dispatches).toHaveLength(1);
+  });
+
   it("counts distinct runs, triggers on age and reviews the pull request", async () => {
     w.factories.set("fac_1", {
       id: "fac_1",

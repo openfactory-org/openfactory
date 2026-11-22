@@ -1,22 +1,21 @@
-// Frozen contract (C0). The Durable Object message catalogue: typed RPC between
+// The Durable Object message catalogue: typed RPC between
 // the Worker and the DOs, outbox kinds between DOs, and Queue messages.
-// Sources: appendix 05 §5.4 (catalogue) and 03 §6 (payloads, keys, lanes).
 //
-// Rules (plan "Rules for the port"):
+// Rules:
 // - Every outbox row has a msgId; the receiver dedupes on it inside its own
 //   transactionSync (inbox_dedupe). Idempotency keys are listed per kind.
 // - Rows with the same non-empty lane are delivered in order; "" = unordered.
 // - Payloads are JSON. A payload above 512 KiB goes to R2 by hash (payloadR2).
 // - Authorization runs inside the owner DO: the Worker passes the Principal.
 
-import type { FailureCode } from "@openfactory/core";
+import type { Event, FailureCode } from "@openfactory/core";
 import type { SandboxTask, TaskStatus } from "@openfactory/sandbox";
 
 // ---------- Shared ----------
 
 export type Role = "user" | "editor" | "admin";
 
-/** Who calls. The Worker authenticates; the owner DO authorizes (rule 6). */
+/** Who calls. The Worker authenticates; the owner DO authorizes. */
 export interface Principal {
   kind: "user" | "service_account" | "factory_mcp" | "run" | "worker";
   id: string;
@@ -37,30 +36,8 @@ export interface CallMeta {
   principal?: Principal;
 }
 
-/** core.Event as JSON (snake_case, same as the Go json tags). */
-export interface CoreEvent {
-  id: string;
-  team_id: string;
-  factory_id?: string;
-  provider: string;
-  type: string;
-  delivery_id?: string;
-  action_key?: string;
-  actor: {
-    provider: string;
-    external_id: string;
-    handle: string;
-    is_bot: boolean;
-    user_id?: string;
-    is_self?: boolean;
-    trust?: string;
-  };
-  source: Record<string, unknown>;
-  attributes: Record<string, unknown>;
-  payload?: unknown;
-  text?: string;
-  received_at: string;
-}
+/** An inbound event (core Event, snake_case JSON as in the Go json tags). */
+export type CoreEvent = Event;
 
 /** core.OutboundMessage as JSON. */
 export interface CoreOutboundMessage {
@@ -253,7 +230,7 @@ export interface OutboxReceiver {
   receive(msg: OutboxEnvelope): Promise<Ack>;
 }
 
-// ---------- Queues (unordered fan-out only, rule 11) ----------
+// ---------- Queues (unordered fan-out only; ordered notices use the outbox) ----------
 
 export type JobMessage =
   | { kind: "judge.result"; msgId: string; runId: string; scorerId: string; result: Record<string, unknown> }
@@ -282,7 +259,7 @@ export type JobMessage =
 export type JobKind = JobMessage["kind"];
 
 // ---------- Synchronous RPC (Worker -> DO, DO -> DO) ----------
-// Method names are the 05 §5.4 names in camelCase (auth.lookupApiKey -> authLookupApiKey).
+// Method names are the dotted operation names in camelCase (auth.lookupApiKey -> authLookupApiKey).
 // Inputs and results that are REST bodies use the openapi schema types from
 // @openfactory/api-client; they are `unknown` here so this file stays small.
 

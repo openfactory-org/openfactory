@@ -7,7 +7,7 @@
 //   snapshots/{team}/{runID}/{session}/{part}/{file}
 //
 // Reads and writes go through the R2 binding; clients outside the Worker get
-// presigned URLs (presign.ts). Retention is a WorkDO timer (03 §10), which
+// presigned URLs (presign.ts). Retention is a WorkDO timer, which
 // calls deleteRun.
 import { OfError } from "@openfactory/core";
 import type { Env } from "../contracts/env";

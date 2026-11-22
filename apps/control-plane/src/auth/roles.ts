@@ -2,7 +2,7 @@
 // (Action, ActionForRole, RoleAuthorizer) and the role helpers of
 // internal/core/types.go and internal/api/auth.go.
 //
-// Authorization runs inside the owner DO (plan rule 6): the Worker passes the
+// Authorization runs inside the owner DO: the Worker passes the
 // Principal with its team role and factory-role map, and the DO calls
 // requireRole with the factory of the resource.
 import { OfError } from "@openfactory/core";

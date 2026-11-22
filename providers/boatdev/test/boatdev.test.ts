@@ -204,7 +204,7 @@ describe("preflight", () => {
   });
 });
 
-describe("state mapping (02 §3.4)", () => {
+describe("state mapping", () => {
   const base: BoatSandbox = { id: "s1", state: "ready", createdAt: "2026-11-22T10:00:00Z" };
   it.each<[string, Partial<BoatSandbox>, boolean, string, string | undefined]>([
     ["cancelled", { state: "cancelled" }, false, "exited", "unschedulable"],

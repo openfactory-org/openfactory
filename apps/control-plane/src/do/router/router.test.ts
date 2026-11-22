@@ -89,7 +89,7 @@ const ev = (id: string, text = ""): CoreEvent => ({
   provider: "webhook",
   type: "received",
   actor: { provider: "webhook", external_id: "x", handle: "x", is_bot: false },
-  source: {},
+  source: { provider: "webhook", kind: "" },
   attributes: {},
   text,
   received_at: new Date().toISOString(),

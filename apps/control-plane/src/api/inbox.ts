@@ -1,4 +1,4 @@
-// REST handlers: inbox. Owner: WS5. Items of runs live in their WorkDO
+// REST handlers: inbox. Items of runs live in their WorkDO
 // (partition token "w"); team-level items in IndexDO ("i"). Lists and read
 // state come from IndexDO.
 import { doName, OfError, partitionOf, tokenKind } from "@openfactory/core";

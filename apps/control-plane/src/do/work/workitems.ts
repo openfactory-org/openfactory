@@ -25,7 +25,8 @@ export function createWorkItem(fx: Fx, n: NewWorkItem, actor: string, eventText?
     factory_id: n.factoryId,
     title: n.title,
     stage: "intake",
-    source: n.source ?? {},
+    // A work item without a source stores {}; readers treat its missing provider and kind as empty.
+    source: n.source ?? ({} as WorkItem["source"]),
     ...(n.sourceKey ? { source_key: n.sourceKey } : {}),
     ...(n.automationId ? { automation_id: n.automationId } : {}),
     ...(n.creatorId ? { creator_id: n.creatorId } : {}),

@@ -298,7 +298,7 @@ const MIN_LEFT_KEY = "retention_min_left";
  * One retention step: deletes the R2 data (transcript, compacted messages,
  * snapshots) of the finished runs of one page that are older than keepMs. The
  * rows stay. Pages go by run ID; the cursor and the oldest activity of the
- * runs that stay are kept in work_item_state between steps. After the last
+ * runs that stay are kept in the meta table between steps. After the last
  * page the next timer is set for the run that expires first.
  */
 export async function retentionStep(

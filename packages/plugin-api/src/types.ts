@@ -1,5 +1,4 @@
-// Frozen contract (C0). Plugin Worker RPC: replaces proto/openfactory/plugin/{v1,v2}.
-// Sources: appendix 05 §5.5 (shape) and 04 §8 (method signatures).
+// Plugin Worker RPC: replaces proto/openfactory/plugin/{v1,v2}.
 //
 // A plugin is a Worker. The control plane binds it as a service binding
 // (`env.PLUGIN_GITLAB`) and calls it with typed JS RPC (`WorkerEntrypoint`).

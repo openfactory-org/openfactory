@@ -1,4 +1,4 @@
-// REST handlers: benchmarks. Owner: WS13.
+// REST handlers: benchmarks.
 import { newRoutedId, newToken, doName, type BenchmarkRun } from "@openfactory/core";
 import { requireRole } from "../auth/roles";
 import {

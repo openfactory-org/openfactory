@@ -1,4 +1,4 @@
-// REST handlers: factory-file JSON Schemas (public, WS4). Port of
+// REST handlers: factory-file JSON Schemas (public). Port of
 // handleSchemaVersions, handleSchemaVersion and handleSchemaDocument.
 import { OfError } from "@openfactory/core";
 import { schemaVersions, schemas } from "@openfactory/definition";

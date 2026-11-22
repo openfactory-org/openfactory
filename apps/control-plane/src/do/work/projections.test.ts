@@ -2,7 +2,7 @@
 // that RouterDO needs to rebuild a route of kind 'source'.
 import { describe, expect, it } from "vitest";
 import type { EnqueueInput } from "../../lib/outbox/outbox";
-import type { WorkItem } from "../../engine/types";
+import type { WorkItem, WorkItemRef } from "../../engine/types";
 import type { Fx } from "./fx";
 import { projectWorkItem } from "./projections";
 
@@ -24,23 +24,24 @@ const base: WorkItem = {
   factory_id: "fac_1",
   title: "t",
   stage: "building",
-  source: {},
+  source: { provider: "", kind: "" },
   created_at: "2026-01-01T00:00:00.000Z",
   updated_at: "2026-01-01T00:00:00.000Z",
   version: 3,
 };
+const issueRef: WorkItemRef = { kind: "issue", key: "jira:X-1", source: { provider: "jira", kind: "issue" } };
 
 describe("projectWorkItem router.status", () => {
   it.each([
     {
       name: "with a source key",
-      wi: { ...base, source_key: "github:o/r#1", references: [{ kind: "issue", key: "jira:X-1" }] },
+      wi: { ...base, source_key: "github:o/r#1", references: [issueRef] },
       keys: ["github:o/r#1", "jira:X-1"],
       sourceKey: "github:o/r#1",
     },
     {
       name: "without a source key",
-      wi: { ...base, references: [{ kind: "issue", key: "jira:X-1" }] },
+      wi: { ...base, references: [issueRef] },
       keys: ["jira:X-1"],
       sourceKey: undefined,
     },

@@ -1,12 +1,12 @@
 // The runner protocol inside WorkDO (internal/runnerapi + dispatch hooks).
 // Each function is one transaction: events are acknowledged and their
-// effects applied together (C1, N1). The Worker verifies tokens and holds
+// effects applied together. The Worker verifies tokens and holds
 // long-polls; WorkDO decides.
 import type { EndRequest, StartRequest } from "@openfactory/runner-proto";
 import { isOfError, runnerFailureCode, type FailureCode } from "@openfactory/core";
 import { iso, ms, setFailureMessage } from "../../engine/sessions";
 import { priorRetries } from "../../engine/sessions";
-import type { Run, RunnerCommand, RunnerEvent, RunSession } from "../../engine/types";
+import type { Run, RunMessage, RunnerCommand, RunnerEvent, RunSession } from "../../engine/types";
 import { deliver, endSession, timeline, timerName, transition, updateRun, type Fx } from "./engine";
 import { SeqGapError } from "./repo";
 
@@ -258,12 +258,6 @@ function processEvent(b: BatchSession, e: RunnerEvent): void {
     case "usage":
       onUsage(b, e, d);
       return;
-    case "artifact":
-      fx.repo.putUpload(s.run_id, s.session, "artifact", str(d.name), str(d.upload_id));
-      return;
-    case "transcript.saved":
-      fx.repo.putUpload(s.run_id, s.session, "transcript", "transcript", str(d.upload_id));
-      return;
     case "snapshot.saved":
       fx.repo.putSnapshotPart(
         s.run_id,
@@ -299,7 +293,7 @@ function processEvent(b: BatchSession, e: RunnerEvent): void {
   }
 }
 
-function appendConversation(fx: Fx, runId: string, role: string, content: string, e: RunnerEvent): void {
+function appendConversation(fx: Fx, runId: string, role: RunMessage["role"], content: string, e: RunnerEvent): void {
   fx.repo.appendMessage({
     id: `msg_${runId.slice(4, 20)}${e.session}x${e.seq}`,
     run_id: runId,
@@ -311,7 +305,7 @@ function appendConversation(fx: Fx, runId: string, role: string, content: string
   fx.wakeRun(runId);
 }
 
-/** onUsage: cumulative usage per session; the run gets the sum. Spend goes to DispatchDO (C5). */
+/** onUsage: cumulative usage per session; the run gets the sum. Spend goes to DispatchDO. */
 function onUsage(b: BatchSession, e: RunnerEvent, d: Record<string, unknown>): void {
   if (d.cumulative !== true) return;
   const { fx, s } = b;

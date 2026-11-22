@@ -1,11 +1,11 @@
 // The per-run factory MCP server (/mcp/run/{runId}, internal/orchestration):
 // stateless JSON-RPC in the Worker. Each tool is one WorkDO RPC; the tool
-// idempotency row commits with the effect (C8). The key hashes canonical JSON
-// of the input in the active turn (plan rule 3); errors are not stored.
+// idempotency row commits with the effect. The key hashes canonical JSON
+// of the input in the active turn; errors are not stored.
 import { doName, isTrialRun, newId, newRoutedId, OfError, partitionOf, sourceKey, toOfError } from "@openfactory/core";
 import type { Env } from "../contracts/env";
 import { toolIdempotencyKey } from "../engine/canonical";
-import { isTerminal, type AgentConfig, type Run } from "../engine/types";
+import { isTerminal, type AgentConfig, type MachineSpec, type Run } from "../engine/types";
 import type { ChildPlan } from "../do/work/engine";
 import type { ToolResult } from "../do/work/tools";
 import { plannerFor } from "../runner-api/planner";
@@ -27,7 +27,7 @@ const PROTOCOL_VERSION = "2025-06-18";
 export interface FactoryConfig {
   agents: AgentConfig[];
   /** The machine types of the factory runtime; undefined when the source does not know them. */
-  machines?: Record<string, unknown> | null;
+  machines?: Record<string, MachineSpec> | null;
 }
 
 /**
@@ -39,7 +39,7 @@ export type AgentSource = (env: Env, teamId: string, factoryId: string) => Promi
 
 interface ConfigSnapshot {
   agents?: AgentConfig[];
-  runtime?: { machines?: Record<string, unknown> | null };
+  runtime?: { machines?: Record<string, MachineSpec> | null };
 }
 
 async function configSnapshot(env: Env, teamId: string, factoryId: string): Promise<ConfigSnapshot | null> {
@@ -130,7 +130,6 @@ export async function handleRunMcp(request: Request, env: Env): Promise<Response
   const url = new URL(request.url);
   if (!url.pathname.startsWith(RUN_MCP_PREFIX)) return null;
   const runId = decodeURIComponent(url.pathname.slice(RUN_MCP_PREFIX.length).replace(/\/+$/, ""));
-  if (request.method === "GET") return new Response(null, { status: 405, headers: { allow: "POST" } });
   if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } });
   const auth = request.headers.get("authorization") ?? "";
   const claims = auth.startsWith("Bearer ")
@@ -475,7 +474,7 @@ async function resolvePlans(c: ToolCtx, args: Record<string, unknown>): Promise<
     try {
       return {
         ...p,
-        config: applyOverrides(p.config as never, pin, machines as never) as unknown as AgentConfig,
+        config: applyOverrides(p.config, pin, machines),
       };
     } catch (e) {
       throw new OfError("invalid_request", `agent_run_configs[${i}]: pin: ${toOfError(e).error.message}`);

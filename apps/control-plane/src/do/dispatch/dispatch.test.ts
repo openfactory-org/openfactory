@@ -103,7 +103,7 @@ describe("DispatchDO admission", () => {
     expect(st.waiting).toHaveLength(2);
   });
 
-  it("spend over the factory limit holds new requests (C5: bucketed by run creation day)", async () => {
+  it("spend over the factory limit holds new requests (bucketed by run creation day)", async () => {
     const team = "spd" + newToken("w");
     const d = dispatch(team);
     await d.receive(

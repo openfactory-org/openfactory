@@ -1,4 +1,4 @@
-// DispatchDO schema (03 §11.3): admission only.
+// DispatchDO schema: admission only.
 import type { Migration } from "../../../lib/sql/migrate";
 
 export const m0001: Migration = {

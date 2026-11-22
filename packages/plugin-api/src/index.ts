@@ -1,4 +1,4 @@
-// @openfactory/plugin-api: plugin Worker RPC interfaces (types.ts is frozen at C0)
+// @openfactory/plugin-api: plugin Worker RPC interfaces (types.ts)
 // and helpers for plugin authors and for the host.
 //
 // Worker-only code is in "@openfactory/plugin-api/worker" (needs the Workers runtime).

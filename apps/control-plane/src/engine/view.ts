@@ -58,7 +58,7 @@ export function runView(
   opts: { publicUrl?: string; latest?: RunSession; rootRunId?: string } = {},
 ): Record<string, unknown> {
   const { id, state, triggered_by: _t, ...rest } = r;
-  const { source, ref } = runSourceAndRef(r as Parameters<typeof runSourceAndRef>[0]);
+  const { source, ref } = runSourceAndRef(r);
   let upd = r.created_at;
   for (const t of [r.started_at, r.finished_at]) if (t && t > upd) upd = t;
   const sm = statusMessage(r);

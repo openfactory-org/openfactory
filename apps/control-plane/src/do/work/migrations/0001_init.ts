@@ -1,4 +1,4 @@
-// WorkDO schema (03 §11.2). Entity bodies keep the Go JSON in `data`; the
+// WorkDO schema. Entity bodies keep the Go JSON in `data`; the
 // columns that decisions read are promoted. Times are *_ms.
 import type { Migration } from "../../../lib/sql/migrate";
 

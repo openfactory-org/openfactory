@@ -148,7 +148,7 @@ export const testWebhookFilter: Handler = async (request, env, ctx) => {
 
 // ---------- ingress (server paths outside /api/v1) ----------
 
-/** The core has one team (D3): forge and custom webhooks carry no team. */
+/** The core has one team per install: forge and custom webhooks carry no team. */
 const INGRESS_TEAM = "default";
 
 async function enqueue(env: Env, teamId: string, partition: string, event: Event, dedupeKey: string) {

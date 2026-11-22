@@ -1,8 +1,8 @@
 # src/lib: Durable Object base
 
 Shared code for every control-plane DO: migrations, the outbox, timers on one
-alarm, the DO side of live updates, and list pagination. Owner: WS4. The API
-below is stable; ask WS4 before you change it.
+alarm, the DO side of live updates, and list pagination. Every DO depends on the
+API below: keep it stable.
 
 ## BaseDO
 
@@ -76,13 +76,14 @@ alarm fire at once, so delivery is kicked at commit.
 - `insertMany(sql, table, cols, rows, {verb, suffix})`: chunked under 100 bound parameters and 100 KB of text.
 - `chunks(list)` for `IN (...)` lists. `all`, `first`, `run`, `parseData` helpers.
 - Migration files: `src/do/<name>/migrations/NNNN_<name>.ts` with `export default \`...SQL...\``.
-  TeamDO modules list theirs in the module's `migrations` export (number ranges in 05 §4.5).
+  TeamDO modules list theirs in the module's `migrations` export, each in its own number range
+  (see the header of `src/do/team/index.ts`).
 
 ## Live (`src/lib/live/`)
 
 `new LiveHub(ctx)`: `accept(tags, attachment?, onOpen?)` answers a WebSocket upgrade from the Worker
 with a hibernatable socket; `broadcast(tag, frame, filter?)` sends a `LiveFrame`. The Worker-side
-long-poll and SSE helpers are in `src/stream/` (WS5). IndexDO serves `/subscribe/team?factory_id=&topics=`.
+long-poll and SSE helpers are in `src/stream/`. IndexDO serves `/subscribe/team?factory_id=&topics=`.
 
 ## Pages (`src/lib/page.ts`)
 

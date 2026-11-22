@@ -1,4 +1,4 @@
-// Entry of the MCP surface of the control plane (WS11). Stateless JSON-RPC
+// Entry of the MCP surface of the control plane. Stateless JSON-RPC
 // in the Worker; there is no MCP session DO.
 //
 //   /mcp, /api/v1/mcp/factory              Factory MCP (API key or ofm_ token)
@@ -6,7 +6,7 @@
 //   /mcp/integrations/{provider}/{runId}   built-in integration servers (ofs_)
 //   /.well-known/oauth-*, /oauth/*         Factory MCP browser sign-in
 //
-// /mcp/run/{runId} (the per-run factory tools) belongs to WS5 (src/orchestration).
+// /mcp/run/{runId} (the per-run factory tools) is in src/orchestration.
 import type { Principal } from "../contracts/do-messages";
 import type { Env } from "../contracts/env";
 import { apiKeyPrincipal } from "../auth/authenticate";

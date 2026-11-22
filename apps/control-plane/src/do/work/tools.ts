@@ -1,6 +1,6 @@
 // Effects of the per-run factory MCP tools (internal/orchestration) inside
 // WorkDO. The idempotency row commits in the same transaction as the tool's
-// effect (C8, plan rule 3). Errors are not stored, so the model can retry.
+// effect. Errors are not stored, so the model can retry.
 import {
   conflict,
   forbidden,
@@ -371,7 +371,7 @@ function postUpdate({ fx, caller, input, actor }: ToolCtx): ToolResult {
   if (!body) throw invalid("text is required");
   if (kind === "handoff") {
     // RequestHuman with InboxHandoff: an inbox item, its notice, and the stage handoff.
-    if (caller.state === "cancelled") throw conflict("run was cancelled");
+    // runTool already refuses a cancelled caller.
     const title = "Ready for your review";
     const it: InboxItem = {
       id: newRoutedId("inb", fx.token),
@@ -421,7 +421,6 @@ function linkIssue({ fx, caller, input, actor }: ToolCtx): ToolResult {
     wi.references = [...refs, ref];
     wi.updated_at = iso(fx.now());
     fx.repo.putWorkItem(wi);
-    fx.repo.addWorkItemRef(ref);
     workItemEvent(fx, wi.id, "issue_linked", caller.id, actor, { key });
     // LinkIssue: the write-back commits with the link (outbox).
     let state = ISSUE_STATE_IN_PROGRESS;

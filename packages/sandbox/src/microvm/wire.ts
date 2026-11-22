@@ -211,7 +211,7 @@ export function providerErrorOf(err: WireError): ProviderError {
 }
 
 /**
- * Failure code of a microVM worker task end (plan "Failure mapping"):
+ * Failure code of a microVM worker task end:
  * image pull → sandbox_create_failed, guest OOM → out_of_memory, host reboot or
  * VM lost → sandbox_lost / runner_lost (retry), deadline → infrastructure_timeout.
  * Cancelled gives none.

@@ -8,14 +8,14 @@ import type { AgentConfig, Run } from "../engine/types";
 import { mintSessionToken, runnerKeys } from "../runner-api/token";
 import { handleRunMcp, setAgentSource, teamAgents } from "./index";
 
-const agent = (name: string, type: string): AgentConfig => ({
+const agent = (name: string, type: AgentConfig["type"]): AgentConfig => ({
   id: `agt_${name}`,
   factory_id: "fac_o",
   name,
   description: `${name} agent`,
   type,
   instructions: "",
-  harness: { type: "claude" },
+  harness: { type: "claude", model: "" },
   network_policy: { restricted: false, allowed_hosts: null, denied_hosts: null },
   spawnable_by: null,
 });

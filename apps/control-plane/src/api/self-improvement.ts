@@ -1,4 +1,4 @@
-// REST handlers: self-improvement. Owner: WS13.
+// REST handlers: self-improvement.
 import { json, type Handler } from "../http/handler";
 import { scoringService } from "../scoring/jobs";
 import { factoryAccess } from "./measure";

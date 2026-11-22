@@ -1,4 +1,4 @@
-// REST handlers: work items. Owner: WS5. Lists from IndexDO; the WorkDO of
+// REST handlers: work items. Lists from IndexDO; the WorkDO of
 // the work item (by its partition token) owns reads and writes.
 import { doName } from "@openfactory/core";
 import { runView } from "../engine/view";

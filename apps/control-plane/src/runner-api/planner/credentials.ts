@@ -2,7 +2,7 @@
 // default credential) and the helpers that collect secret values to redact.
 import { OfError } from "@openfactory/core";
 import type { Run } from "../../engine/types";
-import { cfgOf, type PlannerDeps } from "./deps";
+import type { PlannerDeps } from "./deps";
 
 export const CREDENTIAL_MANAGED_SECRET = "managedSecret";
 export const CREDENTIAL_WORKER_ENVIRONMENT = "workerEnvironment";
@@ -129,7 +129,7 @@ export async function resolveHarnessAuth(
   r: Run,
   env: Record<string, string>,
 ): Promise<{ auth: Record<string, string>; credential: HarnessCredential }> {
-  const a = cfgOf(r).harness?.auth;
+  const a = r.config.harness?.auth;
   if (a) {
     if (a.source === CREDENTIAL_WORKER_ENVIRONMENT)
       return { auth: {}, credential: { source: CREDENTIAL_WORKER_ENVIRONMENT } };

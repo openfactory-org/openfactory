@@ -1,6 +1,6 @@
-// Frozen contract (C0). The control-plane Worker. Source: appendix 01 §4, with the
-// plan overrides: RouterDO added, no McpSessionDO, DO classes declared with
-// "exports" (mutually exclusive with "migrations"; a one-way switch).
+// The control-plane Worker. RouterDO owns the routes, there is no MCP session
+// DO, and the DO classes are declared with "exports" (mutually exclusive with
+// "migrations"; a one-way switch).
 // After a change: `npm run cf-types -w @openfactory/control-plane`, update
 // src/contracts/env.ts, and document new vars, secrets and bindings in docs/.
 {

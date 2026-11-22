@@ -1,4 +1,4 @@
-// REST handlers: workers (WS6). The TeamDO owns the records; after a change
+// REST handlers: workers. The TeamDO owns the records; after a change
 // the handler tells the worker's WorkerHubDO (configure, revoke), so a live
 // connection sees drain, resume, revoke and label changes at once.
 import { DEFAULT_TEAM, OfError, doName, invalid, problemResponse, toOfError } from "@openfactory/core";

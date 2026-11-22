@@ -1,6 +1,5 @@
-// Frozen contract (C0). The SandboxProvider contract: a port of core.TaskBackend
-// (internal/core/task.go) for Workers RPC. Sources: appendix 05 §5.2, appendix
-// 02 §1, and the capabilities list of the main plan (which wins).
+// The SandboxProvider contract: a port of core.TaskBackend
+// (internal/core/task.go) for Workers RPC.
 //
 // Rules:
 // - Every method is async and returns quickly; long work happens in the provider.
@@ -47,7 +46,7 @@ export const SANDBOX_REASONS: readonly SandboxReason[] = [
   "unknown",
 ];
 
-/** Variables of the sandbox image and bootstrap contract (05 §5.6). */
+/** Variables of the sandbox image and bootstrap contract. */
 export const TASK_ENV = {
   controlUrl: "OF_CONTROL_URL",
   runId: "OF_RUN_ID",

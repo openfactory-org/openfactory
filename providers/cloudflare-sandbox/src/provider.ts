@@ -1,4 +1,4 @@
-// The SandboxProvider logic of the cloudflare-sandbox Worker (02 §5.3). The
+// The SandboxProvider logic of the cloudflare-sandbox Worker. The
 // WorkerEntrypoint in index.ts delegates to it; tests drive it with fakes.
 
 import {

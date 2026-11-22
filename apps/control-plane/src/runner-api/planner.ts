@@ -1,4 +1,4 @@
-// The session planner in the Worker (03 §8.2). Port of internal/engine
+// The session planner in the Worker. Port of internal/engine
 // planner.go, runner_plan.go, credentials.go, defaultauth.go, redact.go and
 // the runnerContent of internal/server/runnermode.go. Stateless: inputs come
 // from the run's WorkDO (work item, repository refs), TeamDO (config snapshot,
@@ -22,7 +22,7 @@ import {
 import type { Env } from "../contracts/env";
 import type { Run, WorkItem } from "../engine/types";
 import { findDefaultCredential, headerSecrets, redactList, resolveHarnessAuth } from "./planner/credentials";
-import { cfgOf, environmentOf, platformDeps, type Environment, type PlannerDeps, type Snapshot } from "./planner/deps";
+import { environmentOf, platformDeps, type Environment, type PlannerDeps, type Snapshot } from "./planner/deps";
 import { mcpServers, sessionTokenServers } from "./planner/mcp";
 import { secretsOf, startConfigOf, type RunnerPlan, type SecretsPlan } from "./planner/render";
 import { checkouts, isCommitSha, repoNamed } from "./planner/repos";
@@ -74,7 +74,7 @@ export class Planner {
       r.triggered_by === SELF_IMPROVEMENT ||
       (wi?.source as { provider?: string } | undefined)?.provider === SELF_IMPROVEMENT;
     const builtin = builtinSkillsForRun({ agentType: r.config.type, forges, integrations, selfImprovement: self });
-    return mergeSkills(cfgOf(r).skills ?? [], snap.runtime.skills ?? [], [], builtin);
+    return mergeSkills(r.config.skills ?? [], snap.runtime.skills ?? [], [], builtin);
   }
 
   findDefaultCredential(r: Run) {
@@ -137,14 +137,16 @@ export class Planner {
       );
     }
     const skills = this.runSkills(r, snap, st.workItem);
-    const cfg = { ...r.config, skills } as unknown as Parameters<typeof composeSystemPrompt>[0];
     const systemPrompt = composeSystemPrompt(
-      cfg,
-      (st.workItem ?? null) as unknown as Parameters<typeof composeSystemPrompt>[1],
-      r as unknown as Parameters<typeof composeSystemPrompt>[2],
-      (snap.agents ?? []).map((a) => ({ id: "", ...a, description: a.description ?? "" })) as unknown as Parameters<
-        typeof composeSystemPrompt
-      >[3],
+      { ...r.config, skills },
+      st.workItem ?? null,
+      r,
+      (snap.agents ?? []).map((a) => ({
+        id: "",
+        ...a,
+        description: a.description ?? "",
+        spawnable_by: a.spawnable_by ?? null,
+      })),
     );
     const paths = envr ? [] : (snap.runtime.repositories ?? []).map((x) => x.name);
     const g = snap.runtime.cloud_providers?.gcp;

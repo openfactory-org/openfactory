@@ -1,4 +1,4 @@
-// C2 gate scenarios with the fake runner: foreman → child → lifecycle message
+// Run-loop scenarios with the fake runner: foreman → child → lifecycle message
 // → parent turn; the factory concurrency limit; ask_human through the inbox.
 import { expect, it } from "vitest";
 import { waitFor } from "../harness/api.ts";
@@ -15,7 +15,7 @@ interface Run {
   work_item_id?: string;
 }
 
-describeFeature([TAGS.runner, TAGS.scenario], "C2: foreman, child, lifecycle, parent", () => {
+describeFeature([TAGS.runner, TAGS.scenario], "run loop: foreman, child, lifecycle, parent", () => {
   const sessions = useSessions();
 
   it("the child's finished turn comes back to the foreman as a new input", async () => {
@@ -81,7 +81,7 @@ describeFeature([TAGS.runner, TAGS.scenario], "C2: foreman, child, lifecycle, pa
   });
 });
 
-describeFeature([TAGS.runner, TAGS.scenario], "C2: concurrency limit", () => {
+describeFeature([TAGS.runner, TAGS.scenario], "run loop: concurrency limit", () => {
   const sessions = useSessions();
 
   it("maxConcurrentRuns: 1 holds the second and third run; they start in FIFO order", async () => {
@@ -120,7 +120,7 @@ describeFeature([TAGS.runner, TAGS.scenario], "C2: concurrency limit", () => {
   });
 });
 
-describeFeature([TAGS.runner, TAGS.scenario], "C2: ask_human through the inbox", () => {
+describeFeature([TAGS.runner, TAGS.scenario], "run loop: ask_human through the inbox", () => {
   const sessions = useSessions();
 
   it("the question is an inbox item; the answer comes back to the run", async () => {

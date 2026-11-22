@@ -189,11 +189,6 @@ export function runCreatorId(r: Pick<Run, "creator"> | null | undefined): string
   return r?.creator?.id ?? "";
 }
 
-/** Reports whether a state is a finished state (RunState.Terminal). */
-export function isTerminalRunState(s: RunState): boolean {
-  return s === "succeeded" || s === "failed" || s === "cancelled" || s === "error";
-}
-
 /** Reports whether the run finished a turn and waits for a message (blocked, or the old idle). */
 export function waitsForInput(s: RunState): boolean {
   return s === "idle" || s === "blocked";

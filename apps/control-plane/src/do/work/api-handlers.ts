@@ -14,6 +14,7 @@ import {
 } from "../../engine/types";
 import { approverDeps, canApprove, notAnApprover } from "./approvers";
 import type { Env } from "../../contracts/env";
+import { actorId } from "../../auth/roles";
 import {
   actorLabel,
   cancel,
@@ -46,9 +47,10 @@ export interface ApiCall {
 /**
  * The object of a call whose factory authorizes it (routeFactory of the Go
  * route wrapper): the run of params.runId (or params.id), the work item of
- * params.id, the inbox item of params.id, or the target of a new inbox item.
+ * params.id, the inbox item of params.id, the target of a new inbox item, or
+ * the factory that the body names (body.factoryId).
  */
-export type ApiScope = "run" | "workItem" | "inbox" | "newInbox";
+export type ApiScope = "run" | "workItem" | "inbox" | "newInbox" | "factory";
 
 interface ApiOp {
   scope: ApiScope;
@@ -81,7 +83,8 @@ export type WorkApiOp =
   | "getInbox"
   | "resolveInbox"
   | "unresolveInbox"
-  | "createInboxItem";
+  | "createInboxItem"
+  | "metricsSessions";
 
 /** The operation of a name, or undefined when WorkDO does not serve it. */
 export function apiOp(op: string): ApiOp | undefined {
@@ -101,6 +104,8 @@ export function scopeFactory(repo: Repo, scope: ApiScope, params: Record<string,
       return params.id ? (repo.getWorkItem(params.id)?.factory_id ?? "") : "";
     case "run":
       return repo.getRun(params.runId ?? params.id ?? "")?.factory_id ?? "";
+    case "factory":
+      return String((body as { factoryId?: unknown } | null)?.factoryId ?? "");
   }
 }
 
@@ -132,6 +137,11 @@ const WORK_API: Record<WorkApiOp, ApiOp> = {
       repo.mustRun(runId);
       return { events: repo.listTimeline(runId) };
     },
+  },
+  metricsSessions: {
+    scope: "factory",
+    role: "user",
+    handle: ({ repo, body }) => metricsSessions(repo, body),
   },
   listRunSessions: {
     scope: "run",
@@ -336,8 +346,16 @@ function mustWorkItem(repo: Repo, id: string | undefined) {
   return wi;
 }
 
-function actorOfMeta(meta: CallMeta): string {
-  return meta.principal?.userId ?? meta.principal?.id ?? "api";
+/**
+ * The actor that WorkDO records for a caller: "user:<id>" for a person or a
+ * service account (Principal.ActorID in Go; the dashboard names "user:"
+ * actors), else the ID of an internal caller (an automation, the scoring
+ * service), else "api".
+ */
+export function actorOfMeta(meta: Pick<CallMeta, "principal"> | undefined): string {
+  const p = meta?.principal;
+  if (p?.userId) return actorId(p);
+  return p?.id || "api";
 }
 
 // ---------- inbox ----------
@@ -468,4 +486,38 @@ function sessionView(s: RunSession, parts: Set<string>): Record<string, unknown>
     usage: { ...u, coverage: usageCoverage(u) },
     snapshot: { workspace: parts.has("workspace"), harness_state: parts.has("harness_state") },
   };
+}
+
+// ---------- metrics ----------
+
+/** How many runs one metricsSessions call reads at most. */
+export const MAX_METRICS_RUNS = 200;
+
+/**
+ * The sessions of runs of one factory, for the compute time of the metrics
+ * (collectSessions of the Go metrics): run ID to its sessions, with the
+ * instance shape and the compute seconds. Runs of other factories and runs
+ * that this DO does not have are left out, so a caller cannot read the
+ * sessions of a factory it may not see by naming its run IDs.
+ */
+function metricsSessions(repo: Repo, body: unknown): { sessions: Record<string, Record<string, unknown>[]> } {
+  const b = (body ?? {}) as { factoryId?: unknown; runIds?: unknown };
+  const factoryId = typeof b.factoryId === "string" ? b.factoryId : "";
+  if (factoryId === "") throw invalid("factoryId is required");
+  if (!Array.isArray(b.runIds) || !b.runIds.every((x) => typeof x === "string"))
+    throw invalid("runIds must be a list of run IDs");
+  if (b.runIds.length > MAX_METRICS_RUNS) throw invalid(`runIds has more than ${MAX_METRICS_RUNS} IDs`);
+  const out: Record<string, Record<string, unknown>[]> = {};
+  for (const id of new Set(b.runIds as string[])) {
+    if (repo.getRun(id)?.factory_id !== factoryId) continue;
+    const list = repo.listSessions(id).map((s) => ({
+      ...(s.instance_shape ? { instance_shape: s.instance_shape } : {}),
+      ...(s.compute_seconds !== undefined ? { compute_seconds: s.compute_seconds } : {}),
+      assigned_at: s.assigned_at,
+      ...(s.started_at ? { started_at: s.started_at } : {}),
+      ...(s.ended_at ? { ended_at: s.ended_at } : {}),
+    }));
+    if (list.length > 0) out[id] = list;
+  }
+  return { sessions: out };
 }

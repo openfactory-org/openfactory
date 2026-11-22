@@ -1,4 +1,4 @@
-// Frozen contract (C0). API error codes and the error type every package throws.
+// API error codes and the error type every package throws.
 //
 // Port of internal/api/errors.go (codes, HTTP status, title, retryable, RFC 7807
 // problem body) and of the internal/core sentinels (ErrNotFound, ErrConflict,
@@ -51,24 +51,6 @@ export const ERROR_SPECS: Readonly<Record<ErrorCode, ErrorSpec>> = {
     retryable: false,
   },
 };
-
-/**
- * The Go sentinel errors (internal/core) and the code each maps to.
- * Code that ports a Go `errors.Is(err, core.ErrX)` check compares `err.code`.
- */
-export const SENTINEL_CODES = {
-  ErrNotFound: "resource_not_found",
-  ErrConflict: "conflict",
-  ErrStale: "conflict",
-  ErrInvalid: "invalid_request",
-  ErrUnauthorized: "authentication_required",
-  ErrForbidden: "not_authorized",
-  ErrUnavailable: "resource_unavailable",
-  ErrAtCapacity: "resource_unavailable",
-  ErrIntegrationDisabled: "integration_disabled",
-  ErrOperationNotSupported: "operation_not_supported",
-  ErrExternalAuthRequired: "external_authentication_required",
-} as const satisfies Record<string, ErrorCode>;
 
 export function isErrorCode(s: string): s is ErrorCode {
   return (ERROR_CODES as readonly string[]).includes(s);

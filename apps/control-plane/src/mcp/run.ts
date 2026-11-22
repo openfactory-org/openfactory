@@ -71,7 +71,7 @@ export function runViewOf(r: {
 
 const UNAUTHORIZED = { status: 401, code: "unauthorized", message: "invalid or missing run token" } as const;
 
-/** The production backend: WS5's session tokens and WorkDO, WS4's TeamDO. */
+/** The production backend: session tokens, WorkDO and TeamDO. */
 export const defaultRunBackend: McpRunBackend = {
   async authenticate(env, runId, token) {
     if (!token || !runId) return UNAUTHORIZED;

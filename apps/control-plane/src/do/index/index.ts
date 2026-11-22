@@ -1,5 +1,5 @@
 // IndexDO (key team:<id>|index): the read model of the team, rebuilt from
-// projections (03 §11.5): run and work-item summaries, inbox items (WorkDO
+// projections: run and work-item summaries, inbox items (WorkDO
 // items as projections, team-level items owned here), inbox recipients and
 // read state, pull request facts, work-item metric events, scores, benchmark
 // summaries and dead letters. projections.ts writes the projected entities;

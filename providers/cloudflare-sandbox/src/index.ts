@@ -1,4 +1,4 @@
-// The cloudflare-sandbox provider Worker (02 §5). Its own deploy: a
+// The cloudflare-sandbox provider Worker. Its own deploy: a
 // control-plane deploy does not restart sandboxes.
 //
 // Exports:

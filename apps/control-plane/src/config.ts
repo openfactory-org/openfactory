@@ -1,4 +1,4 @@
-// Control-plane configuration from Worker vars and secrets (D31). Port of the
+// Control-plane configuration from Worker vars and secrets. Port of the
 // key handling of internal/config (MasterKey, EncryptionKeys, SigningKeys,
 // parseKeyList, DeriveKey) and of the duration settings. Settings that an
 // admin changes at run time live in the TeamDO `settings` module.

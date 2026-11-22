@@ -1,4 +1,4 @@
-// REST handlers: proposals. Owner: WS13. TeamDO keeps the versions; the review
+// REST handlers: proposals. TeamDO keeps the versions; the review
 // item belongs to a WorkDO, so the Worker resolves it after the decision.
 import { doName } from "@openfactory/core";
 import {

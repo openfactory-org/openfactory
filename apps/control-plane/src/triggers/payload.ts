@@ -1,5 +1,5 @@
 // The webhook payload pattern matcher. Port of internal/triggers/payload.go.
-// Numbers are compared exactly (plan rule 12): a raw JSON body is parsed with
+// Numbers are compared exactly: a raw JSON body is parsed with
 // lossless-json, and numbers compare as decimals (compareJSONNumbers), like Go
 // math/big. A body that is already a JS value is compared as decoded.
 import { compareJSONNumbers, isLosslessNumber, parseLossless } from "@openfactory/core";

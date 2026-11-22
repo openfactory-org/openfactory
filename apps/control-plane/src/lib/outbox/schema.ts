@@ -1,4 +1,5 @@
-// Base tables of every BaseDO (scope "lib"). 03 §6.1 and §11 "common to every DO".
+// Base tables of every BaseDO (scope "lib"): meta, the outbox, the inbox dedupe
+// and the timers.
 import type { Migration } from "../sql/migrate";
 
 export const LIB_MIGRATIONS: readonly Migration[] = [

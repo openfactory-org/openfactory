@@ -1,4 +1,4 @@
-// Frozen contract (C0). The control-plane Worker environment: every binding,
+// The control-plane Worker environment: every binding,
 // var and secret of wrangler.jsonc. Keep it in step with wrangler.jsonc.
 // `npm run cf-types -w @openfactory/control-plane` writes the generated view to
 // worker-configuration.d.ts (not compiled; review aid). test/env.test.ts checks

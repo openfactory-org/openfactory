@@ -2,11 +2,6 @@
 // runs and messages from WorkDO (and compacted messages from R2), the engine
 // through WorkDO.runsCreate / runsCancel / api, the store through TeamDO.
 // Everything here is plumbing. The logic is in service.ts and benchmark.ts.
-//
-// Calls that WorkDO does not serve yet are listed in the report of WS13:
-// WorkDO.api ops "listRunChildren" (exists), "getRunStartCommits",
-// "createInboxItem", "followUp"; DispatchPlan.startingRepoRefs / agentPins;
-// CreateRunInput.run.startingRepoRefs.
 import {
   DEFAULT_TEAM,
   doName,

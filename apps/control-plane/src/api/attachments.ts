@@ -1,4 +1,4 @@
-// REST handlers: attachments. Owner: WS5. Port of internal/api/attachments.go.
+// REST handlers: attachments. Port of internal/api/attachments.go.
 // The object and its metadata live in R2 under attachments/<team>/<id>/<name>
 // (custom metadata holds the creator), so no DO row is needed; the runner
 // downloads read the same object (src/runner-api/transfer.ts).

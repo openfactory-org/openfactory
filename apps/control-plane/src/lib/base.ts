@@ -2,7 +2,7 @@
 // together migrations (src/lib/sql), the outbox (src/lib/outbox), timers
 // (src/lib/timers) and the one alarm.
 //
-// Rules (plan "Rules for the port"):
+// Rules:
 // - One this.tx(...) (transactionSync) per request or alarm step. No await inside.
 // - Effects leave only through this.enqueue(...) inside that transaction.
 // - Code that must wait for the commit (live pushes, an outbox kick) goes to

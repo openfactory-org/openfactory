@@ -1,4 +1,4 @@
-// TeamDO module: secrets (WS4). Envelope-encrypted secrets (src/secrets),
+// TeamDO module: secrets. Envelope-encrypted secrets (src/secrets),
 // the REST routes of internal/api/platform.go, secret resolution for runs,
 // and rewrap (internal/rewrap) over every sealed value of the team.
 //
@@ -335,5 +335,3 @@ export const ops: Record<string, TeamOp> = {
     return { found: v !== undefined, value: v ?? "" };
   },
 };
-
-export function setup(_kit: TeamKit): void {}

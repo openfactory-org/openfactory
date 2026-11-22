@@ -188,7 +188,7 @@ describe("registry validate", () => {
     for (const b of invalid) expectInvalid(srv(b), JSON.stringify(b));
   });
 
-  it("warns about a proxied server on a private network (gap 20)", () => {
+  it("warns about a proxied server on a private network", () => {
     for (const host of ["10.0.0.5", "192.168.1.2", "mcp.local", "localhost", "172.20.0.1"]) {
       const m = srv({ name: "a", url: `http://${host}/mcp`, connection: "proxy" });
       validate(m);

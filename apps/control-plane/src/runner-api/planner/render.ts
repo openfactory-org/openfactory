@@ -7,7 +7,6 @@ import { parseDuration } from "../../engine/sessions";
 import type { Run, RunSession } from "../../engine/types";
 import { deniedWithoutRequired, mcpServerUrlsOf, type SecretsBuilder, type StartConfig } from "../startconfig";
 import { CREDENTIAL_DEFAULT, redactList, type HarnessCredential } from "./credentials";
-import { cfgOf } from "./deps";
 import type { McpServer } from "./mcp";
 import { splitCloneUrl, type Checkout } from "./repos";
 
@@ -46,7 +45,7 @@ function idleSeconds(env: Env, minutes: number | undefined, set: boolean | undef
 
 /** StartConfig from a plan (runnermode.go StartConfig, plus the network policy of the plan). */
 export function startConfigOf(env: Env, run: Run, session: RunSession, plan: RunnerPlan): StartConfig {
-  const cfg = cfgOf(run);
+  const cfg = run.config;
   const base = (env.OF_PUBLIC_URL ?? "").replace(/\/+$/, "");
   const mcp: Record<string, { url?: string; auth?: string; command?: string; args?: string[] }> = {};
   for (const [name, srv] of Object.entries(plan.mcpServers)) {
@@ -84,7 +83,7 @@ export function startConfigOf(env: Env, run: Run, session: RunSession, plan: Run
     harness: {
       type: cfg.harness?.type ?? "claude",
       model: cfg.harness?.model ?? "",
-      reasoning_level: cfg.harness?.reasoningLevel ?? cfg.harness?.reasoning_level ?? "",
+      reasoning_level: cfg.harness?.reasoningLevel ?? "",
       system_prompt: plan.systemPrompt,
       resume_session_id: run.session_id ?? "",
       mcp_servers: mcp,

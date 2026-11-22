@@ -15,9 +15,12 @@ import {
   type PushActorKind,
   type SourceRef,
 } from "@openfactory/core";
+import { prFactsKey } from "./build";
 
 /** The part of a forge event that the facts need (core.Event and CoreEvent both fit). */
 export interface FactEvent {
+  /** The event ID. IndexDO orders events of the same time by it. */
+  id?: string;
   team_id: string;
   provider: string;
   type: string;
@@ -29,8 +32,40 @@ export interface FactEvent {
 
 const forgeProviders = new Set(["github", "gitlab", "azure_devops"]);
 
+const normProvider = (p: string): string => (p ?? "").trim().replaceAll("-", "_").toLowerCase();
+
 function forgeProvider(p: string): boolean {
-  return forgeProviders.has(p.trim().replaceAll("-", "_").toLowerCase());
+  return forgeProviders.has(normProvider(p));
+}
+
+/**
+ * The pr_key under which IndexDO stores the pushes to one branch. The
+ * repository is compared without case and the branch with case, as
+ * FactsBook does. The "push:" prefix keeps it apart from pull request keys.
+ */
+export function pushFactsKey(provider: string, repo: string, branch: string): string {
+  return `push:${normProvider(provider)}:${repo.toLowerCase()}@${branch}`;
+}
+
+/**
+ * The pr_key under which IndexDO stores a forge event, or undefined when the
+ * facts do not use the event. An event of a pull request goes under the
+ * PRFactsKey of that pull request. A push has no pull request: it goes under
+ * the key of its branch (pushFactsKey), and the collector replays it with the
+ * events of the pull requests whose head branch it is. Go matched the push to
+ * the open pull requests of the branch when it arrived (recordPush).
+ */
+export function factsKeyOf(ev: Pick<FactEvent, "provider" | "type" | "source" | "attributes">): string | undefined {
+  const p = normProvider(ev.provider);
+  if (!forgeProviders.has(p)) return undefined;
+  const src = (ev.source ?? {}) as { repo?: string; number?: number };
+  if (!src.repo) return undefined;
+  if (lower(ev.type ?? "") === "push") {
+    const branch = ev.attributes?.["branch"];
+    return typeof branch === "string" && branch !== "" ? pushFactsKey(p, src.repo, branch) : undefined;
+  }
+  if (!src.number) return undefined;
+  return prFactsKey({ forge: p.toUpperCase(), repo: src.repo, number: src.number });
 }
 
 function actorKind(a: FactEvent["actor"]): PushActorKind {

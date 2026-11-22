@@ -3,7 +3,7 @@
 import { invalid } from "@openfactory/core";
 import type { Run } from "../../engine/types";
 import { expandWith } from "../../secrets/expand";
-import { cfgOf, wrap, type PlannerDeps } from "./deps";
+import { wrap, type PlannerDeps } from "./deps";
 
 export const ORCHESTRATION_SERVER = "factory";
 
@@ -38,7 +38,7 @@ const withoutAuthorization = (h: Record<string, string> | undefined): Record<str
 export async function mcpServers(d: PlannerDeps, r: Run): Promise<Record<string, McpServer>> {
   const out: Record<string, McpServer> = {};
   const base = d.sandboxUrl;
-  for (const [name, s0] of Object.entries(cfgOf(r).mcp_servers ?? {})) {
+  for (const [name, s0] of Object.entries(r.config.mcp_servers ?? {})) {
     if (name === ORCHESTRATION_SERVER) continue;
     let s: McpServer = { ...s0 };
     if (s.managedId) {

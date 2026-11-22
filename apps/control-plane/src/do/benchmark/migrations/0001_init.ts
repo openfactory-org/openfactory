@@ -1,4 +1,4 @@
-// BenchmarkDO schema (03 §11.7), with the columns the DO queries by.
+// BenchmarkDO schema, with the columns the DO queries by.
 export default `
 CREATE TABLE bench (k INTEGER PRIMARY KEY CHECK (k = 1), id TEXT NOT NULL, factory_id TEXT NOT NULL, suite TEXT NOT NULL,
   state TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, created_ms INTEGER NOT NULL, finished_ms INTEGER, data TEXT NOT NULL);

@@ -2,7 +2,6 @@
 // workers (`openfactory-runtime worker --process`) connected to the control
 // plane. The control plane allows them only with OF_DEV_PROCESS_WORKERS=true.
 // They run agents on the host without isolation, so egress is "none".
-// Owner: WS6.
 import type { WorkerHubClient } from "../microvm/provider";
 import {
   ProviderError,

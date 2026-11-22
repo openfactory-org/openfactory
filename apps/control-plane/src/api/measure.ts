@@ -1,4 +1,4 @@
-// Shared helpers of the WS13 handlers (scores, benchmarks, metrics, proposals,
+// Shared helpers of the measurement handlers (scores, benchmarks, metrics, proposals,
 // self-improvement, spend): factory access through TeamDO, IndexDO reads, since.
 import { OfError, doName } from "@openfactory/core";
 import type { Scorer } from "@openfactory/core";

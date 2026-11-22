@@ -2,7 +2,7 @@
 // and publishes the definition check on pull requests. Port of
 // internal/server/defsync.go. Definitions are read with the forge content
 // APIs only (no git). Network I/O happens here, in the Worker; the apply
-// itself is one TeamDO transaction (plan rule 2).
+// itself is one TeamDO transaction with no network I/O inside.
 import {
   OfError,
   clipBytes,

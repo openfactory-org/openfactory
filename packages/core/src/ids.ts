@@ -1,6 +1,6 @@
-// Frozen contract (C0). IDs, partition tokens and Durable Object names.
+// IDs, partition tokens and Durable Object names.
 //
-// Format (plan rule 5, appendix 03 §3):
+// Format:
 //
 //   token = kind(1) + 15 base32 chars          80 random bits, or a hash
 //   id    = prefix "_" token rand(12)          28 chars after "_"
@@ -55,7 +55,8 @@ export function newToken(kind: TokenKind): string {
 
 /**
  * A deterministic token: kind + base32(sha256(parts joined by "|"))[:15].
- * Used for new work items without a router reservation (plan rule 4).
+ * Used for new work items without a router reservation, so a retried action
+ * reaches the same WorkDO.
  */
 export async function hashToken(kind: TokenKind, ...parts: string[]): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(parts.join("|")));

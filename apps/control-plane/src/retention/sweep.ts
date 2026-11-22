@@ -1,6 +1,7 @@
 // Retention sweeps. Port of the retention loops of internal/server and
 // internal/objectstore (RunData.Prune, PruneAttachments), cut into steps that
-// fit one alarm or one Queue message (plan rules 7, 9 and 10).
+// fit one alarm or one Queue message (a Worker invocation has a subrequest
+// limit, and a failing alarm is retried only 6 times).
 //
 // - Run data: the objects of a finished run (`runs/<id>/`, `snapshots/<team>/<id>/`)
 //   are deleted when the run's last activity is older than

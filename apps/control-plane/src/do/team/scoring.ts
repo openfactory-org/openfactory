@@ -1,4 +1,4 @@
-// TeamDO module: scoring (WS13). Scores and markers of the scoring service,
+// TeamDO module: scoring. Scores and markers of the scoring service,
 // scorer and benchmark suite lists, the benchmark plan, and the review of
 // proposed definition changes. Migration range 0400-0499.
 import {

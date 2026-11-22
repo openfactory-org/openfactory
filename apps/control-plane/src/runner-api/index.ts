@@ -289,7 +289,7 @@ async function sessionRoute(
       } catch {
         return errorBody(501, "not_implemented", "not implemented");
       }
-      const tok = await issuer.token(a.run as never, body.audience, ttl * 1000, {
+      const tok = await issuer.token(a.run, body.audience, ttl * 1000, {
         ...(a.run.config?.worker_host ? { workerHost: a.run.config.worker_host } : {}),
       });
       return json(200, { token: tok.token, expires_at: new Date(tok.expiresAt).toISOString() });
@@ -320,7 +320,7 @@ async function sessionRoute(
         Number(url.searchParams.get("after") ?? "0") || 0,
       )) as ConversationRows | RunnerErr;
       if (isErr(res)) return fromErr(res);
-      return json(200, buildConversation(res.run as never, (await conversationMessages(env, res)) as never));
+      return json(200, buildConversation(res.run, (await conversationMessages(env, res)) as never));
     }
     case "GET /runner/v1/session/commands":
       return commands(env, stub, claims, url, request.signal);

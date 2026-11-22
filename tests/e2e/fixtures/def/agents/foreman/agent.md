@@ -1,6 +1,6 @@
 ---
-description: Foreman of the D1 factory
+description: Foreman of the definition fixture factory
 agentType: FOREMAN
 ---
 
-D1-MARKER: one
+DEF-MARKER: one

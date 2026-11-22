@@ -1,4 +1,4 @@
-// IndexDO schema (03 §11.5) plus inbox recipients and per-user read state.
+// IndexDO schema: the read model, inbox recipients and per-user read state.
 export default `
 CREATE TABLE run_summaries (id TEXT PRIMARY KEY, factory_id TEXT NOT NULL DEFAULT '', work_item_id TEXT NOT NULL DEFAULT '',
   parent_run_id TEXT NOT NULL DEFAULT '', root_run_id TEXT NOT NULL DEFAULT '', agent_name TEXT NOT NULL DEFAULT '',

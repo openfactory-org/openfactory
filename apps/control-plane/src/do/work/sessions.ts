@@ -10,7 +10,7 @@ import { writeTimeline } from "./projections";
 
 // ---------- slots (DispatchDO) ----------
 
-/** dispatch.request for the next session of a queued run (03 §7.2 step 1). */
+/** dispatch.request for the next session of a queued run. */
 export function requestSlot(fx: Fx, r: Run): void {
   const latest = fx.repo.latestSession(r.id);
   if (latest && latest.state !== "ended") return;

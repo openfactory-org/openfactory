@@ -1,5 +1,5 @@
 // @openfactory/boatdev: the boat.dev sandbox provider (a library the control
-// plane runs in-process). Spec: .owner/refactor/02-sandbox-providers.md §3.
+// plane runs in-process). See docs/sandbox-providers.md.
 //
 // Facts that shape it:
 // - Start limits 12 a minute, 60 an hour, 200 a day; 100 sandboxes at once ($20 plan).
@@ -146,7 +146,7 @@ function errText(e: BoatSandbox["error"]): string | undefined {
   return typeof e === "string" ? e : e.message;
 }
 
-/** Maps a boat sandbox to a TaskStatus (02 §3.4, evaluated in order). */
+/** Maps a boat sandbox to a TaskStatus. The rules are evaluated in order. */
 export function mapBoatSandbox(taskId: string, sb: BoatSandbox, ctx: Ctx = { cancelRequested: false }): TaskStatus {
   const st: TaskStatus = { taskId, state: "starting", sandboxId: sb.id, providerState: sb.state };
   const startedAt = sb.readyAt ?? sb.createdAt;
@@ -334,7 +334,7 @@ export class BoatdevProvider implements SandboxProvider {
     return shape;
   }
 
-  /** The deterministic create body for one task (02 §3.3). */
+  /** The deterministic create body for one task. */
   async createBody(task: SandboxTask): Promise<Record<string, unknown>> {
     const caps = await this.capabilities();
     const type = resolveInstanceType(caps, task.resources);

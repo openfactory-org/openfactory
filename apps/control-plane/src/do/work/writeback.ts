@@ -24,7 +24,7 @@ function nextNoticeSeq(fx: Fx, wiId: string): number {
   return seq;
 }
 
-/** e.notify: a notice to where the work item started, ordered per work item (rule 11). */
+/** e.notify: a notice to where the work item started, ordered per work item (outbox lane, not a Queue). */
 export function notify(
   fx: Fx,
   wi: WorkItem | undefined,
@@ -43,7 +43,7 @@ export function notify(
     payload: {
       message: {
         work_item_id: wi.id,
-        source: wi.source as Record<string, unknown>,
+        source: { ...wi.source },
         text,
         kind,
         factory_id: wi.factory_id,
@@ -70,7 +70,7 @@ export function notifyTop(fx: Fx, wi: WorkItem | undefined, kind: string, text: 
 /** trackerIssues: the linked issues of a work item, and its source when it is a tracker issue. */
 export function trackerIssues(wi: WorkItem): SourceRef[] {
   const out: SourceRef[] = [];
-  for (const r of workItemRefs(wi as never)) {
+  for (const r of workItemRefs(wi)) {
     if (r.kind === REF_ISSUE || (r.kind === REF_SOURCE && isTrackerIssue(r.source))) out.push(r.source);
   }
   return out;
@@ -99,7 +99,7 @@ export function trackerOp(
       message: {
         work_item_id: wi.id,
         factory_id: wi.factory_id,
-        source: issue as unknown as Record<string, unknown>,
+        source: { ...issue },
         text: "",
         kind,
         ...(state ? { issue_state: state } : {}),

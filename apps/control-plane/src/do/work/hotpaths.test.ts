@@ -79,7 +79,9 @@ describe("WorkDO query plans", () => {
   it("the send_message limit counts in SQLite on the key of the target run", async () => {
     const { token, runId } = await oneRun();
     const detail = await withFx(token, (_fx, sql) => plan(sql, SENT_MESSAGES_SQL, runId, 0, "run:x"));
-    expect(detail).toMatch(/SEARCH run_messages USING (INDEX|PRIMARY KEY)/);
+    expect(detail).toMatch(
+      /SEARCH run_messages USING INDEX run_messages_role \(run_id=\? AND role=\? AND created_ms>\?\)/,
+    );
   });
 });
 

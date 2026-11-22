@@ -1,5 +1,5 @@
 // Stateless MCP tool server over streamable HTTP (JSON responses only).
-// Appendix 04 §5.1: the Factory MCP server, the built-in integration servers
+// The Factory MCP server, the built-in integration servers
 // and the run MCP server are request/response tool servers. This module is
 // the shared JSON-RPC 2.0 handler: initialize, notifications/initialized,
 // ping, tools/list, tools/call and batch arrays. No SSE, no Mcp-Session-Id.

@@ -21,7 +21,7 @@ const ev = (p: Partial<CoreEvent>): CoreEvent => ({
   provider: "github",
   type: "issue_commented",
   actor: { provider: "github", external_id: "1", handle: "alice", is_bot: false },
-  source: {},
+  source: { provider: "github", kind: "" },
   attributes: {},
   received_at: "2026-01-01T00:00:00Z",
   ...p,
@@ -91,7 +91,7 @@ describe("continuation and mentions", () => {
   });
 
   it("covers factories by repository or integration", () => {
-    const e = ev({ source: { repo: "acme/api" } });
+    const e = ev({ source: { provider: "github", kind: "issue", repo: "acme/api" } });
     expect(factoryCovers(e, [{ codeForge: "GITHUB", owner: "acme", name: "api" }], [])).toBe(true);
     expect(factoryCovers(e, [{ codeForge: "GITHUB", owner: "acme", name: "web" }], [])).toBe(false);
     expect(factoryCovers(e, [], [])).toBe(true);
@@ -99,7 +99,7 @@ describe("continuation and mentions", () => {
     expect(factoryCovers(ev({ provider: "slack" }), [], ["linear"])).toBe(false);
     expect(
       factoryCovers(
-        ev({ provider: "azure_devops", source: { kind: "work_item", repo: "Proj" } }),
+        ev({ provider: "azure_devops", source: { provider: "azure_devops", kind: "work_item", repo: "Proj" } }),
         [{ codeForge: "AZURE_DEVOPS", owner: "org/proj", name: "r" }],
         [],
       ),

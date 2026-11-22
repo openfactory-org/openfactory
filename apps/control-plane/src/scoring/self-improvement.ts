@@ -217,20 +217,6 @@ export class SelfImprovementCoordinator {
     return pool[this.ctx.randomInt(pool.length)]!.id;
   }
 
-  /** The reviewer of a Self-improvement run: the one chosen when it started, else a new pick. */
-  async reviewerFor(run: Pick<Run, "work_item_id" | "factory_id">): Promise<string> {
-    if (run.work_item_id) {
-      const track = await this.loadTrack(run.work_item_id);
-      if (track) return track.reviewer_id ?? "";
-    }
-    try {
-      const active = await this.store.activeDefinition(run.factory_id);
-      return await this.pickReviewer(this.settings(active?.definition));
-    } catch {
-      return "";
-    }
-  }
-
   private async loadTrack(workItemId: string): Promise<ImprovementTrack | undefined> {
     const v = await this.store.kvGet(improveTrackKey(workItemId));
     if (!v) return undefined;

@@ -1,4 +1,4 @@
-// REST handlers: runs. Owner: WS5. The Worker authenticates; the WorkDO of
+// REST handlers: runs. The Worker authenticates; the WorkDO of
 // the run (by its partition token) owns it; lists come from IndexDO.
 import {
   builtinMCPProvider,
@@ -15,11 +15,11 @@ import {
   validateMetadata,
   type SourceRef,
 } from "@openfactory/core";
-import type { MachineSpec as CoreMachineSpec, MCPServer } from "@openfactory/core";
-import type { CallMeta, CoreEvent } from "../contracts/do-messages";
+import type { MachineSpec, MCPServer } from "@openfactory/core";
+import type { CallMeta } from "../contracts/do-messages";
 import type { Env } from "../contracts/env";
 import { runView } from "../engine/view";
-import { authorizeInTeam } from "../auth/roles";
+import { actorId, authorizeInTeam } from "../auth/roles";
 import { callerPrincipal } from "../engine/principal";
 import {
   isTerminal,
@@ -59,7 +59,7 @@ export const manualRunDispatcher: ManualRunDispatcher = async (env, input) => {
     platformIntakeDeps(env, input.teamId),
     input.factoryId,
     input.automation,
-    input.event as unknown as CoreEvent,
+    input.event,
   );
   if (!out.runId) throw new OfError("internal_error", "the automation started no run");
   const run = (await env.WORK.getByName(doName.work(input.teamId, partitionOf(out.runId))).getRun(out.runId)) as Run;
@@ -92,13 +92,13 @@ async function viewOf(env: Env, ctx: RouteContext, run: Run): Promise<Record<str
 interface Snapshot {
   factory?: { id: string };
   agents?: AgentConfig[];
-  runtime?: { machines?: Record<string, CoreMachineSpec> | null };
+  runtime?: { machines?: Record<string, MachineSpec> | null };
 }
 
 interface Resolved {
   factoryId: string;
   agent: AgentConfig;
-  machines?: Record<string, CoreMachineSpec> | null;
+  machines?: Record<string, MachineSpec> | null;
 }
 
 async function resolveAgent(env: Env, ctx: RouteContext, factoryRef: string, agentRef: string): Promise<Resolved> {
@@ -123,10 +123,6 @@ async function resolveAgentById(env: Env, ctx: RouteContext, agentId: string): P
   throw notFound(`agent ${agentId}`);
 }
 
-function actorOf(ctx: RouteContext): string {
-  return ctx.principal?.userId || ctx.principal?.id || "api";
-}
-
 // ---------- handlers ----------
 
 /** RunConfig of POST /runs (internal/api/runs.go): optional overrides for the agent of the run. */
@@ -139,7 +135,7 @@ interface RunConfigBody {
   } | null;
   model_id?: string;
   environment_id?: string;
-  machine?: string | CoreMachineSpec | null;
+  machine?: string | MachineSpec | null;
   worker_host?: string;
   mcp_servers?: Record<string, MCPServer> | null;
   secrets?: string[] | null;
@@ -326,14 +322,15 @@ export const createRun: Handler = async (req, env, ctx) => {
     ? await resolveAgent(env, ctx, factoryRef, agentRef)
     : await resolveAgentById(env, ctx, b.agent_identity_uid!);
   const factoryId = resolved.factoryId;
-  const agent = applyOverrides(resolved.agent as never, ov, resolved.machines as never) as unknown as AgentConfig;
+  const agent = applyOverrides(resolved.agent, ov, resolved.machines);
   const token = newToken("w");
   const out = (await env.WORK.getByName(doName.work(teamOf(ctx), token)).runsCreate(callMeta(ctx), {
     dispatch: {
       factoryId,
       config: agent,
       prompt: b.prompt,
-      actor: actorOf(ctx),
+      // Go recorded the channel (triggered_by) as the actor of a dispatch.
+      actor: requestSource(req, ctx),
       title: b.title || b.prompt.split("\n")[0]!.slice(0, 120),
       workItemId: newRoutedId("wi", token),
       triggeredBy: requestSource(req, ctx),
@@ -361,9 +358,7 @@ export const dispatchRun: Handler = async (req, env, ctx) => {
   // WorkDO checks again; this check comes first so that a refused caller leaves no router reservation.
   authorizeInTeam(ctx.principal, teamOf(ctx), factoryId, ctx.route.role);
   if (b.overrides?.environment_id) await checkEnvironment(env, ctx, b.overrides.environment_id);
-  const agent = b.overrides
-    ? (applyOverrides(resolved.agent as never, b.overrides, resolved.machines as never) as unknown as AgentConfig)
-    : resolved.agent;
+  const agent = b.overrides ? applyOverrides(resolved.agent, b.overrides, resolved.machines) : resolved.agent;
   const key = sourceKey(source);
   let token = newToken("w");
   let workItemId = newRoutedId("wi", token);
@@ -382,9 +377,10 @@ export const dispatchRun: Handler = async (req, env, ctx) => {
       factoryId,
       config: agent,
       prompt: b.prompt,
-      actor: actorOf(ctx),
+      // Go recorded the channel (triggered_by) as the actor of a dispatch.
+      actor: requestSource(req, ctx),
       title,
-      source: source as never,
+      source,
       ...(key ? { sourceKey: key } : {}),
       workItemId,
       triggeredBy: requestSource(req, ctx),
@@ -496,7 +492,7 @@ export const postRunMessage: Handler = async (req, env, ctx) => {
   if (b.attachments?.length) await checkAttachments(env, teamOf(ctx), b.attachments);
   const rec = await workFor(env, ctx, ctx.params.runId ?? "").runsMessage(callMeta(ctx), ctx.params.runId ?? "", {
     message,
-    actor: actorOf(ctx),
+    actor: actorId(ctx.principal),
     ...(b.attachments ? { attachments: b.attachments } : {}),
   });
   return json({ run_id: ctx.params.runId ?? "", ...rec }, 202);
