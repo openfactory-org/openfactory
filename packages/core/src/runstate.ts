@@ -3,7 +3,7 @@
 
 import { OfError } from "./errors";
 import { lookupFailure, MAX_RETRY_SESSIONS, runnerFailureCode, type FailureCode } from "./failure";
-import type { RunState } from "./types";
+import type { RunState } from "./run";
 
 /** Something that happens to a run. */
 export const RUN_EVENTS = [

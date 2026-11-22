@@ -1,5 +1,5 @@
-// REST handlers: webhooks (owner WS10a). Webhook records live in TeamDO
-// (src/do/team/schedules.ts); the delivery log lives in IngressDO
+// REST handlers: webhooks. Webhook records live in TeamDO
+// (src/do/team/webhooks.ts); the delivery log lives in IngressDO
 // (partition "webhook:<id>"). The worker-side ingress handlers for
 // POST /webhooks/w/{uid}[/{token}] and POST /integrations/github/webhook are
 // at the end of this file.

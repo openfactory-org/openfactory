@@ -1,7 +1,7 @@
 // The responder port: posts outbound messages back to a work source. Port of
 // core.Responder and core.IssueTracker. Forges, integrations and responder
 // plugins implement it; the notifier calls it.
-import type { OutboundMessage, PullRequestRef, SourceRef } from "./types";
+import type { OutboundMessage, PullRequestRef, SourceRef } from "./workitem";
 
 /** Posts outbound messages back to a work source. Trackers also write the issue state back. */
 export interface Responder {

@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { describeProviderConformance, sampleTask } from "@openfactory/sandbox/testing";
 import { REPORT_HOST, blockedMessage, decideEgress, recordBlocked, type EgressProps } from "../src/egress";
 import { Egress, SandboxProvider } from "../src/index";
-import { CF_INSTANCE_TYPES } from "../src/provider";
-import type { TaskNetworkPolicy } from "@openfactory/sandbox";
+import { CF_INSTANCE_TYPES, CloudflareSandboxProvider, LIST_PARALLEL, type TaskSandboxStub } from "../src/provider";
+import { ProviderError, type TaskNetworkPolicy } from "@openfactory/sandbox";
 import { BOOTSTRAP_ENTRYPOINT } from "@openfactory/sandbox/provider-kit";
 import { BOOT_GRACE_MS, DEADLINE_SLACK_MS, INACTIVITY_TIMEOUT_MS, KEEPALIVE_MS } from "../src/task-sandbox";
 import { fakeProvider, harness } from "./fakes";
@@ -300,6 +300,35 @@ describe("provider", () => {
     registry.add("run_stale.1", 0);
     expect(await provider.list()).toEqual([]);
     expect(registry.list().taskIds).toEqual([]);
+  });
+  it("list runs status calls in bounded parallel batches and keeps registry order", async () => {
+    // Two registry pages: 501 IDs at a page size of 500.
+    const { registry } = fakeProvider();
+    const ids = Array.from({ length: 501 }, (_, i) => `run_${String(i).padStart(4, "0")}.1`);
+    for (const id of ids) registry.add(id, 0);
+    const stale = new Set([ids[3]!, ids[250]!]);
+    let inFlight = 0;
+    let peak = 0;
+    const provider = new CloudflareSandboxProvider({
+      sandbox: (id) =>
+        ({
+          status: async () => {
+            inFlight++;
+            peak = Math.max(peak, inFlight);
+            // Later tasks answer first: the result order must not follow completion.
+            await new Promise((r) => setTimeout(r, (600 - ids.indexOf(id)) % 3));
+            inFlight--;
+            if (stale.has(id)) throw new ProviderError("not_found", "gone");
+            return { taskId: id, state: "running" };
+          },
+        }) as unknown as TaskSandboxStub,
+      registry: () => ({ list: async (c) => registry.list(c), remove: async (id) => registry.remove(id) }),
+    });
+    const got = await provider.list();
+    expect(got.map((t) => t.taskId)).toEqual(ids.filter((id) => !stale.has(id)));
+    expect(peak).toBeGreaterThan(1);
+    expect(peak).toBeLessThanOrEqual(LIST_PARALLEL);
+    expect(registry.list(undefined, 1000).taskIds).toHaveLength(499);
   });
 });
 

@@ -15,6 +15,7 @@ import {
   type InboxKind,
   type PullRequestFacts,
   type PullRequestRef,
+  type PullRequestState,
   type Run,
   type RunState,
   type Scorer,
@@ -355,7 +356,8 @@ function validPR(v: unknown): PRRef | undefined {
     repo: typeof o["repo"] === "string" ? o["repo"] : "",
     number: typeof o["number"] === "number" ? o["number"] : 0,
     url: typeof o["url"] === "string" ? o["url"] : "",
-    state: typeof o["state"] === "string" ? o["state"] : "",
+    // Event data is not checked: an unknown state ranks lowest (stateRank).
+    state: typeof o["state"] === "string" ? (o["state"] as PullRequestState) : "",
     branch: typeof o["branch"] === "string" ? o["branch"] : "",
   };
   return pr.url || (pr.repo && pr.number) ? pr : undefined;
@@ -520,50 +522,6 @@ function sizeBuckets(costs: Map<string, number[]>): PRSizeCost[] {
   return out;
 }
 
-function buildPRFacts(db: Dashboard, prs: readonly PREntry[], since: number, until: number): void {
-  const startToMerge: number[] = [];
-  const startToPR: number[] = [];
-  const prToReview: number[] = [];
-  const reviewToMerge: number[] = [];
-  let factsSince: number | undefined;
-  const diff = (a: number, b: number): number | undefined => (b < a ? undefined : b - a);
-  for (const p of prs) {
-    const f = p.facts;
-    if (f?.opened_at) {
-      const t = ms(f.opened_at);
-      if (factsSince === undefined || t < factsSince) factsSince = t;
-    }
-    if (!f || !f.merged_at) {
-      if (!f && p.state.toLowerCase() === "merged" && inWindow(p.openedMs, since, until))
-        db.autonomy.merged_prs_without_facts++;
-      continue;
-    }
-    const merged = ms(f.merged_at);
-    if (!inWindow(merged, since, until)) continue;
-    db.autonomy.merged_prs++;
-    if (!personPushedBefore(f, new Date(merged))) db.autonomy.autonomous_merged_prs++;
-    db.cycle_time.pull_requests.count++;
-    const v = diff(p.wiCreated, merged);
-    if (v !== undefined) startToMerge.push(v);
-    const toPR = diff(p.wiCreated, p.openedMs);
-    if (toPR !== undefined) startToPR.push(toPR);
-    if (f.first_review_at) {
-      db.cycle_time.pull_requests.reviewed++;
-      const rev = ms(f.first_review_at);
-      const a = diff(p.openedMs, rev);
-      if (a !== undefined) prToReview.push(a);
-      const b = diff(rev, merged);
-      if (b !== undefined) reviewToMerge.push(b);
-    }
-  }
-  if (factsSince !== undefined) db.autonomy.facts_since = iso(factsSince);
-  const c = db.cycle_time.pull_requests;
-  c.start_to_merge_ms = median(startToMerge);
-  c.start_to_pr_ms = median(startToPR);
-  c.pr_to_first_review_ms = median(prToReview);
-  c.first_review_to_merge_ms = median(reviewToMerge);
-}
-
 // ---------- Runs ----------
 
 const runAgent = (r: MRun): string => r.agent_name || r.config?.name || "(unknown)";
@@ -574,163 +532,160 @@ const runSource = (r: MRun): string =>
 /** The source of a run for the metrics ("API" for an empty or unknown triggered_by). */
 export { runSource };
 
-// ---------- Build ----------
+// ---------- Daily series ----------
+
+/** One point per UTC day of [since, until), at most MAX_DAILY_POINTS. */
+class DailySeries {
+  readonly points: DailyPoint[] = [];
+  private readonly startDay: number;
+
+  constructor(since: number, until: number) {
+    this.startDay = Math.floor(since / DAY_MS) * DAY_MS;
+    for (let t = this.startDay; t < until && this.points.length < MAX_DAILY_POINTS; t += DAY_MS) {
+      this.points.push({
+        date: iso(t).slice(0, 10),
+        runs: 0,
+        cost_usd: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        work_items_created: 0,
+        work_items_completed: 0,
+        prs_opened: 0,
+        prs_merged: 0,
+        scores: 0,
+        scores_passed: 0,
+      });
+    }
+  }
+
+  /** Applies fn to the point of the day of t. A time outside the series changes nothing. */
+  at(t: number, fn: (p: DailyPoint) => void): void {
+    const day = Math.floor(t / DAY_MS) * DAY_MS;
+    if (day < this.startDay) return;
+    const p = this.points[(day - this.startDay) / DAY_MS];
+    if (p) fn(p);
+  }
+}
+
+// ---------- Sections ----------
+//
+// Each section reads the input and returns its part of the dashboard. A
+// section that has a daily column also adds to the daily series. build()
+// calls the sections in a fixed order, so floating-point sums keep their
+// order and the output is stable.
+
+/** The window of a build. */
+interface BuildWindow {
+  since: number;
+  until: number;
+  daily: DailySeries;
+}
+
+interface WorkItemSection {
+  work_items: Dashboard["work_items"];
+  autonomy: Pick<Dashboard["autonomy"], "completed_work_items" | "autonomous_work_items" | "rate">;
+  cycle_time: Omit<Dashboard["cycle_time"], "pull_requests">;
+}
 
 function sortedEvents(ev: readonly MEvent[] | undefined): MEvent[] {
   return [...(ev ?? [])].sort((a, b) => ms(a.created_at) - ms(b.created_at));
 }
 
-/** Derives the dashboard from raw data for [since, until). */
-export function build(
-  factoryId: string,
-  input: MetricsData | null | undefined,
-  sinceMs: number,
-  untilMs: number,
-): Dashboard {
-  const d = input ?? emptyData();
-  const since = sinceMs;
-  const until = untilMs;
-  const db: Dashboard = {
-    factory_id: factoryId,
-    since: iso(since),
-    until: iso(until),
-    work_items: { created: 0, completed: 0, cancelled: 0, by_stage: {} },
-    pull_requests: {
-      opened: 0,
-      merged: 0,
-      closed: 0,
-      open: 0,
-      merge_rate: 0,
-      median_cost_usd: 0,
-      total_cost_usd: 0,
-      most_expensive: [],
-      median_time_to_pr_ms: 0,
-      by_size: [],
-    },
-    autonomy: {
-      completed_work_items: 0,
-      autonomous_work_items: 0,
-      rate: 0,
-      merged_prs: 0,
-      autonomous_merged_prs: 0,
-      pr_rate: 0,
-      merged_prs_without_facts: 0,
-    },
-    cycle_time: {
-      count: 0,
-      median_ms: 0,
-      p90_ms: 0,
-      mean_ms: 0,
-      stage_median_ms: {},
-      pull_requests: {
-        count: 0,
-        start_to_merge_ms: 0,
-        start_to_pr_ms: 0,
-        pr_to_first_review_ms: 0,
-        first_review_to_merge_ms: 0,
-        reviewed: 0,
-      },
-    },
-    human_wait: { items: 0, pending: 0, total_ms: 0, median_ms: 0, p90_ms: 0, by_kind: {} },
-    runs: { total: 0, by_agent: {}, by_state: {}, by_agent_state: {}, by_model: {}, by_source: {} },
-    cost: { total: newUsage(), by_agent: {}, by_model: {}, compute_by_shape: {} },
-    scorers: [],
-    daily: [],
-  };
-
-  // Daily series.
-  const startDay = Math.floor(since / DAY_MS) * DAY_MS;
-  const daily: DailyPoint[] = [];
-  for (let t = startDay; t < until && daily.length < MAX_DAILY_POINTS; t += DAY_MS) {
-    daily.push({
-      date: iso(t).slice(0, 10),
-      runs: 0,
-      cost_usd: 0,
-      input_tokens: 0,
-      output_tokens: 0,
-      work_items_created: 0,
-      work_items_completed: 0,
-      prs_opened: 0,
-      prs_merged: 0,
-      scores: 0,
-      scores_passed: 0,
-    });
+function inboxByWorkItem(inbox: readonly MInbox[]): Map<string, MInbox[]> {
+  const out = new Map<string, MInbox[]>();
+  for (const it of inbox) {
+    if (!it.work_item_id) continue;
+    const l = out.get(it.work_item_id);
+    if (l) l.push(it);
+    else out.set(it.work_item_id, [it]);
   }
-  const at = (t: number, fn: (p: DailyPoint) => void): void => {
-    const day = Math.floor(t / DAY_MS) * DAY_MS;
-    if (day < startDay) return;
-    const p = daily[(day - startDay) / DAY_MS];
-    if (p) fn(p);
-  };
+  return out;
+}
 
-  const inboxByWI = new Map<string, MInbox[]>();
-  for (const it of d.inbox) {
-    if (it.work_item_id) {
-      const l = inboxByWI.get(it.work_item_id) ?? [];
-      l.push(it);
-      inboxByWI.set(it.work_item_id, l);
-    }
-  }
-
-  // ----- Work items, autonomy, cycle time -----
+/** Work items created and completed in the window, their autonomy and their cycle time. */
+function workItemSection(d: MetricsData, w: BuildWindow): WorkItemSection {
+  const { since, until, daily } = w;
+  const work_items: Dashboard["work_items"] = { created: 0, completed: 0, cancelled: 0, by_stage: {} };
+  let completedItems = 0;
+  let autonomousItems = 0;
   const cycle: number[] = [];
   const stageDur = new Map<string, number[]>();
-  for (const w of d.workItems) {
-    const ev = sortedEvents(d.events[w.id]);
-    const autonomous = isAutonomous(w, ev, inboxByWI.get(w.id) ?? []);
-    const created = ms(w.created_at);
+  const inbox = inboxByWorkItem(d.inbox);
+  for (const wi of d.workItems) {
+    const ev = sortedEvents(d.events[wi.id]);
+    const created = ms(wi.created_at);
     if (inWindow(created, since, until)) {
-      db.work_items.created++;
-      bump(db.work_items.by_stage, w.stage);
-      at(created, (p) => p.work_items_created++);
+      work_items.created++;
+      bump(work_items.by_stage, wi.stage);
+      daily.at(created, (p) => p.work_items_created++);
     }
-    if (!w.completed_at) continue;
-    const completed = ms(w.completed_at);
+    if (!wi.completed_at) continue;
+    const completed = ms(wi.completed_at);
     if (!inWindow(completed, since, until)) continue;
-    if (w.stage === "cancelled") {
-      db.work_items.cancelled++;
-    } else if (w.stage === "complete") {
-      db.work_items.completed++;
-      at(completed, (p) => p.work_items_completed++);
-      db.autonomy.completed_work_items++;
-      if (autonomous) db.autonomy.autonomous_work_items++;
-      const dur = completed - created;
-      if (dur >= 0) cycle.push(dur);
-      const sd = stageDurations(w, ev);
-      if (sd) {
-        for (const [st, v] of Object.entries(sd)) {
-          const l = stageDur.get(st) ?? [];
-          l.push(v);
-          stageDur.set(st, l);
-        }
-      }
+    if (wi.stage === "cancelled") {
+      work_items.cancelled++;
+      continue;
+    }
+    if (wi.stage !== "complete") continue;
+    work_items.completed++;
+    daily.at(completed, (p) => p.work_items_completed++);
+    completedItems++;
+    if (isAutonomous(wi, ev, inbox.get(wi.id) ?? [])) autonomousItems++;
+    const dur = completed - created;
+    if (dur >= 0) cycle.push(dur);
+    const sd = stageDurations(wi, ev);
+    if (!sd) continue;
+    for (const [st, v] of Object.entries(sd)) {
+      const l = stageDur.get(st);
+      if (l) l.push(v);
+      else stageDur.set(st, [v]);
     }
   }
-  db.autonomy.rate = ratio(db.autonomy.autonomous_work_items, db.autonomy.completed_work_items);
-  db.cycle_time.count = cycle.length;
-  db.cycle_time.median_ms = median(cycle);
-  db.cycle_time.p90_ms = percentile(cycle, 90);
-  db.cycle_time.mean_ms = mean(cycle);
-  for (const [st, xs] of stageDur) db.cycle_time.stage_median_ms[st] = median(xs);
+  const stage_median_ms: Record<string, number> = {};
+  for (const [st, xs] of stageDur) stage_median_ms[st] = median(xs);
+  return {
+    work_items,
+    autonomy: {
+      completed_work_items: completedItems,
+      autonomous_work_items: autonomousItems,
+      rate: ratio(autonomousItems, completedItems),
+    },
+    cycle_time: {
+      count: cycle.length,
+      median_ms: median(cycle),
+      p90_ms: percentile(cycle, 90),
+      mean_ms: mean(cycle),
+      stage_median_ms,
+    },
+  };
+}
 
-  // ----- Run cost per work item -----
-  const wiCost = new Map<string, number>();
-  for (const r of d.runs) {
-    if (r.work_item_id) wiCost.set(r.work_item_id, (wiCost.get(r.work_item_id) ?? 0) + (r.usage?.cost_usd ?? 0));
+/** Run cost per work item, over all runs of the input. */
+function costPerWorkItem(runs: readonly MRun[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const r of runs) {
+    if (r.work_item_id) out.set(r.work_item_id, (out.get(r.work_item_id) ?? 0) + (r.usage?.cost_usd ?? 0));
   }
+  return out;
+}
 
-  // ----- Pull requests -----
-  const prs = collectPRs(d.workItems, d.events, wiCost, d.facts);
+/** Pull requests opened in the window: counts, cost and size. */
+function pullRequestSection(prs: readonly PREntry[], w: BuildWindow): Dashboard["pull_requests"] {
+  const { since, until, daily } = w;
+  let opened = 0;
+  let merged = 0;
+  let closed = 0;
+  let open = 0;
+  let total = 0;
   const prCosts: number[] = [];
   const timeToPR: number[] = [];
   const sizeCosts = new Map<string, number[]>();
   const expensive: PRCost[] = [];
   for (const p of prs) {
     if (!inWindow(p.openedMs, since, until)) continue;
-    const pr = db.pull_requests;
-    pr.opened++;
+    opened++;
     prCosts.push(p.costUsd);
-    pr.total_cost_usd += p.costUsd;
+    total += p.costUsd;
     const cost: PRCost = {
       repo: p.repo,
       number: p.number,
@@ -744,89 +699,181 @@ export function build(
     expensive.push(cost);
     if (p.wiCreated <= p.openedMs) timeToPR.push(p.openedMs - p.wiCreated);
     const size = prSize(p.facts);
-    sizeCosts.set(size, [...(sizeCosts.get(size) ?? []), p.costUsd]);
-    const merged = p.state.toLowerCase() === "merged";
-    if (merged) pr.merged++;
-    else if (p.state.toLowerCase() === "closed") pr.closed++;
-    else pr.open++;
-    at(p.openedMs, (dp) => {
+    const bucket = sizeCosts.get(size);
+    if (bucket) bucket.push(p.costUsd);
+    else sizeCosts.set(size, [p.costUsd]);
+    const isMerged = p.state.toLowerCase() === "merged";
+    if (isMerged) merged++;
+    else if (p.state.toLowerCase() === "closed") closed++;
+    else open++;
+    daily.at(p.openedMs, (dp) => {
       dp.prs_opened++;
-      if (merged) dp.prs_merged++;
+      if (isMerged) dp.prs_merged++;
     });
   }
-  db.pull_requests.merge_rate = ratio(db.pull_requests.merged, db.pull_requests.opened);
-  db.pull_requests.median_cost_usd = medianFloat(prCosts);
-  db.pull_requests.median_time_to_pr_ms = median(timeToPR);
   // Stable sort: cost descending, then opened earlier first.
   expensive.sort((a, b) =>
     a.cost_usd !== b.cost_usd ? b.cost_usd - a.cost_usd : Date.parse(a.opened_at) - Date.parse(b.opened_at),
   );
-  db.pull_requests.most_expensive = expensive.slice(0, MOST_EXPENSIVE_LIMIT);
-  db.pull_requests.by_size = sizeBuckets(sizeCosts);
-  buildPRFacts(db, prs, since, until);
-  db.autonomy.pr_rate = ratio(db.autonomy.autonomous_merged_prs, db.autonomy.merged_prs);
+  return {
+    opened,
+    merged,
+    closed,
+    open,
+    merge_rate: ratio(merged, opened),
+    median_cost_usd: medianFloat(prCosts),
+    total_cost_usd: total,
+    most_expensive: expensive.slice(0, MOST_EXPENSIVE_LIMIT),
+    median_time_to_pr_ms: median(timeToPR),
+    by_size: sizeBuckets(sizeCosts),
+  };
+}
 
-  // ----- Human wait -----
-  const waits: number[] = [];
-  for (const it of d.inbox) {
-    const created = ms(it.created_at);
-    if (it.kind === "review" || !inWindow(created, since, until)) continue;
-    db.human_wait.items++;
-    bump(db.human_wait.by_kind, it.kind as InboxKind);
-    if (it.resolved && it.resolved_at) {
-      const w = Math.max(0, ms(it.resolved_at) - created);
-      waits.push(w);
-      db.human_wait.total_ms += w;
-    } else {
-      db.human_wait.pending++;
-      const w = until - created;
-      if (w > 0) db.human_wait.total_ms += w;
+interface PRFactsSection {
+  autonomy: Pick<
+    Dashboard["autonomy"],
+    "merged_prs" | "autonomous_merged_prs" | "pr_rate" | "merged_prs_without_facts" | "facts_since"
+  >;
+  cycle: Dashboard["cycle_time"]["pull_requests"];
+}
+
+/** Pull requests merged in the window, from the forge facts: autonomy and cycle times. */
+function prFactsSection(prs: readonly PREntry[], w: BuildWindow): PRFactsSection {
+  const { since, until } = w;
+  let mergedPRs = 0;
+  let autonomousPRs = 0;
+  let withoutFacts = 0;
+  let count = 0;
+  let reviewed = 0;
+  const startToMerge: number[] = [];
+  const startToPR: number[] = [];
+  const prToReview: number[] = [];
+  const reviewToMerge: number[] = [];
+  let factsSince: number | undefined;
+  const diff = (a: number, b: number): number | undefined => (b < a ? undefined : b - a);
+  for (const p of prs) {
+    const f = p.facts;
+    if (f?.opened_at) {
+      const t = ms(f.opened_at);
+      if (factsSince === undefined || t < factsSince) factsSince = t;
+    }
+    if (!f || !f.merged_at) {
+      if (!f && p.state.toLowerCase() === "merged" && inWindow(p.openedMs, since, until)) withoutFacts++;
+      continue;
+    }
+    const merged = ms(f.merged_at);
+    if (!inWindow(merged, since, until)) continue;
+    mergedPRs++;
+    if (!personPushedBefore(f, new Date(merged))) autonomousPRs++;
+    count++;
+    const v = diff(p.wiCreated, merged);
+    if (v !== undefined) startToMerge.push(v);
+    const toPR = diff(p.wiCreated, p.openedMs);
+    if (toPR !== undefined) startToPR.push(toPR);
+    if (f.first_review_at) {
+      reviewed++;
+      const rev = ms(f.first_review_at);
+      const a = diff(p.openedMs, rev);
+      if (a !== undefined) prToReview.push(a);
+      const b = diff(rev, merged);
+      if (b !== undefined) reviewToMerge.push(b);
     }
   }
-  db.human_wait.median_ms = median(waits);
-  db.human_wait.p90_ms = percentile(waits, 90);
+  const autonomy: PRFactsSection["autonomy"] = {
+    merged_prs: mergedPRs,
+    autonomous_merged_prs: autonomousPRs,
+    pr_rate: ratio(autonomousPRs, mergedPRs),
+    merged_prs_without_facts: withoutFacts,
+  };
+  if (factsSince !== undefined) autonomy.facts_since = iso(factsSince);
+  return {
+    autonomy,
+    cycle: {
+      count,
+      start_to_merge_ms: median(startToMerge),
+      start_to_pr_ms: median(startToPR),
+      pr_to_first_review_ms: median(prToReview),
+      first_review_to_merge_ms: median(reviewToMerge),
+      reviewed,
+    },
+  };
+}
 
-  // ----- Runs and cost -----
+/** Inbox items (not reviews) created in the window and how long they waited. */
+function humanWaitSection(inbox: readonly MInbox[], w: BuildWindow): Dashboard["human_wait"] {
+  const { since, until } = w;
+  const out: Dashboard["human_wait"] = { items: 0, pending: 0, total_ms: 0, median_ms: 0, p90_ms: 0, by_kind: {} };
+  const waits: number[] = [];
+  for (const it of inbox) {
+    const created = ms(it.created_at);
+    if (it.kind === "review" || !inWindow(created, since, until)) continue;
+    out.items++;
+    bump(out.by_kind, it.kind as InboxKind);
+    if (it.resolved && it.resolved_at) {
+      const wait = Math.max(0, ms(it.resolved_at) - created);
+      waits.push(wait);
+      out.total_ms += wait;
+    } else {
+      out.pending++;
+      const wait = until - created;
+      if (wait > 0) out.total_ms += wait;
+    }
+  }
+  out.median_ms = median(waits);
+  out.p90_ms = percentile(waits, 90);
+  return out;
+}
+
+/** Runs created in the window: counts, usage and sandbox time. */
+function runSection(d: MetricsData, w: BuildWindow): Pick<Dashboard, "runs" | "cost"> {
+  const { since, until, daily } = w;
+  const runs: Dashboard["runs"] = {
+    total: 0,
+    by_agent: {},
+    by_state: {},
+    by_agent_state: {},
+    by_model: {},
+    by_source: {},
+  };
+  const cost: Dashboard["cost"] = { total: newUsage(), by_agent: {}, by_model: {}, compute_by_shape: {} };
   for (const r of d.runs) {
     const created = ms(r.created_at);
     if (!inWindow(created, since, until)) continue;
     const agent = runAgent(r);
     const model = runModel(r);
-    db.runs.total++;
-    bump(db.runs.by_agent, agent);
-    bump(db.runs.by_state, r.state as RunState);
-    const byState = (db.runs.by_agent_state[agent] ??= {});
-    bump(byState, r.state);
-    bump(db.runs.by_model, model);
-    bump(db.runs.by_source, runSource(r));
+    runs.total++;
+    bump(runs.by_agent, agent);
+    bump(runs.by_state, r.state as RunState);
+    bump((runs.by_agent_state[agent] ??= {}), r.state);
+    bump(runs.by_model, model);
+    bump(runs.by_source, runSource(r));
 
     let compute = 0;
     for (const ss of d.sessions?.[r.id] ?? []) {
       const sec = sessionSeconds(ss, until);
       compute += sec;
-      const label = shapeLabel(ss.instance_shape);
-      const c = (db.cost.compute_by_shape[label] ??= { sessions: 0, seconds: 0 });
+      const c = (cost.compute_by_shape[shapeLabel(ss.instance_shape)] ??= { sessions: 0, seconds: 0 });
       c.sessions++;
       c.seconds += sec;
     }
-    addUsage(db.cost.total, r.usage);
-    db.cost.total.compute_seconds += compute;
-    const ua = (db.cost.by_agent[agent] ??= newUsage());
-    addUsage(ua, r.usage);
-    ua.compute_seconds += compute;
-    const um = (db.cost.by_model[model] ??= newUsage());
-    addUsage(um, r.usage);
-    um.compute_seconds += compute;
+    for (const u of [cost.total, (cost.by_agent[agent] ??= newUsage()), (cost.by_model[model] ??= newUsage())]) {
+      addUsage(u, r.usage);
+      u.compute_seconds += compute;
+    }
 
-    at(created, (p) => {
+    daily.at(created, (p) => {
       p.runs++;
       p.cost_usd += r.usage?.cost_usd ?? 0;
       p.input_tokens += r.usage?.input_tokens ?? 0;
       p.output_tokens += r.usage?.output_tokens ?? 0;
     });
   }
+  return { runs, cost };
+}
 
-  // ----- Scorers -----
+/** Scores created in the window, per scorer, sorted by slug then scorer ID. */
+function scorerSection(d: MetricsData, w: BuildWindow): ScorerStats[] {
+  const { since, until, daily } = w;
   const byScorer = new Map<string, ScorerStats>();
   for (const sc of d.scorers) {
     const st: ScorerStats = { scorer_id: sc.id, total: 0, passed: 0, pass_rate: 0, labels: {} };
@@ -845,20 +892,53 @@ export function build(
     st.total++;
     if (s.passed) st.passed++;
     bump(st.labels, s.label ?? "");
-    at(created, (p) => {
+    daily.at(created, (p) => {
       p.scores++;
       if (s.passed) p.scores_passed++;
     });
   }
-  db.scorers = [...byScorer.values()];
-  for (const st of db.scorers) st.pass_rate = ratio(st.passed, st.total);
-  db.scorers.sort((a, b) => {
+  const out = [...byScorer.values()];
+  for (const st of out) st.pass_rate = ratio(st.passed, st.total);
+  out.sort((a, b) => {
     const sa = a.slug ?? "";
     const sb = b.slug ?? "";
     if (sa !== sb) return sa < sb ? -1 : 1;
     return a.scorer_id < b.scorer_id ? -1 : a.scorer_id > b.scorer_id ? 1 : 0;
   });
+  return out;
+}
 
-  db.daily = daily;
-  return db;
+// ---------- Build ----------
+
+/** Derives the dashboard from raw data for [since, until). */
+export function build(
+  factoryId: string,
+  input: MetricsData | null | undefined,
+  sinceMs: number,
+  untilMs: number,
+): Dashboard {
+  const d = input ?? emptyData();
+  const w: BuildWindow = { since: sinceMs, until: untilMs, daily: new DailySeries(sinceMs, untilMs) };
+  const wi = workItemSection(d, w);
+  const prs = collectPRs(d.workItems, d.events, costPerWorkItem(d.runs), d.facts);
+  const pull_requests = pullRequestSection(prs, w);
+  const facts = prFactsSection(prs, w);
+  const human_wait = humanWaitSection(d.inbox, w);
+  const { runs, cost } = runSection(d, w);
+  const scorers = scorerSection(d, w);
+  // The key order is the JSON order of the dashboard.
+  return {
+    factory_id: factoryId,
+    since: iso(sinceMs),
+    until: iso(untilMs),
+    work_items: wi.work_items,
+    pull_requests,
+    autonomy: { ...wi.autonomy, ...facts.autonomy },
+    cycle_time: { ...wi.cycle_time, pull_requests: facts.cycle },
+    human_wait,
+    runs,
+    cost,
+    scorers,
+    daily: w.daily.points,
+  };
 }

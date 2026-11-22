@@ -118,21 +118,12 @@ export function onGrant(fx: Fx, g: Grant): void {
     releaseGrant(fx, g, "unknown run");
     return;
   }
-  fx.repo.sql.exec(
-    `INSERT OR IGNORE INTO grants (run_id, session, target, provider, worker_id, lease_id, created_ms) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    g.runId,
-    g.session,
-    JSON.stringify(g.target),
-    g.providerId,
-    g.workerId ?? "",
-    g.leaseId,
-    fx.now(),
-  );
+  fx.repo.addGrant(g);
   fx.setTimer(timerName.grant(g.runId, g.session), "grant", fx.now(), g);
 }
 
 export function releaseGrant(fx: Fx, g: Pick<Grant, "runId" | "session">, reason: string): void {
-  fx.repo.sql.exec("UPDATE grants SET state = 'released' WHERE run_id = ? AND session = ?", g.runId, g.session);
+  fx.repo.setGrantState(g.runId, g.session, "released");
   fx.enqueue({
     dest: dest.dispatch(fx.teamId),
     kind: "dispatch.release",
@@ -155,13 +146,11 @@ function grantUsable(fx: Fx, g: Grant): boolean {
 /** commit for a prepared grant (or its refusal). One transaction. */
 export function commitGrant(fx: Fx, prep: GrantPrep): void {
   const g = prep.grant;
-  const state = fx.repo.sql
-    .exec<{ state: string }>("SELECT state FROM grants WHERE run_id = ? AND session = ?", g.runId, g.session)
-    .toArray()[0]?.state;
+  const state = fx.repo.grantState(g.runId, g.session);
   if (state && state !== "pending") return; // done before a reset
   if (!grantUsable(fx, g)) {
     if (!fx.repo.getSession(g.runId, g.session)) releaseGrant(fx, g, "not queued");
-    else fx.repo.sql.exec("UPDATE grants SET state = 'used' WHERE run_id = ? AND session = ?", g.runId, g.session);
+    else fx.repo.setGrantState(g.runId, g.session, "used");
     return;
   }
   switch (prep.kind) {
@@ -235,7 +224,7 @@ export function commitGrant(fx: Fx, prep: GrantPrep): void {
     );
   }
   const { changed } = transition(fx, run.id, { event: "assigned" });
-  fx.repo.sql.exec("UPDATE grants SET state = 'used' WHERE run_id = ? AND session = ?", g.runId, g.session);
+  fx.repo.setGrantState(g.runId, g.session, "used");
   if (!changed) {
     endSession(fx, s, "not_started", "");
     return;

@@ -8,7 +8,11 @@ import { isMergeTool, parse, wrap, words, REFUSAL_TEXT } from "../mergeguard/ind
 import * as ec from "../eventctx/index";
 import { FakeResolver } from "../../test/fakes/forge";
 
-const msg = (provider: string, kind = "update", extra: Partial<OutboundMessage> = {}): OutboundMessage => ({
+const msg = (
+  provider: string,
+  kind: OutboundMessage["kind"] = "update",
+  extra: Partial<OutboundMessage> = {},
+): OutboundMessage => ({
   work_item_id: "wi_1",
   source: { provider, kind: "issue", repo: "acme/api", number: 1 },
   text: "hi",

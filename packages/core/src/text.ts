@@ -1,6 +1,6 @@
 // Text and mention helpers shared by the forge, integration and plugin code.
 // Port of internal/forge/forgeutil/text.go.
-import type { OutboundMessage } from "./types";
+import type { OutboundMessage } from "./workitem";
 
 const FENCED_CODE = /(```|~~~)[\s\S]*?(```|~~~|$)/g;
 const INLINE_CODE = /`[^`\n]*`/g;

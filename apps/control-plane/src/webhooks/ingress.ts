@@ -179,10 +179,9 @@ export async function handleWebhookDelivery(
   if (!found || !found.webhook.enabled) return errJSON(404, "not_found", "webhook not found");
   const { webhook: wh, teamId } = found;
   const now = (deps.now ?? Date.now)();
-  const rec: WebhookDelivery = {
+  const rec: Omit<WebhookDelivery, "status"> = {
     id: newId("whd"),
     webhook_id: wh.id,
-    status: "",
     headers: redactHeaders(req.headers),
     received_at: new Date(now).toISOString(),
   };

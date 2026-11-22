@@ -1,11 +1,13 @@
 // Skills, scorers and benchmarks. Port of internal/definition/extras.go.
 
+import type { CodeForge } from "@openfactory/core";
 import { parseMarkdown } from "./agents.ts";
 import {
   applyHarness,
   checkModelHarness,
   dedupe,
   type HarnessOverride,
+  NO_FORGE,
   parseExec,
   parseHarness,
   parseMCPServers,
@@ -383,7 +385,7 @@ function parseRat(s: string): { num: bigint; den: bigint } | null {
 
 // ---- benchmarks ----
 
-const shaRe = /^[0-9a-f]{40}$/;
+export const shaRe = /^[0-9a-f]{40}$/;
 
 export function compileBenchmarks(c: Compiler): void {
   const names = new Map<string, string>();
@@ -587,7 +589,7 @@ export function parseRepoAtCommit(s: string): RepoAtCommit | null {
   if (colon < 0) return null;
   const host = s.slice(0, colon);
   const rest = s.slice(colon + 1);
-  let forge: string;
+  let forge: CodeForge;
   if (host === "github.com") forge = "GITHUB";
   else if (host === "gitlab.com") forge = "GITLAB";
   else return null;
@@ -604,7 +606,7 @@ export function parseRepoAtCommit(s: string): RepoAtCommit | null {
   return { codeForge: forge, owner, repo, ref: sha };
 }
 
-const emptyRef = (): RepoAtCommit => ({ codeForge: "", owner: "", repo: "", ref: "" });
+const emptyRef = (): RepoAtCommit => ({ codeForge: NO_FORGE, owner: "", repo: "", ref: "" });
 
 function parseRepoAtCommitNode(dc: Doc, n: YNode, p: string): [RepoAtCommit, boolean] {
   const r = resolve(n);
@@ -628,8 +630,10 @@ function parseRepoAtCommitNode(dc: Doc, n: YNode, p: string): [RepoAtCommit, boo
     const ref = emptyRef();
     let ok = true;
     let v = m.require("codeForge");
-    if (v !== null) ref.codeForge = dc.enum(v, p + ".codeForge", "GITHUB", "GITLAB")[0];
-    else ok = false;
+    if (v !== null) {
+      const [cf, good] = dc.enum(v, p + ".codeForge", "GITHUB", "GITLAB");
+      if (good) ref.codeForge = cf;
+    } else ok = false;
     v = m.require("owner");
     if (v !== null) ref.owner = dc.nonEmptyStr(v, p + ".owner")[0];
     else ok = false;

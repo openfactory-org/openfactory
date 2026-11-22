@@ -7,6 +7,8 @@ import {
   type BenchmarkConfiguration,
   type BenchmarkSuite,
   type BenchmarkTask,
+  type CodeForge,
+  type HarnessType,
   type MachineSpec,
   type RepoAtCommit,
   type RepoSubstitution,
@@ -360,7 +362,9 @@ export function findSuite(
 
 // ---------- Trial requests ----------
 
-const normalizeHarness = (t: string): string => (t.toLowerCase() === "claude-code" ? "claude" : t.toLowerCase());
+// The definition validates the harness type; "claude-code" is an alias of "claude".
+const normalizeHarness = (t: string): HarnessType =>
+  (t.toLowerCase() === "claude-code" ? "claude" : t.toLowerCase()) as HarnessType;
 
 function pinOverrides(p: BenchmarkAgentPin): Overrides | undefined {
   if (p.harness) return { harness: { ...p.harness, type: normalizeHarness(p.harness.type) } };
@@ -474,7 +478,7 @@ export function applyRepoSubstitutions(
         r.owner.toLowerCase() === sub.source.owner.toLowerCase() &&
         r.repo.toLowerCase() === sub.source.name.toLowerCase()
       ) {
-        if (sub.target.codeForge) r.codeForge = sub.target.codeForge.toUpperCase();
+        if (sub.target.codeForge) r.codeForge = sub.target.codeForge.toUpperCase() as CodeForge;
         r.owner = sub.target.owner;
         r.repo = sub.target.name;
         break;

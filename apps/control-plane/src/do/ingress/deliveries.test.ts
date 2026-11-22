@@ -56,7 +56,7 @@ describe("IngressDO delivery log", () => {
 
 describe("deliveryView", () => {
   it("labels rejections by reason", () => {
-    const base = { id: "d", webhook_id: "w", status: "rejected", received_at: at(0) };
+    const base: WebhookDelivery = { id: "d", webhook_id: "w", status: "rejected", received_at: at(0) };
     expect(deliveryView({ ...base, reason: "invalid_json" }, false).label).toBe("Rejected (invalid JSON)");
     expect(deliveryView({ ...base, reason: "too_large" }, false).label).toBe("Rejected (too large)");
     expect(deliveryView({ ...base, reason: "auth_failed" }, false).label).toBe("Rejected (auth)");

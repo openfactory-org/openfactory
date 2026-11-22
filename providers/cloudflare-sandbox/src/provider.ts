@@ -20,6 +20,9 @@ import type { RegistryPage } from "./registry";
 
 export const PROVIDER_ID = "cloudflare-sandbox";
 
+/** How many sandbox DO status calls list() runs at once. */
+export const LIST_PARALLEL = 16;
+
 const GiB = 1024;
 /** Platform instance types. The account maximum is 4 vCPU / 12 GiB / 20 GB. */
 export const CF_INSTANCE_TYPES: InstanceType[] = [
@@ -170,21 +173,41 @@ export class CloudflareSandboxProvider implements SandboxProvider {
     await this.d.sandbox(taskId).ack().catch(rethrow);
   }
 
+  /**
+   * The status of every registered task, in registry order. Status calls run in
+   * batches of LIST_PARALLEL. A failure other than not_found throws the error
+   * of the first failed task in registry order.
+   */
   async list(): Promise<TaskStatus[]> {
     const out: TaskStatus[] = [];
     const reg = this.d.registry();
+    const statusOf = async (id: string): Promise<TaskStatus | undefined> => {
+      try {
+        return await this.d.sandbox(id).status();
+      } catch (e) {
+        if (parseProviderError(e)?.kind !== "not_found") throw e;
+        await reg.remove(id); // stale index row
+        return undefined;
+      }
+    };
+    let batch: string[] = [];
+    const flush = async (): Promise<void> => {
+      const settled = await Promise.allSettled(batch.map(statusOf));
+      batch = [];
+      for (const r of settled) {
+        if (r.status === "rejected") throw r.reason;
+        if (r.value) out.push(r.value);
+      }
+    };
     const ids = paginateCursor(async (cursor) => {
       const page = await reg.list(cursor);
       return { items: page.taskIds, cursor: page.cursor };
     });
     for await (const id of ids) {
-      try {
-        out.push(await this.d.sandbox(id).status());
-      } catch (e) {
-        if (parseProviderError(e)?.kind !== "not_found") throw e;
-        await reg.remove(id); // stale index row
-      }
+      batch.push(id);
+      if (batch.length >= LIST_PARALLEL) await flush();
     }
+    await flush();
     return out;
   }
 }

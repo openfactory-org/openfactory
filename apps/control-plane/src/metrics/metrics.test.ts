@@ -29,7 +29,7 @@ const ev = (kind: string, t: string, data?: unknown): MEvent => ({
   created_at: t,
   ...(data === undefined ? {} : { data }),
 });
-const pr = (n: number, state: string): PullRequestRef => ({
+const pr = (n: number, state: PullRequestRef["state"]): PullRequestRef => ({
   forge: "GITHUB",
   repo: "acme/app",
   number: n,
@@ -288,7 +288,7 @@ describe("percentiles", () => {
 
 it("deduplicates a pull request across work items", () => {
   const open = pr(9, "open");
-  const merged = { ...open, repo: "a/b", state: "merged" };
+  const merged = { ...open, repo: "a/b", state: "merged" as const };
   const o = { ...open, repo: "a/b" };
   const d: MetricsData = {
     ...fixture(),

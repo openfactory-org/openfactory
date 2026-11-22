@@ -2,6 +2,8 @@
 import {
   JUDGE_SKILL_NAME,
   OfError,
+  base32,
+  sha256,
   type RepoAtCommit,
   type Run,
   type Scorer,
@@ -19,6 +21,15 @@ import {
   type JudgeRunRequest,
   type RunsPort,
 } from "./types";
+
+/**
+ * A routed run ID from a hash: `run_` + token (w + 15) + 12 characters. The
+ * same parts give the same ID, so a retried judge start reaches the same run.
+ */
+export async function deterministicRunId(...parts: string[]): Promise<string> {
+  const b = base32(await sha256(parts.join("|")));
+  return `run_w${b.slice(0, 15)}${b.slice(15, 27)}`;
+}
 
 export const scorerName = (sc: Pick<Scorer, "slug" | "name">): string => sc.slug || sc.name;
 

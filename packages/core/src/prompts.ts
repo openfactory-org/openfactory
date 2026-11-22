@@ -3,7 +3,9 @@
 // agent's own instructions.
 
 import { compareBytes, oneLine, trimChars } from "./gostd";
-import type { AgentConfig, Run, Skill, WorkItem } from "./types";
+import type { AgentConfig, Skill } from "./definition";
+import type { Run } from "./run";
+import type { WorkItem } from "./workitem";
 
 /** The directory (relative to the sandbox workspace) where skills are written. */
 export const SKILLS_ROOT = ".openfactory/skills";

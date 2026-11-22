@@ -9,7 +9,14 @@ import { describe, expect, it } from "vitest";
 import type { CoreEvent } from "../../contracts/do-messages";
 import type { AgentConfig, Run } from "../../engine/types";
 import type { WorkDO } from "../work/index";
-import { handleEvent, platformIntakeDeps, storeEventBundle, type IntakeDeps } from "./intake";
+import {
+  factorySnapshots,
+  handleEvent,
+  platformIntakeDeps,
+  SNAPSHOT_PARALLEL,
+  storeEventBundle,
+  type IntakeDeps,
+} from "./intake";
 import { expandEventFiles } from "../../runner-api/index";
 
 const foreman: AgentConfig = {
@@ -65,6 +72,60 @@ const ev = (team: string, p: Partial<CoreEvent>): CoreEvent => ({
   text: "It crashes",
   received_at: new Date().toISOString(),
   ...p,
+});
+
+describe("intake factory scan", () => {
+  // Factories 0, 3, 6, ... cover acme/api; the others name another repository.
+  function scanDeps(count: number, fail?: Set<number>) {
+    let inFlight = 0;
+    let peak = 0;
+    const calls: string[] = [];
+    const ids = Array.from({ length: count }, (_, i) => `fac_${String(i).padStart(3, "0")}`);
+    const d = {
+      listFactoryIds: async () => ids,
+      snapshot: async (fid: string) => {
+        calls.push(fid);
+        inFlight++;
+        peak = Math.max(peak, inFlight);
+        const i = Number(fid.slice(4));
+        // Later factories answer first, so the order of results must not follow completion.
+        await new Promise((r) => setTimeout(r, (count - i) % 5));
+        inFlight--;
+        if (fail?.has(i)) throw new Error(`snapshot ${fid}`);
+        return {
+          factory: { id: fid },
+          runtime: {
+            repositories: [{ codeForge: "GITHUB", owner: i % 3 === 0 ? "acme" : "other", name: "api" }],
+          },
+          agents: [],
+          automations: [],
+          integrations: {},
+        };
+      },
+    } as unknown as IntakeDeps;
+    return { d, ids, calls, peak: () => peak };
+  }
+
+  it("loads snapshots in bounded parallel batches and keeps the list order", async () => {
+    const s = scanDeps(50);
+    const snaps = await factorySnapshots(s.d, ev("t", {}));
+    expect(snaps.map((x) => x.factory.id)).toEqual(s.ids.filter((_, i) => i % 3 === 0));
+    expect(s.calls).toHaveLength(50);
+    expect(s.peak()).toBeGreaterThan(1);
+    expect(s.peak()).toBeLessThanOrEqual(SNAPSHOT_PARALLEL);
+  });
+
+  it("throws the error of the first failed factory in list order", async () => {
+    const s = scanDeps(20, new Set([7, 3]));
+    await expect(factorySnapshots(s.d, ev("t", {}))).rejects.toThrow("snapshot fac_003");
+  });
+
+  it("loads only the named factory when the event names one", async () => {
+    const s = scanDeps(10);
+    const snaps = await factorySnapshots(s.d, ev("t", { factory_id: "fac_004" }));
+    expect(snaps.map((x) => x.factory.id)).toEqual(["fac_004"]);
+    expect(s.calls).toEqual(["fac_004"]);
+  });
 });
 
 describe("intake (HandleEvent)", () => {

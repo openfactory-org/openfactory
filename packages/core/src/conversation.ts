@@ -2,7 +2,7 @@
 // Port of internal/conversation. The types have the shape of
 // schemas/runner/v1/conversation.json (packages/runner-proto).
 
-import type { Run, RunMessage } from "./types";
+import type { Run, RunMessage } from "./run";
 
 export const BLOCK_TEXT = "text";
 export const BLOCK_ACTION = "action";

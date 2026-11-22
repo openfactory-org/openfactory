@@ -18,19 +18,44 @@ import { unwrapOp } from "../lib/rpc";
 import { systemPrincipal } from "../scoring/clients";
 import { issueRef, type LinkIssueInput } from "./linkissue";
 import { prReference, prRef, type LinkPullRequestInput } from "./linkpr";
+import { isToolName, TOOLS, type ToolName } from "./schemas";
 
 export const RUN_MCP_PREFIX = "/mcp/run/";
 const PROTOCOL_VERSION = "2025-06-18";
 
-/** Agents of a factory: from TeamDO configSnapshot (a list of resolved agent configs). */
-export type AgentSource = (env: Env, teamId: string, factoryId: string) => Promise<AgentConfig[]>;
+/** The parts of the TeamDO configSnapshot of a factory that the tools read. */
+export interface FactoryConfig {
+  agents: AgentConfig[];
+  /** The machine types of the factory runtime; undefined when the source does not know them. */
+  machines?: Record<string, unknown> | null;
+}
 
+/**
+ * Agents of a factory: from TeamDO configSnapshot. A source that returns only
+ * the agents (tests) lets run_agents read the machine types from TeamDO when
+ * an agent pin needs them.
+ */
+export type AgentSource = (env: Env, teamId: string, factoryId: string) => Promise<FactoryConfig | AgentConfig[]>;
+
+interface ConfigSnapshot {
+  agents?: AgentConfig[];
+  runtime?: { machines?: Record<string, unknown> | null };
+}
+
+async function configSnapshot(env: Env, teamId: string, factoryId: string): Promise<ConfigSnapshot | null> {
+  return (await env.TEAM.getByName(doName.team(teamId)).configSnapshot(factoryId)) as ConfigSnapshot | null;
+}
+
+/** The agents and the machine types of a factory from one configSnapshot. */
 export const teamAgents: AgentSource = async (env, teamId, factoryId) => {
-  const snap = (await env.TEAM.getByName(doName.team(teamId)).configSnapshot(factoryId)) as {
-    agents?: AgentConfig[];
-  } | null;
-  return snap?.agents ?? [];
+  const snap = await configSnapshot(env, teamId, factoryId);
+  return { agents: snap?.agents ?? [], machines: snap?.runtime?.machines ?? null };
 };
+
+async function factoryConfig(env: Env, teamId: string, factoryId: string): Promise<FactoryConfig> {
+  const out = await agentSource(env, teamId, factoryId);
+  return Array.isArray(out) ? { agents: out } : out;
+}
 
 let agentSource: AgentSource = teamAgents;
 export function setAgentSource(fn: AgentSource): void {
@@ -55,7 +80,7 @@ export function setRedactor(fn: Redactor): void {
 }
 
 /** The argument fields that each tool posts as text, redacted before the WorkDO call. */
-const REDACTED_FIELDS: Record<string, string[]> = {
+const REDACTED_FIELDS: Partial<Record<ToolName, string[]>> = {
   post_update: ["text"],
   ask_human: ["question", "title", "summary", "details", "body", "context", "options", "recommended_option"],
   request_approval: ["question", "title", "summary", "details", "body", "options", "links"],
@@ -84,178 +109,6 @@ async function redactArgs(
     else if (Array.isArray(v)) out[f] = v.map((x) => (typeof x === "string" ? rd(x) : x));
   }
   return out;
-}
-
-const TOOLS: { name: string; description: string; inputSchema: Record<string, unknown> }[] = [
-  {
-    name: "run_agents",
-    description:
-      "Start one or more configured factory agents as child runs. Each child reports back to you as a follow-up message when it finishes a turn.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        summary: { type: "string" },
-        base_prompt: { type: "string" },
-        metadata: { type: "object", additionalProperties: { type: "string" } },
-        agent_run_configs: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              name: { type: "string" },
-              agent_identity_uid: { type: "string" },
-              prompt: { type: "string" },
-              metadata: { type: "object", additionalProperties: { type: "string" } },
-            },
-            required: ["agent_identity_uid"],
-          },
-        },
-      },
-      required: ["agent_run_configs"],
-    },
-  },
-  {
-    name: "list_agents",
-    description: "List the factory agents you may start, with their UIDs, types and descriptions.",
-    inputSchema: { type: "object", properties: {} },
-  },
-  {
-    name: "follow_up_agent",
-    description: "Send a follow-up message to one of your child runs.",
-    inputSchema: obj({ run_id: "string", message: "string" }, ["run_id", "message"]),
-  },
-  {
-    name: "send_message",
-    description:
-      "Send a message to an active run of your work item: your parent, a child, a sibling or a side run. The target gets it as an agent message from your run. Find targets in active_runs of list_agents.",
-    inputSchema: obj({ run_id: "string", text: "string" }, ["run_id", "text"]),
-  },
-  {
-    name: "ask_human",
-    description: "Ask the requester a question. End your turn afterwards; the answer arrives as a follow-up message.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        question: { type: "string", description: "The question for the requester" },
-        context: { type: "string", description: "Background needed to answer" },
-        options: { type: "array", items: { type: "string" }, description: "Optional suggested answers" },
-        multi_select: { type: "boolean", description: "The person can pick more than one option" },
-        recommended_option: { type: "string", description: "The option you recommend. It must be one of options" },
-      },
-      required: ["question"],
-    },
-  },
-  {
-    name: "request_approval",
-    description: "Request an explicit human approval before continuing.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        title: { type: "string", description: "What needs approval, e.g. 'Spec: purchase-order field'" },
-        summary: { type: "string", description: "What is being approved and why" },
-        links: {
-          type: "array",
-          items: { type: "string" },
-          description: "Links to review (spec pull request, documents)",
-        },
-        options: { type: "array", items: { type: "string" }, description: "Decision options (default approve/reject)" },
-      },
-      required: ["title"],
-    },
-  },
-  {
-    name: "post_update",
-    description: "Post a progress update (or, with kind=handoff, the finished result) to where the work item started.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        text: { type: "string", description: "Markdown update posted where the request started" },
-        kind: {
-          type: "string",
-          description: "update (default), handoff (finished result ready for the team) or error",
-        },
-      },
-      required: ["text"],
-    },
-  },
-  {
-    name: "set_stage",
-    description: "Set the work item's stage.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        stage: {
-          type: "string",
-          description:
-            "One of intake, triage, planning, awaiting_approval, building, reviewing, handoff, complete, cancelled",
-        },
-        note: { type: "string", description: "Why the stage changed" },
-      },
-      required: ["stage"],
-    },
-  },
-  {
-    name: "link_pull_request",
-    description: "Attach a pull request to the work item so its reviews and merge events are routed back.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        url: { type: "string", description: "Pull request (merge request) URL" },
-        repo: { type: "string", description: "owner/name; derived from the URL when omitted" },
-        number: { type: "integer", description: "Pull request number; derived from the URL when omitted" },
-        branch: { type: "string", description: "Head branch" },
-        forge: { type: "string", description: "GITHUB, GITLAB or AZURE_DEVOPS; derived from the URL when omitted" },
-        state: { type: "string", description: "open (default), draft, merged or closed" },
-      },
-      required: [],
-    },
-  },
-  {
-    name: "link_issue",
-    description:
-      "Attach a tracker issue to the work item. Give its URL (Linear, Jira, GitHub, GitLab or an Azure DevOps work item), or a provider with a key (or a repo and a number).",
-    inputSchema: obj({ url: "string", provider: "string", key: "string", repo: "string", number: "integer" }, []),
-  },
-  {
-    name: "propose_definition_change",
-    description:
-      "Propose a change to the managed factory definition for human review. The files are checked with the compiler and the preflight; errors come back so you can fix them. A valid proposal is stored and a reviewer sees its diff in the inbox. An approval applies it; a rejection comes back to you as a message. For a definition in git, open a pull request instead.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        files: {
-          type: "object",
-          additionalProperties: { type: "string" },
-          description: "Path relative to the definition root to the full new content of the file.",
-        },
-        delete: { type: "array", items: { type: "string" }, description: "Paths to remove." },
-        message: { type: "string", description: "A short description of the change." },
-      },
-      required: ["message"],
-    },
-  },
-  {
-    name: "get_work_item",
-    description: "Read the work item: stage, source, pull requests, open human requests, child runs.",
-    inputSchema: { type: "object", properties: {} },
-  },
-  {
-    name: "complete_work_item",
-    description: "Mark the work item complete.",
-    inputSchema: {
-      type: "object",
-      properties: { note: { type: "string", description: "Closing note, e.g. which pull request merged" } },
-      required: [],
-    },
-  },
-];
-
-function obj(props: Record<string, string>, required: string[]): Record<string, unknown> {
-  return {
-    type: "object",
-    properties: Object.fromEntries(Object.entries(props).map(([k, t]) => [k, { type: t }])),
-    required,
-  };
 }
 
 interface JsonRpc {
@@ -334,6 +187,25 @@ async function dispatch(env: Env, teamId: string, runId: string, m: JsonRpc): Pr
   return rpcError(m.id, -32601, `method ${m.method} not found`);
 }
 
+/** What a tool handler of the Worker gets. */
+interface ToolCtx {
+  env: Env;
+  teamId: string;
+  runId: string;
+  name: ToolName;
+  work: ReturnType<Env["WORK"]["getByName"]>;
+  /** The active turn of the run; "" without one. */
+  turnId: string;
+  /** The idempotency key of the call in the active turn; "" without a turn. */
+  key: string;
+}
+
+/** A tool in the Worker: it answers the call, or prepares it and calls WorkDO. */
+type ToolHandler = (c: ToolCtx, args: Record<string, unknown>) => Promise<ToolResult>;
+
+/** Tools that change nothing: no turn key and no WorkDO idempotency row. */
+const UNKEYED = new Set<ToolName>(["list_agents"]);
+
 /** One tool call (also used by tests). */
 export async function callTool(
   env: Env,
@@ -342,90 +214,125 @@ export async function callTool(
   name: string,
   args: Record<string, unknown>,
 ): Promise<ToolResult> {
+  if (!isToolName(name)) return toolError(`unknown tool ${name}`);
   const work = env.WORK.getByName(doName.work(teamId, partitionOf(runId)));
-  if (name === "list_agents") {
-    const run = (await work.getRun(runId)) as Run;
-    const agents = await agentSource(env, teamId, run.factory_id);
-    const caller = run.agent_name || run.config.name;
-    const mayStart = agents.filter(
-      (a) => a.type !== "FOREMAN" && (a.spawnable_by ? a.spawnable_by.includes(caller) : run.config.type === "FOREMAN"),
-    );
-    // The runs that this run can send a message to (activeTargets in sendmessage.go).
-    const targets = (await work.toolCall({ runId, tool: "list_agents", input: {}, key: "", turnId: "" })) as ToolResult;
-    if (targets.isError) return targets;
-    const { active_runs } = JSON.parse(targets.content[0]!.text) as { active_runs: unknown[] };
-    return text({
-      agents: mayStart.map((a) => ({
-        agent_identity_uid: a.id,
-        name: a.name,
-        type: a.type,
-        description: a.description,
-        harness: a.harness?.type ?? "",
-        model: a.harness?.model ?? "",
-      })),
-      active_runs,
-    });
+  const c: ToolCtx = { env, teamId, runId, name, work, turnId: "", key: "" };
+  if (!UNKEYED.has(name)) {
+    // The key hashes the input as the model sent it, before redaction.
+    c.turnId = await work.activeTurn(runId);
+    c.key = c.turnId ? await toolIdempotencyKey(runId, c.turnId, name, args) : "";
   }
-  if (!TOOLS.some((t) => t.name === name))
-    return { content: [{ type: "text", text: `unknown tool ${name}` }], isError: true };
-  const turnId = await work.activeTurn(runId);
-  const key = turnId ? await toolIdempotencyKey(runId, turnId, name, args) : "";
   const fields = REDACTED_FIELDS[name];
   if (fields) args = await redactArgs(env, work, runId, fields, args);
-  if (name === "link_issue") {
+  return TOOL_HANDLERS[name](c, args);
+}
+
+/** The WorkDO call of a tool: the effect and its idempotency row in one transaction. */
+async function forward(c: ToolCtx, args: Record<string, unknown>, plans?: ChildPlan[]): Promise<ToolResult> {
+  return (await c.work.toolCall({
+    runId: c.runId,
+    tool: c.name,
+    input: args,
+    key: c.key,
+    turnId: c.turnId,
+    ...(plans ? { plans } : {}),
+  })) as ToolResult;
+}
+
+const TOOL_HANDLERS: Record<ToolName, ToolHandler> = {
+  run_agents: async (c, args) => {
+    let plans: ChildPlan[];
     try {
-      const src = issueRef(args as LinkIssueInput);
-      args = { ...args, key: sourceKey(src), source: src };
+      plans = await resolvePlans(c, args);
     } catch (e) {
-      return { content: [{ type: "text", text: toOfError(e).error.message }], isError: true };
+      return toolError(toOfError(e).error.message);
     }
-  }
-  if (name === "link_pull_request") {
+    return forward(c, args, plans);
+  },
+  list_agents: listAgents,
+  follow_up_agent: forward,
+  send_message: forward,
+  ask_human: forward,
+  request_approval: forward,
+  post_update: forward,
+  set_stage: forward,
+  link_pull_request: async (c, args) => {
     // linkPR: the Worker reads the pull request (linkpr.ts); the WorkDO stores
     // it with its normalized reference. Without a repo and a number there is
     // no reference key (Go adds no alias then).
+    let input: Record<string, unknown>;
     try {
       const pr = prRef(args as LinkPullRequestInput);
       const ref = prReference(pr);
-      args = { pull_request: pr, ...(ref ? { key: ref.key, source: ref.source } : {}) };
+      input = { pull_request: pr, ...(ref ? { key: ref.key, source: ref.source } : {}) };
     } catch (e) {
-      return { content: [{ type: "text", text: toOfError(e).error.message }], isError: true };
+      return toolError(toOfError(e).error.message);
     }
-  }
-  if (name === "propose_definition_change") return proposeDefinitionChange(env, teamId, runId, args, key);
-  let plans: ChildPlan[] | undefined;
-  if (name === "run_agents") {
+    return (await claimReference(c, input, "pull_request")) ?? forward(c, input);
+  },
+  link_issue: async (c, args) => {
+    let input: Record<string, unknown>;
     try {
-      plans = await resolvePlans(env, teamId, runId, args);
+      const src = issueRef(args as LinkIssueInput);
+      input = { ...args, key: sourceKey(src), source: src };
     } catch (e) {
-      return { content: [{ type: "text", text: toOfError(e).error.message }], isError: true };
+      return toolError(toOfError(e).error.message);
     }
-  }
-  if ((name === "link_pull_request" || name === "link_issue") && typeof args.key === "string") {
-    const run = (await work.getRun(runId)) as Run;
-    if (run.work_item_id) {
-      const claim = await env.ROUTER.getByName(doName.router(teamId)).addReference({
-        factoryId: run.factory_id,
-        key: args.key,
-        kind: name === "link_pull_request" ? "pull_request" : "issue",
-        wiId: run.work_item_id,
-        token: partitionOf(runId),
-      });
-      if (!claim.ok)
-        return {
-          content: [{ type: "text", text: `${args.key} belongs to work item ${claim.ownerWiId}` }],
-          isError: true,
-        };
-    }
-  }
-  return (await work.toolCall({
-    runId,
-    tool: name,
-    input: args,
-    key,
-    turnId,
-    ...(plans ? { plans } : {}),
-  })) as ToolResult;
+    return (await claimReference(c, input, "issue")) ?? forward(c, input);
+  },
+  propose_definition_change: (c, args) => proposeDefinitionChange(c.env, c.teamId, c.runId, args, c.key),
+  get_work_item: forward,
+  complete_work_item: forward,
+};
+
+/**
+ * list_agents: the agents that the run may start (TeamDO config) and the runs
+ * that it can send a message to (activeTargets in sendmessage.go).
+ */
+async function listAgents(c: ToolCtx): Promise<ToolResult> {
+  const run = (await c.work.getRun(c.runId)) as Run;
+  const { agents } = await factoryConfig(c.env, c.teamId, run.factory_id);
+  const caller = run.agent_name || run.config.name;
+  const mayStart = agents.filter(
+    (a) => a.type !== "FOREMAN" && (a.spawnable_by ? a.spawnable_by.includes(caller) : run.config.type === "FOREMAN"),
+  );
+  const targets = await forward(c, {});
+  if (targets.isError) return targets;
+  const { active_runs } = JSON.parse(targets.content[0]!.text) as { active_runs: unknown[] };
+  return text({
+    agents: mayStart.map((a) => ({
+      agent_identity_uid: a.id,
+      name: a.name,
+      type: a.type,
+      description: a.description,
+      harness: a.harness?.type ?? "",
+      model: a.harness?.model ?? "",
+    })),
+    active_runs,
+  });
+}
+
+/**
+ * Claims the reference key of a linked pull request or issue for the work
+ * item of the run at RouterDO. Returns an error result when another work item
+ * owns the key, undefined otherwise.
+ */
+async function claimReference(
+  c: ToolCtx,
+  input: Record<string, unknown>,
+  kind: "pull_request" | "issue",
+): Promise<ToolResult | undefined> {
+  if (typeof input.key !== "string") return undefined;
+  const run = (await c.work.getRun(c.runId)) as Run;
+  if (!run.work_item_id) return undefined;
+  const claim = await c.env.ROUTER.getByName(doName.router(c.teamId)).addReference({
+    factoryId: run.factory_id,
+    key: input.key,
+    kind,
+    wiId: run.work_item_id,
+    token: partitionOf(c.runId),
+  });
+  return claim.ok ? undefined : toolError(`${input.key} belongs to work item ${claim.ownerWiId}`);
 }
 
 const text = (v: unknown): ToolResult => ({ content: [{ type: "text", text: JSON.stringify(v) }] });
@@ -518,15 +425,15 @@ async function proposeDefinitionChange(
   }
 }
 
-async function resolvePlans(
-  env: Env,
-  teamId: string,
-  runId: string,
-  args: Record<string, unknown>,
-): Promise<ChildPlan[]> {
-  const work = env.WORK.getByName(doName.work(teamId, partitionOf(runId)));
-  const parent = (await work.getRun(runId)) as Run;
-  const agents = await agentSource(env, teamId, parent.factory_id);
+/**
+ * The children of run_agents from the agents of the factory. The agents and
+ * the machine types of the pins come from one TeamDO configSnapshot.
+ */
+async function resolvePlans(c: ToolCtx, args: Record<string, unknown>): Promise<ChildPlan[]> {
+  const { env, teamId } = c;
+  const parent = (await c.work.getRun(c.runId)) as Run;
+  const cfg = await factoryConfig(env, teamId, parent.factory_id);
+  const agents = cfg.agents;
   const list = Array.isArray(args.agent_run_configs) ? (args.agent_run_configs as Record<string, unknown>[]) : [];
   if (list.length === 0) throw new OfError("invalid_request", "agent_run_configs must contain at least one child");
   const base = typeof args.base_prompt === "string" ? args.base_prompt.trim() : "";
@@ -558,20 +465,17 @@ async function resolvePlans(
   });
   if (Object.keys(pins).length === 0 || !plans.some((p) => pins[p.config.name])) return plans;
   // Pins (benchmark configurations) win over the configuration of the agent (RunAgents in engine/runs.go).
-  const snap = (await env.TEAM.getByName(doName.team(teamId)).configSnapshot(parent.factory_id)) as {
-    runtime?: { machines?: Record<string, unknown> | null };
-  } | null;
+  const machines =
+    cfg.machines !== undefined
+      ? cfg.machines
+      : ((await configSnapshot(env, teamId, parent.factory_id))?.runtime?.machines ?? null);
   return plans.map((p, i) => {
     const pin = pins[p.config.name];
     if (!pin) return p;
     try {
       return {
         ...p,
-        config: applyOverrides(
-          p.config as never,
-          pin,
-          (snap?.runtime?.machines ?? null) as never,
-        ) as unknown as AgentConfig,
+        config: applyOverrides(p.config as never, pin, machines as never) as unknown as AgentConfig,
       };
     } catch (e) {
       throw new OfError("invalid_request", `agent_run_configs[${i}]: pin: ${toOfError(e).error.message}`);

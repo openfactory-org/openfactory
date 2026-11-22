@@ -26,17 +26,8 @@ import { dashboardHint, member } from "../shared";
 import type { IntegrationDeps, IssueTracker, Logger, WebhookOutcome } from "../types";
 import { consoleLogger } from "../types";
 import { difference, formatOutbound, type Responder } from "@openfactory/core";
-import {
-  Dedupe,
-  cfg,
-  errMessage,
-  errorResponse,
-  integrationSecret,
-  jsonResponse,
-  readBody,
-  sha256Hex,
-  verifyHmacSha256Hex,
-} from "../util";
+import { Dedupe, cfg, errMessage, integrationSecret, sha256Hex, verifyHmacSha256Hex } from "../util";
+import { acceptDelivery, handleIntegrationWebhook } from "../webhook";
 import { adfMentions, adfText, markdownToAdf } from "./adf";
 
 export const PROVIDER = EVENT_PROVIDER.Jira;
@@ -160,46 +151,37 @@ export class JiraHandler implements Responder, IssueTracker {
   }
 
   async handleWebhook(req: Request): Promise<WebhookOutcome> {
-    let body: string;
-    try {
-      body = await readBody(req);
-    } catch (e) {
-      return { response: errorResponse(413, "payload_too_large", errMessage(e)) };
-    }
-    let p: WebhookPayload;
-    try {
-      p = JSON.parse(body) as WebhookPayload;
-    } catch {
-      return { response: errorResponse(400, "invalid_payload", "payload is not valid JSON") };
-    }
-    let jwtIss = "";
-    const auth = req.headers.get("Authorization") ?? "";
-    if (auth.startsWith("JWT ")) {
-      try {
-        jwtIss = claimString(decodeUnverified(auth.slice(4)).claims, "iss");
-      } catch {
-        /* a bad token fails verification below */
-      }
-    }
-    const site = p.issue?.self ?? "";
-    const found = await this.findIntegration(site, jwtIss);
-    if (!(await this.verify(found.integration, req, body))) {
-      return { response: errorResponse(401, "invalid_signature", "webhook authentication failed") };
-    }
-    if (found.error || !found.integration) {
-      this.log.info("delivery ignored", { site, err: found.error?.message });
-      return { response: jsonResponse(202, { status: "ignored", reason: "no matching integration" }) };
-    }
-    const delivery = req.headers.get("X-Atlassian-Webhook-Identifier") ?? "";
-    if (this.dedupe.isSeen(delivery)) return { response: jsonResponse(200, { status: "duplicate" }) };
-    const in_ = found.integration;
-    return {
-      response: jsonResponse(202, { status: "accepted" }),
-      background: async () => {
-        const evs = await this.normalize(in_, delivery, body);
-        if (evs.length > 0) await this.deps.publish(evs);
+    return handleIntegrationWebhook<WebhookPayload>(req, {
+      parse: (body) => JSON.parse(body) as WebhookPayload,
+      invalidPayload: "payload is not valid JSON",
+      select: (p) => {
+        let jwtIss = "";
+        const auth = req.headers.get("Authorization") ?? "";
+        if (auth.startsWith("JWT ")) {
+          try {
+            jwtIss = claimString(decodeUnverified(auth.slice(4)).claims, "iss");
+          } catch {
+            /* a bad token fails verification below */
+          }
+        }
+        return this.findIntegration(p.issue?.self ?? "", jwtIss);
       },
-    };
+      verify: (r, body, _p, found) => this.verify(found.integration, r, body),
+      unauthorized: { code: "invalid_signature", message: "webhook authentication failed" },
+      accept: (p, found, body) => {
+        const delivery = req.headers.get("X-Atlassian-Webhook-Identifier") ?? "";
+        return acceptDelivery(found, {
+          log: this.log,
+          logFields: { site: p.issue?.self ?? "" },
+          dedupe: this.dedupe,
+          delivery,
+          background: async (in_) => {
+            const evs = await this.normalize(in_, delivery, body);
+            if (evs.length > 0) await this.deps.publish(evs);
+          },
+        });
+      },
+    });
   }
 
   private async verify(in_: Integration | null, req: Request, body: string): Promise<boolean> {

@@ -2,7 +2,15 @@
 // Slack, Teams). Port of the core.Store / core.SecretStore / core.EventBus
 // uses of internal/integrations. The Worker wires the real implementations
 // (TeamDO RPC, secrets, IngressDO); tests pass fakes.
-import type { Event, ExternalIdentity, Integration, PullRequestRef, SourceRef, User } from "@openfactory/core";
+import type {
+  Event,
+  ExternalIdentity,
+  Integration,
+  IntegrationStatus,
+  PullRequestRef,
+  SourceRef,
+  User,
+} from "@openfactory/core";
 
 export type Fetch = (input: Request | string | URL, init?: RequestInit) => Promise<Response>;
 
@@ -26,7 +34,7 @@ export interface IntegrationStore {
   listIntegrations(teamId: string): Promise<Integration[]>;
   getIntegration(id: string): Promise<Integration | null>;
   /** Returns true when the status changed. An unknown record is not an error. */
-  setIntegrationStatus(id: string, status: string, reason: string): Promise<boolean>;
+  setIntegrationStatus(id: string, status: IntegrationStatus, reason: string): Promise<boolean>;
   findExternalIdentity(provider: string, externalId: string): Promise<ExternalIdentity | null>;
   getUser(id: string): Promise<User | null>;
   getUserByEmail(email: string): Promise<User | null>;

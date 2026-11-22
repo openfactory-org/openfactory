@@ -198,17 +198,16 @@ export class Outbox {
 
   private async deliverOne(row: OutboxRow, res: DrainResult): Promise<void> {
     try {
+      // A large payload goes to R2 as stored; parsing it would be wasted work.
+      const large = row.payload.length > OUTBOX_INLINE_LIMIT ? this.d.putLarge : undefined;
       const envelope: OutboxEnvelope = {
         msgId: row.msg_id,
         kind: row.kind as OutboxKind,
         lane: row.lane,
         origin: this.d.origin(),
-        payload: JSON.parse(row.payload) as OutboxEnvelope["payload"],
+        payload: (large ? {} : JSON.parse(row.payload)) as OutboxEnvelope["payload"],
       };
-      if (row.payload.length > OUTBOX_INLINE_LIMIT && this.d.putLarge) {
-        envelope.payloadR2 = await this.d.putLarge(row.payload);
-        envelope.payload = {} as OutboxEnvelope["payload"];
-      }
+      if (large) envelope.payloadR2 = await large(row.payload);
       const ack = await this.d.deliver(envelope, row);
       if (ack && "retry" in ack && ack.retry) {
         this.sql.exec(

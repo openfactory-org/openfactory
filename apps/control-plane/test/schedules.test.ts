@@ -4,7 +4,8 @@ import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import type { TeamKit } from "../src/do/team/kit";
-import { fireSchedule, getUserForgeToken, syncSchedules } from "../src/do/team/schedules";
+import { fireSchedule, setScheduleActiveRunCheck, syncSchedules } from "../src/do/team/schedules";
+import { getUserForgeToken } from "../src/do/team/user-forge-tokens";
 
 const automation = (cron: string, extra: Record<string, unknown> = {}) => ({
   id: "aut_1",
@@ -74,6 +75,27 @@ describe("TeamDO schedules", () => {
       expect(kit.sql.exec("SELECT active FROM schedules").one().active).toBe(0);
       expect(kit.sql.exec("SELECT COUNT(*) AS n FROM timers WHERE name = 'sched:aut_1:'").one().n).toBe(0);
     });
+  });
+
+  it("skips a concurrency skip slot and records the error when no active-run check is registered", async () => {
+    const prev = setScheduleActiveRunCheck(undefined);
+    try {
+      await runInDurableObject(env.TEAM.getByName("team:sched-skip"), async (instance) => {
+        const kit = (instance as unknown as { kit: TeamKit }).kit;
+        kit.tx(() => syncSchedules(kit, "fac_1", [automation("*/5 * * * *", { concurrency: "skip" })]));
+        const row = kit.sql.exec("SELECT next_ms FROM schedules").one() as { next_ms: number };
+        await fireSchedule(kit, "aut_1:", row.next_ms + 1000);
+        expect(kit.sql.exec("SELECT COUNT(*) AS n FROM outbox WHERE kind = 'ingress.deliver'").one().n).toBe(0);
+        const after = kit.sql.exec("SELECT next_ms, last_error FROM schedules").one() as {
+          next_ms: number;
+          last_error: string;
+        };
+        expect(after.last_error).toBe("check for an active run: no active-run check is registered");
+        expect(after.next_ms).toBe(row.next_ms + 300_000);
+      });
+    } finally {
+      setScheduleActiveRunCheck(prev);
+    }
   });
 
   it("stores personal forge tokens sealed", async () => {

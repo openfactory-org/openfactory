@@ -1,6 +1,6 @@
 // A benchmark task from a finished run: port of benchmark_tasks.go.
 import { parseDocument, stringify as yamlStringify, YAMLSeq, Scalar, isMap, isSeq, type Document } from "yaml";
-import { OfError, type BenchmarkSuite, type BenchmarkTask, type Run } from "@openfactory/core";
+import { OfError, type BenchmarkSuite, type BenchmarkTask, type CodeForge, type Run } from "@openfactory/core";
 import { definitionRoot } from "./improve";
 import { findSuite, formatRepoAtCommit } from "./benchmark";
 import { finishedForScoring, type RunsPort } from "./types";
@@ -87,7 +87,7 @@ export async function makeTaskFromRun(
         `benchmark tasks support GitHub and GitLab repositories only (${st.owner}/${st.repo} is on ${st.codeForge})`,
       );
     }
-    const ref = { codeForge: forge, owner: st.owner, repo: st.repo, ref: st.ref };
+    const ref = { codeForge: forge as CodeForge, owner: st.owner, repo: st.repo, ref: st.ref };
     startingRepoRefs.push(ref);
     refs.push(formatRepoAtCommit(ref));
   }

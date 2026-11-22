@@ -9,7 +9,7 @@ import { LocalProvider, type DevWorker } from "@openfactory/sandbox/local";
 import { MicroVMProvider, type WorkerShape } from "@openfactory/sandbox/microvm";
 import type { TeamRpc } from "../../contracts/do-messages";
 import type { Env } from "../../contracts/env";
-import { unwrapOp } from "../../lib/rpc";
+import { isOpError, unwrapOp } from "../../lib/rpc";
 import type { WorkerRecord, WorkerStatus } from "../team/workers";
 
 type ListedWorker = WorkerRecord & { status: WorkerStatus; slotsUsed: number; arch: string };
@@ -22,6 +22,18 @@ async function listWorkers(env: Env, teamId: string): Promise<ListedWorker[]> {
     null,
   );
   return unwrapOp<ListedWorker[]>(r, "workers.list");
+}
+
+/** One worker record, or undefined when the team has no such worker. */
+async function workerRecord(env: Env, teamId: string, workerId: string): Promise<ListedWorker | undefined> {
+  const r = await (env.TEAM.getByName(doName.team(teamId)) as unknown as TeamRpc).api(
+    { requestId: newId("req") },
+    "workers.record",
+    { id: workerId },
+    null,
+  );
+  if (isOpError(r) && r.$error.code === "resource_not_found") return undefined;
+  return unwrapOp<ListedWorker>(r, "workers.record");
 }
 
 function archOf(a: string): Arch[] {
@@ -55,7 +67,7 @@ export function workerProvider(env: Env, teamId: string, workerId: string): Sand
   let cached: WorkerShape | undefined;
   return new MicroVMProvider(hubClient(env, teamId, workerId), async () => {
     if (cached) return cached;
-    const w = (await listWorkers(env, teamId)).find((x) => x.id === workerId);
+    const w = await workerRecord(env, teamId, workerId);
     cached = {
       arch: archOf(w?.arch ?? ""),
       slots: w?.slots ?? 0,

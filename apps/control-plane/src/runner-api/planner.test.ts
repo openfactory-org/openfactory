@@ -12,7 +12,10 @@ import {
   headerSecrets,
   parseRepoSpec,
   Planner,
+  plannedSecrets,
+  platformDeps,
   redactList,
+  setPlannerDeps,
   secretsOf,
   splitCloneUrl,
   startConfigOf,
@@ -222,6 +225,127 @@ describe("planner", () => {
     const c = await pl.gitCredential(run(), "github.com", "/acme/api.git");
     expect(c).toEqual({ username: "x-access-token", password: "ghs_tok", expiresAt: "2026-01-01T00:50:00.000Z" });
     await expect(pl.gitCredential(run(), "github.com", "acme/other")).rejects.toMatchObject({ code: "not_authorized" });
+  });
+});
+
+// The secrets route and the git credential route ask the forge for no more
+// than they return.
+describe("planner call counts", () => {
+  type Calls = { snapshot: number; state: number; cloneURL: string[]; recorded: number };
+  function counted(repos: string[], over: Partial<PlannerDeps> = {}): { d: PlannerDeps; calls: Calls } {
+    const calls: Calls = { snapshot: 0, state: 0, cloneURL: [], recorded: 0 };
+    const base = deps();
+    const d: PlannerDeps = {
+      ...base,
+      snapshot: async (fid) => {
+        calls.snapshot++;
+        const s = await base.snapshot(fid);
+        return {
+          ...s,
+          runtime: { repositories: repos.map((name) => ({ codeForge: "GITHUB", owner: "acme", name })) },
+        };
+      },
+      state: async (r) => {
+        calls.state++;
+        return base.state(r);
+      },
+      recordStartCommits: async () => {
+        calls.recorded++;
+      },
+      forges: {
+        forge: async () =>
+          ({
+            cloneURL: async (o: string, n: string) => {
+              calls.cloneURL.push(`${o}/${n}`);
+              return `https://x-access-token:ghs_tok@github.com/${o}/${n}.git`;
+            },
+          }) as never,
+      },
+      ...over,
+    };
+    return { d, calls };
+  }
+
+  it("planSecrets reads no snapshot and mints no clone URL; planStart does both", async () => {
+    const r = run({}, { secrets: ["API_TOKEN"], mcp_servers: { reg: { managedId: "slack-x" } } });
+    const start = counted(["api", "web", "docs"]);
+    const full = await new Planner(start.d).planStart(r);
+    expect(start.calls).toEqual({
+      snapshot: 1,
+      state: 1,
+      cloneURL: ["acme/api", "acme/web", "acme/docs"],
+      recorded: 1,
+    });
+
+    const sec = counted(["api", "web", "docs"]);
+    const part = await new Planner(sec.d).planSecrets(r);
+    expect(sec.calls).toEqual({ snapshot: 0, state: 0, cloneURL: [], recorded: 0 });
+    expect(secretsOf(part)).toEqual(secretsOf(full));
+  });
+
+  it("plannedSecrets uses planSecrets", async () => {
+    const { d, calls } = counted(["api", "web"]);
+    setPlannerDeps(() => d);
+    try {
+      const sec = await plannedSecrets({} as Env, run({}, { secrets: ["API_TOKEN"] }), { session: 1 } as RunSession);
+      expect(sec.env).toEqual({ API_TOKEN: "s3cr3t-value" });
+      expect(sec.harness_auth).toEqual({ ANTHROPIC_API_KEY: "sk-ant-team" });
+    } finally {
+      setPlannerDeps(platformDeps);
+    }
+    expect(calls).toEqual({ snapshot: 0, state: 0, cloneURL: [], recorded: 0 });
+  });
+
+  it.each([
+    { name: "one configured repository", path: "/acme/web.git", want: ["acme/web"], ok: true },
+    { name: "an unknown repository", path: "acme/other", want: [], ok: false },
+    // Paths compare with case, as before: the filter keeps API, the match rejects it.
+    { name: "a repository in another case", path: "acme/API", want: ["acme/api"], ok: false },
+  ])("gitCredential mints a clone URL for $name only", async ({ path, want, ok }) => {
+    const { d, calls } = counted(["api", "web", "docs"]);
+    const res = new Planner(d).gitCredential(run(), "github.com", path);
+    if (ok) await expect(res).resolves.toMatchObject({ password: "ghs_tok" });
+    else await expect(res).rejects.toMatchObject({ code: "not_authorized" });
+    expect(calls.cloneURL).toEqual(want);
+  });
+
+  it("gitCredential covers a starting repository and keeps the token scope of the run", async () => {
+    const scopes: (string[] | undefined)[] = [];
+    const { d, calls } = counted(["api", "web"], {
+      state: async () => ({ repoRefs: [{ codeForge: "GITHUB", owner: "acme", repo: "extra", ref: "a".repeat(40) }] }),
+    });
+    const forge = d.forges.forge;
+    d.forges = {
+      forge: async (l) => {
+        scopes.push(l.scope);
+        return forge(l);
+      },
+    };
+    const c = await new Planner(d).gitCredential(run(), "github.com", "acme/extra.git");
+    expect(c.password).toBe("ghs_tok");
+    expect(calls.cloneURL).toEqual(["acme/extra"]);
+    expect(scopes).toEqual([["acme/api", "acme/web", "acme/extra"]]);
+  });
+
+  it("gitCredential matches an Azure DevOps path, whose URL is not owner/name", async () => {
+    const minted: string[] = [];
+    const d = deps({
+      environment: async () => ({ id: "env_1", repos: ["azure_devops:org/proj/repo", "azure_devops:org/proj/other"] }),
+      forges: {
+        forge: async () =>
+          ({
+            cloneURL: async (o: string, n: string) => {
+              minted.push(`${o}/${n}`);
+              const [org, project] = o.split("/");
+              return `https://pat:tok@dev.azure.com/${org}/${project}/_git/${n}`;
+            },
+          }) as never,
+      },
+    });
+    const r = run({}, { environment_id: "env_1" });
+    const c = await new Planner(d).gitCredential(r, "dev.azure.com", "/org/proj/_git/repo");
+    expect(c).toMatchObject({ username: "pat", password: "tok" });
+    expect(minted).toEqual(["org/proj/repo"]);
   });
 });
 

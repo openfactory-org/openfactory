@@ -5,14 +5,13 @@
 //
 // - The Worker routes GET /api/v1/workers/connect here by the OF-Worker-ID
 //   header (src/api/workers.ts connectWorker).
-// - An enrolled worker (mode "key") gets auth.challenge first and proves its
-//   Ed25519 key; a development process worker (mode "apikey") was checked by
-//   the Worker with a team API key and speaks first.
+// - The handshake (challenge -> hello -> ready) and the Ed25519 check are in
+//   protocol.ts; the SQLite lease cache and hub state are in store.ts.
 // - Liveness: the worker sends the text {"type":"ping"}; the runtime answers
 //   {"type":"pong"} (setWebSocketAutoResponse) without waking the DO. A timer
 //   every 45 s reads the auto-response timestamp.
 // - hello reconciles the task cache with the tasks the worker holds. Tasks
-//   that were never leased to this worker are ignored (06 correction 20).
+//   that were never leased to this worker are ignored.
 // - capacity.report goes to DispatchDO on every change (lane per worker).
 import { doName, newId, partitionOf } from "@openfactory/core";
 import { ProviderError, type SandboxTask, type TaskStatus } from "@openfactory/sandbox";
@@ -22,7 +21,6 @@ import {
   mergeStatus,
   providerErrorOf,
   toWireTask,
-  workerAuthMessage,
   type WireError,
   type WireFrame,
   type WireHello,
@@ -31,26 +29,35 @@ import type { Ack, OutboxEnvelope, TeamRpc, WorkerHubRpc } from "../../contracts
 import { serverConfig } from "../../config";
 import type { Env } from "../../contracts/env";
 import { BaseDO, type Migration } from "../../lib/base";
-import { b64url, fromAnyB64, fromB64url, randomBytes } from "../../lib/bytes";
 import { dest } from "../../lib/outbox/dest";
 import type { OutboxRow } from "../../lib/outbox/outbox";
 import { isoOf } from "../../lib/page";
 import { isOpError } from "../../lib/rpc";
-import { all, first } from "../../lib/sql/query";
 import type { WorkerRecord } from "../team/workers";
 import m0001 from "./migrations/0001_init";
+import {
+  HANDSHAKE_MS,
+  LIVENESS_MS,
+  PING_TEXT,
+  PONG_TEXT,
+  challengeFrame,
+  closeQuietly,
+  frameRefusal,
+  handshakeTimeout,
+  heldTasks,
+  helloRefusal,
+  helloSummary,
+  openAttachment,
+  verifyAuthResponse,
+  welcomeResult,
+  type Attachment,
+  type Mode,
+} from "./protocol";
+import { HubStore, statusOf } from "./store";
 import { mintWorkerToken } from "./token";
 
-/** Heartbeat interval announced in welcome. */
-export const HEARTBEAT_MS = 15_000;
-/** No ping or frame for this long closes the connection (3 intervals). */
-export const LIVENESS_MS = 45_000;
-/** The handshake (challenge answer and hello) must finish in this time. */
-export const HANDSHAKE_MS = 10_000;
 /** Timeout of a request to the worker without a caller deadline (hubv2.go). */
 export const CALL_TIMEOUT_MS = 60_000;
-export const PING_TEXT = '{"type":"ping"}';
-export const PONG_TEXT = '{"type":"pong"}';
 /** Custom outbox destination: WorkDO.sandboxState of a run. */
 const SANDBOX_STATE_DEST = "sandbox-state:";
 
@@ -66,18 +73,6 @@ export const hubSettings: Readonly<{
   callTimeoutMs: CALL_TIMEOUT_MS,
 });
 
-type Mode = "key" | "apikey";
-type Phase = "challenge" | "hello" | "ready";
-
-interface Attachment {
-  connId: string;
-  mode: Mode;
-  phase: Phase;
-  nonce?: string;
-  openedMs: number;
-  lastSeenMs: number;
-}
-
 interface Pending {
   resolve: (v: unknown) => void;
   reject: (e: unknown) => void;
@@ -86,51 +81,8 @@ interface Pending {
   method: string;
 }
 
-interface TaskRow extends Record<string, SqlStorageValue> {
-  task_id: string;
-  run_id: string;
-  session: number;
-  status: string;
-  destroyed: number;
-  leased_ms: number;
-  updated_ms: number;
-}
-
-/** Hello facts kept by the hub for live() and the TeamDO push. */
-interface HelloSummary {
-  version: string;
-  capacity: number;
-  labels: Record<string, string>;
-  facts: Record<string, unknown> | null;
-  features: string[];
-  slots: number;
-}
-
-function closeQuietly(ws: WebSocket, code: number, reason: string): void {
-  try {
-    ws.close(code, reason);
-  } catch {
-    /* already closed */
-  }
-}
-
-/** a < b for dotted numeric versions ("v1.4.0"); non-numeric versions never compare lower. */
-export function versionLess(a: string, b: string): boolean {
-  const parse = (v: string): number[] | null => {
-    const m = /^v?(\d+(?:\.\d+)*)/.exec(v.trim());
-    return m ? m[1]!.split(".").map(Number) : null;
-  };
-  const x = parse(a);
-  const y = parse(b);
-  if (!x || !y) return false;
-  for (let i = 0; i < Math.max(x.length, y.length); i++) {
-    const d = (x[i] ?? 0) - (y[i] ?? 0);
-    if (d !== 0) return d < 0;
-  }
-  return false;
-}
-
 export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
+  private readonly store = new HubStore(this.sql);
   private readonly pending = new Map<string, Pending>();
   /** Per-connection message chains: frames of one socket are handled in order. */
   private readonly chains = new Map<string, Promise<void>>();
@@ -145,11 +97,8 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
       if (!ws) return;
       const att = this.att(ws);
       if (att.phase === "ready") return;
-      closeQuietly(
-        ws,
-        att.phase === "challenge" ? 1008 : 1002,
-        att.phase === "challenge" ? "auth_failed" : "expected hello",
-      );
+      const r = handshakeTimeout(att.phase);
+      closeQuietly(ws, r.code, r.reason);
     });
     this.onTimerAsync("liveness", () => this.checkLiveness());
   }
@@ -169,57 +118,6 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
     return i < 0 ? n : n.slice(i + "|worker:".length);
   }
 
-  // ---------- state helpers ----------
-
-  private state(k: string): string | undefined {
-    return first<{ v: string }>(this.sql, "SELECT v FROM hub_state WHERE k = ?", k)?.v;
-  }
-
-  private setState(k: string, v: string): void {
-    this.sql.exec("INSERT INTO hub_state (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v", k, v);
-  }
-
-  private delState(k: string): void {
-    this.sql.exec("DELETE FROM hub_state WHERE k = ?", k);
-  }
-
-  private record(): WorkerRecord | undefined {
-    const v = this.state("record");
-    return v ? (JSON.parse(v) as WorkerRecord) : undefined;
-  }
-
-  private hello(): HelloSummary | undefined {
-    const v = this.state("hello");
-    return v ? (JSON.parse(v) as HelloSummary) : undefined;
-  }
-
-  private revoked(): boolean {
-    return this.state("revoked") === "1" || this.record()?.revoked === true;
-  }
-
-  private rows(): TaskRow[] {
-    return all<TaskRow>(this.sql, "SELECT * FROM hub_tasks ORDER BY leased_ms, task_id");
-  }
-
-  private row(taskId: string): TaskRow | undefined {
-    return first<TaskRow>(this.sql, "SELECT * FROM hub_tasks WHERE task_id = ?", taskId);
-  }
-
-  private statusOf(r: TaskRow): TaskStatus {
-    return JSON.parse(r.status) as TaskStatus;
-  }
-
-  /** Leased tasks that hold a slot: not exited and not destroyed. */
-  private slotsUsed(): number {
-    return this.rows().filter((r) => r.destroyed === 0 && this.statusOf(r).state !== "exited").length;
-  }
-
-  private slotLimit(): number {
-    const rec = this.record();
-    if (rec && rec.slots > 0) return rec.slots;
-    return this.hello()?.capacity ?? 0;
-  }
-
   private att(ws: WebSocket): Attachment {
     return ws.deserializeAttachment() as Attachment;
   }
@@ -230,7 +128,7 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
 
   /** The live connection: the socket that finished its hello last. */
   private current(): WebSocket | undefined {
-    const id = this.state("current_conn");
+    const id = this.store.get("current_conn");
     if (!id) return undefined;
     const ws = this.socket(id);
     if (!ws || this.att(ws).phase !== "ready") return undefined;
@@ -239,11 +137,11 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
 
   /** capacity.report to DispatchDO. Call inside tx. */
   private reportCapacity(): void {
-    const rec = this.record();
+    const st = this.store;
+    const rec = st.record();
     if (!rec) return;
-    const gen = Number(this.state("generation") ?? "0") + 1;
-    this.setState("generation", String(gen));
-    const online = !this.revoked() && this.state("current_conn") !== undefined;
+    const gen = st.nextGeneration();
+    const online = !st.revoked() && st.get("current_conn") !== undefined;
     this.enqueue({
       dest: dest.dispatch(this.teamId()),
       kind: "capacity.report",
@@ -254,9 +152,9 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
         kind: rec.kind,
         online,
         draining: rec.draining,
-        slots: this.slotLimit(),
-        used: this.slotsUsed(),
-        labels: rec.kind === "process" ? { ...rec.labels, ...(this.hello()?.labels ?? {}) } : rec.labels,
+        slots: st.slotLimit(),
+        used: st.slotsUsed(),
+        labels: rec.kind === "process" ? { ...rec.labels, ...(st.hello()?.labels ?? {}) } : rec.labels,
         factories: rec.factories,
         generation: gen,
       },
@@ -310,8 +208,8 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
   }
 
   private liveBody(online: boolean): Record<string, unknown> {
-    const h = this.hello();
-    const body: Record<string, unknown> = { online, slotsUsed: this.slotsUsed() };
+    const h = this.store.hello();
+    const body: Record<string, unknown> = { online, slotsUsed: this.store.slotsUsed() };
     const ws = this.current();
     if (ws) body.lastSeenMs = this.lastSeen(ws);
     if (h) {
@@ -340,7 +238,7 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
     if (request.headers.get("x-of-worker-id") !== workerId)
       return new Response("worker ID mismatch\n", { status: 400 });
     const mode: Mode = request.headers.get("x-of-auth-mode") === "apikey" ? "apikey" : "key";
-    if (this.state("revoked") === "1") return new Response("revoked\n", { status: 403 });
+    if (this.store.get("revoked") === "1") return new Response("revoked\n", { status: 403 });
 
     let rec: WorkerRecord;
     try {
@@ -355,7 +253,7 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
       return new Response("worker registry unavailable\n", { status: 503 });
     }
     if (rec.revoked) {
-      this.tx(() => this.setState("revoked", "1"));
+      this.tx(() => this.store.set("revoked", "1"));
       return new Response("revoked\n", { status: 403 });
     }
     if (mode === "key" && rec.publicKey === "")
@@ -372,22 +270,11 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
     const connId = newId("wconn");
     this.ctx.acceptWebSocket(server, [connId]);
     const now = Date.now();
-    const att: Attachment = {
-      connId,
-      mode,
-      phase: mode === "key" ? "challenge" : "hello",
-      openedMs: now,
-      lastSeenMs: now,
-    };
-    if (mode === "key") {
-      att.nonce = b64url(randomBytes(32));
-      server.send(
-        JSON.stringify({ type: "auth.challenge", params: { nonce: att.nonce, connection_id: connId, protocols: [1] } }),
-      );
-    }
+    const att = openAttachment(connId, mode, now);
+    if (att.phase === "challenge") server.send(challengeFrame(att));
     server.serializeAttachment(att);
     this.tx(() => {
-      this.setState("record", JSON.stringify(rec));
+      this.store.setRecord(rec);
       this.setTimer(`handshake:${connId}`, "handshake", now + HANDSHAKE_MS, { connId });
     });
     return new Response(null, {
@@ -425,19 +312,16 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
     if (typeof f !== "object" || f === null) return;
     att.lastSeenMs = Date.now();
     ws.serializeAttachment(att);
+    const refused = frameRefusal(att.phase, f);
+    if (refused) {
+      closeQuietly(ws, refused.code, refused.reason);
+      return;
+    }
     switch (att.phase) {
       case "challenge":
-        if (f.type !== "auth.response") {
-          closeQuietly(ws, 1008, "auth_failed");
-          return;
-        }
         await this.onAuthResponse(ws, att, f.params);
         return;
       case "hello":
-        if (f.type !== "hello") {
-          closeQuietly(ws, 1002, "expected hello");
-          return;
-        }
         await this.onHello(ws, att, f.params as WireHello);
         return;
       case "ready":
@@ -446,15 +330,7 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
   }
 
   private async onAuthResponse(ws: WebSocket, att: Attachment, params: unknown): Promise<void> {
-    const p = (params ?? {}) as { worker_id?: unknown; alg?: unknown; sig?: unknown };
-    const rec = this.record();
-    const ok =
-      !!rec &&
-      p.worker_id === rec.id &&
-      p.alg === "ed25519" &&
-      typeof p.sig === "string" &&
-      (await this.verify(rec.publicKey, p.worker_id, att.connId, att.nonce ?? "", p.sig));
-    if (!ok) {
+    if (!(await verifyAuthResponse(this.store.record(), att, params))) {
       closeQuietly(ws, 1008, "auth_failed");
       return;
     }
@@ -463,47 +339,15 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
     ws.serializeAttachment(att);
   }
 
-  private async verify(
-    publicKey: string,
-    workerId: string,
-    connId: string,
-    nonce: string,
-    sig: string,
-  ): Promise<boolean> {
-    try {
-      const raw = fromAnyB64(publicKey);
-      if (!raw || raw.length !== 32) return false;
-      const key = await crypto.subtle.importKey("raw", raw, { name: "Ed25519" }, false, ["verify"]);
-      return await crypto.subtle.verify(
-        { name: "Ed25519" },
-        key,
-        fromB64url(sig),
-        workerAuthMessage(workerId, connId, nonce) as Uint8Array<ArrayBuffer>,
-      );
-    } catch {
-      return false;
-    }
-  }
-
   private async onHello(ws: WebSocket, att: Attachment, hello: WireHello): Promise<void> {
-    const rec = this.record();
-    if (!rec || !hello || hello.worker_id !== rec.id) {
-      closeQuietly(ws, 1008, "worker_id does not match");
+    const st = this.store;
+    const rec = st.record();
+    const refused = helloRefusal(rec, att, hello, hubSettings.minRuntimeVersion);
+    if (refused || !rec) {
+      closeQuietly(ws, refused?.code ?? 1008, refused?.reason ?? "worker_id does not match");
       return;
     }
-    if (att.mode === "key" && (hello.protocol_minor ?? 0) < 1) {
-      closeQuietly(ws, 1008, "runtime_too_old");
-      return;
-    }
-    if (hubSettings.minRuntimeVersion && versionLess(hello.version ?? "", hubSettings.minRuntimeVersion)) {
-      closeQuietly(ws, 1008, "runtime_too_old");
-      return;
-    }
-    const held = new Map<string, TaskStatus>();
-    for (const t of hello.tasks ?? []) {
-      const s = fromWireStatus(t?.status);
-      if (s && s.taskId === t.task_id) held.set(s.taskId, s);
-    }
+    const held = heldTasks(hello);
     const replaced: WebSocket[] = [];
     this.tx(() => {
       for (const other of this.ctx.getWebSockets()) {
@@ -511,41 +355,16 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
       }
       att.phase = "ready";
       ws.serializeAttachment(att);
-      this.setState("current_conn", att.connId);
+      st.set("current_conn", att.connId);
       this.clearTimer(`handshake:${att.connId}`);
       const now = Date.now();
-      // attach: the hello's list replaces the cache. A leased task the worker
-      // does not hold is gone; a held task that was never leased is ignored.
-      for (const r of this.rows()) {
-        const s = held.get(r.task_id);
-        if (!s) {
-          this.sql.exec("DELETE FROM hub_tasks WHERE task_id = ?", r.task_id);
-          continue;
-        }
-        if (r.destroyed === 1) continue; // reconcile() sends the destroy kept while the worker was away
-        const old = this.statusOf(r);
-        this.sql.exec(
-          "UPDATE hub_tasks SET status = ?, updated_ms = ? WHERE task_id = ?",
-          JSON.stringify(s),
-          now,
-          r.task_id,
-        );
-        if (s.state === "exited" && old.state !== "exited") this.notifyExit(s);
-      }
-      for (const id of held.keys()) {
-        if (!this.row(id)) console.warn(`WorkerHubDO ${rec.id}: ignoring task ${id}, not leased to this worker`);
-      }
-      const summary: HelloSummary = {
-        version: hello.version ?? "",
-        capacity: Math.max(0, hello.capacity ?? 0),
-        labels: hello.labels ?? {},
-        facts: (hello.facts as Record<string, unknown> | undefined) ?? null,
-        features: hello.features ?? [],
-        slots: hello.slots ?? 0,
-      };
-      this.setState("hello", JSON.stringify(summary));
+      // A row with a destroy still owed keeps it: reconcile() sends it below.
+      const { exited, ignored } = st.attach(held, now);
+      for (const s of exited) this.notifyExit(s);
+      for (const id of ignored) console.warn(`WorkerHubDO ${rec.id}: ignoring task ${id}, not leased to this worker`);
+      st.setHello(helloSummary(hello));
       // The drain flag the worker holds now; reconcile() sends the record's flag when it differs.
-      this.setState("worker_draining", String(!!hello.draining));
+      st.set("worker_draining", String(!!hello.draining));
       this.reportCapacity();
       this.setTimer("liveness", "liveness", now + LIVENESS_MS);
     });
@@ -553,16 +372,9 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
       this.rejectPending(this.att(old).connId, "the connection was replaced");
       closeQuietly(old, 1001, "replaced by a new connection");
     }
-    const welcome: Record<string, unknown> = {
-      connection_id: att.connId,
-      heartbeat_ms: HEARTBEAT_MS,
-      draining: rec.draining,
-    };
-    if (hubSettings.minRuntimeVersion) welcome.min_runtime_version = hubSettings.minRuntimeVersion;
-    if (hubSettings.recommendedRuntimeVersion)
-      welcome.recommended_runtime_version = hubSettings.recommendedRuntimeVersion;
+    const welcome = welcomeResult(att.connId, rec.draining, hubSettings);
     if ((hello.features ?? []).includes("access_token")) {
-      // Additive (needs the schema change requested by WS6): only for workers that ask.
+      // Additive: only for workers that ask for it.
       const t = await mintWorkerToken(this.env, this.teamId(), rec.id);
       welcome.access_token = t.token;
       welcome.access_token_expires_at = isoOf(t.expiresAt);
@@ -583,21 +395,16 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
       return;
     }
     if (f.type === "event" && f.method === "task.state") {
-      if (this.state("current_conn") !== att.connId) return;
+      if (this.store.get("current_conn") !== att.connId) return;
       const s = fromWireStatus((f.params as { status?: unknown } | undefined)?.status);
       if (!s) return;
       const exited = this.tx(() => {
-        const r = this.row(s.taskId);
+        const r = this.store.task(s.taskId);
         if (!r || r.destroyed === 1) return false;
-        const old = this.statusOf(r);
+        const old = statusOf(r);
         const merged = mergeStatus(old, s);
         if (merged === old) return false;
-        this.sql.exec(
-          "UPDATE hub_tasks SET status = ?, updated_ms = ? WHERE task_id = ?",
-          JSON.stringify(merged),
-          Date.now(),
-          s.taskId,
-        );
+        this.store.setStatus(s.taskId, merged, Date.now());
         if (merged.state === "exited" && old.state !== "exited") {
           this.notifyExit(merged);
           this.reportCapacity();
@@ -605,7 +412,7 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
         }
         return false;
       });
-      if (exited) await this.pushTeam({ slotsUsed: this.slotsUsed() });
+      if (exited) await this.pushTeam({ slotsUsed: this.store.slotsUsed() });
       return;
     }
     if (f.type === "request" && typeof f.id === "string") {
@@ -635,13 +442,13 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
     this.rejectPending(att.connId, "the worker disconnected");
     const wasCurrent = this.tx(() => {
       this.clearTimer(`handshake:${att.connId}`);
-      if (this.state("current_conn") !== att.connId) return false;
-      this.delState("current_conn");
+      if (this.store.get("current_conn") !== att.connId) return false;
+      this.store.del("current_conn");
       this.clearTimer("liveness");
       this.reportCapacity();
       return true;
     });
-    if (wasCurrent) await this.pushTeam({ online: false, slotsUsed: this.slotsUsed() });
+    if (wasCurrent) await this.pushTeam({ online: false, slotsUsed: this.store.slotsUsed() });
   }
 
   private rejectPending(connId: string, why: string): void {
@@ -700,19 +507,18 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
    */
   private reconcile(): void {
     if (!this.current()) return;
-    const rec = this.record();
-    if (rec && this.state("worker_draining") !== String(rec.draining)) {
+    const st = this.store;
+    const rec = st.record();
+    if (rec && st.get("worker_draining") !== String(rec.draining)) {
       const draining = rec.draining;
       this.background("drain", "drain", { draining }, () => {
-        this.tx(() => this.setState("worker_draining", String(draining)));
+        this.tx(() => st.set("worker_draining", String(draining)));
         this.reconcile(); // the record may have changed while the request was out
       });
     }
-    for (const r of this.rows()) {
-      if (r.destroyed !== 1) continue;
-      const taskId = r.task_id;
+    for (const taskId of st.destroyedIds()) {
       this.background(`destroy:${taskId}`, "task.destroy", { task_id: taskId }, () =>
-        this.tx(() => this.sql.exec("DELETE FROM hub_tasks WHERE task_id = ? AND destroyed = 1", taskId)),
+        this.tx(() => st.removeDestroyed(taskId)),
       );
     }
   }
@@ -744,28 +550,19 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
 
   async taskAssign(task: SandboxTask, extras?: Record<string, unknown>): Promise<TaskStatus> {
     await this.ready;
+    const st = this.store;
     const reserved = this.tx(() => {
-      const r = this.row(task.taskId);
-      if (r && r.destroyed === 0) return { existing: this.statusOf(r) };
-      if (this.revoked()) throw new ProviderError("unavailable", "the worker is revoked");
-      const rec = this.record();
+      const r = st.task(task.taskId);
+      if (r && r.destroyed === 0) return { existing: statusOf(r) };
+      if (st.revoked()) throw new ProviderError("unavailable", "the worker is revoked");
+      const rec = st.record();
       if (!rec) throw new ProviderError("unavailable", "the worker has never connected");
       if (rec.draining) throw new ProviderError("at_capacity", "the worker is draining");
       if (!this.current()) throw new ProviderError("unavailable", "the worker is not connected");
-      const limit = this.slotLimit();
-      if (limit > 0 && this.slotsUsed() >= limit)
+      const limit = st.slotLimit();
+      if (limit > 0 && st.slotsUsed() >= limit)
         throw new ProviderError("at_capacity", `all ${limit} slots of the worker are in use`);
-      const now = Date.now();
-      const s: TaskStatus = { taskId: task.taskId, state: "accepted" };
-      this.sql.exec(
-        "INSERT OR REPLACE INTO hub_tasks (task_id, run_id, session, status, destroyed, leased_ms, updated_ms) VALUES (?, ?, ?, ?, 0, ?, ?)",
-        task.taskId,
-        task.runId,
-        task.session,
-        JSON.stringify(s),
-        now,
-        now,
-      );
+      st.lease(task, { taskId: task.taskId, state: "accepted" }, Date.now());
       this.reportCapacity();
       return { existing: undefined };
     });
@@ -776,9 +573,9 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
     } catch (e) {
       // Free the slot (hubv2.go frees the reservation on error).
       this.tx(() => {
-        const r = this.row(task.taskId);
-        if (r && this.statusOf(r).state === "accepted") {
-          this.sql.exec("DELETE FROM hub_tasks WHERE task_id = ?", task.taskId);
+        const r = st.task(task.taskId);
+        if (r && statusOf(r).state === "accepted") {
+          st.remove(task.taskId);
           this.reportCapacity();
         }
       });
@@ -789,14 +586,9 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
       state: "accepted" as const,
     };
     const merged = this.tx(() => {
-      const r = this.row(task.taskId);
-      const m = mergeStatus(r ? this.statusOf(r) : undefined, reported);
-      this.sql.exec(
-        "UPDATE hub_tasks SET status = ?, updated_ms = ? WHERE task_id = ?",
-        JSON.stringify(m),
-        Date.now(),
-        task.taskId,
-      );
+      const r = st.task(task.taskId);
+      const m = mergeStatus(r ? statusOf(r) : undefined, reported);
+      st.setStatus(task.taskId, m, Date.now());
       return m;
     });
     const cache = (extras?.git_cache ?? []) as { clone_url?: string }[];
@@ -808,21 +600,21 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
         .api({ requestId: newId("req") }, "workers.noteRepos", { id: this.workerId() }, { repos })
         .catch((e: unknown) => console.warn("WorkerHubDO: noteRepos failed", e));
     }
-    await this.pushTeam({ slotsUsed: this.slotsUsed() });
+    await this.pushTeam({ slotsUsed: st.slotsUsed() });
     return merged;
   }
 
   async taskStatus(taskId: string): Promise<TaskStatus> {
     await this.ready;
-    const r = this.row(taskId);
+    const r = this.store.task(taskId);
     if (!r || r.destroyed === 1)
       throw new ProviderError("not_found", `task ${taskId} is not known to worker ${this.workerId()}`);
-    return this.statusOf(r);
+    return statusOf(r);
   }
 
   async taskCancel(taskId: string, graceSeconds: number): Promise<void> {
     await this.ready;
-    const r = this.row(taskId);
+    const r = this.store.task(taskId);
     if (!r || r.destroyed === 1)
       throw new ProviderError("not_found", `task ${taskId} is not known to worker ${this.workerId()}`);
     await this.request("task.cancel", { task_id: taskId, grace_seconds: Math.max(0, Math.round(graceSeconds)) });
@@ -838,20 +630,14 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
         if ((e as ProviderError).kind !== "not_found") throw e;
       }
       this.tx(() => {
-        if (this.row(taskId)) {
-          this.sql.exec("DELETE FROM hub_tasks WHERE task_id = ?", taskId);
-          this.reportCapacity();
-        }
+        if (this.store.remove(taskId)) this.reportCapacity();
       });
     } else {
       this.tx(() => {
-        if (this.row(taskId)) {
-          this.sql.exec("UPDATE hub_tasks SET destroyed = 1, updated_ms = ? WHERE task_id = ?", Date.now(), taskId);
-          this.reportCapacity();
-        }
+        if (this.store.markDestroyed(taskId, Date.now())) this.reportCapacity();
       });
     }
-    await this.pushTeam({ slotsUsed: this.slotsUsed() });
+    await this.pushTeam({ slotsUsed: this.store.slotsUsed() });
   }
 
   /** Orphan sweep: every task the worker holds when connected, else the leased cache. */
@@ -861,9 +647,7 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
       const res = (await this.request("task.list", {})) as { tasks?: { task_id: string; status: unknown }[] | null };
       return (res.tasks ?? []).map((t) => fromWireStatus(t.status)).filter((s): s is TaskStatus => s !== null);
     }
-    return this.rows()
-      .filter((r) => r.destroyed === 0)
-      .map((r) => this.statusOf(r));
+    return this.store.liveStatuses();
   }
 
   async live(): Promise<{ online: boolean; slotsUsed: number; lastSeen: string | null; version: string | null }> {
@@ -871,9 +655,9 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
     const ws = this.current();
     return {
       online: !!ws,
-      slotsUsed: this.slotsUsed(),
+      slotsUsed: this.store.slotsUsed(),
       lastSeen: ws ? isoOf(this.lastSeen(ws)) : null,
-      version: this.hello()?.version || null,
+      version: this.store.hello()?.version || null,
     };
   }
 
@@ -881,10 +665,10 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
   async revoke(): Promise<void> {
     await this.ready;
     this.tx(() => {
-      this.setState("revoked", "1");
-      const rec = this.record();
-      if (rec) this.setState("record", JSON.stringify({ ...rec, revoked: true }));
-      this.delState("current_conn");
+      this.store.set("revoked", "1");
+      const rec = this.store.record();
+      if (rec) this.store.setRecord({ ...rec, revoked: true });
+      this.store.del("current_conn");
       this.clearTimer("liveness");
       this.reportCapacity();
     });
@@ -897,9 +681,9 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
   async drain(draining: boolean): Promise<void> {
     await this.ready;
     this.tx(() => {
-      const rec = this.record();
+      const rec = this.store.record();
       if (!rec) return;
-      this.setState("record", JSON.stringify({ ...rec, draining }));
+      this.store.setRecord({ ...rec, draining });
       this.reportCapacity();
     });
     this.reconcile();
@@ -909,8 +693,8 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
   async configure(rec: WorkerRecord): Promise<void> {
     await this.ready;
     this.tx(() => {
-      this.setState("record", JSON.stringify(rec));
-      if (rec.revoked) this.setState("revoked", "1");
+      this.store.setRecord(rec);
+      if (rec.revoked) this.store.set("revoked", "1");
       this.reportCapacity();
     });
     if (rec.revoked) {

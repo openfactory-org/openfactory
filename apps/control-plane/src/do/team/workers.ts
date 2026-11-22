@@ -15,14 +15,8 @@ import { isoOf, listResponse } from "../../lib/page";
 import type { Migration } from "../../lib/sql/migrate";
 import { all, first, run } from "../../lib/sql/query";
 import { registeredProviders } from "../dispatch/providers";
-import {
-  activeMachines,
-  agentFile,
-  automationFile,
-  findFactory,
-  listFactories,
-  type DefinitionCheck,
-} from "./factories";
+import type { DefinitionCheck } from "./factories/definitions";
+import { activeMachines, agentFile, automationFile, findFactory, listFactories } from "./factories/repo";
 import { created, noContent, type OpCall, type Preflight, type TeamKit, type TeamOp } from "./kit";
 import type { CompiledDefinition } from "@openfactory/definition";
 
@@ -700,14 +694,21 @@ function noteRepos(kit: TeamKit, call: OpCall): { ok: true } {
   return { ok: true };
 }
 
-/** "workers.list": every record, for the local provider and DispatchDO. */
-function listRecords(kit: TeamKit): (WorkerRecord & { status: WorkerStatus; slotsUsed: number; arch: string })[] {
-  return all<WorkerRow>(kit.sql, "SELECT * FROM workers ORDER BY created_ms, id").map((r) => ({
+/** One row of "workers.list" and "workers.record". */
+export type ListedWorker = WorkerRecord & { status: WorkerStatus; slotsUsed: number; arch: string };
+
+function listed(r: WorkerRow): ListedWorker {
+  return {
     ...recordOf(r),
     status: statusOf(r),
     slotsUsed: r.slots_used,
     arch: String(parseJson<Record<string, unknown>>(r.facts, {}).arch ?? ""),
-  }));
+  };
+}
+
+/** "workers.list": every record, for the local provider and DispatchDO. */
+function listRecords(kit: TeamKit): ListedWorker[] {
+  return all<WorkerRow>(kit.sql, "SELECT * FROM workers ORDER BY created_ms, id").map(listed);
 }
 
 // ---------- machines (GET /machines) ----------
@@ -764,6 +765,8 @@ export const ops: Record<string, TeamOp> = {
   "workers.hubState": hubState,
   "workers.noteRepos": noteRepos,
   "workers.list": (kit) => listRecords(kit),
+  /** One record in the "workers.list" row shape (params id), or 404. */
+  "workers.record": (kit, call) => listed(mustRow(kit, call.params.id ?? "")),
 };
 
 function listRecordsView(kit: TeamKit): WorkerView[] {

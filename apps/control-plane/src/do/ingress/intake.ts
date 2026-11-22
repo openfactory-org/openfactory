@@ -254,6 +254,30 @@ function retryErrorOf(errs: unknown[]): unknown {
   return transient ?? errs[0];
 }
 
+/** How many configSnapshot calls are in flight at once when intake scans every factory. */
+export const SNAPSHOT_PARALLEL = 16;
+
+/**
+ * The snapshots of the factories the event is for, in the order of
+ * listFactoryIds: the named factory, or every factory that covers the event.
+ * Snapshots load in bounded parallel batches. A failure throws the error of the
+ * first failed factory in list order, as a sequential scan would.
+ */
+export async function factorySnapshots(d: IntakeDeps, ev: CoreEvent): Promise<Snapshot[]> {
+  if (ev.factory_id) return [await d.snapshot(ev.factory_id)];
+  const ids = await d.listFactoryIds();
+  const out: Snapshot[] = [];
+  for (let i = 0; i < ids.length; i += SNAPSHOT_PARALLEL) {
+    const batch = await Promise.allSettled(ids.slice(i, i + SNAPSHOT_PARALLEL).map((id) => d.snapshot(id)));
+    for (const r of batch) {
+      if (r.status === "rejected") throw r.reason;
+      const snap = r.value;
+      if (factoryCovers(ev, snap.runtime.repositories, Object.keys(snap.integrations ?? {}))) out.push(snap);
+    }
+  }
+  return out;
+}
+
 /** HandleEvent. Returns done, or a retry for a transient failure. */
 export async function handleEvent(d: IntakeDeps, teamId: string, ev: CoreEvent): Promise<IntakeResult> {
   if (!ev) throw new OfError("invalid_request", "nil event");
@@ -270,13 +294,7 @@ export async function handleEvent(d: IntakeDeps, teamId: string, ev: CoreEvent):
   if (isSelfEvent(ev)) return { done: true };
 
   // 2. Factories.
-  const snaps: Snapshot[] = [];
-  const ids = ev.factory_id ? [ev.factory_id] : await d.listFactoryIds();
-  for (const id of ids) {
-    const snap = await d.snapshot(id);
-    if (ev.factory_id || factoryCovers(ev, snap.runtime.repositories, Object.keys(snap.integrations ?? {})))
-      snaps.push(snap);
-  }
+  const snaps = await factorySnapshots(d, ev);
   // 3. Sender.
   const user = await senderTrust(d, ev, teamId);
 

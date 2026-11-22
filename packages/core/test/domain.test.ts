@@ -24,6 +24,7 @@ import {
   workItemHasRef,
   workItemRefs,
   builtinMCPProvider,
+  type PullRequestFacts,
   type SourceRef,
   type WorkItem,
 } from "../src/index";
@@ -195,7 +196,10 @@ describe("misc", () => {
   });
 
   it("checks person pushes", () => {
-    const f = { opener_kind: "agent", pushes: [{ at: "2026-01-02T00:00:00Z", kind: "person" }] };
+    const f: Pick<PullRequestFacts, "opener_kind" | "pushes"> = {
+      opener_kind: "agent",
+      pushes: [{ at: "2026-01-02T00:00:00Z", kind: "person" }],
+    };
     expect(personPushedBefore(f, "2026-01-01T00:00:00Z")).toBe(false);
     expect(personPushedBefore(f, "2026-01-02T00:00:00Z")).toBe(true);
   });

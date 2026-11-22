@@ -1,8 +1,8 @@
 // Worker-side adapters that read integration records and secrets from the
 // team's TeamDO, and build a forge Resolver from the environment.
-// TeamDO ops used: integrationsForProvider and integrationsSetStatus (WS10b,
-// src/do/team/integrations.ts), secretsGet (WS4, src/do/team/secrets.ts),
-// userForgeTokenGet (this workstream, src/do/team/schedules.ts).
+// TeamDO ops used: integrationsForProvider and integrationsSetStatus
+// (src/do/team/integrations.ts), secretsGet (src/do/team/secrets.ts),
+// userForgeTokenGet (src/do/team/user-forge-tokens.ts).
 import { doName, type Integration } from "@openfactory/core";
 import type { ForgePlugin } from "@openfactory/plugin-api";
 import type { CallMeta } from "../contracts/do-messages";

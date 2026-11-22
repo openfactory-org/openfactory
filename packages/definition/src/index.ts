@@ -4,13 +4,7 @@
 
 export type * from "./types.ts";
 export { compile, normalizePath } from "./compile.ts";
-export {
-  BUILTIN_MCP_PREFIX,
-  BUILTIN_MCP_PROVIDERS,
-  builtinMCPProvider,
-  RESERVED_MCP_SERVER_NAME,
-  SCHEMA_VERSION,
-} from "./common.ts";
+export { BUILTIN_MCP_PREFIX, BUILTIN_MCP_PROVIDERS, RESERVED_MCP_SERVER_NAME, SCHEMA_VERSION } from "./common.ts";
 export { encodeDefinition } from "./encode.ts";
 export {
   type Change,

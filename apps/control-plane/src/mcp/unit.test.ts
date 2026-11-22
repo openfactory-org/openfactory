@@ -15,7 +15,7 @@ import { localEncrypter } from "../secrets/envelope";
 import { handleMessage, serveMcp, textResult, type McpServer } from "./jsonrpc";
 import { MERGE_REFUSED_HEADER, REFUSAL_TEXT, guardMerge, isMergeTool } from "./mergeguard";
 import { authParam, canonicalResource } from "./registry/oauth";
-import { defaultConnection, privateHostWarning, proxied, validate } from "./registry/validate";
+import { defaultConnection, parseConnection, privateHostWarning, proxied, validate } from "./registry/validate";
 import { matchesWorkItem, parsePullRequestURL, planReference, truncate } from "./server/refs";
 
 describe("mergeguard", () => {
@@ -145,16 +145,16 @@ describe("registry validate", () => {
       { name: "a", url: "https://a.test/sse", connection: "proxy" },
       { name: "a", url: "https://a.test", headers: { "X-Api-Key": "abc" } },
       { name: "a", command: "x", env: { GITHUB_TOKEN: "ghp_x" } },
-      { name: "a", url: "https://a.test", oauth: { status: "", token_endpoint: "http://idp.test/token" } },
-      { name: "a", url: "https://a.test", oauth: { status: "", client_secret_name: "S" } },
-      { name: "a", url: "https://a.test", oauth: { status: "", scopes: ["a b"] } },
+      { name: "a", url: "https://a.test", oauth: { status: "not_connected", token_endpoint: "http://idp.test/token" } },
+      { name: "a", url: "https://a.test", oauth: { status: "not_connected", client_secret_name: "S" } },
+      { name: "a", url: "https://a.test", oauth: { status: "not_connected", scopes: ["a b"] } },
     ];
     bad.forEach((b, i) => expectInvalid(srv(b), `case ${i}`));
     const ok = srv({
       name: "a",
       url: "https://a.test/mcp",
       headers: { Authorization: "Bearer {{TOKEN}}", "X-Team": "eng" },
-      oauth: { status: "", token_endpoint: "http://127.0.0.1:9/token" },
+      oauth: { status: "not_connected", token_endpoint: "http://127.0.0.1:9/token" },
     });
     validate(ok);
     expect(proxied(ok)).toBe(true);
@@ -177,14 +177,15 @@ describe("registry validate", () => {
       expect(proxied(m), name).toBe(want === MCP_CONNECTION_PROXY);
       expect(w !== "", name).toBe(warning);
     }
-    for (const b of [
-      { name: "a", url: "https://a.test/mcp", connection: "tunnel" },
+    expect(() => parseConnection("tunnel")).toThrow(/connection "tunnel": want proxy or direct/);
+    expect(parseConnection(" Proxy ")).toBe(MCP_CONNECTION_PROXY);
+    expect(parseConnection("")).toBeUndefined();
+    const invalid: Partial<RegisteredMCPServer>[] = [
       { name: "a", url: "https://a.test/sse", connection: "proxy" },
-      { name: "a", url: "https://a.test/mcp", connection: "direct", oauth: { status: "" } },
+      { name: "a", url: "https://a.test/mcp", connection: "direct", oauth: { status: "not_connected" } },
       { name: "a", command: "npx", connection: "proxy" },
-    ]) {
-      expectInvalid(srv(b), JSON.stringify(b));
-    }
+    ];
+    for (const b of invalid) expectInvalid(srv(b), JSON.stringify(b));
   });
 
   it("warns about a proxied server on a private network (gap 20)", () => {

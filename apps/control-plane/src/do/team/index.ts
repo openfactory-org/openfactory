@@ -7,7 +7,8 @@
 //
 //   migrations: readonly Migration[]   numbers in its range: auth, secrets,
 //                                      factories, settings 1-99; integrations,
-//                                      schedules 100-199; mcp 200-299;
+//                                      schedules, webhooks, user forge tokens
+//                                      100-199; mcp 200-299;
 //                                      workers 300-399; scoring 400-499
 //   ops: Record<string, TeamOp>        handlers of TeamDO.api(meta, op, ...),
 //                                      keyed by openapi operationId (or an
@@ -28,6 +29,7 @@ import type { OpError } from "../../lib/rpc";
 import type { Migration } from "../../lib/sql/migrate";
 import * as auth from "./auth";
 import * as factories from "./factories";
+import * as definitions from "./factories/definitions";
 import * as integrations from "./integrations";
 import * as mcp from "./mcp";
 import * as preflight from "./preflight";
@@ -35,6 +37,8 @@ import * as schedules from "./schedules";
 import * as scoring from "./scoring";
 import * as secrets from "./secrets";
 import * as settings from "./settings";
+import * as userForgeTokens from "./user-forge-tokens";
+import * as webhooks from "./webhooks";
 import * as workers from "./workers";
 import type { OpCall, TeamKit, TeamModule, TeamOp } from "./kit";
 
@@ -49,6 +53,8 @@ const MODULES: Record<string, TeamModule> = {
   workers,
   integrations,
   schedules,
+  webhooks,
+  userForgeTokens,
   mcp,
   scoring,
   preflight,
@@ -214,7 +220,7 @@ export class TeamDO extends BaseDO implements TeamRpc, RetentionRpc {
   }
 
   definitionApply(meta: CallMeta, factoryId: string, input: unknown): Promise<unknown> {
-    return this.rpc(() => factories.definitionApply(this.kit, meta, factoryId, input));
+    return this.rpc(() => definitions.definitionApply(this.kit, meta, factoryId, input));
   }
 
   secretsResolve(
@@ -225,11 +231,11 @@ export class TeamDO extends BaseDO implements TeamRpc, RetentionRpc {
   }
 
   configSnapshot(factoryId: string): Promise<unknown> {
-    return this.rpc(() => factories.configSnapshot(this.kit, factoryId));
+    return this.rpc(() => definitions.configSnapshot(this.kit, factoryId));
   }
 
-  proposeDefinition(meta: CallMeta, input: factories.ProposeDefinitionInput): Promise<unknown> {
-    return this.rpc(() => factories.proposeDefinition(this.kit, meta, input));
+  proposeDefinition(meta: CallMeta, input: definitions.ProposeDefinitionInput): Promise<unknown> {
+    return this.rpc(() => definitions.proposeDefinition(this.kit, meta, input));
   }
 
   workersEnroll(input: Parameters<TeamRpc["workersEnroll"]>[0]): Promise<{ workerId: string }> {

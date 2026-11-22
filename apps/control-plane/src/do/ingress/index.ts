@@ -87,9 +87,9 @@ export function deliveryView(d: WebhookDelivery, withBody: boolean): Record<stri
     d.body === undefined || d.body === null
       ? 0
       : new TextEncoder().encode(typeof d.body === "string" ? d.body : JSON.stringify(d.body)).length;
-  let label = d.status;
+  let label: string = d.status;
   const reason = d.reason ?? "";
-  switch (d.status) {
+  switch (label) {
     case "accepted":
       label = "Accepted";
       break;

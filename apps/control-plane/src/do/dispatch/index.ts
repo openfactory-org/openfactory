@@ -399,6 +399,8 @@ export class DispatchDO extends BaseDO {
       p.session,
     );
     if (cur && cur.seq >= p.seq) return;
+    const now = Date.now();
+    const wasOver = exceeded(this.limitsOf(p.factoryId, now)) !== undefined;
     const delta = p.costUsd - (cur?.cost_usd ?? 0);
     const day = dayKey(p.runCreatedMs);
     const month = monthKey(p.runCreatedMs);
@@ -434,7 +436,6 @@ export class DispatchDO extends BaseDO {
         );
       }
     }
-    const now = Date.now();
     const limits = this.limitsOf(p.factoryId, now);
     const over = exceeded(limits);
     const wd = p.workDO ?? doName.work(this.teamId(), partitionOf(p.runId));
@@ -461,7 +462,9 @@ export class DispatchDO extends BaseDO {
         },
       });
     }
-    this.admission();
+    // Usage changes only this factory's spend gate. The full pass runs only when
+    // the gate flips; a hold that is already set ends through the "spend" timer.
+    if ((over !== undefined) !== wasOver) this.admission();
   }
 
   // ---------- RPC ----------

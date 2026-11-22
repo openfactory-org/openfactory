@@ -1,5 +1,6 @@
-// Request body helpers for ops (port of decodeJSON's type errors) and
-// byte-capped reads of request and response bodies.
+// Request body helpers for ops and byte-capped reads of request and response
+// bodies. A field of the wrong JSON type is a 400 (invalid_request) that names
+// the field and the JSON type it needs; null is the same as an absent field.
 import { OfError } from "@openfactory/core";
 
 export type JsonObject = Record<string, unknown>;
@@ -15,14 +16,15 @@ export function bodyObject(body: unknown, optional = false): JsonObject {
   return body as JsonObject;
 }
 
-function typeErr(field: string, type: string): OfError {
-  return new OfError("invalid_request", `field "${field}" must be of type ${type}`);
+/** want: the JSON type in plain words ("a string", "an array of strings"). */
+function typeErr(field: string, want: string): OfError {
+  return new OfError("invalid_request", `field "${field}" must be ${want}`);
 }
 
 export function optString(o: JsonObject, k: string): string | undefined {
   const v = o[k];
   if (v === undefined || v === null) return undefined;
-  if (typeof v !== "string") throw typeErr(k, "string");
+  if (typeof v !== "string") throw typeErr(k, "a string");
   return v;
 }
 
@@ -33,14 +35,14 @@ export function str(o: JsonObject, k: string): string {
 export function optBool(o: JsonObject, k: string): boolean | undefined {
   const v = o[k];
   if (v === undefined || v === null) return undefined;
-  if (typeof v !== "boolean") throw typeErr(k, "bool");
+  if (typeof v !== "boolean") throw typeErr(k, "a boolean");
   return v;
 }
 
 export function optStringArray(o: JsonObject, k: string): string[] | undefined {
   const v = o[k];
   if (v === undefined || v === null) return undefined;
-  if (!Array.isArray(v) || !v.every((x) => typeof x === "string")) throw typeErr(k, "[]string");
+  if (!Array.isArray(v) || !v.every((x) => typeof x === "string")) throw typeErr(k, "an array of strings");
   return v as string[];
 }
 
@@ -48,9 +50,17 @@ export function optStringMap(o: JsonObject, k: string): Record<string, string> |
   const v = o[k];
   if (v === undefined || v === null) return undefined;
   if (typeof v !== "object" || Array.isArray(v) || !Object.values(v).every((x) => typeof x === "string")) {
-    throw typeErr(k, "map[string]string");
+    throw typeErr(k, "an object with string values");
   }
   return v as Record<string, string>;
+}
+
+/** A nested object; undefined when absent. */
+export function optObject(o: JsonObject, k: string): JsonObject | undefined {
+  const v = o[k];
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== "object" || Array.isArray(v)) throw typeErr(k, "an object");
+  return v as JsonObject;
 }
 
 /** Map of string or null values (for "null removes"). */
@@ -62,7 +72,7 @@ export function optNullableStringMap(o: JsonObject, k: string): Record<string, s
     Array.isArray(v) ||
     !Object.values(v).every((x) => x === null || typeof x === "string")
   ) {
-    throw typeErr(k, "map[string]*string");
+    throw typeErr(k, "an object with string or null values");
   }
   return v as Record<string, string | null>;
 }

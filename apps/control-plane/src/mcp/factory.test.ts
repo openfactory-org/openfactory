@@ -291,4 +291,41 @@ describe("Factory MCP tools", () => {
     expect((await call(ctx, "complete_work_item", { work_item_id: id })).out.status).toBe("completed");
     expect(errCode((await call(ctx, "send_work_item", { work_item_id: id, note: "again" })).out)).toBe("conflict");
   });
+
+  // GET /factories returns at most 200 per page; the tools read every page.
+  it("list_factories and reference lookups read every page of factories", async () => {
+    const { backend } = fakeBackend();
+    const queries: string[] = [];
+    const asked: string[] = [];
+    const paged: FactoryMcpBackend = {
+      ...backend,
+      async api<T>(e: Env, p: Principal, method: string, path: string, body?: unknown): Promise<T> {
+        const u = new URL("http://x" + path);
+        if (method === "GET" && u.pathname === "/factories") {
+          queries.push(u.search);
+          const cursor = u.searchParams.get("cursor");
+          if (!cursor)
+            return { items: [{ id: "fac_1", name: "web", source: "managed" }], page_info: { next_cursor: "c2" } } as T;
+          if (cursor === "c2")
+            return { items: [{ id: "fac_2", name: "api", source: "managed" }], page_info: { next_cursor: "c3" } } as T;
+          return { items: [{ id: "fac_3", name: "docs", source: "git" }], page_info: {} } as T;
+        }
+        if (method === "GET" && /^\/factories\/fac_[23]\/work-items$/.test(u.pathname))
+          return { items: [], page_info: {} } as T;
+        return backend.api<T>(e, p, method, path, body);
+      },
+      async resolveSourceKey(_e, _p, factoryId, key) {
+        asked.push(`${factoryId} ${key}`);
+        return null;
+      },
+    };
+    const ctx: FactoryCtx = { env: env as unknown as Env, principal: editor, backend: paged, publicURL: PUB };
+    const out = (await call(ctx, "list_factories")).out.factories as { uid: string }[];
+    expect(out.map((f) => f.uid).sort()).toEqual(["fac_1", "fac_2", "fac_3"]);
+    expect(queries).toEqual(["?limit=200", "?limit=200&cursor=c2", "?limit=200&cursor=c3"]);
+
+    // A reference lookup asks the factories of every page for the source key.
+    expect(errCode((await call(ctx, "get_work_item", { work_item: "acme/web#12" })).out)).toBe("resource_not_found");
+    expect(asked).toContain("fac_3 github:acme/web#12");
+  });
 });

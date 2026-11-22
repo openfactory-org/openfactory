@@ -10,7 +10,7 @@ import type { EnqueueInput } from "../../lib/outbox/outbox";
 import type { OpResponse } from "../../lib/rpc";
 import type { Migration } from "../../lib/sql/migrate";
 import type { AsyncTimerHandler, SyncTimerHandler, Timers } from "../../lib/timers/timers";
-import type { PreflightCheck } from "./factories";
+import type { PreflightCheck } from "./factories/definitions";
 import type { RewrapSource } from "./secrets";
 
 export type { OpError, OpResponse } from "../../lib/rpc";

@@ -1,11 +1,12 @@
 import { env } from "cloudflare:workers";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { OutboxEnvelope } from "../contracts/do-messages";
 import { insertMany } from "./sql/chunk";
 import { applyMigrations, schemaSnapshot } from "./sql/migrate";
 import {
   Outbox,
+  OUTBOX_INLINE_LIMIT,
   OUTBOX_LEASE_MS,
   OUTBOX_MAX_ATTEMPTS,
   OUTBOX_PARALLEL,
@@ -192,6 +193,40 @@ describe("outbox", () => {
       expect(leaseLeft).toHaveLength(OUTBOX_PARALLEL + 1);
       expect(leaseLeft.every((ms) => ms === OUTBOX_LEASE_MS)).toBe(true);
       expect(t.ob.pendingCount()).toBe(0);
+    });
+  });
+
+  it("sends a large payload to R2 without parsing it", async () => {
+    await runInDurableObject(fresh(), async (_i, state) => {
+      const got: OutboxEnvelope[] = [];
+      const stored: string[] = [];
+      const ob = new Outbox({
+        storage: state.storage,
+        origin: () => "team:test",
+        deliver: (async (e: OutboxEnvelope) => {
+          got.push(e);
+        }) as never,
+        onDead: () => undefined,
+        putLarge: async (body) => {
+          stored.push(body);
+          return "r2:key";
+        },
+      });
+      const big = { blob: "x".repeat(OUTBOX_INLINE_LIMIT) };
+      ob.enqueue({ dest: "custom:x", kind: "k", msgId: "big", payload: big });
+      ob.enqueue({ dest: "custom:x", kind: "k", msgId: "small", payload: { a: 1 } });
+      const parse = vi.spyOn(JSON, "parse");
+      try {
+        await ob.drain();
+        expect(parse.mock.calls.filter(([s]) => String(s).length > OUTBOX_INLINE_LIMIT)).toHaveLength(0);
+      } finally {
+        parse.mockRestore();
+      }
+      const byId = new Map(got.map((e) => [e.msgId, e]));
+      expect(byId.get("big")).toMatchObject({ payloadR2: "r2:key", payload: {} });
+      expect(stored).toEqual([JSON.stringify(big)]);
+      expect(byId.get("small")).toMatchObject({ payload: { a: 1 } });
+      expect(byId.get("small")!.payloadR2).toBeUndefined();
     });
   });
 

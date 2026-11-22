@@ -1,6 +1,6 @@
 // Agent parser and resolution. Port of internal/definition/agents.go.
 
-import { mergePolicies } from "@openfactory/core";
+import { CREDENTIAL_STRATEGIES, type CredentialStrategy, mergePolicies } from "@openfactory/core";
 import {
   applyHarness,
   dedupe,
@@ -36,7 +36,7 @@ interface AgentSpec {
   description: string;
   typ: AgentType;
   typeNode: YNode | null;
-  credential: string;
+  credential: CredentialStrategy | "";
   snapshot: boolean | null;
   spawnSet: boolean;
   spawn: string[];
@@ -113,7 +113,7 @@ function parseAgent(d: Diag, file: string, name: string, content: string): Agent
       }
     }
     v = m.get("credentialStrategy");
-    if (v !== null && !isNull(v)) a.credential = c.enum(v, "credentialStrategy", "EXECUTOR", "CREATOR")[0];
+    if (v !== null && !isNull(v)) a.credential = c.enum(v, "credentialStrategy", ...CREDENTIAL_STRATEGIES)[0];
     v = m.get("snapshot");
     if (v !== null && !isNull(v)) {
       const [b, good] = c.boolean(v, "snapshot");

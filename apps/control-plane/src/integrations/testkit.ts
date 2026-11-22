@@ -1,6 +1,6 @@
 // Fakes for the integration tests: store, secrets, fetch router, linker.
 import { OfError } from "@openfactory/core";
-import type { Event, ExternalIdentity, Integration, User } from "@openfactory/core";
+import type { Event, ExternalIdentity, Integration, IntegrationStatus, User } from "@openfactory/core";
 import { Linker } from "./link";
 import type { Fetch, IntegrationDeps, IntegrationStore, SecretReader, WorkSide } from "./types";
 
@@ -16,7 +16,7 @@ export class FakeStore implements IntegrationStore {
   async getIntegration(id: string) {
     return this.integrations.find((i) => i.id === id) ?? null;
   }
-  async setIntegrationStatus(id: string, status: string, reason: string) {
+  async setIntegrationStatus(id: string, status: IntegrationStatus, reason: string) {
     const i = this.integrations.find((x) => x.id === id);
     if (!i) return false;
     i.status = status;

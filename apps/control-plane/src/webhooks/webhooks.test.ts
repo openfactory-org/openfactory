@@ -1,7 +1,7 @@
 // Ports of internal/webhooks signature_test.go, webhooks_test.go (handler
 // with fake dependencies) and the config rules.
 import { beforeEach, describe, expect, it } from "vitest";
-import type { Event, Webhook } from "@openfactory/core";
+import type { Event, Webhook, WebhookDelivery } from "@openfactory/core";
 import { utf8 } from "../lib/bytes";
 import { sign, verify, signatureSchemes, standardWebhooksKey } from "./signature";
 import { generateSecret, ingressURL, redactHeaders, testFilter, validateConfig, validURLToken } from "./config";
@@ -95,7 +95,11 @@ describe("config", () => {
     ).toEqual({ "X-Request-Id": "r" });
   });
   it("tests a filter against a delivery", () => {
-    const d = { webhook_id: "whk_1", status: "accepted", body: { env: "prod" } };
+    const d: Pick<WebhookDelivery, "webhook_id" | "status" | "body"> = {
+      webhook_id: "whk_1",
+      status: "accepted",
+      body: { env: "prod" },
+    };
     expect(testFilter({ webhook_ids: ["whk_1"], payload: { env: ["prod"] } }, d)).toEqual({
       would_trigger: true,
       webhook_matched: true,
@@ -111,7 +115,11 @@ describe("config", () => {
 
 describe("delivery identity and title", () => {
   it("prefers the configured header, the scheme header, X-OF-Delivery-Id, then the body hash", async () => {
-    const wh = { delivery_id_header: "X-Id", auth_mode: "signature", signature_scheme: "github" };
+    const wh: Pick<Webhook, "delivery_id_header" | "auth_mode" | "signature_scheme"> = {
+      delivery_id_header: "X-Id",
+      auth_mode: "signature",
+      signature_scheme: "github",
+    };
     expect(await deliveryIdentity(wh, new Headers({ "x-id": " a ", "x-github-delivery": "b" }), body)).toBe("a");
     expect(await deliveryIdentity(wh, new Headers({ "x-github-delivery": "b", "x-of-delivery-id": "c" }), body)).toBe(
       "b",

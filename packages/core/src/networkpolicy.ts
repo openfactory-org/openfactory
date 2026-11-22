@@ -6,7 +6,7 @@
 
 import { OfError } from "./errors";
 import { goQuote, sortStrings } from "./gostd";
-import type { EffectiveNetworkPolicy, NetworkPolicy } from "./types";
+import type { EffectiveNetworkPolicy, NetworkPolicy } from "./definition";
 
 export const BUILTIN_PREFIX = "builtin/";
 

@@ -1,7 +1,7 @@
 // Reserved worker IDs and names (direct.ReservedWorkerIDs and
 // ValidateWorkerID in internal/sandbox/direct/protocol.go): a worker cannot
 // take the ID or name of a built-in worker host or sandbox provider.
-import { env } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import { doName } from "@openfactory/core";
 import { describe, expect, it } from "vitest";
 import type { CallMeta, Principal, TeamRpc } from "../../contracts/do-messages";
@@ -75,5 +75,34 @@ describe("development process workers", () => {
       const e = { OF_DEV_PROCESS_WORKERS: v } as unknown as Env;
       expect(devAllowed({ env: e }), String(v)).toBe(want);
     }
+  });
+});
+
+describe("workers.record", () => {
+  it("returns one record in the workers.list row shape, and 404 for an unknown ID", async () => {
+    const e = await op("createWorkerEnrollment", {}, { name: "record-01" });
+    expect(e.$status, JSON.stringify(e)).toBe(201);
+    const keys = (await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"])) as CryptoKeyPair;
+    const raw = (await crypto.subtle.exportKey("raw", keys.publicKey)) as ArrayBuffer;
+    const res = await exports.default.fetch("http://localhost/api/v1/workers/enroll", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        enrollment_token: e.body.token,
+        name: "record-01",
+        public_key: btoa(String.fromCharCode(...new Uint8Array(raw))),
+        facts: { arch: "arm64", vcpus: 4, memory_mib: 8192, kvm: true, runtime_version: "1.0.0" },
+        labels: {},
+        slots: 1,
+        slot_size: { vcpus: 2, memory_mib: 4096, scratch_gib: 20 },
+      }),
+    });
+    expect(res.status).toBe(201);
+    const { worker_id: id } = (await res.json()) as { worker_id: string };
+    const list = (await op("workers.list", {}, null)) as { id: string }[];
+    const rec = await op("workers.record", { id }, null);
+    expect(rec).toEqual(list.find((w) => w.id === id));
+    expect(rec.arch).toBe("arm64");
+    expect((await op("workers.record", { id: "wkr_none" }, null)).$error?.code).toBe("resource_not_found");
   });
 });

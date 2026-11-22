@@ -60,8 +60,17 @@ export async function collect(
     for (const r of page) if (ms(r.created_at) >= from && ms(r.created_at) < untilMs) d.runs.push(r);
     if (page.length > 0 && ms(page[page.length - 1]!.created_at) < from) break;
   }
-  for await (const page of pages<MInbox>(list, "inbox", { factory_id: factoryId, scope: "team" }))
-    d.inbox.push(...page);
+  // An inbox item comes after its work item, so an item created before the
+  // lookback can belong to no loaded work item, and human wait counts only
+  // items of the window.
+  for await (const page of pages<MInbox>(list, "inbox", {
+    factory_id: factoryId,
+    scope: "team",
+    since_ms: String(from),
+  })) {
+    for (const it of page) if (ms(it.created_at) >= from) d.inbox.push(it);
+    if (page.length > 0 && ms(page[page.length - 1]!.created_at) < from) break;
+  }
   for await (const page of pages<MScore>(list, "scores", { factory_id: factoryId })) {
     for (const s of page) if (ms(s.created_at) >= sinceMs) d.scores.push(s);
     if (page.length > 0 && ms(page[page.length - 1]!.created_at) < sinceMs) break;
@@ -96,17 +105,56 @@ export async function collect(
     }
   }
 
-  // Pull request facts: replay the forge events in arrival order.
-  const book = new FactsBook();
-  for await (const page of pages<FactEvent>(list, "prFacts", { sort_order: "asc" }))
-    for (const e of page) book.record(e);
   const wanted = new Set<string>();
   for (const w of d.workItems)
     for (const pr of w.pull_requests ?? []) if (pr.repo && pr.number) wanted.add(prFactsKey(pr));
-  const facts: Record<string, PullRequestFacts> = {};
-  for (const f of book.list()) if (wanted.has(f.key.toLowerCase())) facts[f.key.toLowerCase()] = f;
-  d.facts = facts;
+  d.facts = await loadFacts(list, wanted);
   return d;
+}
+
+/** How many pull requests at most loadFacts reads one by one (one list call each). */
+const MAX_PR_KEY_QUERIES = MAX_PAGES;
+const PR_KEY_CONCURRENCY = 8;
+
+/**
+ * The facts of the wanted pull requests (lower-case PRFactsKey), from the
+ * forge events in arrival order. IndexDO stores each event under the
+ * PRFactsKey of its pull request (pr_key), and the facts of one pull request
+ * depend only on its own events. So for up to MAX_PR_KEY_QUERIES pull requests
+ * it replays only their events; for more it replays all events of the team,
+ * which costs at most MAX_PAGES list calls.
+ */
+export async function loadFacts(
+  list: IndexList,
+  wanted: ReadonlySet<string>,
+  maxKeyQueries = MAX_PR_KEY_QUERIES,
+): Promise<Record<string, PullRequestFacts>> {
+  const facts: Record<string, PullRequestFacts> = {};
+  const keep = (all: readonly PullRequestFacts[]): void => {
+    for (const f of all) if (wanted.has(f.key.toLowerCase())) facts[f.key.toLowerCase()] = f;
+  };
+  if (wanted.size > maxKeyQueries) {
+    const book = new FactsBook();
+    for await (const page of pages<FactEvent>(list, "prFacts", { sort_order: "asc" }))
+      for (const e of page) book.record(e);
+    keep(book.list());
+    return facts;
+  }
+  const keys = [...wanted];
+  const perKey: PullRequestFacts[][] = new Array<PullRequestFacts[]>(keys.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < keys.length) {
+      const i = next++;
+      const book = new FactsBook();
+      for await (const page of pages<FactEvent>(list, "prFacts", { pr_key: keys[i]!, sort_order: "asc" }))
+        for (const e of page) book.record(e);
+      perKey[i] = book.list();
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(PR_KEY_CONCURRENCY, keys.length) }, worker));
+  for (const all of perKey) keep(all);
+  return facts;
 }
 
 /** Compute: collect and build. */

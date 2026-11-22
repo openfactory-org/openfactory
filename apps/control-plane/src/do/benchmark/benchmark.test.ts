@@ -2,13 +2,13 @@
 // (benchmark_test.go, judge_test.go) onto the DO.
 import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
-import { doName, newRoutedId, newToken, type BenchmarkSuite } from "@openfactory/core";
+import { doName, newRoutedId, newToken, type BenchmarkSuite, type HarnessType } from "@openfactory/core";
 import { describe, expect, it, vi } from "vitest";
 import type { CallMeta } from "../../contracts/do-messages";
 import { CORRECTNESS_SCORER, type BenchmarkResults, type BenchmarkScorer } from "../../scoring/benchmark";
 import { FakeWorld, finishJudge, run } from "../../scoring/testkit";
 import type { BenchmarkDO } from "./index";
-import { DISPATCH_CHUNK, type BenchmarkPlan, type BenchmarkRunJson } from "./index";
+import { DISPATCH_CHUNK, RECONCILE_EVERY_MS, type BenchmarkPlan, type BenchmarkRunJson } from "./index";
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
 const editor: CallMeta = {
@@ -62,7 +62,8 @@ function plan(over: Partial<BenchmarkPlan> = {}): BenchmarkPlan {
       {
         name: "Candidate",
         agents: [
-          { agent: "implement", harness: { type: "claude-code", model: "model-small" } },
+          // "claude-code" is an alias that the dispatch normalizes to "claude".
+          { agent: "implement", harness: { type: "claude-code" as HarnessType, model: "model-small" } },
           { agent: "review", model: "model-review" },
         ],
       },
@@ -256,6 +257,29 @@ describe("BenchmarkDO", () => {
     });
     expect(rows.length).toBeGreaterThanOrEqual(1);
     expect(rows[0]!.msg_id).toBe(`bench:${t.id}:1`);
+  });
+
+  it("schedules its timers on the real clock, not on the clock of the trial timestamps", async () => {
+    // The test clock is months in the past. A reconcile timer due on it fires at
+    // once and re-arms itself in the past again: a busy loop of alarms.
+    const t = await setup(plan({ configurations: [{ name: "only" }] }));
+    let gets = 0;
+    const getRun = t.world.getRun.bind(t.world);
+    t.world.getRun = (id: string) => {
+      gets++;
+      return getRun(id);
+    };
+    const before = Date.now();
+    await t.start();
+    await t.dispatchAll();
+    const due = await t.call(async (i) => {
+      const sql = (i as unknown as { sql: SqlStorage }).sql;
+      return sql.exec<{ due_ms: number }>("SELECT due_ms FROM timers WHERE name = 'bench.reconcile'").one().due_ms;
+    });
+    expect(due).toBeGreaterThanOrEqual(before + RECONCILE_EVERY_MS);
+    // Nothing finished, so nothing reads a run until the reconcile check is due.
+    await new Promise((r) => setTimeout(r, 200));
+    expect(gets).toBe(0);
   });
 
   it("requires the editor role to start and the user role to read", async () => {

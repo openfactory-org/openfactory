@@ -4,8 +4,24 @@
 // scripts/gen-schemas.ts writes them to schemas/definition/v1/.
 // cloudProviders has only gcp and audiences.
 
+import {
+  CREDENTIAL_STRATEGIES,
+  HARNESS_AUTH_SOURCES,
+  SCHEDULE_CONCURRENCIES,
+  SELF_IMPROVEMENT_REVIEWER_TYPES,
+  WEBHOOK_AUTH_MODES,
+} from "@openfactory/core";
 import { agentTypes } from "./agents.ts";
-import { RESERVED_MCP_SERVER_NAME, SCHEMA_VERSION } from "./common.ts";
+import {
+  aliasRe,
+  mcpServerNameRe,
+  reasoningRe,
+  RESERVED_MCP_SERVER_NAME,
+  resourceNameRe,
+  SCHEMA_VERSION,
+  secretNameRe,
+} from "./common.ts";
+import { shaRe } from "./extras.ts";
 import { codeForgeValues, integrationTypes } from "./factory.ts";
 import { SIGNATURE_SCHEMES } from "./resources.ts";
 import {
@@ -31,6 +47,8 @@ const str = (): Obj => ({ type: "string" });
 const nonEmpty = (): Obj => ({ type: "string", minLength: 1 });
 const nullable = (s: Obj): Obj => ({ anyOf: [s, { type: "null" }] });
 const strEnum = (...vals: string[]): Obj => ({ type: "string", enum: vals });
+/** pattern is a string schema with the source of a validator's regular expression. */
+const pattern = (re: RegExp): Obj => ({ type: "string", pattern: re.source });
 const arr = (items: Obj): Obj => ({ type: "array", items });
 const boolean = (): Obj => ({ type: "boolean" });
 const intRange = (lo: number, hi: number): Obj => ({ type: "integer", minimum: lo, maximum: hi });
@@ -111,10 +129,7 @@ function commonSchema(): Obj {
   const harnessProps = {
     type: withDesc(ref("harnessType"), "Harness that runs the agent. claude-code is an alias of claude."),
     model: withDesc(ref("model"), "Model name. The harness gets it as it is."),
-    reasoningLevel: withDesc(
-      { type: "string", pattern: "^[a-z][a-z0-9_-]{0,31}$" },
-      "Reasoning level that the harness passes to the model.",
-    ),
+    reasoningLevel: withDesc(pattern(reasoningRe), "Reasoning level that the harness passes to the model."),
     auth: withDesc(
       nullable(ref("harnessAuth")),
       "Model credential of the harness. null clears the inherited credential.",
@@ -156,7 +171,7 @@ function commonSchema(): Obj {
 
   const auth = object(["source"], {
     source: withDesc(
-      strEnum("managedSecret", "workerEnvironment"),
+      strEnum(...HARNESS_AUTH_SOURCES),
       "Where the credential comes from. managedSecret reads a secret. workerEnvironment uses the environment of a self-hosted worker, so the effective workerHost must not be empty.",
     ),
     secretName: withDesc(
@@ -175,8 +190,8 @@ function commonSchema(): Obj {
     "Shared field definitions referenced by the other v1 schemas.",
     {
       $defs: {
-        resourceName: { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
-        secretName: { type: "string", pattern: "^[A-Za-z_][A-Za-z0-9_]{0,127}$" },
+        resourceName: pattern(resourceNameRe),
+        secretName: pattern(secretNameRe),
         secretList: { type: "array", items: ref("secretName"), uniqueItems: true },
         model: withDesc(nonEmpty(), "A model name that the harness CLI accepts."),
         harnessType: strEnum("claude", "codex", "claude-code"),
@@ -189,7 +204,7 @@ function commonSchema(): Obj {
         mcpServer: mcp,
         mcpServers: {
           type: "object",
-          propertyNames: { pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$", not: { const: RESERVED_MCP_SERVER_NAME } },
+          propertyNames: { pattern: mcpServerNameRe.source, not: { const: RESERVED_MCP_SERVER_NAME } },
           additionalProperties: ref("mcpServer"),
         },
         host: { anyOf: [hostname, ipv6] },
@@ -210,7 +225,7 @@ function commonSchema(): Obj {
           }),
         ),
         codeForge: strEnum(...codeForgeValues),
-        credential: strEnum("EXECUTOR", "CREATOR"),
+        credential: strEnum(...CREDENTIAL_STRATEGIES),
       },
     },
   );
@@ -310,7 +325,7 @@ function factorySchema(): Obj {
       ),
       reviewerType: withDefault(
         withDesc(
-          strEnum("admins", "team", "custom", "none"),
+          strEnum(...SELF_IMPROVEMENT_REVIEWER_TYPES),
           "Who reviews a proposed change: admins (team admins), team (any team member), custom (the members in reviewerEmails) or none.",
         ),
         "admins",
@@ -338,7 +353,7 @@ function factorySchema(): Obj {
     name: withDesc(nonEmpty(), "Name of the factory."),
     description: withDesc(str(), "Short description of the factory."),
     alias: withDesc(
-      { type: "string", pattern: "^[A-Za-z0-9 ._-]{1,60}$" },
+      pattern(aliasRe),
       "Handle of the foreman in chat and on code hosts. It must not be blank and must be unique in the team. Default: the current alias of the factory, else a value made from name.",
     ),
     credentialStrategy: withDesc(
@@ -642,7 +657,7 @@ function triggerSchema(): Obj {
     ),
     concurrency: withDefault(
       withDesc(
-        strEnum("allow", "skip"),
+        strEnum(...SCHEDULE_CONCURRENCIES),
         "Schedule triggers only. allow starts a run for every slot. skip drops a slot while a run of the automation is not finished.",
       ),
       "allow",
@@ -802,7 +817,7 @@ function webhookSchema(): Obj {
   const w = object(["secretName"], {
     authMode: withDefault(
       withDesc(
-        strEnum("token", "url_token", "signature"),
+        strEnum(...WEBHOOK_AUTH_MODES),
         "How the sender authenticates: token (the secret in an Authorization: Bearer header), url_token (the secret as the last segment of the URL path) or signature (a provider signature). It cannot change after the first apply.",
       ),
       "token",
@@ -871,7 +886,7 @@ function benchmarkSuiteSchema(): Obj {
 }
 
 function benchmarkTaskSchema(): Obj {
-  const sha = { type: "string", pattern: "^[0-9a-f]{40}$" };
+  const sha = pattern(shaRe);
   const ref1 = {
     anyOf: [
       { type: "string", pattern: "^(github\\.com|gitlab\\.com):[^@\\s]+/[^@/\\s]+@[0-9a-f]{40}$" },

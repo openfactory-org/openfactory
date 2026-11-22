@@ -22,16 +22,8 @@ import { dashboardHint, member } from "../shared";
 import type { Fetch, IntegrationDeps, IssueTracker, Logger, WebhookOutcome } from "../types";
 import { consoleLogger } from "../types";
 import { difference, formatOutbound, stringSet, type Responder } from "@openfactory/core";
-import {
-  Dedupe,
-  cfg,
-  errMessage,
-  errorResponse,
-  integrationSecret,
-  jsonResponse,
-  readBody,
-  verifyHmacSha256Hex,
-} from "../util";
+import { Dedupe, cfg, errMessage, errorResponse, integrationSecret, verifyHmacSha256Hex } from "../util";
+import { acceptDelivery, handleIntegrationWebhook } from "../webhook";
 
 export const PROVIDER = EVENT_PROVIDER.Linear;
 export const WEBHOOK_PATH = "/integrations/linear/webhook";
@@ -246,48 +238,38 @@ export class LinearHandler implements Responder, IssueTracker {
   }
 
   async handleWebhook(req: Request): Promise<WebhookOutcome> {
-    let body: string;
-    try {
-      body = await readBody(req);
-    } catch (e) {
-      return { response: errorResponse(413, "payload_too_large", errMessage(e)) };
-    }
-    let p: Payload;
-    try {
-      p = JSON.parse(body) as Payload;
-    } catch {
-      return { response: errorResponse(400, "invalid_payload", "payload is not valid JSON") };
-    }
-    const found = await intake(this.deps.store, PROVIDER, p.organizationId ?? "");
-    if (!(await this.verify(found.integration, body, req.headers.get("Linear-Signature") ?? ""))) {
-      return { response: errorResponse(401, "invalid_signature", "Linear-Signature does not match") };
-    }
-    if (p.webhookTimestamp) {
-      const skew = this.now().getTime() - p.webhookTimestamp;
-      if (skew > MAX_TIMESTAMP_SKEW_MS || skew < -MAX_TIMESTAMP_SKEW_MS) {
-        return { response: errorResponse(401, "stale_webhook", "webhookTimestamp is outside the allowed window") };
-      }
-    }
-    if (found.error || !found.integration) {
-      this.log.info("delivery ignored", { org: p.organizationId, err: found.error?.message });
-      return { response: jsonResponse(202, { status: "ignored", reason: "no matching integration" }) };
-    }
-    const delivery = req.headers.get("Linear-Delivery") ?? "";
-    if (this.dedupe.isSeen(delivery)) return { response: jsonResponse(200, { status: "duplicate" }) };
-    const in_ = found.integration;
-    return {
-      response: jsonResponse(202, { status: "accepted" }),
-      background: async () => {
-        let evs: Event[];
-        try {
-          evs = await this.normalize(in_, delivery, body);
-        } catch (e) {
-          this.log.warn("normalize linear webhook", { err: errMessage(e) });
-          return;
+    return handleIntegrationWebhook<Payload>(req, {
+      parse: (body) => JSON.parse(body) as Payload,
+      invalidPayload: "payload is not valid JSON",
+      select: (p) => intake(this.deps.store, PROVIDER, p.organizationId ?? ""),
+      verify: (r, body, _p, found) => this.verify(found.integration, body, r.headers.get("Linear-Signature") ?? ""),
+      unauthorized: { code: "invalid_signature", message: "Linear-Signature does not match" },
+      accept: (p, found, body) => {
+        if (p.webhookTimestamp) {
+          const skew = this.now().getTime() - p.webhookTimestamp;
+          if (skew > MAX_TIMESTAMP_SKEW_MS || skew < -MAX_TIMESTAMP_SKEW_MS) {
+            return { response: errorResponse(401, "stale_webhook", "webhookTimestamp is outside the allowed window") };
+          }
         }
-        if (evs.length > 0) await this.deps.publish(evs);
+        const delivery = req.headers.get("Linear-Delivery") ?? "";
+        return acceptDelivery(found, {
+          log: this.log,
+          logFields: { org: p.organizationId },
+          dedupe: this.dedupe,
+          delivery,
+          background: async (in_) => {
+            let evs: Event[];
+            try {
+              evs = await this.normalize(in_, delivery, body);
+            } catch (e) {
+              this.log.warn("normalize linear webhook", { err: errMessage(e) });
+              return;
+            }
+            if (evs.length > 0) await this.deps.publish(evs);
+          },
+        });
       },
-    };
+    });
   }
 
   private async verify(in_: Integration | null, body: string, sig: string): Promise<boolean> {

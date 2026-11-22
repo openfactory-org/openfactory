@@ -14,7 +14,7 @@ import type { Migration } from "../../lib/sql/migrate";
 import { all, first } from "../../lib/sql/query";
 import { Envelopes, envelopes, type SecretIdentity } from "../../secrets/envelope";
 import { API_NAME_RE, isSecretType, validateApiValue, validateName, validateValue } from "../../secrets/validate";
-import { findFactory } from "./factories";
+import { findFactory } from "./factories/repo";
 import { created, noContent, type OpCall, type TeamKit, type TeamOp } from "./kit";
 
 export const migrations: readonly Migration[] = [

@@ -2,7 +2,7 @@
 // advisory: harnesses pass any non-empty model to the CLI.
 
 import { goQuote } from "./gostd";
-import type { HarnessType } from "./types";
+import type { HarnessType } from "./definition";
 
 export interface Model {
   id: string;

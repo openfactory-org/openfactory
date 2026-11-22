@@ -50,6 +50,37 @@ describe("RouterDO", () => {
     expect(await r.reopen({ factoryId: "f", sourceKey: "k1", wiId: a.wiId })).toBe(true);
     expect((await r.resolve("f", "k1"))?.status).toBe("active");
   });
+
+  it("a route rebuilt from a status message keeps the source key's owner", async () => {
+    const t = "r" + newToken("w");
+    const r = router(t);
+    // A fresh RouterDO, as after a reset: only the rebuild message brings the routes back.
+    const a = { wiId: "wi_" + newToken("w") + "x", token: "" };
+    await r.receive({
+      msgId: "rebuild:a",
+      kind: "router.status",
+      lane: "router",
+      origin: "t",
+      payload: {
+        wiId: a.wiId,
+        factoryId: "f",
+        stage: "running",
+        completedMs: null,
+        version: 2,
+        keys: ["github:o/r#5", "pr:5"],
+        sourceKey: "github:o/r#5",
+      } as never,
+    });
+    const b = await r.resolveOrReserve({ factoryId: "f", sourceKeys: ["k9"], actionKey: "z", target: "auto:1" });
+    // The source key is still owned by a; a reference key is not.
+    expect(
+      await r.addReference({ factoryId: "f", key: "github:o/r#5", kind: "issue", wiId: b.wiId, token: b.token }),
+    ).toEqual({ ok: false, ownerWiId: a.wiId });
+    expect(
+      await r.addReference({ factoryId: "f", key: "pr:5", kind: "pull_request", wiId: b.wiId, token: b.token }),
+    ).toEqual({ ok: true });
+    expect((await r.resolve("f", "github:o/r#5"))?.wiId).toBe(a.wiId);
+  });
 });
 
 const ev = (id: string, text = ""): CoreEvent => ({

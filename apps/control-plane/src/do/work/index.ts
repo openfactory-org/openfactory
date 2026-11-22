@@ -1,84 +1,41 @@
 // WorkDO (key team:<t>|work:<token>): one work item (or a run tree without
 // one), its runs, sessions, runner protocol, inbox items, dispatch ledger and
 // tool idempotency rows. Every request or alarm step is one transactionSync.
-import {
-  usageCoverage,
-  conflict,
-  doName,
-  invalid,
-  newRoutedId,
-  notFound,
-  OfError,
-  lookupFailure,
-  partitionOf,
-  sourceKey,
-} from "@openfactory/core";
-import {
-  failureForSandboxReason,
-  gateNetworkPolicy,
-  parseProviderError,
-  type SandboxProvider,
-  type TaskStatus,
-} from "@openfactory/sandbox";
+import { invalid, OfError, sourceKey } from "@openfactory/core";
+import { failureForSandboxReason, type TaskStatus } from "@openfactory/sandbox";
 import type { EndRequest, StartRequest } from "@openfactory/runner-proto";
-import type { Ack, CallMeta, CoreEvent, OutboxEnvelope, OutboxPayloads, Role } from "../../contracts/do-messages";
+import type { Ack, CallMeta, CoreEvent, OutboxEnvelope, Role } from "../../contracts/do-messages";
 import { authorizeInTeam } from "../../auth/roles";
 import type { Env } from "../../contracts/env";
 import { BaseDO, type Migration } from "../../lib/base";
-import { unwrapOp } from "../../lib/rpc";
 import { LiveHub, isUpgrade } from "../../lib/live/index";
 import type { OutboxRow } from "../../lib/outbox/outbox";
-import type { TimerRow } from "../../lib/timers/timers";
-import { decideDeadline, decideSilent, DEFAULT_LOST_AFTER_MS } from "../../engine/liveness";
+import { DEFAULT_LOST_AFTER_MS } from "../../engine/liveness";
 import { parseDuration } from "../../engine/sessions";
-import {
-  isTerminal,
-  STAGES,
-  stageTerminal,
-  type InboxItem,
-  type PullRequestRef,
-  type Run,
-  type RunSession,
-  type Stage,
-} from "../../engine/types";
-import { defaultProviderId, providerFor, targetOf } from "../dispatch/providers";
+import { isTerminal, type Run, type RunSession } from "../../engine/types";
+import { targetOf } from "../dispatch/providers";
 import {
   createRun as engineCreateRun,
-  actorLabel,
-  resumesRun,
   workItemEvent,
   cancel,
-  setStage,
   dispatchRoot,
   loseCode,
-  loseSession,
   requestSlot,
   DEFAULT_SANDBOX_IMAGE,
   runAgents,
   sendMessage,
   stopSession,
   transition,
-  projectInbox,
   projectWorkItem,
   type ChildPlan,
   type DispatchPlan,
   type EngineConfig,
   type Fx,
 } from "./engine";
-import {
-  buildTask,
-  commitGrant,
-  mintBootstrap,
-  onGrant,
-  startFailed,
-  startSucceeded,
-  taskPolicy,
-  type Grant,
-  type GrantPrep,
-} from "./grant";
+import { onGrant, type Grant } from "./grant";
 import { m0001 } from "./migrations/0001_init";
 import { compactRunMessages, type CompactionRpc } from "../../compaction/compact";
-import { pruneRunData, retentionMs, type RetentionRpc } from "../../retention/sweep";
+import { retentionMs, type RetentionRpc } from "../../retention/sweep";
 import { Repo } from "./repo";
 import {
   appendEvents,
@@ -92,35 +49,19 @@ import {
   type RunnerError,
 } from "./runner";
 import { runTool, type ToolCall, type ToolResult } from "./tools";
-import { approverDeps, canApprove, notAnApprover } from "./approvers";
+import { applyAction as applyIntake, type ApplyActionInput, type ApplyActionResult } from "./intake";
+import { apiOp, scopeFactory, type ApiCall } from "./api-handlers";
 import {
-  answerInbox,
-  applyAction as applyIntake,
-  completeWorkItem,
-  linkPullRequest,
-  type ApplyActionInput,
-  type ApplyActionResult,
-} from "./intake";
+  deliverNotice,
+  deliverProvider,
+  onDeadline,
+  onLiveness,
+  prepareAndCommitGrant,
+  retentionStep,
+  type WorkHost,
+} from "./effects";
 
-/** Delivers notices (the notify service). bootstrapControlPlane in src/wiring.ts sets it. */
-export type NoticeDeliverer = (env: Env, envelope: OutboxEnvelope) => Promise<void>;
-let noticeDeliverer: NoticeDeliverer | undefined;
-
-/** Sets the deliverer (tests replace it). Returns the one it replaces. */
-export function setNoticeDeliverer(fn: NoticeDeliverer | undefined): NoticeDeliverer | undefined {
-  const prev = noticeDeliverer;
-  noticeDeliverer = fn;
-  return prev;
-}
-
-/** The deliverer. Without a registration it throws, so the outbox keeps the notice and retries it. */
-function deliverer(): NoticeDeliverer {
-  if (!noticeDeliverer) {
-    console.error("work: no notice deliverer is registered: call bootstrapControlPlane()");
-    throw new OfError("internal_error", "no notice deliverer is registered");
-  }
-  return noticeDeliverer;
-}
+export { setNoticeDeliverer, type NoticeDeliverer } from "./effects";
 
 /** OF_OBJECT_STORE_RETENTION in ms; an invalid value keeps data (0) and is logged. */
 function safeRetentionMs(env: Env): number {
@@ -204,22 +145,22 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
         }
       }),
     );
-    this.onMessage("work.spendStop", (p) => this.withFx((fx) => this.spendStop(fx, p.rootRunId)));
-    this.onTimerAsync<Grant>("grant", (t) => this.prepareAndCommitGrant(t.payload));
+    this.onMessage("work.spendStop", (p) => this.withFx((fx) => spendStop(fx, p.rootRunId)));
+    this.onTimerAsync<Grant>("grant", (t) => prepareAndCommitGrant(this.host(), t.payload));
     this.onTimer<{ runId: string }>("requeue", (t) =>
-      this.fxSync((fx) => {
+      this.withFx((fx) => {
         const r = fx.repo.getRun(t.payload.runId);
         if (r?.state === "queued") requestSlot(fx, r);
       }),
     );
     this.onTimer<{ runId: string; session: number }>("start_timeout", (t) =>
-      this.fxSync((fx) => {
+      this.withFx((fx) => {
         const s = fx.repo.getSession(t.payload.runId, t.payload.session);
         if (s?.state === "assigned")
           loseCode(fx, s, "deadline_exceeded", "sandbox_create_failed", true, { cancel: true });
       }),
     );
-    this.onTimer<{ runId: string; session: number }>("deadline", (t) => this.fxSync((fx) => this.onDeadline(fx, t)));
+    this.onTimer<{ runId: string; session: number }>("deadline", (t) => this.withFx((fx) => onDeadline(fx, t)));
     // Data upkeep of finished runs: each timer sends a queue job that calls back compactRun / retentionSweep.
     this.onTimerAsync<{ runId: string }>("compact", async (t) => {
       await this.env.JOBS.send({
@@ -236,7 +177,7 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
         doName: this.doName(),
       });
     });
-    this.onTimerAsync<{ runId: string; session: number }>("liveness", (t) => this.onLiveness(t));
+    this.onTimerAsync<{ runId: string; session: number }>("liveness", (t) => onLiveness(this.host(), t));
   }
 
   protected migrations(): readonly Migration[] {
@@ -286,16 +227,25 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
     return out;
   }
 
-  private fxSync<T>(fn: (fx: Fx) => T): T {
-    return this.withFx(fn);
-  }
-
   /**
    * One transaction with an Fx; live pushes and an outbox kick follow its
    * commit. Inside an outer step they wait for the outer commit.
    */
   private txFx<T>(fn: (fx: Fx) => T): T {
     return this.tx(() => this.withFx(fn));
+  }
+
+  /** The view of this DO that the asynchronous effects use (effects.ts). */
+  private host(): WorkHost {
+    return {
+      env: this.env,
+      teamId: this.teamId(),
+      repo: () => new Repo(this.sql, Date.now),
+      readFx: () => this.makeFx({ cmd: new Set(), run: new Set() }),
+      txFx: (fn) => this.txFx(fn),
+      tx: (fn) => this.tx(fn),
+      setEarliestTimer: (n, k, d, p) => this.timers.setEarliest(n, k, d, p),
+    };
   }
 
   private afterCommit(wakes: { cmd: Set<string>; run: Set<string> }): void {
@@ -434,18 +384,10 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
         {
           bucket: this.env.DATA,
           now: () => Date.now(),
-          readRows: (id, after, limit) =>
-            this.sql
-              .exec<{ seq: number; data: string }>(
-                "SELECT seq, data FROM run_messages WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT ?",
-                id,
-                after,
-                limit,
-              )
-              .toArray(),
+          readRows: (id, after, limit) => repo.messageRows(id, after, limit),
           deleteRows: (id, upto) =>
             this.tx(() => {
-              const n = this.sql.exec("DELETE FROM run_messages WHERE run_id = ? AND seq <= ?", id, upto).rowsWritten;
+              const n = repo.deleteMessagesUpTo(id, upto);
               const prev = Number(repo.getRunState(id, "compacted_upto") ?? "0");
               if (upto > prev) repo.setRunState(id, "compacted_upto", String(upto));
               return n;
@@ -463,38 +405,7 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
    * The rows stay. The next timer is set for the next run that expires.
    */
   async retentionSweep(): Promise<{ more: boolean }> {
-    return this.rpc(async () => {
-      const keep = safeRetentionMs(this.env);
-      if (keep <= 0) return { more: false };
-      const now = Date.now();
-      const rows = this.sql
-        .exec<{ id: string; data: string }>(
-          "SELECT id, data FROM runs WHERE state IN ('succeeded', 'failed', 'error', 'cancelled') AND id NOT IN (SELECT run_id FROM run_state WHERE k = 'data_pruned')",
-        )
-        .toArray();
-      const runs: { id: string; lastActivityMs: number }[] = [];
-      for (const row of rows) {
-        const r = JSON.parse(row.data) as Run;
-        runs.push({ id: row.id, lastActivityMs: Date.parse(r.finished_at ?? r.created_at) || now });
-      }
-      const out = await pruneRunData({
-        bucket: this.env.DATA,
-        teamId: this.teamId(),
-        runs,
-        nowMs: now,
-        retentionMs: keep,
-      });
-      this.tx(() => {
-        const repo = new Repo(this.sql, Date.now);
-        for (const id of out.pruned) repo.setRunState(id, "data_pruned", String(now));
-        if (!out.more) {
-          const left = runs.filter((r) => !out.pruned.includes(r.id)).map((r) => r.lastActivityMs);
-          if (left.length > 0)
-            this.timers.setEarliest("retention", "retention", Math.min(...left) + keep + 60_000, null);
-        }
-      });
-      return { more: out.more };
-    });
+    return this.rpc(() => retentionStep(this.host(), safeRetentionMs(this.env)));
   }
 
   // ---------- reads ----------
@@ -518,239 +429,24 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
     return new Repo(this.sql, Date.now).getRun(runId)?.factory_id ?? "";
   }
 
+  /** One REST operation (api-handlers.ts), authorized on the factory of its object first. */
   async api(meta: CallMeta, op: string, params: Record<string, string>, body: unknown): Promise<unknown> {
     return this.rpc(() => {
       const repo = new Repo(this.sql, Date.now);
-      const runId = params.runId ?? params.id ?? "";
-      this.authorize(meta, opFactory(repo, op, params, body), OP_ROLE[op] ?? "user");
-      switch (op) {
-        case "getRun":
-          return repo.mustRun(runId);
-        case "listRunMessages": {
-          repo.mustRun(runId);
-          // compacted_upto: messages at or below it are in R2 (runs/<id>/messages.ndjson).
-          const upto = Number(repo.getRunState(runId, "compacted_upto") ?? "0");
-          return {
-            messages: repo.listMessages(runId, Number(params.after ?? 0), Number(params.limit ?? 0)),
-            ...(upto > 0 ? { compacted_upto: upto } : {}),
-          };
-        }
-        case "getAgentPins": {
-          const raw = repo.getMeta(`agent_pins:${params.id ?? ""}`);
-          return { pins: raw ? (JSON.parse(raw) as Record<string, unknown>) : {} };
-        }
-        case "listRunInputs":
-          repo.mustRun(runId);
-          return { inputs: repo.listInputs(runId) };
-        case "getRunTimeline":
-          repo.mustRun(runId);
-          return { events: repo.listTimeline(runId) };
-        case "listRunSessions":
-          repo.mustRun(runId);
-          return { sessions: repo.listSessions(runId).map((x) => sessionView(this.sql, x)) };
-        case "getRunDiagnostics": {
-          repo.mustRun(runId);
-          const out: unknown[] = [];
-          for (const s of repo.listSessions(runId))
-            out.push(...repo.listEvents(runId, s.session).filter((e) => e.type === "diagnostic"));
-          return { diagnostics: out };
-        }
-        case "listRunChildren":
-          return { runs: repo.listRuns({ parentRunId: runId }) };
-        case "getWorkItem": {
-          const wi = repo.getWorkItem(params.id);
-          if (!wi) throw notFound(`work item ${params.id}`);
-          return wi;
-        }
-        case "getWorkItemTimeline": {
-          const wi = repo.getWorkItem(params.id);
-          if (!wi) throw notFound(`work item ${params.id}`);
-          return { events: repo.listWorkItemEvents(wi.id) };
-        }
-        case "listWorkItemRuns": {
-          const wi = repo.getWorkItem(params.id);
-          if (!wi) throw notFound(`work item ${params.id}`);
-          return { runs: repo.listRuns({ workItemId: wi.id }) };
-        }
-        case "listWorkItemInbox": {
-          const wi = repo.getWorkItem(params.id);
-          if (!wi) throw notFound(`work item ${params.id}`);
-          return { items: repo.listInbox({ resolved: false }).filter((i) => i.work_item_id === wi.id) };
-        }
-        case "getInbox": {
-          const it = repo.getInbox(params.id ?? "");
-          if (!it) throw notFound(`inbox item ${params.id}`);
-          return it;
-        }
-        case "resolveInbox": {
-          // ResolveInbox: an approval needs CanApprove (approvers.ts) first.
-          const it = repo.getInbox(params.id ?? "");
-          if (it?.kind !== "approval" || it.resolved)
-            return this.txFx((fx) => resolveInbox(fx, params.id ?? "", body, meta));
-          return canApprove(approverDeps(this.env, this.teamId()), it.factory_id, meta.principal?.userId ?? "").then(
-            (ok) => {
-              if (!ok) throw notAnApprover();
-              return this.txFx((fx) => resolveInbox(fx, params.id ?? "", body, meta));
-            },
-          );
-        }
-        case "getRunStartCommits": {
-          repo.mustRun(runId);
-          const raw = repo.getRunState(runId, "start_commits");
-          return { start_commits: raw ? (JSON.parse(raw) as unknown[]) : [] };
-        }
-        case "createInboxItem":
-          return this.txFx((fx) => {
-            const b = (body ?? {}) as Partial<InboxItem> & { track_key?: string };
-            if (!b.kind || !b.title) throw invalid("kind and title are required");
-            const key = b.track_key ? `inbox_track:${b.track_key}` : "";
-            if (key) {
-              const prev = fx.repo.getMeta(key);
-              if (prev) return fx.repo.getInbox(prev);
-            }
-            const wi = b.work_item_id ? fx.repo.getWorkItem(b.work_item_id) : fx.repo.getWorkItem();
-            // A caller may choose the ID (propose_definition_change names it in the version first).
-            let id = newRoutedId("inb", fx.token);
-            if (b.id) {
-              if (!b.id.startsWith("inb_") || partitionOf(b.id) !== fx.token)
-                throw invalid(`inbox item ID ${b.id} does not belong to this work item`);
-              if (fx.repo.getInbox(b.id)) return fx.repo.getInbox(b.id);
-              id = b.id;
-            }
-            const it: InboxItem = {
-              id,
-              factory_id: b.factory_id ?? wi?.factory_id ?? "",
-              ...(wi ? { work_item_id: wi.id } : {}),
-              ...(b.run_id ? { run_id: b.run_id } : {}),
-              kind: b.kind,
-              title: b.title,
-              body: b.body ?? "",
-              ...(b.options ? { options: b.options } : {}),
-              ...(b.questions ? { questions: b.questions } : {}),
-              ...(b.assignee_id ? { assignee_id: b.assignee_id } : {}),
-              ...(b.recipients ? { recipients: b.recipients } : wi?.creator_id ? { recipients: [wi.creator_id] } : {}),
-              resolved: false,
-              created_at: new Date(fx.now()).toISOString(),
-              version: 0,
-            };
-            fx.repo.createInbox(it);
-            projectInbox(fx, it);
-            if (key) fx.repo.setMeta(key, it.id);
-            return it;
-          });
-        case "unresolveInbox":
-          return this.txFx((fx) =>
-            unresolveInbox(
-              fx,
-              params.id ?? "",
-              actorOfMeta(meta),
-              (body as { actor_label?: string } | null)?.actor_label,
-            ),
-          );
-        case "appendRunLog":
-          return this.txFx((fx) => {
-            const r = fx.repo.mustRun(runId);
-            const b = (body ?? {}) as { content?: string; data?: unknown };
-            const m = fx.repo.appendMessage({
-              id: newRoutedId("msg", fx.token),
-              run_id: r.id,
-              role: "system",
-              content: b.content ?? "",
-              ...(b.data !== undefined ? { data: b.data } : {}),
-              created_at: new Date(fx.now()).toISOString(),
-            });
-            fx.wakeRun(r.id);
-            return { message_id: m.id };
-          });
-        case "mcpPatchWorkItem":
-          return this.txFx((fx) => {
-            const wi = fx.repo.getWorkItem(params.id);
-            if (!wi) throw notFound(`work item ${params.id}`);
-            const b = (body ?? {}) as {
-              local_owner?: string;
-              labels?: Record<string, string>;
-              event?: { kind: string; data?: Record<string, unknown>; run_id?: string; actor?: string };
-            };
-            if (b.local_owner !== undefined) wi.local_owner = b.local_owner;
-            if (b.labels) wi.labels = { ...(wi.labels ?? {}), ...b.labels };
-            if (b.local_owner !== undefined || b.labels) {
-              wi.updated_at = new Date(fx.now()).toISOString();
-              fx.repo.putWorkItem(wi);
-              projectWorkItem(fx, wi);
-            }
-            if (b.event?.kind)
-              workItemEvent(
-                fx,
-                wi.id,
-                b.event.kind,
-                b.event.run_id ?? "",
-                b.event.actor ?? actorOfMeta(meta),
-                b.event.data ?? {},
-              );
-            return fx.repo.getWorkItem(wi.id);
-          });
-        case "mcpLinkPullRequest":
-          return this.txFx((fx) => {
-            const wi = fx.repo.getWorkItem(params.id);
-            if (!wi) throw notFound(`work item ${params.id}`);
-            linkPullRequest(fx, wi, (body ?? {}) as PullRequestRef);
-            return fx.repo.getWorkItem(wi.id);
-          });
-        case "workItemMessage":
-          return this.txFx((fx) => {
-            const wi = fx.repo.getWorkItem(params.id);
-            if (!wi) throw notFound(`work item ${params.id}`);
-            if (!wi.root_run_id) throw new OfError("operation_not_supported", `work item ${wi.id} has no foreman run`);
-            const b = (body ?? {}) as { message?: string };
-            if (!(b.message ?? "").trim()) throw invalid("message is required");
-            const rec = sendMessage(fx, wi.root_run_id, b.message ?? "", actorOfMeta(meta));
-            return { work_item_id: wi.id, run_id: wi.root_run_id, message_id: rec.message_id, outcome: rec.outcome };
-          });
-        case "workItemCancel":
-          return this.txFx((fx) => {
-            const wi = fx.repo.getWorkItem(params.id);
-            if (!wi) throw notFound(`work item ${params.id}`);
-            if (wi.stage === "cancelled" || wi.stage === "complete") throw conflict(`work item is already ${wi.stage}`);
-            const actor = actorOfMeta(meta);
-            const done = new Set<string>();
-            for (const r of fx.repo.listRuns({ workItemId: wi.id })) {
-              if (!r.parent_run_id) for (const id of cancel(fx, r.id, actor, true)) done.add(id);
-            }
-            const note = ((body ?? {}) as { reason?: string }).reason || "Cancelled via API";
-            const cur = fx.repo.getWorkItem(wi.id)!;
-            if (cur.stage !== "cancelled" && cur.stage !== "complete") setStage(fx, wi.id, "cancelled", actor, note);
-            return { work_item: fx.repo.getWorkItem(wi.id), cancelled: [...done] };
-          });
-        case "workItemComplete":
-          return this.txFx((fx) => {
-            const wi = fx.repo.getWorkItem(params.id);
-            if (!wi) throw notFound(`work item ${params.id}`);
-            if (wi.stage === "cancelled" || wi.stage === "complete") throw conflict(`work item is already ${wi.stage}`);
-            return completeWorkItem(fx, wi.id, actorOfMeta(meta), ((body ?? {}) as { note?: string }).note ?? "");
-          });
-        case "workItemStage":
-          return this.txFx((fx) => {
-            const b = (body ?? {}) as { stage?: string; reason?: string };
-            if (!b.stage || !STAGES.includes(b.stage as Stage))
-              throw invalid(`invalid stage ${JSON.stringify(b.stage ?? "")}`);
-            // Engine.SetStage: the stage complete is a completion (write-back, inbox, notice).
-            if (b.stage === "complete") return completeWorkItem(fx, params.id ?? "", actorOfMeta(meta), b.reason ?? "");
-            // The stage cancelled with a root run cancels the root run tree, which cancels the work item.
-            if (b.stage === "cancelled") {
-              const wi = fx.repo.getWorkItem(params.id ?? "");
-              if (!wi) throw notFound(`work item ${params.id}`);
-              if (wi.stage === "cancelled") return wi;
-              if (stageTerminal(wi.stage)) throw conflict(`work item is ${wi.stage}`);
-              if (wi.root_run_id && fx.repo.getRun(wi.root_run_id)) {
-                cancel(fx, wi.root_run_id, actorOfMeta(meta), true);
-                return fx.repo.getWorkItem(wi.id)!;
-              }
-            }
-            return setStage(fx, params.id ?? "", b.stage as Stage, actorOfMeta(meta), b.reason ?? "");
-          });
-        default:
-          throw new OfError("feature_not_available", `WorkDO does not serve ${op}`);
-      }
+      const spec = apiOp(op);
+      this.authorize(meta, scopeFactory(repo, spec?.scope ?? "run", params, body), spec?.role ?? "user");
+      if (!spec) throw new OfError("feature_not_available", `WorkDO does not serve ${op}`);
+      const call: ApiCall = {
+        meta,
+        params,
+        body,
+        runId: params.runId ?? params.id ?? "",
+        repo,
+        txFx: (fn) => this.txFx(fn),
+        env: this.env,
+        teamId: this.teamId(),
+      };
+      return spec.handle(call);
     });
   }
 
@@ -858,10 +554,7 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
       const repo = new Repo(this.sql, Date.now);
       const r = repo.mustRun(runId);
       const wi = r.work_item_id ? repo.getWorkItem(r.work_item_id) : undefined;
-      const wiRefs = this.sql
-        .exec<{ v: string }>("SELECT v FROM work_item_state WHERE k = 'repo_refs'")
-        .toArray()[0]?.v;
-      const raw = repo.getRunState(runId, "repo_refs") ?? wiRefs;
+      const raw = repo.getRunState(runId, "repo_refs") ?? repo.getWorkItemState("repo_refs");
       const start = repo.getRunState(runId, "start_commits");
       return {
         ...(wi ? { workItem: wi } : {}),
@@ -915,23 +608,7 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
     runId: string,
     before: number,
   ): Promise<{ session: number; part: string; uploadIds: string[] }[]> {
-    return this.rpc(() => {
-      const rows = this.sql
-        .exec<{ session: number; part: string; upload_ids: string }>(
-          "SELECT session, part, upload_ids FROM snapshot_parts WHERE run_id = ? AND session < ? ORDER BY session DESC",
-          runId,
-          before,
-        )
-        .toArray();
-      const out: { session: number; part: string; uploadIds: string[] }[] = [];
-      const seen = new Set<string>();
-      for (const r of rows) {
-        if (seen.has(r.part)) continue;
-        seen.add(r.part);
-        out.push({ session: Number(r.session), part: r.part, uploadIds: JSON.parse(r.upload_ids) as string[] });
-      }
-      return out;
-    });
+    return this.rpc(() => new Repo(this.sql, Date.now).latestSnapshotParts(runId, before));
   }
 
   /** Whether an input of the run names the attachment (downloads of kind attachment). */
@@ -947,10 +624,7 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
       const repo = new Repo(this.sql, Date.now);
       const s = repo.getSession(runId, session);
       if (s) return s.state === "ended" ? "ended" : "open";
-      const g = this.sql
-        .exec<{ state: string }>("SELECT state FROM grants WHERE run_id = ? AND session = ?", runId, session)
-        .toArray()[0];
-      return g?.state === "pending" ? "open" : "ended";
+      return repo.grantState(runId, session) === "pending" ? "open" : "ended";
     });
   }
 
@@ -986,20 +660,7 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
   /** allowBotAction: at most 20 bot actions per work item in one hour; an action counts once. */
   async allowBotAction(actionKey: string): Promise<boolean> {
     return this.rpc(() =>
-      this.tx(() => {
-        const now = Date.now();
-        if (actionKey && this.sql.exec("SELECT 1 FROM bot_actions WHERE action_key = ?", actionKey).toArray().length)
-          return true;
-        this.sql.exec("DELETE FROM bot_actions WHERE at_ms < ?", now - 3_600_000);
-        const n = Number(this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM bot_actions").one().n);
-        if (n >= 20) return false;
-        this.sql.exec(
-          "INSERT OR IGNORE INTO bot_actions (action_key, at_ms) VALUES (?, ?)",
-          actionKey || `anon:${now}:${Math.random()}`,
-          now,
-        );
-        return true;
-      }),
+      this.tx(() => new Repo(this.sql, Date.now).claimBotAction(actionKey, Date.now(), 20, 3_600_000)),
     );
   }
 
@@ -1034,181 +695,12 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
     );
   }
 
-  // ---------- grants ----------
-
-  private async prepareAndCommitGrant(g: Grant): Promise<void> {
-    let prep: GrantPrep;
-    try {
-      prep = await this.prepareGrant(g);
-    } catch (e) {
-      prep = { kind: "retry_later", grant: g, message: e instanceof Error ? e.message : String(e) };
-    }
-    this.txFx((fx) => commitGrant(fx, prep));
-  }
-
-  private async prepareGrant(g: Grant): Promise<GrantPrep> {
-    const repo = new Repo(this.sql, Date.now);
-    const run = repo.getRun(g.runId);
-    if (!run || run.state !== "queued") return { kind: "release", grant: g, reason: "not queued" };
-    const provider = providerFor(this.env, this.teamId(), g.providerId || defaultProviderId(this.env), g.workerId);
-    const caps = await provider.capabilities();
-    const fx = this.makeFx({ cmd: new Set(), run: new Set() });
-    const policy = taskPolicy(fx, run);
-    const gate = gateNetworkPolicy(caps, policy, { allowUnenforced: fx.cfg.allowUnenforced });
-    if (!gate.ok) return { kind: "config_fault", grant: g, code: gate.code, message: gate.message };
-    if (gate.warning) console.warn("work: gate:", gate.warning, run.id);
-    const { token, hash } = await mintBootstrap(this.teamId(), run.id);
-    const arch = caps.arch[0] ?? "amd64";
-    const task = buildTask(fx, run, g.session, token, g, {
-      arch,
-      egress: gate.egress,
-      loopbackDaemonPorts: caps.loopbackDaemonPorts,
-      runnerSha256: await runnerSha256(this.env, arch),
-      environmentImage: await environmentImage(this.env, run),
-    });
-    const pre = await provider.preflight(task);
-    if (!pre.ok) {
-      // A user-class failure is a configuration fault; an unknown code is the platform's.
-      if (lookupFailure(pre.code)?.class === "user")
-        return { kind: "config_fault", grant: g, code: pre.code, message: pre.message };
-      return { kind: "retry_later", grant: g, message: pre.message };
-    }
-    if (pre.resources) task.resources = pre.resources;
-    return { kind: "start", grant: g, task, bootstrapHash: hash };
-  }
-
   // ---------- outbox destinations ----------
 
   protected override async deliverCustom(envelope: OutboxEnvelope, row: OutboxRow): Promise<Ack | void> {
-    if (row.dest.startsWith("notice:") || row.dest === "svc:notify") {
-      await deliverer()(this.env, envelope);
-      return { ok: true };
-    }
-    if (row.dest.startsWith("provider:")) return this.deliverProvider(envelope);
+    if (row.dest.startsWith("notice:") || row.dest === "svc:notify") return deliverNotice(this.env, envelope);
+    if (row.dest.startsWith("provider:")) return deliverProvider(this.host(), envelope);
     throw new Error(`no delivery for destination ${row.dest}`);
-  }
-
-  private async deliverProvider(envelope: OutboxEnvelope): Promise<Ack> {
-    const team = this.teamId();
-    switch (envelope.kind) {
-      case "provider.start": {
-        const p = envelope.payload as OutboxPayloads["provider.start"];
-        const provider = providerFor(this.env, team, p.providerId, p.workerId);
-        try {
-          await provider.start(p.task);
-          this.txFx((fx) =>
-            startSucceeded(
-              fx,
-              p.task.runId,
-              p.task.session,
-              p.workerId ? `worker:${p.workerId}` : p.providerId,
-              p.workerId,
-            ),
-          );
-        } catch (e) {
-          this.txFx((fx) => startFailed(fx, p.task.runId, p.task.session, e));
-        }
-        return { ok: true };
-      }
-      case "provider.ack": {
-        const p = envelope.payload as OutboxPayloads["provider.ack"];
-        const prov = providerOf(this.env, team, p.providerId, p.workerId);
-        if (canAck(prov)) await ignoreNotFound(prov.ack(p.taskId));
-        return { ok: true };
-      }
-      case "provider.cancel": {
-        const p = envelope.payload as OutboxPayloads["provider.cancel"];
-        await ignoreNotFound(providerOf(this.env, team, p.providerId, p.workerId).cancel(p.taskId, p.graceSeconds));
-        return { ok: true };
-      }
-      case "provider.destroy": {
-        const p = envelope.payload as OutboxPayloads["provider.destroy"];
-        await ignoreNotFound(providerOf(this.env, team, p.providerId, p.workerId).destroy(p.taskId));
-        return { ok: true };
-      }
-    }
-    throw new Error(`unexpected provider kind ${envelope.kind}`);
-  }
-
-  // ---------- timers ----------
-
-  private onDeadline(fx: Fx, t: TimerRow<{ runId: string; session: number }>): void {
-    const s = fx.repo.getSession(t.payload.runId, t.payload.session);
-    if (!s) return;
-    const d = decideDeadline(s, fx.repo.stopSentMs(s.run_id, s.session), fx.now(), {
-      maxSessionMs: fx.cfg.maxSessionMs,
-      stopGraceMs: fx.cfg.stopGraceMs,
-      lostAfterMs: fx.cfg.lostAfterMs,
-    });
-    switch (d.kind) {
-      case "wait":
-        fx.setTimer(t.name, "deadline", d.atMs, t.payload);
-        return;
-      case "stop":
-        enqueueCommand(fx, s, "session.stop", { reason: "deadline", snapshot: true });
-        fx.repo.setStopSent(s.run_id, s.session, fx.now());
-        if (d.applyDeadlineEvent) transition(fx, s.run_id, { event: "session_deadline" });
-        fx.setTimer(t.name, "deadline", fx.now() + fx.cfg.stopGraceMs + fx.cfg.lostAfterMs + 1, t.payload);
-        return;
-      case "lose":
-        loseSession(fx, s, "deadline_exceeded", d.applyEvent, { cancel: true });
-        return;
-    }
-  }
-
-  private async onLiveness(t: TimerRow<{ runId: string; session: number }>): Promise<void> {
-    const repo = new Repo(this.sql, Date.now);
-    const s = repo.getSession(t.payload.runId, t.payload.session);
-    if (!s || s.state === "ended") return;
-    const cfg = engineConfig(this.env);
-    let d = decideSilent(s, Date.now(), { lostAfterMs: cfg.lostAfterMs });
-    if (d.kind === "ask_status") {
-      let status: TaskStatus | "not_found" | "unavailable";
-      try {
-        status = await providerOf(this.env, this.teamId(), s.backend ?? "", s.worker_id).status(s.task_id);
-      } catch (e) {
-        status = parseProviderError(e)?.kind === "not_found" ? "not_found" : "unavailable";
-      }
-      const cur = repo.getSession(s.run_id, s.session);
-      if (!cur || cur.state === "ended") return;
-      d = decideSilent(cur, Date.now(), { lostAfterMs: cfg.lostAfterMs }, status);
-    }
-    const action = d;
-    this.txFx((fx) => {
-      const cur = fx.repo.getSession(s.run_id, s.session);
-      if (!cur || cur.state === "ended") return;
-      if (action.kind === "wait" || action.kind === "ask_status") {
-        const at = action.kind === "wait" ? action.recheckAtMs : Date.now() + cfg.lostAfterMs;
-        fx.setTimer(t.name, "liveness", Math.max(at, Date.now() + 1000), t.payload);
-        return;
-      }
-      if (action.useReasonMap)
-        loseCode(fx, cur, action.reason, failureForSandboxReason(action.reason) ?? "", true, { cancel: action.cancel });
-      else loseCode(fx, cur, action.reason, action.code, true, { cancel: action.cancel });
-    });
-  }
-
-  /** work.spendStop: spend_limit on every run of the tree, and stop live sessions (N7). */
-  private spendStop(fx: Fx, rootRunId: string): void {
-    const root = fx.repo.getRun(rootRunId);
-    // The spend gate before a new turn of a live session (deliver.go spendStopsTurn).
-    if (root) fx.repo.setMeta(`spend_exceeded:${root.factory_id}`, String(fx.now()));
-    const queue = [rootRunId];
-    const seen = new Set<string>();
-    while (queue.length) {
-      const id = queue.shift()!;
-      if (seen.has(id)) continue;
-      seen.add(id);
-      const r = fx.repo.getRun(id);
-      if (!r) continue;
-      const { changed } = transition(fx, id, { event: "spend_limit" }, (run) => {
-        if (run.state === "error" && run.failure_code === "spend_limit_exceeded") {
-          run.error = "spend_limit_exceeded: the spend limit of the factory or team is reached";
-        }
-      });
-      if (changed) stopSession(fx, id);
-      for (const c of fx.repo.listRuns({ parentRunId: id })) queue.push(c.id);
-    }
   }
 
   // ---------- tests and tools ----------
@@ -1238,192 +730,30 @@ function createRunOnly(fx: Fx, r: NonNullable<CreateRunInput["run"]>, meta: Call
   );
 }
 
-/** ResolveInbox of the REST API: the checks of the request, then answerInbox. */
-function resolveInbox(fx: Fx, id: string, body: unknown, meta: CallMeta): unknown {
-  const it = fx.repo.getInbox(id);
-  if (!it) throw notFound(`inbox item ${id}`);
-  const b = (body ?? {}) as { resolution?: string; message?: string; via?: string; actor_label?: string };
-  const resolution = (b.resolution ?? "").trim();
-  if (!resolution) throw invalid("resolution is required");
-  return answerInbox(fx, it, resolution, actorOfMeta(meta), {
-    ...(b.message ? { message: b.message } : {}),
-    ...(b.via ? { via: b.via } : {}),
-    ...(b.actor_label ? { label: b.actor_label } : {}),
-  });
-}
-
-/** UnresolveWindow (engine/inbox.go). */
-export const UNRESOLVE_WINDOW_MS = 10 * 60_000;
-
-/**
- * UnresolveInbox: undoes a resolve within 10 minutes, while the run did not
- * consume the answer. The run gets a message that withdraws the answer.
- */
-export function unresolveInbox(fx: Fx, id: string, actor: string, label?: string): InboxItem {
-  const it = fx.repo.getInbox(id);
-  if (!it) throw notFound(`inbox item ${id}`);
-  if (!it.resolved) throw conflict("inbox item is not resolved");
-  const at = it.resolved_at ? Date.parse(it.resolved_at) : NaN;
-  if (!Number.isFinite(at) || fx.now() - at > UNRESOLVE_WINDOW_MS)
-    throw conflict("the resolve is older than 10m0s and cannot be undone");
-  if (it.resolved_via === "forge" || (!it.resolved_by && !it.resolved_via))
-    throw conflict("the platform closed this item and it cannot be undone");
-  if (it.run_id && it.answer_message_id) {
-    const input = fx.repo.getInput(it.answer_message_id);
-    if (input && input.state !== "pending") throw conflict("the run already read the answer");
+/** work.spendStop: spend_limit on every run of the tree, and stop live sessions (N7). */
+function spendStop(fx: Fx, rootRunId: string): void {
+  const root = fx.repo.getRun(rootRunId);
+  // The spend gate before a new turn of a live session (deliver.go spendStopsTurn).
+  if (root) fx.repo.setMeta(`spend_exceeded:${root.factory_id}`, String(fx.now()));
+  const queue = [rootRunId];
+  const seen = new Set<string>();
+  while (queue.length) {
+    const id = queue.shift()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const r = fx.repo.getRun(id);
+    if (!r) continue;
+    const { changed } = transition(fx, id, { event: "spend_limit" }, (run) => {
+      if (run.state === "error" && run.failure_code === "spend_limit_exceeded") {
+        run.error = "spend_limit_exceeded: the spend limit of the factory or team is reached";
+      }
+    });
+    if (changed) stopSession(fx, id);
+    for (const c of fx.repo.listRuns({ parentRunId: id })) queue.push(c.id);
   }
-  const old = it.resolution ?? "";
-  it.resolved = false;
-  delete it.resolution;
-  delete it.resolved_by;
-  delete it.resolved_via;
-  delete it.resolved_at;
-  delete it.answer_message_id;
-  fx.repo.putInbox(it);
-  projectInbox(fx, it);
-  if (it.work_item_id)
-    workItemEvent(fx, it.work_item_id, "note", it.run_id ?? "", actor, { inbox_id: it.id, text: "resolve undone" });
-  if (it.run_id && resumesRun(it)) {
-    const short = [...old].length > 500 ? [...old].slice(0, 499).join("") + "…" : old;
-    const msg = `[human correction] ${actorLabel(actor, label)} withdrew the answer to ${JSON.stringify(it.title)} (it was: ${short}). Ignore that answer. A new answer will arrive as a follow-up message.`;
-    try {
-      sendMessage(fx, it.run_id, msg, actor);
-    } catch (e) {
-      console.warn("work: deliver inbox unresolve", it.id, e);
-    }
-  }
-  return it;
-}
-
-/** api() ops whose route needs more than the user role. */
-const OP_ROLE: Partial<Record<string, Role>> = { workItemStage: "editor" };
-
-/** api() ops about a work item: params.id is the work item ID. */
-const WORK_ITEM_OPS = new Set([
-  "getAgentPins",
-  "getWorkItem",
-  "getWorkItemTimeline",
-  "listWorkItemRuns",
-  "listWorkItemInbox",
-  "mcpPatchWorkItem",
-  "mcpLinkPullRequest",
-  "workItemMessage",
-  "workItemCancel",
-  "workItemComplete",
-  "workItemStage",
-]);
-
-/**
- * The factory of the object of an api() call (routeFactory of the Go route
- * wrapper): the inbox item, work item or run of the params. "" when the
- * object does not exist.
- */
-function opFactory(repo: Repo, op: string, params: Record<string, string>, body: unknown): string {
-  switch (op) {
-    case "getInbox":
-    case "resolveInbox":
-    case "unresolveInbox":
-      return repo.getInbox(params.id ?? "")?.factory_id ?? "";
-    case "createInboxItem": {
-      const b = (body ?? {}) as { factory_id?: string; work_item_id?: string };
-      return b.factory_id ?? repo.getWorkItem(b.work_item_id)?.factory_id ?? "";
-    }
-  }
-  if (WORK_ITEM_OPS.has(op)) return params.id ? (repo.getWorkItem(params.id)?.factory_id ?? "") : "";
-  return repo.getRun(params.runId ?? params.id ?? "")?.factory_id ?? "";
-}
-
-function actorOfMeta(meta: CallMeta): string {
-  return meta.principal?.userId ?? meta.principal?.id ?? "api";
-}
-
-/** SessionView (api/runs_ext.go): one session of a run with the snapshot parts it saved. */
-function sessionView(sql: SqlStorage, s: RunSession): Record<string, unknown> {
-  const parts = new Set(
-    sql
-      .exec<{ part: string }>("SELECT part FROM snapshot_parts WHERE run_id = ? AND session = ?", s.run_id, s.session)
-      .toArray()
-      .map((r) => r.part),
-  );
-  const u = s.usage ?? { input_tokens: 0, output_tokens: 0, cost_usd: 0, duration_ms: 0 };
-  return {
-    session: s.session,
-    number: s.session,
-    state: s.state,
-    assigned_at: s.assigned_at,
-    ...(s.started_at ? { started_at: s.started_at } : {}),
-    ...(s.ready_at ? { ready_at: s.ready_at } : {}),
-    ...(s.ended_at ? { ended_at: s.ended_at } : {}),
-    ...(s.end_reason ? { end_reason: s.end_reason } : {}),
-    ...(s.failure_code ? { failure_code: s.failure_code } : {}),
-    ...(s.sandbox_reason ? { sandbox_reason: s.sandbox_reason } : {}),
-    usage: { ...u, coverage: usageCoverage(u) },
-    snapshot: { workspace: parts.has("workspace"), harness_state: parts.has("harness_state") },
-  };
 }
 
 function isDevVersion(v: string): boolean {
   const major = v.replace(/^v/, "").split(".")[0] ?? "";
   return major === "" || !/^\d+$/.test(major);
-}
-
-/** A provider that can forget the bootstrap token of a started task. `ack` is not part of SandboxProvider. */
-type AckingProvider = SandboxProvider & { ack(taskId: string): Promise<void> };
-
-function canAck(p: SandboxProvider): p is AckingProvider {
-  return "ack" in p && typeof p.ack === "function";
-}
-
-function providerOf(env: Env, team: string, backend: string, workerId?: string) {
-  if (workerId) return providerFor(env, team, "", workerId);
-  return providerFor(
-    env,
-    team,
-    backend.startsWith("worker:") ? "" : backend,
-    backend.startsWith("worker:") ? backend.slice(7) : undefined,
-  );
-}
-
-/**
- * The image of the environment of a run (taskImageFor in the Go server). A
- * failed lookup is logged and gives no image, so the next image applies.
- */
-async function environmentImage(env: Env, run: Run): Promise<string | undefined> {
-  const id = run.config.environment_id;
-  if (!id) return undefined;
-  try {
-    const meta: CallMeta = {
-      requestId: `env-image:${run.id}`,
-      principal: { kind: "run", id: run.id, runId: run.id, teamId: run.team_id, role: "admin", factoryRoles: {} },
-    };
-    const out = unwrapOp<{ image?: string } | null>(
-      await env.TEAM.getByName(doName.team(run.team_id || "default")).api(meta, "getEnvironment", { id }, null),
-    );
-    return out?.image?.trim() || undefined;
-  } catch (e) {
-    console.warn("work: sandbox image: read environment failed, using the next image", run.id, id, e);
-    return undefined;
-  }
-}
-
-/** The checksum of the published runner binary, or undefined when it is not in R2. */
-async function runnerSha256(env: Env, arch: string): Promise<string | undefined> {
-  const v = env.OF_RUNNER_VERSION;
-  if (!v) return undefined;
-  try {
-    const obj = await env.DATA.get(`runner/${v}/openfactory-runtime-linux-${arch}.sha256`);
-    const text = obj ? (await obj.text()).trim() : "";
-    return text.split(/\s+/)[0] || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function ignoreNotFound(p: Promise<void>): Promise<void> {
-  try {
-    await p;
-  } catch (e) {
-    if (parseProviderError(e)?.kind === "not_found") return;
-    throw e;
-  }
 }

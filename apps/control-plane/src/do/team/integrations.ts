@@ -18,6 +18,7 @@
 import {
   INTEGRATION_ACTIVE,
   INTEGRATION_DISABLED,
+  INTEGRATION_STATUSES,
   OfError,
   integrationStatus,
   integrationWorkspace,
@@ -25,13 +26,14 @@ import {
   newId,
   normalizeWorkspace,
 } from "@openfactory/core";
-import type { ExternalIdentity, Integration, User } from "@openfactory/core";
+import type { ExternalIdentity, Integration, IntegrationStatus, User } from "@openfactory/core";
+import { bodyObject, optString, optStringMap, str } from "../../lib/body";
 import { listResponse } from "../../lib/page";
 import { API_NAME_RE } from "../../secrets/validate";
 import type { Migration } from "../../lib/sql/migrate";
 import { all, first, run } from "../../lib/sql/query";
 import { getUser } from "./auth";
-import { findFactory, getFactoryIntegrations } from "./factories";
+import { getFactoryById, getFactoryIntegrations } from "./factories/repo";
 import { created, noContent, type OpCall, type TeamKit, type TeamOp } from "./kit";
 
 export const migrations: readonly Migration[] = [
@@ -97,7 +99,7 @@ function putIntegration(kit: TeamKit, i: Integration): void {
 }
 
 /** Sets the status of a record. Returns true when it changed. An unknown record is not an error. */
-export function setIntegrationStatus(kit: TeamKit, id: string, status: string, reason: string): boolean {
+export function setIntegrationStatus(kit: TeamKit, id: string, status: IntegrationStatus, reason: string): boolean {
   return kit.tx(() => {
     const i = getIntegration(kit, id);
     if (!i) return false;
@@ -122,20 +124,22 @@ interface IntegrationRequest {
 }
 
 function request(body: unknown): IntegrationRequest {
-  if (typeof body !== "object" || body === null || Array.isArray(body))
-    throw new OfError("invalid_request", "the body must be a JSON object");
-  const b = body as Record<string, unknown>;
-  for (const k of ["provider", "name", "secret_ref", "factory_id", "status"]) {
-    if (b[k] !== undefined && b[k] !== null && typeof b[k] !== "string")
-      throw new OfError("invalid_request", `${k} must be a string`);
-  }
-  if (b["config"] !== undefined && b["config"] !== null) {
-    const c = b["config"];
-    if (typeof c !== "object" || Array.isArray(c) || Object.values(c as object).some((v) => typeof v !== "string")) {
-      throw new OfError("invalid_request", "config must be an object of strings");
-    }
-  }
-  return b as IntegrationRequest;
+  const b = bodyObject(body);
+  return {
+    provider: optString(b, "provider"),
+    name: optString(b, "name"),
+    config: optStringMap(b, "config"),
+    secret_ref: optString(b, "secret_ref"),
+    factory_id: optString(b, "factory_id"),
+    status: optString(b, "status"),
+  };
+}
+
+/** A status value of a request: one of INTEGRATION_STATUSES, else 400. */
+function statusOf(v: string): IntegrationStatus {
+  if (!(INTEGRATION_STATUSES as readonly string[]).includes(v))
+    throw new OfError("invalid_request", `status must be one of ${INTEGRATION_STATUSES.join(", ")}`);
+  return v as IntegrationStatus;
 }
 
 /** Applies the status that an admin asks for: active or disabled. auth_failed is set only by the server. */
@@ -260,10 +264,15 @@ function findIdentity(kit: TeamKit, provider: string, externalId: string): Exter
 }
 
 function identityBody(c: OpCall): ExternalIdentity {
-  const b = c.body as Partial<ExternalIdentity> | null;
-  if (!b || !b.provider || !b.external_id)
-    throw new OfError("invalid_request", "identity needs provider and external_id");
-  return { user_id: b.user_id ?? "", provider: b.provider, external_id: b.external_id, handle: b.handle ?? "" };
+  const b = bodyObject(c.body);
+  const x = {
+    user_id: str(b, "user_id"),
+    provider: str(b, "provider"),
+    external_id: str(b, "external_id"),
+    handle: str(b, "handle"),
+  };
+  if (!x.provider || !x.external_id) throw new OfError("invalid_request", "identity needs provider and external_id");
+  return x;
 }
 
 function writeIdentity(kit: TeamKit, x: ExternalIdentity): void {
@@ -305,7 +314,7 @@ export const ops: Record<string, TeamOp> = {
       }
       const fac = (req.factory_id ?? "").trim();
       if (fac !== "") {
-        if (!findFactory(kit, fac) || findFactory(kit, fac)!.id !== fac) {
+        if (!getFactoryById(kit, fac)) {
           throw new OfError("invalid_request", `factory_id "${fac}" is not a factory of this team`);
         }
         i.factory_id = fac;
@@ -354,9 +363,11 @@ export const ops: Record<string, TeamOp> = {
   integrationsForProvider: (kit, c) => ({ items: listIntegrations(kit, c.query["provider"] ?? "") }),
   "integrations.get": (kit, c) => getIntegration(kit, c.params["id"]!) ?? null,
   integrationsSetStatus: (kit, c) => {
-    const b = (c.body ?? {}) as { id?: string; status?: string; reason?: string };
-    if (!b.id || !b.status) throw new OfError("invalid_request", "id and status are required");
-    return { changed: setIntegrationStatus(kit, b.id, b.status, b.reason ?? "") };
+    const b = bodyObject(c.body, true);
+    const id = str(b, "id");
+    const status = str(b, "status");
+    if (!id || !status) throw new OfError("invalid_request", "id and status are required");
+    return { changed: setIntegrationStatus(kit, id, statusOf(status), str(b, "reason")) };
   },
 
   "identity.find": (kit, c) => findIdentity(kit, c.params["provider"]!, c.params["external_id"]!),

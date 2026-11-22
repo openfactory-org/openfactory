@@ -28,16 +28,8 @@ import { scorerExec, scorerName } from "../../scoring/judge";
 import { DEFAULT_CORRECTNESS_MODEL, MAX_BENCHMARK_REPETITIONS, type FactoryInfo } from "../../scoring/types";
 import { STORE_METHODS, type StoreMethod } from "../../scoring/clients";
 import type { BenchmarkPlan } from "../benchmark/index";
-import {
-  activeFiles,
-  configSnapshot,
-  factoryFor,
-  getFactoryById,
-  getVersion,
-  checkDefinition,
-  definitionApply,
-} from "./factories";
-import type { DefinitionVersion } from "./factories";
+import { checkDefinition, configSnapshot, definitionApply } from "./factories/definitions";
+import { activeFiles, factoryFor, getFactoryById, getVersion, type DefinitionVersion } from "./factories/repo";
 import type { OpCall, TeamKit, TeamOp } from "./kit";
 import { scoringSweep } from "../../scoring/sweep";
 

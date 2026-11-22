@@ -16,9 +16,22 @@ import type {
   TimelineEvent,
   WorkItem,
   WorkItemEvent,
+  WorkItemRef,
 } from "../../engine/types";
 
 type Data = { data: string };
+
+/**
+ * The diagnostic events of a run. The literal type lets SQLite use the partial
+ * index runner_events_diag; an ORDER BY in SQL would make it walk the primary
+ * key over every event of the run instead, so the few rows sort in JS.
+ */
+export const DIAGNOSTICS_SQL =
+  "SELECT session, seq, type, turn_id, at_ms, data FROM runner_events WHERE run_id = ? AND type = 'diagnostic'";
+
+/** The user messages of one actor on a run after a time (the send_message limit). */
+export const SENT_MESSAGES_SQL =
+  "SELECT COUNT(*) AS n FROM run_messages WHERE run_id = ? AND role = 'user' AND created_ms > ? AND json_extract(data, '$.data.actor') = ?";
 
 export class SeqGapError extends Error {
   override readonly name = "SeqGapError";
@@ -101,6 +114,18 @@ export class Repo {
     return all<Data>(this.sql, q, ...args).map((r) => JSON.parse(r.data) as Run);
   }
 
+  /** Finished runs whose R2 data is not pruned, after afterId by ID (one retention page). */
+  listUnprunedFinishedRuns(afterId: string, limit: number): Run[] {
+    return all<Data>(
+      this.sql,
+      `SELECT data FROM runs WHERE id > ? AND state IN ('succeeded', 'failed', 'error', 'cancelled')
+       AND NOT EXISTS (SELECT 1 FROM run_state WHERE run_state.run_id = runs.id AND k = 'data_pruned')
+       ORDER BY id LIMIT ?`,
+      afterId,
+      limit,
+    ).map((r) => JSON.parse(r.data) as Run);
+  }
+
   // ---------- messages (conversation) ----------
 
   appendMessage(m: Omit<RunMessage, "seq"> & { seq?: number }): RunMessage {
@@ -135,6 +160,30 @@ export class Repo {
       runId,
       afterSeq,
     ).map((r) => JSON.parse(r.data) as RunMessage);
+  }
+
+  /** The raw rows of the messages of a run after afterSeq (compaction to R2). */
+  messageRows(runId: string, afterSeq: number, limit: number): { seq: number; data: string }[] {
+    return all<{ seq: number; data: string }>(
+      this.sql,
+      "SELECT seq, data FROM run_messages WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT ?",
+      runId,
+      afterSeq,
+      limit,
+    );
+  }
+
+  /** Deletes the messages of a run up to seq (they are in R2). Returns the deleted rows. */
+  deleteMessagesUpTo(runId: string, upto: number): number {
+    return this.sql.exec("DELETE FROM run_messages WHERE run_id = ? AND seq <= ?", runId, upto).rowsWritten;
+  }
+
+  /**
+   * The user messages that actor (engine.MessageActor: data.actor) stored on
+   * the run after afterMs. SQLite filters and counts the rows.
+   */
+  countUserMessagesBy(runId: string, actor: string, afterMs: number): number {
+    return Number(first<{ n: number }>(this.sql, SENT_MESSAGES_SQL, runId, afterMs, actor)?.n ?? 0);
   }
 
   // ---------- sessions ----------
@@ -298,6 +347,25 @@ export class Repo {
       at: iso(r.at_ms),
       ...(r.data !== null ? { data: JSON.parse(r.data) as unknown } : {}),
     }));
+  }
+
+  /** The diagnostic events of a run in session and seq order. */
+  listDiagnostics(runId: string): RunnerEvent[] {
+    return all<{ session: number; seq: number; type: string; turn_id: string; at_ms: number; data: string | null }>(
+      this.sql,
+      DIAGNOSTICS_SQL,
+      runId,
+    )
+      .sort((a, b) => a.session - b.session || a.seq - b.seq)
+      .map((r) => ({
+        run_id: runId,
+        session: r.session,
+        seq: r.seq,
+        type: r.type,
+        ...(r.turn_id ? { turn_id: r.turn_id } : {}),
+        at: iso(r.at_ms),
+        ...(r.data !== null ? { data: JSON.parse(r.data) as unknown } : {}),
+      }));
   }
 
   // ---------- runner commands ----------
@@ -521,6 +589,68 @@ export class Repo {
     }));
   }
 
+  // ---------- run uploads and snapshot parts ----------
+
+  /** An upload that the runner reported (an artifact or the transcript); a later report of the same name wins. */
+  putUpload(runId: string, session: number, kind: string, name: string, uploadId: string): void {
+    this.sql.exec(
+      "INSERT OR REPLACE INTO run_uploads (run_id, session, kind, name, upload_id, at_ms) VALUES (?, ?, ?, ?, ?, ?)",
+      runId,
+      session,
+      kind,
+      name,
+      uploadId,
+      this.now(),
+    );
+  }
+
+  /** A saved part of a workspace snapshot (workspace, harness_state); a later save of the same part wins. */
+  putSnapshotPart(runId: string, session: number, part: string, uploadIds: unknown[], bytes: number): void {
+    this.sql.exec(
+      "INSERT OR REPLACE INTO snapshot_parts (run_id, session, part, upload_ids, bytes, at_ms) VALUES (?, ?, ?, ?, ?, ?)",
+      runId,
+      session,
+      part,
+      JSON.stringify(uploadIds),
+      bytes,
+      this.now(),
+    );
+  }
+
+  /** The snapshot parts that each session of a run saved, in one query. */
+  snapshotPartsBySession(runId: string): Map<number, Set<string>> {
+    const out = new Map<number, Set<string>>();
+    for (const r of all<{ session: number; part: string }>(
+      this.sql,
+      "SELECT session, part FROM snapshot_parts WHERE run_id = ?",
+      runId,
+    )) {
+      const n = Number(r.session);
+      let set = out.get(n);
+      if (!set) out.set(n, (set = new Set()));
+      set.add(r.part);
+    }
+    return out;
+  }
+
+  /** For each part, the upload IDs of the newest session before `before` that saved it (snapshotFiles). */
+  latestSnapshotParts(runId: string, before: number): { session: number; part: string; uploadIds: string[] }[] {
+    const rows = all<{ session: number; part: string; upload_ids: string }>(
+      this.sql,
+      "SELECT session, part, upload_ids FROM snapshot_parts WHERE run_id = ? AND session < ? ORDER BY session DESC",
+      runId,
+      before,
+    );
+    const out: { session: number; part: string; uploadIds: string[] }[] = [];
+    const seen = new Set<string>();
+    for (const r of rows) {
+      if (seen.has(r.part)) continue;
+      seen.add(r.part);
+      out.push({ session: Number(r.session), part: r.part, uploadIds: JSON.parse(r.upload_ids) as string[] });
+    }
+    return out;
+  }
+
   // ---------- work item ----------
 
   getWorkItem(id?: string): WorkItem | undefined {
@@ -561,6 +691,22 @@ export class Repo {
       JSON.stringify(wi),
       wi.id,
     );
+  }
+
+  /** Indexes a reference of the work item by its key. The caller adds it to wi.references. */
+  addWorkItemRef(ref: WorkItemRef): void {
+    this.sql.exec(
+      "INSERT OR IGNORE INTO work_item_refs (key, kind, added_ms, data) VALUES (?, ?, ?, ?)",
+      ref.key,
+      ref.kind,
+      ms(typeof ref["added_at"] === "string" ? ref["added_at"] : undefined) ?? this.now(),
+      JSON.stringify(ref),
+    );
+  }
+
+  /** A value of work_item_state (repo_refs: the starting repository refs of the work item). */
+  getWorkItemState(k: string): string | undefined {
+    return first<{ v: string }>(this.sql, "SELECT v FROM work_item_state WHERE k = ?", k)?.v;
   }
 
   appendWorkItemEvent(ev: WorkItemEvent): void {
@@ -649,6 +795,29 @@ export class Repo {
     );
   }
 
+  // ---------- event context ----------
+
+  /** The R2 key of the event context of a message (or of the first prompt of a run), read when it is delivered. */
+  putEventContext(messageKey: string, runId: string, r2Key: string): void {
+    this.sql.exec(
+      "INSERT OR IGNORE INTO event_context (message_id, run_id, r2_key, bytes, created_ms) VALUES (?, ?, ?, 0, ?)",
+      messageKey,
+      runId,
+      r2Key,
+      this.now(),
+    );
+  }
+
+  eventContextKey(messageKey: string): string | undefined {
+    return first<{ r2_key: string }>(this.sql, "SELECT r2_key FROM event_context WHERE message_id = ?", messageKey)
+      ?.r2_key;
+  }
+
+  /** Drops the event context rows of a finished run. */
+  deleteEventContexts(runId: string): void {
+    this.sql.exec("DELETE FROM event_context WHERE run_id = ?", runId);
+  }
+
   // ---------- dispatch ledger ----------
 
   hasDispatch(actionKey: string, target: string): string | undefined {
@@ -669,6 +838,60 @@ export class Repo {
       ref,
       this.now(),
     );
+  }
+
+  // ---------- grants and bot actions ----------
+
+  /** Records a slot grant of DispatchDO; a repeated grant keeps the first row. */
+  addGrant(g: {
+    runId: string;
+    session: number;
+    target: unknown;
+    providerId: string;
+    workerId?: string;
+    leaseId: string;
+  }): void {
+    this.sql.exec(
+      `INSERT OR IGNORE INTO grants (run_id, session, target, provider, worker_id, lease_id, created_ms) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      g.runId,
+      g.session,
+      JSON.stringify(g.target),
+      g.providerId,
+      g.workerId ?? "",
+      g.leaseId,
+      this.now(),
+    );
+  }
+
+  /** The state of a grant (pending, used, released), undefined without one. */
+  grantState(runId: string, session: number): string | undefined {
+    return first<{ state: string }>(
+      this.sql,
+      "SELECT state FROM grants WHERE run_id = ? AND session = ?",
+      runId,
+      session,
+    )?.state;
+  }
+
+  setGrantState(runId: string, session: number, state: "used" | "released"): void {
+    this.sql.exec("UPDATE grants SET state = ? WHERE run_id = ? AND session = ?", state, runId, session);
+  }
+
+  /**
+   * Counts a bot action in the window (allowBotAction): true when it is
+   * already counted or fits under max; false when the window is full.
+   */
+  claimBotAction(actionKey: string, nowMs: number, max: number, windowMs: number): boolean {
+    if (actionKey && first(this.sql, "SELECT 1 FROM bot_actions WHERE action_key = ?", actionKey)) return true;
+    this.sql.exec("DELETE FROM bot_actions WHERE at_ms < ?", nowMs - windowMs);
+    const n = Number(first<{ n: number }>(this.sql, "SELECT COUNT(*) AS n FROM bot_actions")?.n ?? 0);
+    if (n >= max) return false;
+    this.sql.exec(
+      "INSERT OR IGNORE INTO bot_actions (action_key, at_ms) VALUES (?, ?)",
+      actionKey || `anon:${nowMs}:${Math.random()}`,
+      nowMs,
+    );
+    return true;
   }
 
   // ---------- tool calls (orchestration idempotency) ----------
@@ -710,5 +933,9 @@ export class Repo {
 
   setMeta(k: string, v: string): void {
     this.sql.exec("INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v", k, v);
+  }
+
+  deleteMeta(k: string): void {
+    this.sql.exec("DELETE FROM meta WHERE k = ?", k);
   }
 }

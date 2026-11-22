@@ -2,6 +2,7 @@
 // with the work-item status (C6). resolveOrReserve is atomic and returns the
 // same token while a route is reserved or active (plan rule 4).
 import { hashToken, newRoutedId } from "@openfactory/core";
+import type { OutboxPayloads } from "../../contracts/do-messages";
 import type { Env } from "../../contracts/env";
 import { BaseDO, type Migration } from "../../lib/base";
 import { first } from "../../lib/sql/query";
@@ -33,6 +34,12 @@ interface RouteRow {
   updated_ms: number;
 }
 
+/**
+ * sourceKey names which of keys is the work item's source key. Senders set it
+ * so that a route rebuilt from a status message keeps kind 'source'.
+ */
+type StatusPayload = OutboxPayloads["router.status"];
+
 function tokenOf(wiId: string): string {
   return wiId.slice(wiId.indexOf("_") + 1, wiId.indexOf("_") + 17);
 }
@@ -40,7 +47,8 @@ function tokenOf(wiId: string): string {
 export class RouterDO extends BaseDO {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    this.onMessage("router.status", (p) => {
+    this.onMessage("router.status", (msg) => {
+      const p = msg as StatusPayload;
       const now = Date.now();
       const status = p.stage === "complete" ? "completed" : p.stage === "cancelled" ? "cancelled" : "active";
       // Lower versions are ignored.
@@ -64,13 +72,17 @@ export class RouterDO extends BaseDO {
           )
         )
           continue;
+        // A missing route (a RouterDO reset, then a rebuild) gets the kind that
+        // the normal path gives it: 'source' for the source key, so the key keeps
+        // its owner. OR IGNORE keeps one active source route per key.
         this.sql.exec(
           `INSERT OR IGNORE INTO routes (factory_id, source_key, work_item_id, work_token, kind, status, completed_ms, wi_version, updated_ms)
-           VALUES (?, ?, ?, ?, 'thread', ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           p.factoryId,
           key,
           p.wiId,
           tokenOf(p.wiId),
+          key === p.sourceKey ? "source" : "thread",
           status,
           p.completedMs,
           p.version,

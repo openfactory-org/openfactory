@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { collect, compute, type IndexList } from "./collect";
+import type { PullRequestFacts } from "@openfactory/core";
+import { DEFAULT_LOOKBACK_MS, prFactsKey } from "./build";
+import { collect, compute, loadFacts, type IndexList } from "./collect";
+import { GOLDEN_SINCE, GOLDEN_UNTIL, fakeIndex, goldenSet, type ListStats } from "./testdata/golden";
 
 const DAY = 86_400_000;
 const day0 = Date.UTC(2026, 4, 1);
@@ -94,5 +97,41 @@ describe("collect", () => {
   it("rejects an inverted window and a missing factory", async () => {
     await expect(collect(fake({}, []), "f", [], 2, 1)).rejects.toThrow(/until/);
     await expect(collect(fake({}, []), "", [], 1, 2)).rejects.toThrow(/factory/);
+  });
+
+  it("loads the inbox of the lookback and the events of the linked pull requests only", async () => {
+    const g = goldenSet();
+    const from = GOLDEN_SINCE - DEFAULT_LOOKBACK_MS;
+    const stats: ListStats = {};
+    const d = await collect(fakeIndex(g, stats), "fac_golden", g.scorers, GOLDEN_SINCE, GOLDEN_UNTIL);
+    const wanted = new Set<string>();
+    for (const w of d.workItems)
+      for (const pr of w.pull_requests ?? []) if (pr.repo && pr.number) wanted.add(prFactsKey(pr));
+
+    // Before: every inbox item of the factory and every forge event of the team.
+    const inboxInLookback = g.data.inbox.filter((it) => Date.parse(it.created_at) >= from).length;
+    expect(inboxInLookback).toBeLessThan(g.data.inbox.length);
+    expect(stats["inbox"]!.rows).toBe(inboxInLookback);
+    expect(d.inbox).toHaveLength(inboxInLookback);
+
+    const linkedEvents = g.factEvents.filter((e) => wanted.has(e.prKey)).length;
+    expect(linkedEvents).toBeLessThan(g.factEvents.length);
+    expect(stats["prFacts"]!.rows).toBe(linkedEvents);
+    expect(stats["prFacts"]!.calls).toBe(wanted.size);
+  });
+
+  it("gives the same facts per pull request as the full replay", async () => {
+    const g = goldenSet();
+    const wanted = new Set(Object.keys(g.data.facts));
+    wanted.add("github:nobody/none#1");
+    const strip = (fs: Record<string, PullRequestFacts>) =>
+      Object.fromEntries(Object.entries(fs).map(([k, f]) => [k, { ...f, updated_at: "" }]));
+    const fullStats: ListStats = {};
+    const full = await loadFacts(fakeIndex(g, fullStats), wanted, 0);
+    const perKey = await loadFacts(fakeIndex(g), wanted);
+    expect(fullStats["prFacts"]!.rows).toBe(g.factEvents.length);
+    expect(Object.keys(perKey).length).toBeGreaterThan(10);
+    expect(strip(perKey)).toEqual(strip(full));
+    expect(strip(perKey)).toEqual(strip(g.data.facts));
   });
 });

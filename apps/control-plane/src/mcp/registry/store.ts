@@ -7,8 +7,10 @@ import {
   MCP_OAUTH_CONNECTED,
   MCP_OAUTH_ERROR,
   MCP_OAUTH_NOT_CONNECTED,
+  MCP_OAUTH_STATUSES,
   OfError,
   builtinMCPProvider,
+  isOneOf,
   newId,
   sameIntegrationProvider,
   type MCPOAuthConfig,
@@ -19,7 +21,7 @@ import type { TeamKit } from "../../do/team/kit";
 import { bodyObject, optString, optStringArray, optStringMap, type JsonObject } from "../../lib/body";
 import { all, first } from "../../lib/sql/query";
 import { msOf } from "../../lib/page";
-import { defaultConnection, privateHostWarning, proxied, validate } from "./validate";
+import { defaultConnection, parseConnection, privateHostWarning, proxied, validate } from "./validate";
 
 /** Paths of the run endpoints. */
 export const PROXY_PATH_PREFIX = "/mcp/proxy/";
@@ -113,6 +115,7 @@ export function setStatus(
   msg: string,
   nowMs: number,
 ): RegisteredMCPServer | undefined {
+  if (!isOneOf(MCP_OAUTH_STATUSES, status)) throw new OfError("invalid_request", `unknown OAuth status "${status}"`);
   const m = getServer(kit, serverId);
   if (!m?.oauth) return m;
   m.oauth.status = status;
@@ -234,7 +237,11 @@ export function applyRequest(m: RegisteredMCPServer, o: JsonObject): boolean {
     }
   }
   const conn = optString(o, "connection");
-  if (conn !== undefined) m.connection = conn.trim().toLowerCase();
+  if (conn !== undefined) {
+    const c = parseConnection(conn);
+    if (c === undefined) delete m.connection;
+    else m.connection = c;
+  }
   // Go omitempty for maps and lists.
   for (const k of ["headers", "env"] as const) if (m[k] && Object.keys(m[k]!).length === 0) delete m[k];
   if (m.args && m.args.length === 0) delete m.args;

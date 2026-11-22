@@ -2,9 +2,12 @@
 // appendix 04 gap 20: a proxy-mode server on a private network cannot be
 // reached from Cloudflare.
 import {
+  isOneOf,
   MCP_CONNECTION_DIRECT,
   MCP_CONNECTION_PROXY,
+  MCP_CONNECTIONS,
   MCP_OAUTH_NOT_CONNECTED,
+  type MCPConnection,
   OfError,
   type RegisteredMCPServer,
 } from "@openfactory/core";
@@ -16,6 +19,14 @@ const PLACEHOLDER_RE = /\{\{[\t\n\f\r ]*[A-Za-z_][A-Za-z0-9_]*[\t\n\f\r ]*\}\}/;
 const SENSITIVE_RE = /(authorization|token|secret|password|passwd|api[-_]?key|apikey|credential|cookie|private)/i;
 
 const invalid = (msg: string) => new OfError("invalid_request", msg);
+
+/** The connection mode of a request value, or undefined for an empty value. Throws invalid_request. */
+export function parseConnection(v: string): MCPConnection | undefined {
+  const s = v.trim().toLowerCase();
+  if (s === "") return undefined;
+  if (!isOneOf(MCP_CONNECTIONS, s)) throw invalid(`connection "${s}": want proxy or direct`);
+  return s;
+}
 
 /** harness.IsSSEURL: the path ends in /sse. */
 export function isSSEURL(raw: string): boolean {
@@ -98,10 +109,9 @@ export function validate(m: RegisteredMCPServer): void {
   m.name = (m.name ?? "").trim();
   m.url = (m.url ?? "").trim();
   m.command = (m.command ?? "").trim();
-  m.connection = (m.connection ?? "").trim().toLowerCase();
-  if (m.connection !== "" && m.connection !== MCP_CONNECTION_PROXY && m.connection !== MCP_CONNECTION_DIRECT) {
-    throw invalid(`connection "${m.connection}": want proxy or direct`);
-  }
+  const conn = parseConnection(m.connection ?? "");
+  if (conn === undefined) delete m.connection;
+  else m.connection = conn;
   if (!NAME_RE.test(m.name)) {
     throw invalid(`name "${m.name}" must be 1-64 letters, digits, '.', '_' or '-' and start with a letter or digit`);
   }
@@ -121,9 +131,9 @@ export function validate(m: RegisteredMCPServer): void {
     if (Object.keys(headers).length > 0) throw invalid("headers apply only to url servers");
     if (m.connection === MCP_CONNECTION_PROXY || m.oauth)
       throw invalid("connection proxy and oauth apply only to url servers");
-    m.connection = "";
+    delete m.connection;
   }
-  if (m.url !== "" && m.connection === "") m.connection = m.oauth ? MCP_CONNECTION_PROXY : MCP_CONNECTION_DIRECT;
+  if (m.url !== "" && !m.connection) m.connection = m.oauth ? MCP_CONNECTION_PROXY : MCP_CONNECTION_DIRECT;
   if (m.oauth) {
     if (m.connection === MCP_CONNECTION_DIRECT) {
       throw invalid("an OAuth server needs connection proxy: its tokens stay in the control plane");
@@ -160,7 +170,6 @@ export function validate(m: RegisteredMCPServer): void {
   // Go omits empty fields (omitempty).
   if (m.url === "") delete m.url;
   if (m.command === "") delete m.command;
-  if (m.connection === "") delete m.connection;
 }
 
 /** Literal values for credential-like keys are refused: reference a secret with {{SECRET}}. */

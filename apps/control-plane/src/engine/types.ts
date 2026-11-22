@@ -1,7 +1,7 @@
 // Domain types of the engine. JSON shapes follow the Go json tags
 // (internal/core/types.go, internal/core/runnerstore.go) so that REST bodies
 // and stored `data` columns port 1:1.
-import type { FailureCode } from "@openfactory/core";
+import type { FailureCode, PullRequestState } from "@openfactory/core";
 
 export type RunState =
   | "queued"
@@ -280,7 +280,7 @@ export interface PullRequestRef {
   number: number;
   url: string;
   branch: string;
-  state: string;
+  state: PullRequestState;
 }
 
 export interface WorkItem {

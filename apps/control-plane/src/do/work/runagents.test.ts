@@ -100,6 +100,33 @@ describe("run_agents overrides", () => {
   });
 });
 
+describe("run_agents config", () => {
+  it("reads the TeamDO config snapshot once for the agents and the machine types of a pin", async () => {
+    const f = await buildRuns(
+      { wi: { stage: "building", root: "root" } },
+      { root: { agent: "foreman", type: "FOREMAN", workItem: "wi", state: "running" } },
+    );
+    await withFx(f.token, (fx) =>
+      fx.repo.setMeta(`agent_pins:${f.ids.wi!}`, JSON.stringify({ implement: { model: "pinned" } })),
+    );
+    let snapshots = 0;
+    const team = {
+      configSnapshot: async () => {
+        snapshots++;
+        return { agents: AGENTS, runtime: { machines: null } };
+      },
+    };
+    const fake = { ...env, TEAM: { getByName: () => team } } as unknown as Env;
+    const res = await callTool(fake, "default", f.ids.root!, "run_agents", {
+      agent_run_configs: [{ agent_identity_uid: "agt_implement", prompt: "x" }],
+    });
+    expect(res.isError, resultText(res)).toBeFalsy();
+    expect(snapshots).toBe(1);
+    const [kid] = await children(f.token, f.ids.root!);
+    expect(kid!.config.harness.model).toBe("pinned");
+  });
+});
+
 describe("cancel during run_agents", () => {
   it("leaves no live child", async () => {
     const f = await buildRuns(

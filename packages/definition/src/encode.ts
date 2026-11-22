@@ -36,8 +36,6 @@ import type {
 } from "./types.ts";
 import { put } from "./yamlnode.ts";
 
-type Obj = Record<string, unknown>;
-
 function isEmpty(v: unknown): boolean {
   if (v === undefined || v === null || v === "" || v === 0 || v === false) return true;
   if (Array.isArray(v)) return v.length === 0;
@@ -45,19 +43,37 @@ function isEmpty(v: unknown): boolean {
   return false;
 }
 
-class Out {
-  o: Obj = {};
-  req(k: string, v: unknown, zero: unknown): this {
+/** The Go zero values: req writes one when the value is unset, even for a Go string that TypeScript types as a union. */
+type GoZero = "" | 0 | false | null;
+
+/** The keys of T that are not optional. */
+type RequiredKeys<T> = { [K in keyof T]-?: object extends Pick<T, K> ? never : K }[keyof T];
+
+/**
+ * Out builds the JSON object of a T field by field, in Go struct order. S
+ * collects the keys written so far; done() compiles only when every required
+ * key of T is written.
+ */
+class Out<T, S extends keyof T = never> {
+  private readonly o: Record<PropertyKey, unknown> = {};
+  /** req writes a field without omitempty: v, or zero when v is unset. */
+  req<K extends keyof T>(k: K, v: T[K] | undefined, zero: T[K] | GoZero): Out<T, S | K> {
     this.o[k] = v === undefined ? zero : v;
-    return this;
+    return this as Out<T, S | K>;
   }
-  omit(k: string, v: unknown): this {
+  /** omit writes an omitempty field unless it holds its zero value or is empty. */
+  omit<K extends keyof T>(k: K, v: T[K] | null | undefined): Out<T, S | K> {
     if (!isEmpty(v)) this.o[k] = v;
-    return this;
+    return this as Out<T, S | K>;
   }
-  ptr(k: string, v: unknown): this {
+  /** ptr writes a pointer field unless it is unset. */
+  ptr<K extends keyof T>(k: K, v: T[K] | null | undefined): Out<T, S | K> {
     if (v !== undefined && v !== null) this.o[k] = v;
-    return this;
+    return this as Out<T, S | K>;
+  }
+  done(...missing: [Exclude<RequiredKeys<T>, S>] extends [never] ? [] : [missing: Exclude<RequiredKeys<T>, S>]): T {
+    void missing;
+    return this.o as unknown as T;
   }
 }
 
@@ -76,26 +92,28 @@ function sortedMap<T, R>(m: Record<string, T> | null | undefined, f: (x: T) => R
 const id = <T>(x: T): T => x;
 
 export function encodeAuth(a: HarnessAuth): HarnessAuth {
-  return new Out().req("source", a.source, "").omit("secretName", a.secretName).o as unknown as HarnessAuth;
+  return new Out<HarnessAuth>().req("source", a.source, "").omit("secretName", a.secretName).done();
 }
 
 export function encodeHarness(h: HarnessConfig): HarnessConfig {
-  return new Out()
+  return new Out<HarnessConfig>()
     .req("type", h.type, "")
     .req("model", h.model, "")
     .omit("reasoningLevel", h.reasoningLevel)
-    .ptr("auth", h.auth ? encodeAuth(h.auth) : undefined).o as unknown as HarnessConfig;
+    .ptr("auth", h.auth ? encodeAuth(h.auth) : undefined)
+    .done();
 }
 
 export function encodeMCPServer(s: MCPServer): MCPServer {
-  return new Out()
+  return new Out<MCPServer>()
     .omit("managedId", s.managedId)
     .omit("command", s.command)
     .omit("args", s.args)
     .omit("env", sortedMap(s.env, id))
     .omit("url", s.url)
     .omit("headers", sortedMap(s.headers, id))
-    .omit("allowWrite", s.allowWrite).o as MCPServer;
+    .omit("allowWrite", s.allowWrite)
+    .done();
 }
 
 function mcpMap(m: Record<string, MCPServer> | null | undefined): Record<string, MCPServer> | null {
@@ -103,24 +121,26 @@ function mcpMap(m: Record<string, MCPServer> | null | undefined): Record<string,
 }
 
 function encodeNetwork(n: EffectiveNetworkPolicy): EffectiveNetworkPolicy {
-  return new Out()
+  return new Out<EffectiveNetworkPolicy>()
     .req("restricted", n.restricted, false)
     .req("allowed_hosts", n.allowed_hosts, null)
-    .req("denied_hosts", n.denied_hosts, null).o as unknown as EffectiveNetworkPolicy;
+    .req("denied_hosts", n.denied_hosts, null)
+    .done();
 }
 
 export function encodeSkill(s: Skill): Skill {
-  return new Out()
+  return new Out<Skill>()
     .req("name", s.name, "")
     .req("description", s.description, "")
     .req("path", s.path, "")
     .req("content", s.content, "")
     .omit("files", sortedMap(s.files, id))
-    .req("scope", s.scope, "").o as unknown as Skill;
+    .req("scope", s.scope, "")
+    .done();
 }
 
 export function encodeMachine(m: MachineSpec): MachineSpec {
-  return new Out()
+  return new Out<MachineSpec>()
     .req("name", m.name, "")
     .omit("description", m.description)
     .omit("setupCommands", m.setupCommands)
@@ -132,11 +152,12 @@ export function encodeMachine(m: MachineSpec): MachineSpec {
     .omit("macVersion", m.macVersion)
     .omit("registryCredentialSecretName", m.registryCredentialSecretName)
     .omit("user", m.user)
-    .omit("failureSessionRetentionMinutes", m.failureSessionRetentionMinutes).o as unknown as MachineSpec;
+    .omit("failureSessionRetentionMinutes", m.failureSessionRetentionMinutes)
+    .done();
 }
 
 export function encodeAgent(a: AgentConfig): AgentConfig {
-  return new Out()
+  return new Out<AgentConfig>()
     .req("id", a.id, "")
     .req("factory_id", a.factory_id, "")
     .req("name", a.name, "")
@@ -159,24 +180,26 @@ export function encodeAgent(a: AgentConfig): AgentConfig {
     .omit("idle_timeout_set", a.idle_timeout_set)
     .omit("credential_strategy", a.credential_strategy)
     .omit("skills", list(a.skills, encodeSkill))
-    .ptr("snapshot", a.snapshot).o as unknown as AgentConfig;
+    .ptr("snapshot", a.snapshot)
+    .done();
 }
 
 function encodeSchedule(s: Schedule): Schedule {
-  return new Out().omit("name", s.name).req("cron", s.cron, "").o as unknown as Schedule;
+  return new Out<Schedule>().omit("name", s.name).req("cron", s.cron, "").done();
 }
 
 export function encodeTrigger(t: Trigger): Trigger {
-  return new Out()
+  return new Out<Trigger>()
     .req("provider", t.provider, "")
     .req("event", t.event, "")
     .ptr("filter", t.filter)
     .ptr("schedule", t.schedule ? encodeSchedule(t.schedule) : undefined)
-    .omit("concurrency", t.concurrency).o as unknown as Trigger;
+    .omit("concurrency", t.concurrency)
+    .done();
 }
 
 export function encodeOverrides(o: AgentOverrides): AgentOverrides {
-  return new Out()
+  return new Out<AgentOverrides>()
     .ptr("harness", o.harness ? encodeHarness(o.harness) : undefined)
     .omit("model", o.model)
     .omit("machine", o.machine)
@@ -184,11 +207,12 @@ export function encodeOverrides(o: AgentOverrides): AgentOverrides {
     .req("secrets", o.secrets, null)
     .req("mcp_servers", mcpMap(o.mcp_servers), null)
     .ptr("worker_host", o.worker_host)
-    .ptr("idle_timeout_minutes", o.idle_timeout_minutes).o as unknown as AgentOverrides;
+    .ptr("idle_timeout_minutes", o.idle_timeout_minutes)
+    .done();
 }
 
 export function encodeAutomation(a: Automation): Automation {
-  return new Out()
+  return new Out<Automation>()
     .req("id", a.id, "")
     .req("factory_id", a.factory_id, "")
     .req("name", a.name, "")
@@ -198,11 +222,12 @@ export function encodeAutomation(a: Automation): Automation {
     .req("prompt", a.prompt, "")
     .req("triggers", list(a.triggers, encodeTrigger), null)
     .omit("run_as", a.run_as)
-    .ptr("overrides", a.overrides ? encodeOverrides(a.overrides) : undefined).o as unknown as Automation;
+    .ptr("overrides", a.overrides ? encodeOverrides(a.overrides) : undefined)
+    .done();
 }
 
 export function encodeWebhook(w: CompiledWebhook): CompiledWebhook {
-  return new Out()
+  return new Out<CompiledWebhook>()
     .req("id", w.id, "")
     .req("factory_id", w.factory_id, "")
     .req("name", w.name, "")
@@ -210,20 +235,24 @@ export function encodeWebhook(w: CompiledWebhook): CompiledWebhook {
     .omit("signature_scheme", w.signature_scheme)
     .req("secret_name", w.secret_name, "")
     .omit("delivery_id_header", w.delivery_id_header)
-    .req("enabled", w.enabled, false).o as unknown as CompiledWebhook;
+    .req("enabled", w.enabled, false)
+    .done();
 }
 
 function encodeLabel(l: ScorerLabel): ScorerLabel {
-  return new Out().req("value", l.value, "").omit("description", l.description).req("score", l.score, 0)
-    .o as unknown as ScorerLabel;
+  return new Out<ScorerLabel>()
+    .req("value", l.value, "")
+    .omit("description", l.description)
+    .req("score", l.score, 0)
+    .done();
 }
 
 function encodeScorerAgent(a: ScorerAgent): ScorerAgent {
-  return new Out().req("name", a.name, "").omit("includeDescendants", a.includeDescendants).o as unknown as ScorerAgent;
+  return new Out<ScorerAgent>().req("name", a.name, "").omit("includeDescendants", a.includeDescendants).done();
 }
 
 export function encodeScorer(s: Scorer): Scorer {
-  return new Out()
+  return new Out<Scorer>()
     .req("id", s.id, "")
     .req("factory_id", s.factory_id, "")
     .req("slug", s.slug, "")
@@ -239,36 +268,41 @@ export function encodeScorer(s: Scorer): Scorer {
     .omit("machine", s.machine)
     .omit("secrets", s.secrets)
     .omit("mcp_servers", mcpMap(s.mcp_servers))
-    .ptr("harness", s.harness ? encodeHarness(s.harness) : undefined).o as unknown as Scorer;
+    .ptr("harness", s.harness ? encodeHarness(s.harness) : undefined)
+    .done();
 }
 
 function encodeRepo(r: RepoRef): RepoRef {
-  return new Out().req("codeForge", r.codeForge, "").req("owner", r.owner, "").req("name", r.name, "")
-    .o as unknown as RepoRef;
+  return new Out<RepoRef>().req("codeForge", r.codeForge, "").req("owner", r.owner, "").req("name", r.name, "").done();
 }
 
 function encodePin(p: BenchmarkAgentPin): BenchmarkAgentPin {
-  return new Out()
+  return new Out<BenchmarkAgentPin>()
     .req("agent", p.agent, "")
     .omit("model", p.model)
-    .ptr("harness", p.harness ? encodeHarness(p.harness) : undefined).o as unknown as BenchmarkAgentPin;
+    .ptr("harness", p.harness ? encodeHarness(p.harness) : undefined)
+    .done();
 }
 
 function encodeConfig(c: BenchmarkConfiguration): BenchmarkConfiguration {
-  return new Out().req("name", c.name, "").omit("agents", list(c.agents, encodePin)).omit("machine", c.machine)
-    .o as unknown as BenchmarkConfiguration;
+  return new Out<BenchmarkConfiguration>()
+    .req("name", c.name, "")
+    .omit("agents", list(c.agents, encodePin))
+    .omit("machine", c.machine)
+    .done();
 }
 
 function encodeRepoAt(r: RepoAtCommit): RepoAtCommit {
-  return new Out()
+  return new Out<RepoAtCommit>()
     .req("codeForge", r.codeForge, "")
     .req("owner", r.owner, "")
     .req("repo", r.repo, "")
-    .req("ref", r.ref, "").o as unknown as RepoAtCommit;
+    .req("ref", r.ref, "")
+    .done();
 }
 
 function encodeTask(t: BenchmarkTask): BenchmarkTask {
-  return new Out()
+  return new Out<BenchmarkTask>()
     .req("slug", t.slug, "")
     .req("title", t.title, "")
     .req("prompt", t.prompt, "")
@@ -276,45 +310,52 @@ function encodeTask(t: BenchmarkTask): BenchmarkTask {
     .omit("sourceRunId", t.sourceRunId)
     .omit("tags", t.tags)
     .ptr("trackerSeed", t.trackerSeed)
-    .omit("startingRepoRefs", list(t.startingRepoRefs, encodeRepoAt)).o as unknown as BenchmarkTask;
+    .omit("startingRepoRefs", list(t.startingRepoRefs, encodeRepoAt))
+    .done();
 }
 
 export function encodeSuite(s: BenchmarkSuite): BenchmarkSuite {
-  return new Out()
+  return new Out<BenchmarkSuite>()
     .req("slug", s.slug, "")
     .req("name", s.name, "")
     .omit("description", s.description)
     .req("agent", s.agent, "")
     .omit("configurations", list(s.configurations, encodeConfig))
-    .omit("tasks", list(s.tasks, encodeTask)).o as unknown as BenchmarkSuite;
+    .omit("tasks", list(s.tasks, encodeTask))
+    .done();
 }
 
 function encodeIntegration(i: IntegrationDecl): IntegrationDecl {
-  return new Out().req("type", i.type, "").omit("settings", sortedMap(i.settings, id)).o as unknown as IntegrationDecl;
+  return new Out<IntegrationDecl>().req("type", i.type, "").omit("settings", sortedMap(i.settings, id)).done();
 }
 
 function encodeSelfImprovement(s: SelfImprovementConfig): SelfImprovementConfig {
-  return new Out()
+  return new Out<SelfImprovementConfig>()
     .omit("failedRunThreshold", s.failedRunThreshold)
     .omit("reviewerType", s.reviewerType)
     .omit("reviewerEmails", s.reviewerEmails)
-    .omit("analysisModel", s.analysisModel).o as SelfImprovementConfig;
+    .omit("analysisModel", s.analysisModel)
+    .done();
 }
 
 function encodeGCP(g: GCPProvider): GCPProvider {
-  return new Out()
+  return new Out<GCPProvider>()
     .req("projectNumber", g.projectNumber, "")
     .req("workloadIdentityFederationPoolId", g.workloadIdentityFederationPoolId, "")
     .req("workloadIdentityFederationProviderId", g.workloadIdentityFederationProviderId, "")
-    .omit("serviceAccountEmail", g.serviceAccountEmail).o as unknown as GCPProvider;
+    .omit("serviceAccountEmail", g.serviceAccountEmail)
+    .done();
 }
 
 function encodeCloud(c: CloudProviders): CloudProviders {
-  return new Out().ptr("gcp", c.gcp ? encodeGCP(c.gcp) : undefined).omit("audiences", c.audiences).o as CloudProviders;
+  return new Out<CloudProviders>()
+    .ptr("gcp", c.gcp ? encodeGCP(c.gcp) : undefined)
+    .omit("audiences", c.audiences)
+    .done();
 }
 
 function encodeSpend(s: SpendLimit): SpendLimit {
-  return new Out().omit("daily", s.daily).omit("monthly", s.monthly).o as SpendLimit;
+  return new Out<SpendLimit>().omit("daily", s.daily).omit("monthly", s.monthly).done();
 }
 
 function encodeSub(s: RepoSubstitution): RepoSubstitution {
@@ -323,7 +364,7 @@ function encodeSub(s: RepoSubstitution): RepoSubstitution {
 
 /** encodeDefinition returns def in the JSON shape of the Go CompiledDefinition. */
 export function encodeDefinition(d: CompiledDefinition): CompiledDefinition {
-  return new Out()
+  return new Out<CompiledDefinition>()
     .req("schemaVersion", d.schemaVersion, "")
     .req("name", d.name, "")
     .omit("description", d.description)
@@ -353,5 +394,6 @@ export function encodeDefinition(d: CompiledDefinition): CompiledDefinition {
     .ptr("spendLimit", d.spendLimit ? encodeSpend(d.spendLimit) : undefined)
     .omit("approvers", d.approvers)
     .omit("restrictFollowupsToStarter", d.restrictFollowupsToStarter)
-    .omit("requireLinkedActor", d.requireLinkedActor).o as unknown as CompiledDefinition;
+    .omit("requireLinkedActor", d.requireLinkedActor)
+    .done();
 }

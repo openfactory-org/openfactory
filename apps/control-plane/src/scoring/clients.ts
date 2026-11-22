@@ -16,6 +16,7 @@ import {
   toOfError,
   workDOName,
   type CompiledDefinition,
+  type RepoStart,
   type Run,
   type RunMessage,
   type Score,
@@ -93,9 +94,9 @@ export function workRunsPort(env: Env, teamId: string): RunsPort {
     },
     async loadStartCommits(runId) {
       try {
-        const out = unwrapOp<{
-          start_commits: { codeForge: string; owner: string; repo: string; ref: string; resolved?: boolean }[];
-        }>(await stubOf(runId).api(meta, "getRunStartCommits", { runId }, undefined));
+        const out = unwrapOp<{ start_commits: RepoStart[] }>(
+          await stubOf(runId).api(meta, "getRunStartCommits", { runId }, undefined),
+        );
         return (out.start_commits ?? []).map((s) => ({ ...s }));
       } catch (e) {
         if (toOfError(e).error.code === "feature_not_available") return [];

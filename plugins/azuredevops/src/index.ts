@@ -11,21 +11,15 @@
 // Worker vars: PLUGIN_VERSION (optional version string).
 
 import type {
-  CommitStatus,
-  FileDiff,
   ForgePlugin,
   ForgeTarget,
   HostApi,
   IngressPlugin,
   PluginInfo,
-  PullRequestInput,
-  PullRequestRef,
-  ReviewInput,
-  ReviewThread,
   WebhookResult,
 } from "@openfactory/plugin-api";
-import { notSupported, rpc } from "@openfactory/plugin-api";
-import { PluginWorker, pluginInfo } from "@openfactory/plugin-api/worker";
+import { rpc } from "@openfactory/plugin-api";
+import { ForgePluginWorker, pluginInfo, type ForgeSpec } from "@openfactory/plugin-api/worker";
 import { AzureDevOpsClient, FORGE_NAME } from "./client";
 import { PROVIDER, handleWebhook } from "./webhook";
 
@@ -61,7 +55,14 @@ export function clientFor(t: ForgeTarget, fetchFn?: typeof fetch): AzureDevOpsCl
   });
 }
 
-export class Plugin extends PluginWorker<Env> implements ForgePlugin, IngressPlugin {
+export class Plugin extends ForgePluginWorker<Env> implements ForgePlugin, IngressPlugin {
+  protected readonly forge: ForgeSpec = {
+    name: FORGE_NAME,
+    label: "azuredevops",
+    client: (t) => clientFor(t),
+    unsupported: ["commentIssue"],
+  };
+
   async info(): Promise<PluginInfo> {
     return pluginInfo(
       {
@@ -73,108 +74,6 @@ export class Plugin extends PluginWorker<Env> implements ForgePlugin, IngressPlu
       },
       this.env.PLUGIN_VERSION,
     );
-  }
-
-  async name(_t: ForgeTarget): Promise<string> {
-    return FORGE_NAME;
-  }
-
-  cloneUrl(t: ForgeTarget, owner: string, repo: string): Promise<string> {
-    return rpc(() => clientFor(t).cloneUrl(owner, repo));
-  }
-
-  defaultBranch(t: ForgeTarget, owner: string, repo: string): Promise<string> {
-    return rpc(() => clientFor(t).defaultBranch(owner, repo));
-  }
-
-  createPullRequest(t: ForgeTarget, owner: string, repo: string, pr: PullRequestInput): Promise<PullRequestRef> {
-    return rpc(() => clientFor(t).createPullRequest(owner, repo, pr));
-  }
-
-  getPullRequest(t: ForgeTarget, owner: string, repo: string, number: number): Promise<PullRequestRef> {
-    return rpc(() => clientFor(t).getPullRequest(owner, repo, number));
-  }
-
-  comment(t: ForgeTarget, owner: string, repo: string, number: number, body: string): Promise<void> {
-    return rpc(() => clientFor(t).comment(owner, repo, number, body));
-  }
-
-  /** Azure DevOps has no separate issue comments: the host falls back to comment. */
-  commentIssue(_t: ForgeTarget, _owner: string, _repo: string, _number: number, _body: string): Promise<void> {
-    return rpc(() => {
-      throw notSupported("azuredevops: issue comments");
-    });
-  }
-
-  commentWorkItem(t: ForgeTarget, project: string, id: number, body: string): Promise<void> {
-    return rpc(() => clientFor(t).commentWorkItem(project, id, body));
-  }
-
-  setCommitStatus(t: ForgeTarget, owner: string, repo: string, sha: string, status: CommitStatus): Promise<void> {
-    return rpc(() => clientFor(t).setCommitStatus(owner, repo, sha, status));
-  }
-
-  getFiles(
-    t: ForgeTarget,
-    owner: string,
-    repo: string,
-    ref: string,
-    path: string,
-  ): Promise<{ files: Record<string, string>; commitSha: string }> {
-    return rpc(() => clientFor(t).getFiles(owner, repo, ref, path));
-  }
-
-  replyInThread(
-    t: ForgeTarget,
-    owner: string,
-    repo: string,
-    number: number,
-    threadRef: string,
-    body: string,
-  ): Promise<void> {
-    return rpc(() => clientFor(t).replyInThread(owner, repo, number, threadRef, body));
-  }
-
-  resolveThread(t: ForgeTarget, owner: string, repo: string, number: number, threadRef: string): Promise<void> {
-    return rpc(() => clientFor(t).resolveThread(owner, repo, number, threadRef));
-  }
-
-  submitReview(t: ForgeTarget, owner: string, repo: string, number: number, review: ReviewInput): Promise<void> {
-    return rpc(() => clientFor(t).submitReview(owner, repo, number, review));
-  }
-
-  markReady(t: ForgeTarget, owner: string, repo: string, number: number): Promise<void> {
-    return rpc(() => clientFor(t).markReady(owner, repo, number));
-  }
-
-  setWorkItemState(t: ForgeTarget, project: string, id: number, state: string): Promise<void> {
-    return rpc(() => clientFor(t).setWorkItemState(project, id, state));
-  }
-
-  attachPullRequestToWorkItem(t: ForgeTarget, project: string, id: number, pr: PullRequestRef): Promise<void> {
-    return rpc(() => clientFor(t).attachPullRequestToWorkItem(project, id, pr));
-  }
-
-  requestReviewers(t: ForgeTarget, owner: string, repo: string, number: number, logins: string[]): Promise<void> {
-    return rpc(() => clientFor(t).requestReviewers(owner, repo, number, logins));
-  }
-
-  login(t: ForgeTarget): Promise<string> {
-    return rpc(() => clientFor(t).login());
-  }
-
-  getReviewThread(
-    t: ForgeTarget,
-    owner: string,
-    repo: string,
-    number: number,
-    threadRef: string,
-  ): Promise<ReviewThread> {
-    return rpc(() => clientFor(t).reviewThread(owner, repo, number, threadRef));
-  }
-
-  getFileDiff(t: ForgeTarget, owner: string, repo: string, number: number, path: string): Promise<FileDiff> {
-    return rpc(() => clientFor(t).fileDiff(owner, repo, number, path));
   }
 
   handleWebhook(req: Request, host: HostApi): Promise<WebhookResult> {

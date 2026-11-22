@@ -8,7 +8,7 @@ import { bodyObject, optString, optStringArray, optStringMap, type JsonObject } 
 import { listResponse } from "../../lib/page";
 import type { Migration } from "../../lib/sql/migrate";
 import { all, first } from "../../lib/sql/query";
-import { listAgents, listAutomations, listFactories } from "./factories";
+import { listAgents, listAutomations, listFactories } from "./factories/repo";
 import { created, noContent, type TeamKit, type TeamOp } from "./kit";
 
 export const migrations: readonly Migration[] = [

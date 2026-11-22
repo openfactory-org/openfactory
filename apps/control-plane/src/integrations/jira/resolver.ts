@@ -1,61 +1,26 @@
 // Jira name resolver: project names to keys, status names to IDs (port of jira/resolver.go).
-
 import type { Integration } from "@openfactory/core";
 import { ApiError, type ApiClient } from "@openfactory/core";
-import { NameLists, addId, addName, sortIds, type NameMap } from "../namelist";
-import type { IntegrationDeps, NameResolver } from "../types";
-import { equalFold, integrationSecret } from "../util";
+import { addName, type NameMap } from "../namelist";
+import { BaseNameResolver } from "../resolver";
+import type { IntegrationDeps } from "../types";
+import { integrationSecret } from "../util";
 import { PROVIDER, newApiClient } from "./jira";
-import { integrationActive } from "@openfactory/core";
 
 const LIST_PAGE_SIZE = 50;
 const MAX_LIST_PAGES = 100;
 
-export class JiraNameResolver implements NameResolver {
-  private readonly lists: NameLists;
-  constructor(private readonly deps: IntegrationDeps) {
-    this.lists = new NameLists(deps.now ? () => deps.now!().getTime() : undefined);
+export class JiraNameResolver extends BaseNameResolver {
+  constructor(deps: IntegrationDeps) {
+    super(deps, {
+      label: "Jira",
+      providers: [PROVIDER],
+      integrationProvider: PROVIDER,
+      kinds: ["projects", "statuses"],
+    });
   }
 
-  async resolveNames(
-    teamId: string,
-    provider: string,
-    kind: string,
-    names: string[],
-  ): Promise<Record<string, string[]>> {
-    if (!equalFold(provider, PROVIDER)) throw new Error(`the Jira resolver cannot list ${provider} objects`);
-    if (kind !== "projects" && kind !== "statuses") throw new Error(`the Jira resolver cannot resolve "${kind}"`);
-    let all: Integration[];
-    try {
-      all = (await this.deps.store.listIntegrations(teamId)).filter((i) => equalFold(i.provider, PROVIDER));
-    } catch (e) {
-      throw new Error(`could not read the Jira integrations: ${(e as Error).message}`, { cause: e });
-    }
-    const ints = all.filter(integrationActive);
-    if (ints.length === 0) throw new Error("the team has no active Jira integration");
-    const keys = names.map((n) => n.trim().toLowerCase());
-    const out: NameMap = {};
-    let firstErr: Error | undefined;
-    let ok = 0;
-    for (const in_ of ints) {
-      let byName: NameMap;
-      try {
-        byName = await this.lookup(in_, kind, keys);
-      } catch (e) {
-        firstErr ??= e as Error;
-        continue;
-      }
-      ok++;
-      names.forEach((n, i) => {
-        for (const v of byName[keys[i]!] ?? []) addId(out, n, v);
-      });
-    }
-    if (ok === 0) throw firstErr!;
-    sortIds(out);
-    return out;
-  }
-
-  private async lookup(in_: Integration, kind: string, keys: string[]): Promise<NameMap> {
+  protected override async lookup(in_: Integration, kind: string, keys: string[]): Promise<NameMap> {
     let api: ApiClient;
     try {
       api = newApiClient(in_, await integrationSecret(this.deps.secrets, in_), this.deps.fetch);

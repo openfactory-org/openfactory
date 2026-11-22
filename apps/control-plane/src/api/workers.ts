@@ -71,7 +71,7 @@ export const enrollWorker: Handler = async (request, env) => {
   const str = (k: string): string => {
     const v = o[k];
     if (v === undefined || v === null) return "";
-    if (typeof v !== "string") throw invalid(`field "${k}" must be of type string`);
+    if (typeof v !== "string") throw invalid(`field "${k}" must be a string`);
     return v;
   };
   const facts = o.facts;
@@ -83,7 +83,7 @@ export const enrollWorker: Handler = async (request, env) => {
     Array.isArray(labels) ||
     !Object.values(labels).every((v) => typeof v === "string")
   ) {
-    throw invalid('field "labels" must be of type map[string]string');
+    throw invalid('field "labels" must be an object with string values');
   }
   const out = await env.TEAM.getByName(doName.team(DEFAULT_TEAM)).workersEnroll({
     enrollmentToken: str("enrollment_token"),

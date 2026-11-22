@@ -8,7 +8,7 @@
 
 import { compareBytes, cut } from "./gostd";
 import { BUILTIN_SKILL_FILES } from "./skills-builtin.generated";
-import type { AgentType, Skill } from "./types";
+import type { AgentType, Skill } from "./definition";
 
 /** Skill scopes (Skill.scope). An agent skill has the agent name as its scope. */
 export const SCOPE_FACTORY = "factory";

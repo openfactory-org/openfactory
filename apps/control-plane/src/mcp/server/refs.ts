@@ -1,15 +1,16 @@
 // Pure helpers of the Factory MCP server (port of internal/mcpserver/resolve.go):
 // reference parsing and the local setup guidance of start_working.
-import { clipBytes, utf8 } from "@openfactory/core";
+import {
+  clipBytes,
+  utf8,
+  type PullRequestRef as CorePullRequestRef,
+  type SourceRef,
+  type WorkItem,
+} from "@openfactory/core";
 
-export interface PullRequestRef {
-  forge: string;
-  repo: string;
-  number: number;
-  url?: string;
-  branch?: string;
-  state?: string;
-}
+/** A pull request a reference names; url, branch and state may be unknown. */
+export type PullRequestRef = Pick<CorePullRequestRef, "forge" | "repo" | "number"> &
+  Partial<Pick<CorePullRequestRef, "url" | "branch" | "state">>;
 
 export const ISSUE_KEY_RE = /^[A-Z][A-Z0-9]+-\d+$/;
 export const SHORT_REF_RE = /^([\w.-]+\/[\w.-]+)#(\d+)$/;
@@ -34,7 +35,7 @@ export function parsePullRequestURL(raw: string): PullRequestRef | null {
   const segs = splitPath(path);
   const host = u.host.toLowerCase();
   const url = `${u.protocol}//${u.host}${path}`.replace(/\/+$/, "");
-  const base = { url, state: "open" };
+  const base = { url, state: "open" as const };
   if (host.includes("dev.azure.com") || host.includes("visualstudio.com")) {
     // /{org}/{project}/_git/{repo}/pullrequest/{n}
     for (let i = 0; i + 1 < segs.length; i++) {
@@ -138,21 +139,11 @@ export function planReference(ref: string, publicURL: string): RefPlan {
 }
 
 /** The fields of a work item that matchesWorkItem reads. */
-export interface WorkItemLike {
-  id: string;
-  source_key?: string;
-  source?: {
-    provider?: string;
-    kind?: string;
-    repo?: string;
-    number?: number;
-    channel?: string;
-    thread_id?: string;
-    external_id?: string;
+export type WorkItemLike = Pick<WorkItem, "id"> &
+  Partial<Pick<WorkItem, "source_key" | "updated_at">> & {
+    source?: Partial<SourceRef>;
+    pull_requests?: PullRequestRef[];
   };
-  pull_requests?: PullRequestRef[];
-  updated_at?: string;
-}
 
 /** SourceRef.Key of the Go core (fallback when source_key is empty). */
 function sourceKey(wi: WorkItemLike): string {

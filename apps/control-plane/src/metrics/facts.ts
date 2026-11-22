@@ -12,6 +12,7 @@ import {
   type Actor,
   type PullRequestFacts,
   type PullRequestPush,
+  type PushActorKind,
   type SourceRef,
 } from "@openfactory/core";
 
@@ -32,7 +33,7 @@ function forgeProvider(p: string): boolean {
   return forgeProviders.has(p.trim().replaceAll("-", "_").toLowerCase());
 }
 
-function actorKind(a: FactEvent["actor"]): string {
+function actorKind(a: FactEvent["actor"]): PushActorKind {
   if (a.is_self) return PUSH_BY_AGENT;
   if (a.is_bot) return PUSH_BY_BOT;
   return PUSH_BY_PERSON;

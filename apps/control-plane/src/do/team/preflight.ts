@@ -1,8 +1,12 @@
-// TeamDO module: definition preflight checks against the team that the
-// factories module does not own. Port of internal/engine/preflight.go
-// (webhooks, webhook filters, approvers, models, credentials) and
+// TeamDO module: definition preflight checks against the team. Port of
+// internal/engine/preflight.go (alias, secrets, environments, webhooks,
+// webhook filters, approvers, models, credentials) and
 // internal/engine/principal.go (runAs). Adds the check that workerEnvironment
 // auth targets a development process worker.
+//
+// builtinPreflight (alias, secrets, environments) runs first, from
+// checkDefinition; a throw there fails the check. The `preflights` export runs
+// after it with the checks of the other modules; a throw there skips the check.
 //
 // preflightMachines keeps only the registryCredentialSecretName warning: the
 // compiler rejects macOS and Windows machines. preflightNameFilters resolves
@@ -15,6 +19,7 @@ import {
   type AgentConfig,
   type CompiledDefinition,
   type HarnessConfig,
+  type ValidationError,
 } from "@openfactory/definition";
 import { registeredProviders } from "../dispatch/providers";
 import { isApprover, resolveRunAs, type PrincipalUser } from "../../engine/principal";
@@ -24,14 +29,8 @@ import type { Migration } from "../../lib/sql/migrate";
 import { all } from "../../lib/sql/query";
 import { listUsers } from "./auth";
 import { listIntegrations } from "./integrations";
-import {
-  agentFile,
-  automationFile,
-  scorerFile,
-  webhookFile,
-  type DefinitionCheck,
-  type FactoryRecord,
-} from "./factories";
+import type { DefinitionCheck } from "./factories/definitions";
+import { agentFile, automationFile, scorerFile, webhookFile, type FactoryRecord } from "./factories/repo";
 import { getSecretValue } from "./secrets";
 import { isProviderHost } from "./workers";
 import type { Preflight, TeamKit, TeamOp } from "./kit";
@@ -41,6 +40,145 @@ export const migrations: readonly Migration[] = [];
 const q = (s: string) => JSON.stringify(s);
 
 const teamUsers = (kit: TeamKit): PrincipalUser[] => listUsers(kit) as unknown as PrincipalUser[];
+
+// ---------- built-in checks: alias, secrets, environments ----------
+
+interface DefRef {
+  file: string;
+  field: string;
+  name: string;
+}
+
+function secretRefs(def: CompiledDefinition): DefRef[] {
+  const refs: DefRef[] = [];
+  const add = (file: string, field: string, name: string | undefined) => {
+    if (name) refs.push({ file, field, name });
+  };
+  const auth = (file: string, field: string, a: { source: string; secretName?: string } | undefined) => {
+    if (a && a.source === "managedSecret") add(file, field + ".auth.secretName", a.secretName);
+  };
+  for (const s of def.secrets ?? []) add("factory.yaml", "secrets", s);
+  for (const a of def.agents ?? []) {
+    for (const s of a.secrets ?? []) add(agentFile(a.name), "secrets", s);
+    auth(agentFile(a.name), "harness", a.harness?.auth);
+  }
+  for (const au of def.automations ?? []) {
+    const o = au.overrides as
+      { secrets?: string[]; harness?: { auth?: { source: string; secretName?: string } } } | undefined;
+    if (!o) continue;
+    for (const s of o.secrets ?? []) add(automationFile(au.name), "secrets", s);
+    auth(automationFile(au.name), "harness", o.harness?.auth);
+  }
+  const sd = def.scorerDefaults as
+    { secrets?: string[]; harness?: { auth?: { source: string; secretName?: string } } } | undefined;
+  if (sd) {
+    for (const s of sd.secrets ?? []) add("factory.yaml", "scorerDefaults.secrets", s);
+    auth("factory.yaml", "scorerDefaults.harness", sd.harness?.auth);
+  }
+  for (const sc of def.scorers ?? []) for (const s of sc.secrets ?? []) add(scorerFile(sc.slug), "secrets", s);
+  for (const w of def.webhooks ?? []) add(webhookFile(w.name), "secretName", w.secret_name);
+  return refs;
+}
+
+function preflightSecrets(
+  kit: TeamKit,
+  f: FactoryRecord,
+  def: CompiledDefinition,
+  _files: Record<string, string>,
+  chk: DefinitionCheck,
+): void {
+  const refs = secretRefs(def);
+  if (refs.length === 0) return;
+  const known = new Set(
+    all<{ name: string }>(kit.sql, "SELECT name FROM secrets WHERE factory_id = '' OR factory_id = ?", f.id).map(
+      (r) => r.name,
+    ),
+  );
+  const seen = new Set<string>();
+  for (const r of refs) {
+    if (known.has(r.name) || seen.has(r.name)) continue;
+    seen.add(r.name);
+    chk.errors.push({
+      file: r.file,
+      field: r.field,
+      message: `secret ${JSON.stringify(r.name)} does not exist in the team or the factory; add it under Secrets first`,
+    });
+  }
+}
+
+function preflightEnvironments(
+  kit: TeamKit,
+  _f: FactoryRecord,
+  def: CompiledDefinition,
+  files: Record<string, string>,
+  chk: DefinitionCheck,
+): void {
+  const refs: DefRef[] = [];
+  const envField = "environmentId";
+  const defaultsSet = keyLine("factory.yaml", files["factory.yaml"] ?? "", "agentDefaults." + envField) > 0;
+  for (const a of def.agents ?? []) {
+    if (!a.environment_id) continue;
+    let file = agentFile(a.name);
+    let field = envField;
+    if (defaultsSet && keyLine(file, files[file] ?? "", envField) === 0) {
+      file = "factory.yaml";
+      field = "agentDefaults." + envField;
+    }
+    refs.push({ file, field, name: a.environment_id });
+  }
+  for (const au of def.automations ?? []) {
+    const e = au.overrides as { environmentId?: string | null; environment_id?: string | null } | undefined;
+    const id = e?.environmentId ?? e?.environment_id;
+    if (id) refs.push({ file: automationFile(au.name), field: envField, name: id });
+  }
+  if (refs.length === 0) return;
+  let known: Set<string>;
+  try {
+    known = new Set(all<{ id: string }>(kit.sql, "SELECT id FROM environments").map((r) => r.id));
+  } catch (e) {
+    chk.skipped.push({ check: "environments", reason: "could not list the environments: " + (e as Error).message });
+    return;
+  }
+  const seen = new Set<string>();
+  for (const r of refs) {
+    const key = r.file + "\0" + r.name;
+    if (known.has(r.name) || seen.has(key)) continue;
+    seen.add(key);
+    chk.errors.push({
+      file: r.file,
+      field: r.field,
+      message: `environment ${JSON.stringify(r.name)} does not exist in the team`,
+    });
+  }
+}
+
+function checkAlias(kit: TeamKit, f: FactoryRecord, def: CompiledDefinition): ValidationError[] {
+  if (!def.alias) return [];
+  const other = all<{ data: string }>(kit.sql, "SELECT data FROM factories WHERE alias = ? COLLATE NOCASE", def.alias)
+    .map((r) => JSON.parse(r.data) as FactoryRecord)
+    .find((o) => o.id !== f.id);
+  if (!other) return [];
+  return [
+    {
+      file: "factory.yaml",
+      field: "alias",
+      message: `alias ${JSON.stringify(def.alias)} is already used by factory ${JSON.stringify(other.name)}`,
+    },
+  ];
+}
+
+/** The checks that run before the module checks, in this order. */
+export function builtinPreflight(
+  kit: TeamKit,
+  f: FactoryRecord,
+  def: CompiledDefinition,
+  files: Record<string, string>,
+  chk: DefinitionCheck,
+): void {
+  chk.errors.push(...checkAlias(kit, f, def));
+  preflightSecrets(kit, f, def, files, chk);
+  preflightEnvironments(kit, f, def, files, chk);
+}
 
 // ---------- webhooks ----------
 

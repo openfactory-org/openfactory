@@ -4,6 +4,7 @@ import {
   type CompiledDefinition,
   type Run,
   type RepoStart,
+  type RunMessageRole,
   type Score,
   type Scorer,
   type WorkItem,
@@ -55,7 +56,7 @@ export class FakeWorld implements ScoringStore, RunsPort, EnginePort, BenchmarkP
   kv = new Map<string, string>();
   users: { id: string; email: string; role: string }[] = [];
   runsById = new Map<string, Run>();
-  messages = new Map<string, { role: string; content: string }[]>();
+  messages = new Map<string, { role: RunMessageRole; content: string }[]>();
   workItems = new Map<string, WorkItem>();
   starts = new Map<string, RepoStart[]>();
   inboxOpen: { id: string; run_id?: string; work_item_id?: string }[] = [];
@@ -157,7 +158,7 @@ export class FakeWorld implements ScoringStore, RunsPort, EnginePort, BenchmarkP
   async listChildren(id: string): Promise<Run[]> {
     return [...this.runsById.values()].filter((r) => r.parent_run_id === id);
   }
-  async listMessages(id: string): Promise<{ role: string; content: string }[]> {
+  async listMessages(id: string): Promise<{ role: RunMessageRole; content: string }[]> {
     return this.messages.get(id) ?? [];
   }
   async loadStartCommits(id: string): Promise<RepoStart[]> {
@@ -172,7 +173,7 @@ export class FakeWorld implements ScoringStore, RunsPort, EnginePort, BenchmarkP
     this.runsById.set(r.id, r);
     return r;
   }
-  say(runId: string, role: string, content: string): void {
+  say(runId: string, role: RunMessageRole, content: string): void {
     const l = this.messages.get(runId) ?? [];
     l.push({ role, content });
     this.messages.set(runId, l);

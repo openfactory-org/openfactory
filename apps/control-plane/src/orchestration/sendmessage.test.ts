@@ -51,9 +51,16 @@ async function messages(f: Fixture, run: string): Promise<{ content: string; act
 
 /** Moves the messages of a run out of the rate-limit window. */
 async function age(f: Fixture, run: string): Promise<void> {
-  const old = new Date(Date.now() - SEND_MESSAGE_WINDOW_MS - 1000).toISOString();
+  const oldMs = Date.now() - SEND_MESSAGE_WINDOW_MS - 1000;
+  const old = new Date(oldMs).toISOString();
+  // The row keeps the time twice: created_at in the JSON and created_ms (the column the limit reads).
   await withFx(f.token, (_fx, sql) => {
-    sql.exec("UPDATE run_messages SET data = json_set(data, '$.created_at', ?) WHERE run_id = ?", old, f.ids[run]!);
+    sql.exec(
+      "UPDATE run_messages SET data = json_set(data, '$.created_at', ?), created_ms = ? WHERE run_id = ?",
+      old,
+      oldMs,
+      f.ids[run]!,
+    );
   });
 }
 

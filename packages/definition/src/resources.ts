@@ -1,6 +1,7 @@
 // Machine and webhook parsers. Port of internal/definition/resources.go.
 // Machines are Linux only: platform.os macos and windows are rejected.
 
+import { WEBHOOK_AUTH_MODES, WEBHOOK_SIGNATURE_SCHEMES } from "@openfactory/core";
 import { secretName } from "./common.ts";
 import { goQuote } from "./gofmt.ts";
 import type { CompiledWebhook, MachineSpec } from "./types.ts";
@@ -113,7 +114,7 @@ export function parseMachine(d: Diag, file: string, name: string, content: strin
 }
 
 /** SIGNATURE_SCHEMES are the provider signature schemes a webhook can verify. */
-export const SIGNATURE_SCHEMES = ["github", "pagerduty", "sentry", "standard_webhooks", "stripe", "vercel"];
+export const SIGNATURE_SCHEMES = WEBHOOK_SIGNATURE_SCHEMES;
 
 const credentialHeaders = new Set([
   "authorization",
@@ -183,7 +184,7 @@ export function parseWebhook(d: Diag, file: string, name: string, content: strin
   try {
     let v = m.get("authMode");
     if (v !== null && !isNull(v)) {
-      const [s, ok] = c.enum(v, "authMode", "token", "url_token", "signature");
+      const [s, ok] = c.enum(v, "authMode", ...WEBHOOK_AUTH_MODES);
       if (ok) w.auth_mode = s;
     }
     const sv = m.get("signatureScheme");
@@ -192,7 +193,8 @@ export function parseWebhook(d: Diag, file: string, name: string, content: strin
     } else if (w.auth_mode !== "signature" && sv !== null && !isNull(sv)) {
       c.errf(sv, "signatureScheme", "signatureScheme is only valid when authMode is signature");
     } else if (sv !== null && !isNull(sv)) {
-      w.signature_scheme = c.enum(sv, "signatureScheme", ...SIGNATURE_SCHEMES)[0];
+      const [s, ok] = c.enum(sv, "signatureScheme", ...SIGNATURE_SCHEMES);
+      if (ok) w.signature_scheme = s;
     }
     v = m.require("secretName");
     if (v !== null) w.secret_name = secretName(c, v, "secretName")[0];

@@ -1,9 +1,10 @@
 // The WorkDO side of event intake (03 §7.1 steps 7-9): one action applied in
 // the caller's transaction, deduplicated by the dispatch ledger
 // (actionKey, target). Port of engine/events.go routeToWorkItem,
-// handlePullRequestClosed, deliverToRoot, startSideRun, dispatchMention,
-// engine/inbox.go closeHandoffs and engine/mergecomplete.go.
-import { conflict, invalid, notFound, pullRequestSource, sourceKey } from "@openfactory/core";
+// handlePullRequestClosed, deliverToRoot, startSideRun, dispatchMention and
+// engine/inbox.go closeHandoffs. The merge completion (engine/mergecomplete.go)
+// is in lifecycle.ts, because the root run's turn end triggers it.
+import { invalid, pullRequestSource, sourceKey } from "@openfactory/core";
 import type { CoreEvent } from "../../contracts/do-messages";
 import {
   CONTINUE_EVENT,
@@ -20,34 +21,23 @@ import {
 } from "../../engine/intake";
 import { buildDispatchPrompt, truncate } from "../../engine/text";
 import {
-  isTerminal,
   stageTerminal,
-  waitsForInput,
   type InboxItem,
   type PullRequestRef,
-  type Run,
   type WorkItem,
   type WorkItemRef,
 } from "../../engine/types";
-import {
-  cancelTree,
-  createRun,
-  dispatchRoot,
-  newMsgId,
-  notifyTop,
-  projectWorkItem,
-  resolveInboxItem,
-  resumesRun,
-  actorLabel,
-  resolutionMessage,
-  sendMessage,
-  setStage,
-  workItemEvent,
-  writeBackComplete,
-  writeBackPullRequest,
-  type DispatchPlan,
-  type Fx,
-} from "./engine";
+import { createRun, dispatchRoot, type DispatchPlan } from "./engine";
+import { newMsgId, type Fx } from "./fx";
+import { armMergeCompletion, completeWorkItem, promptContextKey, sendMessage } from "./lifecycle";
+import { projectWorkItem, workItemEvent } from "./projections";
+import { writeBackPullRequest } from "./writeback";
+import { actorLabel, resolutionMessage, resolveInboxItem, resumesRun } from "./workitems";
+
+// completeWorkItem lives in lifecycle.ts (a merge completes the work item
+// after the root run's turn); callers import it from here with the other
+// work item operations.
+export { completeWorkItem };
 
 export type ActionKind = "continue" | "createRoot" | "sideRun" | "deliverToRoot" | "mention";
 
@@ -178,18 +168,9 @@ function closeHandoffs(fx: Fx, wi: WorkItem, ev: CoreEvent, actor: string): void
   }
 }
 
-/** The event_context key of the first prompt of a run (eventctx.PromptKVKey). */
-export const promptContextKey = (runId: string): string => `prompt:${runId}`;
-
 /** storeEventBundle: the R2 reference of a message's event context, read when the message is delivered. */
 export function storeEventContext(fx: Fx, messageKey: string, runId: string, ref: string): void {
-  fx.repo.sql.exec(
-    "INSERT OR IGNORE INTO event_context (message_id, run_id, r2_key, bytes, created_ms) VALUES (?, ?, ?, 0, ?)",
-    messageKey,
-    runId,
-    ref,
-    fx.now(),
-  );
+  fx.repo.putEventContext(messageKey, runId, ref);
 }
 
 /** followUpEvent: a message to the root run (a cancelled root gets nothing), with the event context. */
@@ -293,7 +274,7 @@ function answer(fx: Fx, inboxId: string, resolution: string, actor: string, via:
 // ---------- work item operations ----------
 //
 // One copy each of Engine.ResolveInbox, Engine.LinkPullRequest and
-// Engine.CompleteWorkItem. The REST API, the Factory MCP, the run tools and
+// Engine.CompleteWorkItem (in lifecycle.ts). The REST API, the Factory MCP, the run tools and
 // event intake call them inside their own transaction.
 
 export interface AnswerOptions {
@@ -377,13 +358,7 @@ export function linkPullRequest(fx: Fx, wi: WorkItem, input: PullRequestRef): Li
         added_at: new Date(fx.now()).toISOString(),
       };
       wi.references = [...refs, ref];
-      fx.repo.sql.exec(
-        "INSERT OR IGNORE INTO work_item_refs (key, kind, added_ms, data) VALUES (?, ?, ?, ?)",
-        key,
-        "pull_request",
-        fx.now(),
-        JSON.stringify(ref),
-      );
+      fx.repo.addWorkItemRef(ref);
     }
   }
   wi.pull_requests = list;
@@ -453,77 +428,4 @@ function handlePullRequestClosed(fx: Fx, wi0: WorkItem, ev: CoreEvent, actor: st
     `[pull request update] Pull request ${ref} was ${verb} by ${who}. Decide the next step; do not complete the work item unless the requested change has landed.`,
     "system",
   );
-}
-
-interface PendingMergeCompletion {
-  run_id: string;
-  actor: string;
-  note: string;
-  turns: number;
-  was_done?: boolean;
-}
-
-/** armMergeCompletion: the fallback completion for the turn that the merge message starts. */
-export function armMergeCompletion(fx: Fx, wiId: string, root: Run, actor: string, note: string): void {
-  const p: PendingMergeCompletion = {
-    run_id: root.id,
-    actor,
-    note,
-    turns: root.turns ?? 0,
-    ...(isTerminal(root.state) ? { was_done: true } : {}),
-  };
-  if (!waitsForInput(root.state) && !isTerminal(root.state)) p.turns++;
-  fx.repo.setMeta(`merge_complete:${wiId}`, JSON.stringify(p));
-}
-
-/** checkMergeCompletion: called in the root run's turn-end transition. */
-export function checkMergeCompletion(fx: Fx, r: Run): void {
-  if (r.parent_run_id || !r.work_item_id) return;
-  const key = `merge_complete:${r.work_item_id}`;
-  const raw = fx.repo.getMeta(key);
-  if (!raw) return;
-  let p: PendingMergeCompletion;
-  try {
-    p = JSON.parse(raw) as PendingMergeCompletion;
-  } catch {
-    return;
-  }
-  if (p.run_id !== r.id) return;
-  const ended = (r.turns ?? 0) > p.turns || (isTerminal(r.state) && !p.was_done);
-  if (!ended) return;
-  fx.repo.setMeta(key, "");
-  const wi = fx.repo.getWorkItem(r.work_item_id);
-  if (!wi || stageTerminal(wi.stage)) return;
-  completeWorkItem(
-    fx,
-    wi.id,
-    p.actor,
-    p.note + " The foreman did not complete the work item in its turn after the merge, so the platform completed it.",
-  );
-}
-
-/**
- * completeWorkItem (Engine.CompleteWorkItem): the stage, the tracker
- * write-back, a stop of the child runs of the root run (the root run winds
- * down on its own), the open inbox items of the work item and the completion
- * notice. A completed work item is left as it is; a cancelled one is a
- * conflict.
- */
-export function completeWorkItem(fx: Fx, wiId: string, actor0: string, note: string): WorkItem {
-  const actor = actor0 || "system";
-  const cur = fx.repo.getWorkItem(wiId);
-  if (!cur) throw notFound(`work item ${wiId}`);
-  if (cur.stage === "complete") return cur;
-  if (cur.stage === "cancelled") throw conflict("work item was cancelled");
-  // The stage changes first, so the cancelled children do not report to the root run.
-  const wi = setStage(fx, wiId, "complete", actor, note);
-  // Move the tracker issues to done.
-  writeBackComplete(fx, wi);
-  if (wi.root_run_id) cancelTree(fx, wi.root_run_id, actor, wi.root_run_id);
-  for (const it of fx.repo.listInbox({ resolved: false })) {
-    if (it.work_item_id === wi.id) resolveInboxItem(fx, it, "work item completed", actor);
-  }
-  const out = fx.repo.getWorkItem(wi.id) ?? wi;
-  notifyTop(fx, out, "update", note ? `This work item is complete. ${note}` : "This work item is complete.");
-  return out;
 }

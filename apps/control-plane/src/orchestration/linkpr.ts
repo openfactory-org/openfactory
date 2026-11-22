@@ -1,6 +1,14 @@
 // The pull request of a link_pull_request call (linkPR and ParsePullRequestURL
 // in internal/orchestration/server.go): a URL, or a repo and a number.
-import { OfError, pullRequestSource, sourceKey, type PullRequestRef, type SourceRef } from "@openfactory/core";
+import {
+  isOneOf,
+  OfError,
+  PULL_REQUEST_STATES,
+  pullRequestSource,
+  sourceKey,
+  type PullRequestRef,
+  type SourceRef,
+} from "@openfactory/core";
 
 export interface LinkPullRequestInput {
   url?: string;
@@ -44,18 +52,19 @@ export function parsePullRequestUrl(raw: string): { forge: string; repo: string;
   return undefined;
 }
 
-const STATES = new Set(["", "open", "draft", "merged", "closed"]);
-
 /** prRef: the pull request of a link_pull_request call. Throws invalid_request. */
 export function prRef(input: LinkPullRequestInput): PullRequestRef {
   const str = (v: unknown): string => (typeof v === "string" ? v : "");
+  const state = str(input.state).toLowerCase();
+  if (!isOneOf(PULL_REQUEST_STATES, state))
+    throw new OfError("invalid_request", `unknown state ${JSON.stringify(input.state)}`);
   const pr: PullRequestRef = {
     forge: str(input.forge).toUpperCase(),
     repo: str(input.repo),
     number: typeof input.number === "number" && Number.isInteger(input.number) ? input.number : 0,
     url: str(input.url),
     branch: str(input.branch),
-    state: str(input.state).toLowerCase(),
+    state,
   };
   const parsed = parsePullRequestUrl(pr.url);
   if (parsed) {
@@ -63,7 +72,6 @@ export function prRef(input: LinkPullRequestInput): PullRequestRef {
     if (!pr.repo) pr.repo = parsed.repo;
     if (!pr.number) pr.number = parsed.number;
   }
-  if (!STATES.has(pr.state)) throw new OfError("invalid_request", `unknown state ${JSON.stringify(input.state)}`);
   if (!pr.url && (!pr.repo || !pr.number)) throw new OfError("invalid_request", "url (or repo and number) is required");
   return pr;
 }

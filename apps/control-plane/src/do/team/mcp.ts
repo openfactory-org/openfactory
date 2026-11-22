@@ -5,12 +5,14 @@
 // only stores and decides. Migrations use the range 200-299.
 import { BUILTIN_MCP_PREFIX, MCP_OAUTH_ERROR, OfError, newId, type MCPServer } from "@openfactory/core";
 import type { CompiledDefinition } from "@openfactory/definition";
-import { agentFile, automationFile, scorerFile, type DefinitionCheck } from "./factories";
+import type { DefinitionCheck } from "./factories/definitions";
+import { agentFile, automationFile, scorerFile } from "./factories/repo";
 import { inUseError, teamResourceUses, type ReferenceDefinition } from "./settings";
 import { listIntegrations } from "./integrations";
 import { actorId, roleRank } from "../../auth/roles";
 import * as authStore from "../../mcp/auth/store";
 import * as reg from "../../mcp/registry/store";
+import { bodyObject, optObject, optStringMap, str, type JsonObject } from "../../lib/body";
 import type { Migration } from "../../lib/sql/migrate";
 import { listResponse } from "../../lib/page";
 import { all, first } from "../../lib/sql/query";
@@ -45,11 +47,10 @@ CREATE INDEX mcpauth_grants_user ON mcpauth_grants (user_id);
 export const REFRESH_LEASE_MS = 45_000;
 const STATE_TTL_MS = 10 * 60 * 1000;
 
-type JsonObject = Record<string, unknown>;
-
-const obj = (v: unknown): JsonObject =>
-  typeof v === "object" && v !== null && !Array.isArray(v) ? (v as JsonObject) : {};
-const s = (o: JsonObject, k: string): string => (typeof o[k] === "string" ? (o[k] as string) : "");
+/** The body of an internal op: {} when absent, 400 when it is not an object. */
+const obj = (v: unknown): JsonObject => bodyObject(v, true);
+/** A string field: "" when absent, 400 when it is not a string. */
+const s = str;
 /** Clock of internal ops: the Worker passes `now` (tests move it); else Date.now(). */
 const nowOf = (o: JsonObject): number => (typeof o.now === "number" ? o.now : Date.now());
 
@@ -252,11 +253,11 @@ const internalOps: Record<string, TeamOp> = {
   /** Resolve (planner, WS5): managedId -> transport. Body {run: {id, mcpServers}, managedId}. */
   "mcp.resolve": (kit, call) => {
     const o = obj(call.body);
-    const run = obj(o.run);
+    const run = optObject(o, "run") ?? {};
     return reg.resolveManaged(
       kit,
       kit.env.OF_PUBLIC_URL ?? "",
-      { id: s(run, "id"), mcpServers: obj(run.mcpServers) as Record<string, MCPServer> },
+      { id: s(run, "id"), mcpServers: (optObject(run, "mcpServers") ?? {}) as Record<string, MCPServer> },
       s(o, "managedId"),
     );
   },
@@ -296,7 +297,7 @@ const internalOps: Record<string, TeamOp> = {
     const o = obj(call.body);
     return authStore.authorize(kit, {
       publicURL: s(o, "publicURL"),
-      query: obj(o.query) as Record<string, string>,
+      query: optStringMap(o, "query") ?? {},
       rawQuery: s(o, "rawQuery"),
       userId: s(o, "userId"),
       now: nowOf(o),
@@ -314,7 +315,7 @@ const internalOps: Record<string, TeamOp> = {
   },
   "mcpauth.token": (kit, call) => {
     const o = obj(call.body);
-    return authStore.token(kit, obj(o.form) as Record<string, string>, nowOf(o));
+    return authStore.token(kit, optStringMap(o, "form") ?? {}, nowOf(o));
   },
   "mcpauth.revoke": async (kit, call) => {
     const o = obj(call.body);

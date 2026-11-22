@@ -1,9 +1,10 @@
 // Linear name resolver: team, project, state names and issue numbers to IDs (port of linear/resolver.go).
-import { ApiError, integrationActive } from "@openfactory/core";
+import { ApiError } from "@openfactory/core";
 import type { Integration } from "@openfactory/core";
-import { NameLists, addId, addName, sortIds, type NameMap } from "../namelist";
-import type { IntegrationDeps, NameResolver } from "../types";
-import { cfg, equalFold, integrationSecret } from "../util";
+import { addId, addName, type NameMap } from "../namelist";
+import { BaseNameResolver } from "../resolver";
+import type { IntegrationDeps } from "../types";
+import { cfg, integrationSecret } from "../util";
 import { GraphQLError, LinearClient, PROVIDER } from "./linear";
 
 const LIST_PAGE_SIZE = 100;
@@ -22,54 +23,22 @@ interface Nodes<T> {
 
 const inTeams = (teams: string[], id: string): boolean => teams.length === 0 || teams.includes(id);
 
-export class LinearNameResolver implements NameResolver {
-  private readonly lists: NameLists;
+export class LinearNameResolver extends BaseNameResolver {
   constructor(
-    private readonly deps: IntegrationDeps,
+    deps: IntegrationDeps,
     private readonly graphqlUrl = "",
   ) {
-    this.lists = new NameLists(deps.now ? () => deps.now!().getTime() : undefined);
+    super(deps, {
+      label: "Linear",
+      providers: [PROVIDER],
+      integrationProvider: PROVIDER,
+      kinds: ["teams", "projects", "states", "issues"],
+    });
   }
 
-  async resolveNames(
-    teamId: string,
-    provider: string,
-    kind: string,
-    names: string[],
-    scope: Record<string, string[]> = {},
-  ): Promise<Record<string, string[]>> {
-    if (!equalFold(provider, PROVIDER)) throw new Error(`the Linear resolver cannot list ${provider} objects`);
-    if (!["teams", "projects", "states", "issues"].includes(kind))
-      throw new Error(`the Linear resolver cannot resolve "${kind}"`);
-    let all: Integration[];
-    try {
-      all = (await this.deps.store.listIntegrations(teamId)).filter((i) => equalFold(i.provider, PROVIDER));
-    } catch (e) {
-      throw new Error(`could not read the Linear integrations: ${(e as Error).message}`, { cause: e });
-    }
-    const ints = all.filter(integrationActive);
-    if (ints.length === 0) throw new Error("the team has no active Linear integration");
-    const keys = names.map((n) => n.trim().replace(/^#/, "").trim().toLowerCase());
-    const teams = [...(scope["team_ids"] ?? [])].sort();
-    const out: NameMap = {};
-    let firstErr: Error | undefined;
-    let ok = 0;
-    for (const in_ of ints) {
-      let byName: NameMap;
-      try {
-        byName = await this.lookup(in_, kind, keys, teams);
-      } catch (e) {
-        firstErr ??= e as Error;
-        continue;
-      }
-      ok++;
-      names.forEach((n, i) => {
-        for (const id of byName[keys[i]!] ?? []) addId(out, n, id);
-      });
-    }
-    if (ok === 0) throw firstErr!;
-    sortIds(out);
-    return out;
+  /** A name ignores a leading "#", so "#123" is issue number 123. */
+  protected override normalize(_kind: string, name: string): string {
+    return name.trim().replace(/^#/, "").trim().toLowerCase();
   }
 
   private async client(in_: Integration): Promise<LinearClient> {
@@ -82,7 +51,14 @@ export class LinearNameResolver implements NameResolver {
     return new LinearClient(this.graphqlUrl, tok, cfg(in_, "token_type"), this.deps.fetch);
   }
 
-  private async lookup(in_: Integration, kind: string, keys: string[], teams: string[]): Promise<NameMap> {
+  /** scope["team_ids"] limits the lookup to these Linear teams. */
+  protected override async lookup(
+    in_: Integration,
+    kind: string,
+    keys: string[],
+    scope: Record<string, string[]>,
+  ): Promise<NameMap> {
+    const teams = [...(scope["team_ids"] ?? [])].sort();
     const base = `${in_.id}/${kind}/${teams.join(",")}`;
     const c = await this.client(in_);
     try {

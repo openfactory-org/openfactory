@@ -88,9 +88,12 @@ export function redactHeaders(h: Headers): Record<string, string> {
 }
 
 /** Checks auth mode, signature scheme, secret name and delivery ID header. Throws invalid_request. */
-export function validateConfig(
-  w: Pick<Webhook, "auth_mode" | "signature_scheme" | "secret_name" | "delivery_id_header">,
-): void {
+export function validateConfig(w: {
+  auth_mode: string;
+  signature_scheme?: string;
+  secret_name: string;
+  delivery_id_header?: string;
+}): void {
   const errs: string[] = [];
   const mode = w.auth_mode || AUTH_TOKEN;
   const scheme = w.signature_scheme ?? "";

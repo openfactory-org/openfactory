@@ -21,7 +21,8 @@ import type {
 } from "../types";
 import { consoleLogger } from "../types";
 import { formatOutbound, stringSet, type Responder } from "@openfactory/core";
-import { Dedupe, cfg, equalFold, errMessage, errorResponse, integrationSecret, readBody, setCapped } from "../util";
+import { Dedupe, cfg, equalFold, errMessage, integrationSecret, setCapped } from "../util";
+import { handleIntegrationWebhook } from "../webhook";
 import { DEFAULT_TOKEN_TENANT, GRAPH_SCOPE, KeySet, TokenSource } from "./auth";
 import { GRAPH_PAGE_SIZE, MAX_THREAD_MESSAGES, cleanText, fitThread, threadEntry, type ThreadEntry } from "./context";
 import { EVENT_CONTEXT_MAX_PAYLOAD_BYTES } from "../types";
@@ -121,41 +122,40 @@ export class TeamsHandler implements Responder, EventContextBuilder {
   }
 
   async handleMessages(req: Request): Promise<WebhookOutcome> {
-    let body: string;
-    try {
-      body = await readBody(req);
-    } catch (e) {
-      return { response: errorResponse(413, "payload_too_large", errMessage(e)) };
-    }
-    let act: Activity;
-    try {
-      act = JSON.parse(body) as Activity;
-    } catch {
-      return { response: errorResponse(400, "invalid_payload", "activity is not valid JSON") };
-    }
-    try {
-      await this.keys.validate(
-        req.headers.get("Authorization") ?? "",
-        await this.appIds(),
-        act.channelId ?? "",
-        act.serviceUrl ?? "",
-      );
-    } catch (e) {
-      this.log.info("rejected bot framework request", { err: errMessage(e) });
-      return { response: errorResponse(401, "unauthorized", "invalid Bot Connector token") };
-    }
-    const ok = new Response(null, { status: 200 });
-    if (act.type !== "message" || this.dedupe.isSeen(act.id)) return { response: ok };
-    return {
-      response: ok,
-      background: async () => {
+    return handleIntegrationWebhook<Activity>(req, {
+      parse: (body) => JSON.parse(body) as Activity,
+      invalidPayload: "activity is not valid JSON",
+      // The Bot Connector token names the bot; handleMessage selects the record later.
+      verify: async (r, _body, act) => {
         try {
-          await this.handleMessage(act, body);
+          await this.keys.validate(
+            r.headers.get("Authorization") ?? "",
+            await this.appIds(),
+            act.channelId ?? "",
+            act.serviceUrl ?? "",
+          );
+          return true;
         } catch (e) {
-          this.log.warn("handle teams activity", { id: act.id, err: errMessage(e) });
+          this.log.info("rejected bot framework request", { err: errMessage(e) });
+          return false;
         }
       },
-    };
+      unauthorized: { code: "unauthorized", message: "invalid Bot Connector token" },
+      accept: (act, _found, body) => {
+        const ok = new Response(null, { status: 200 });
+        if (act.type !== "message" || this.dedupe.isSeen(act.id)) return { response: ok };
+        return {
+          response: ok,
+          background: async () => {
+            try {
+              await this.handleMessage(act, body);
+            } catch (e) {
+              this.log.warn("handle teams activity", { id: act.id, err: errMessage(e) });
+            }
+          },
+        };
+      },
+    });
   }
 
   /** The record of an activity: records whose team_id is the Graph team and whose app_id is the bot that received it. */

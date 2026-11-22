@@ -164,43 +164,74 @@ export function appendEvents(
     if (isOfError(e, "conflict")) return unauthorized("session ended");
     throw e;
   }
-  fx.repo.putSession(s);
   if (res.fresh.length === 0) return { ack: res.ack };
+  const b = new BatchSession(fx, s);
   let wake = false;
   for (const e of res.fresh) {
-    processEvent(fx, s, e);
+    processEvent(b, e);
     if (e.type === "session.ready" || e.type === "turn.ended") wake = true;
   }
+  b.flush();
   if (wake) deliver(fx, runId);
   return { ack: res.ack };
+}
+
+/**
+ * The session of one event batch. Changes stay in memory and are written once
+ * at the end of the batch, or before an engine step that reads or writes the
+ * session itself; after such a step the session is read again.
+ */
+class BatchSession {
+  /** The ack and the last-seen time of the new events are not written yet. */
+  private dirty = true;
+
+  constructor(
+    readonly fx: Fx,
+    readonly s: RunSession,
+  ) {}
+
+  /** Marks a change of s for the next write. */
+  touch(): void {
+    this.dirty = true;
+  }
+
+  flush(): void {
+    if (!this.dirty) return;
+    this.fx.repo.putSession(this.s);
+    this.dirty = false;
+  }
+
+  /** Runs an engine step that reads the session from storage (transition, delivery). */
+  step(fn: () => void): void {
+    this.flush();
+    fn();
+    const cur = this.fx.repo.getSession(this.s.run_id, this.s.session);
+    if (cur) Object.assign(this.s, cur);
+  }
 }
 
 function str(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
 
-function processEvent(fx: Fx, s: RunSession, e: RunnerEvent): void {
+function processEvent(b: BatchSession, e: RunnerEvent): void {
+  const { fx, s } = b;
   const d = (e.data ?? {}) as Record<string, unknown>;
   switch (e.type) {
     case "session.ready": {
-      const caps = Array.isArray(d.capabilities) ? (d.capabilities as unknown[]).map(String) : [];
-      const cur = fx.repo.getSession(s.run_id, s.session)!;
-      cur.capabilities = caps;
-      if (!cur.ready_at) cur.ready_at = iso(fx.now());
-      fx.repo.putSession(cur);
-      Object.assign(s, cur);
+      s.capabilities = Array.isArray(d.capabilities) ? (d.capabilities as unknown[]).map(String) : [];
+      if (!s.ready_at) s.ready_at = iso(fx.now());
+      b.touch();
       if (Array.isArray(d.repositories))
         resolveStartCommits(fx, s.run_id, d.repositories as { path: string; commit: string }[]);
       return;
     }
     case "turn.started": {
       if (!e.turn_id) return;
-      const cur = fx.repo.getSession(s.run_id, s.session)!;
-      cur.active_turn_id = e.turn_id;
-      fx.repo.putSession(cur);
-      Object.assign(s, cur);
+      s.active_turn_id = e.turn_id;
+      b.touch();
       fx.repo.markAcceptedByTurn(s.run_id, e.turn_id);
-      transition(fx, s.run_id, { event: "turn_started" });
+      b.step(() => transition(fx, s.run_id, { event: "turn_started" }));
       return;
     }
     case "input.accepted": {
@@ -225,65 +256,43 @@ function processEvent(fx: Fx, s: RunSession, e: RunnerEvent): void {
       });
       return;
     case "usage":
-      onUsage(fx, s, e, d);
+      onUsage(b, e, d);
       return;
     case "artifact":
-      fx.repo.sql.exec(
-        "INSERT OR REPLACE INTO run_uploads (run_id, session, kind, name, upload_id, at_ms) VALUES (?, ?, ?, ?, ?, ?)",
-        s.run_id,
-        s.session,
-        "artifact",
-        str(d.name),
-        str(d.upload_id),
-        fx.now(),
-      );
+      fx.repo.putUpload(s.run_id, s.session, "artifact", str(d.name), str(d.upload_id));
       return;
     case "transcript.saved":
-      fx.repo.sql.exec(
-        "INSERT OR REPLACE INTO run_uploads (run_id, session, kind, name, upload_id, at_ms) VALUES (?, ?, ?, ?, ?, ?)",
-        s.run_id,
-        s.session,
-        "transcript",
-        "transcript",
-        str(d.upload_id),
-        fx.now(),
-      );
+      fx.repo.putUpload(s.run_id, s.session, "transcript", "transcript", str(d.upload_id));
       return;
     case "snapshot.saved":
-      fx.repo.sql.exec(
-        "INSERT OR REPLACE INTO snapshot_parts (run_id, session, part, upload_ids, bytes, at_ms) VALUES (?, ?, ?, ?, ?, ?)",
+      fx.repo.putSnapshotPart(
         s.run_id,
         s.session,
         str(d.part),
-        JSON.stringify(Array.isArray(d.upload_ids) ? d.upload_ids : []),
+        Array.isArray(d.upload_ids) ? d.upload_ids : [],
         typeof d.bytes === "number" ? d.bytes : 0,
-        fx.now(),
       );
       return;
     case "turn.ended": {
       if (!e.turn_id) return;
       fx.repo.finishTurnInputs(s.run_id, e.turn_id);
-      const cur = fx.repo.getSession(s.run_id, s.session)!;
-      if (cur.active_turn_id === e.turn_id) {
-        cur.active_turn_id = "";
-        fx.repo.putSession(cur);
+      if (s.active_turn_id === e.turn_id) {
+        s.active_turn_id = "";
+        b.touch();
       }
-      Object.assign(s, cur);
       const outcome = str(d.outcome);
-      transition(
-        fx,
-        s.run_id,
-        {
-          event: "turn_ended",
-          outcome,
-          failureCode: str(d.failure_code),
-          hasOpenRequest: fx.repo.hasOpenRequest(s.run_id),
-        },
-        (r) => {
-          r.turns = (r.turns ?? 0) + 1;
-          if (str(d.result)) r.result = str(d.result);
-          if (outcome === "error") setFailureMessage(r, str(d.message));
-        },
+      const hasOpenRequest = fx.repo.hasOpenRequest(s.run_id);
+      b.step(() =>
+        transition(
+          fx,
+          s.run_id,
+          { event: "turn_ended", outcome, failureCode: str(d.failure_code), hasOpenRequest },
+          (r) => {
+            r.turns = (r.turns ?? 0) + 1;
+            if (str(d.result)) r.result = str(d.result);
+            if (outcome === "error") setFailureMessage(r, str(d.message));
+          },
+        ),
       );
       return;
     }
@@ -303,26 +312,28 @@ function appendConversation(fx: Fx, runId: string, role: string, content: string
 }
 
 /** onUsage: cumulative usage per session; the run gets the sum. Spend goes to DispatchDO (C5). */
-function onUsage(fx: Fx, s: RunSession, e: RunnerEvent, d: Record<string, unknown>): void {
+function onUsage(b: BatchSession, e: RunnerEvent, d: Record<string, unknown>): void {
   if (d.cumulative !== true) return;
+  const { fx, s } = b;
   const num = (v: unknown) => (typeof v === "number" ? v : 0);
-  const cur = fx.repo.getSession(s.run_id, s.session)!;
-  cur.usage = {
+  const usage: NonNullable<RunSession["usage"]> = {
     input_tokens: num(d.input_tokens),
     output_tokens: num(d.output_tokens),
     cost_usd: num(d.cost_usd),
     duration_ms: num(d.duration_ms),
     ...(d.coverage === "partial" ? { coverage: "partial" } : {}),
   };
-  fx.repo.putSession(cur);
-  Object.assign(s, cur);
+  s.usage = usage;
+  b.touch();
   const total = { input_tokens: 0, output_tokens: 0, cost_usd: 0, duration_ms: 0 } as Run["usage"];
+  // The stored row of this session is not written yet: its usage comes from s.
   for (const x of fx.repo.listSessions(s.run_id)) {
-    total.input_tokens += x.usage?.input_tokens ?? 0;
-    total.output_tokens += x.usage?.output_tokens ?? 0;
-    total.cost_usd += x.usage?.cost_usd ?? 0;
-    total.duration_ms += x.usage?.duration_ms ?? 0;
-    if (x.usage?.coverage === "partial") total.coverage = "partial";
+    const u = x.session === s.session ? usage : x.usage;
+    total.input_tokens += u?.input_tokens ?? 0;
+    total.output_tokens += u?.output_tokens ?? 0;
+    total.cost_usd += u?.cost_usd ?? 0;
+    total.duration_ms += u?.duration_ms ?? 0;
+    if (u?.coverage === "partial") total.coverage = "partial";
   }
   const run = updateRun(fx, s.run_id, (r) => {
     r.usage = total;
@@ -337,7 +348,7 @@ function onUsage(fx: Fx, s: RunSession, e: RunnerEvent, d: Record<string, unknow
       seq: e.seq,
       factoryId: run.factory_id,
       runCreatedMs: ms(run.created_at) ?? fx.now(),
-      costUsd: cur.usage.cost_usd,
+      costUsd: usage.cost_usd,
       rootRunId: rootOf(fx, run),
       workDO: fx.doName,
     } as never,

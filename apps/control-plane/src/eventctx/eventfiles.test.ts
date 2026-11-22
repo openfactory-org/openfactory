@@ -164,3 +164,48 @@ describe("event files of webhook and chat runs", () => {
     }
   });
 });
+
+describe("jira issue description", () => {
+  // The issue builder renders the description with the Jira integration's
+  // adfText: hard breaks and code blocks end a line and mentions read "@Name",
+  // where the old private walker dropped them.
+  it("keeps line breaks, code blocks and mentions of a rich-text description", async () => {
+    const ev = {
+      id: "evt_j",
+      team_id: "team1",
+      provider: "jira",
+      type: "issue_created",
+      actor: { provider: "jira" },
+      source: { provider: "jira", kind: "issue", url: "https://j/ENG-2" },
+      received_at: "2026-01-01T00:00:00Z",
+      payload: {
+        issue: {
+          key: "ENG-2",
+          fields: {
+            summary: "S",
+            description: {
+              type: "doc",
+              version: 1,
+              content: [
+                {
+                  type: "paragraph",
+                  content: [
+                    { type: "text", text: "line one" },
+                    { type: "hardBreak" },
+                    { type: "text", text: "line two, ask " },
+                    { type: "mention", attrs: { id: "acc1", text: "@Dana" } },
+                  ],
+                },
+                { type: "codeBlock", content: [{ type: "text", text: "make test" }] },
+                { type: "paragraph", content: [{ type: "text", text: "end" }] },
+              ],
+            },
+          },
+        },
+      },
+    } as unknown as Event;
+    const b = await build("msg_j", ev, true);
+    const issue = JSON.parse(files(b)[".openfactory/events/msg_j/context/issue.json"]!) as { description: string };
+    expect(issue.description).toBe("line one\nline two, ask @Dana\nmake test\nend");
+  });
+});

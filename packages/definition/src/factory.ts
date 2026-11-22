@@ -1,10 +1,19 @@
 // factory.yaml parser. Port of internal/definition/factory.go.
 
 import {
+  CODE_FORGES,
+  type CodeForge,
+  CREDENTIAL_STRATEGIES,
+  INTEGRATION_DECL_TYPES,
+  isOneOf,
+  SELF_IMPROVEMENT_REVIEWER_TYPES,
+} from "@openfactory/core";
+import {
   copyMCP,
   emptyExec,
   emailRe,
   type ExecSettings,
+  NO_FORGE,
   type HarnessOverride,
   aliasRe,
   checkModelHarness,
@@ -30,8 +39,8 @@ import type {
 } from "./types.ts";
 import { type Diag, Doc, indexPath, isNull, type Mapping, resolve, type YNode } from "./yamlnode.ts";
 
-export const codeForgeValues = ["GITHUB", "GITLAB", "AZURE_DEVOPS"];
-export const integrationTypes = ["slack", "microsoft-teams", "linear", "jira"];
+export const codeForgeValues = CODE_FORGES;
+export const integrationTypes = INTEGRATION_DECL_TYPES;
 export const FACTORY_FILE = "factory.yaml";
 
 export interface ScorerDefaultsSpec {
@@ -80,7 +89,7 @@ export function newDefinition(): CompiledDefinition {
   };
 }
 
-const emptyRepo = (): RepoRef => ({ codeForge: "", owner: "", name: "" });
+const emptyRepo = (): RepoRef => ({ codeForge: NO_FORGE, owner: "", name: "" });
 
 export function parseFactory(d: Diag, content: string): FactorySpec | null {
   const c = new Doc(d, FACTORY_FILE);
@@ -124,7 +133,10 @@ export function parseFactory(d: Diag, content: string): FactorySpec | null {
       }
     }
     v = m.get("credentialStrategy");
-    if (v !== null && !isNull(v)) def.credentialStrategy = c.enum(v, "credentialStrategy", "EXECUTOR", "CREATOR")[0];
+    if (v !== null && !isNull(v)) {
+      const [s, ok] = c.enum(v, "credentialStrategy", ...CREDENTIAL_STRATEGIES);
+      if (ok) def.credentialStrategy = s;
+    }
     v = m.get("maxConcurrentRuns");
     if (v !== null && !isNull(v)) {
       const [i, ok] = c.integer(v, "maxConcurrentRuns");
@@ -272,16 +284,19 @@ export function parseFactory(d: Diag, content: string): FactorySpec | null {
 
 function parseRepositories(f: FactorySpec, m: Mapping): void {
   const { c, def } = f;
-  let forges: string[] = [];
+  let forges: CodeForge[] = [];
   let forgesSet = false;
   let v = m.get("codeForges");
   if (v !== null && !isNull(v)) {
     const [list, ok0] = c.uniqueStrList(v, "codeForges");
     let ok = ok0;
+    const valid: CodeForge[] = [];
     if (ok && list !== null) {
       const items = resolve(v)!.content;
       list.forEach((s, i) => {
-        if (!codeForgeValues.includes(s)) {
+        if (isOneOf(codeForgeValues, s)) {
+          valid.push(s);
+        } else {
           c.errf(
             items[i],
             indexPath("codeForges", i),
@@ -292,9 +307,9 @@ function parseRepositories(f: FactorySpec, m: Mapping): void {
       });
     }
     if (ok && list !== null) {
-      forges = list;
+      forges = valid;
       forgesSet = true;
-      def.codeForges = list;
+      def.codeForges = valid;
     }
   }
   v = m.require("repositories");
@@ -313,15 +328,16 @@ function parseRepositories(f: FactorySpec, m: Mapping): void {
     if (rm === null) return;
     const r = emptyRepo();
     const cv = rm.get("codeForge");
+    let forge: CodeForge | "" = "";
     if (cv !== null && !isNull(cv)) {
-      r.codeForge = c.enum(cv, p + ".codeForge", ...codeForgeValues)[0];
-      if (r.codeForge !== "" && forgesSet && !forges.includes(r.codeForge)) {
-        c.errf(cv, p + ".codeForge", `${p + ".codeForge"} ${r.codeForge} is not listed in codeForges`);
+      forge = c.enum(cv, p + ".codeForge", ...codeForgeValues)[0];
+      if (forge !== "" && forgesSet && !forges.includes(forge)) {
+        c.errf(cv, p + ".codeForge", `${p + ".codeForge"} ${forge} is not listed in codeForges`);
       }
     } else if (forges.length > 1) {
       c.errf(rm.node, p + ".codeForge", `${p}.codeForge is required when codeForges lists more than one code host`);
     }
-    if (r.codeForge === "") r.codeForge = forges.length === 1 ? forges[0]! : "GITHUB";
+    r.codeForge = forge !== "" ? forge : forges.length === 1 ? forges[0]! : "GITHUB";
     const ov = rm.require("owner");
     if (ov !== null) {
       const [s, ok] = c.nonEmptyStr(ov, p + ".owner");
@@ -501,7 +517,7 @@ function parseIntegrations(f: FactorySpec, m: Mapping): void {
     const im = c.mapping(it, p);
     if (im === null) return;
     const [typ, ok] = c.enum(im.require("type"), p + ".type", ...integrationTypes);
-    const decl: IntegrationDecl = { type: typ };
+    let settings: Record<string, string> | null = null;
     for (const t of integrationTypes) {
       const sv = im.get(t);
       if (sv === null || isNull(sv)) continue;
@@ -509,9 +525,7 @@ function parseIntegrations(f: FactorySpec, m: Mapping): void {
         c.errf(im.keyNode(t), p + "." + t, `${p}.${t} settings are only valid on an integration of type ${t}`);
         continue;
       }
-      const settings = parseIntegrationSettings(c, t, sv, p + "." + t);
-      if (settings !== null) decl.settings = settings;
-      else delete decl.settings;
+      settings = parseIntegrationSettings(c, t, sv, p + "." + t);
     }
     im.finish();
     if (!ok) return;
@@ -520,6 +534,8 @@ function parseIntegrations(f: FactorySpec, m: Mapping): void {
       return;
     }
     seen.set(typ, im.node);
+    const decl: IntegrationDecl = { type: typ };
+    if (settings !== null) decl.settings = settings;
     def.integrations!.push(decl);
   });
   if (seen.has("linear") && seen.has("jira")) {
@@ -609,7 +625,7 @@ function parseSelfImprovement(c: Doc, n: YNode): SelfImprovementConfig | null {
     if (v !== null && !isNull(v)) si.failedRunThreshold = c.intRange(v, "selfImprovement.failedRunThreshold", 1, 50)[0];
     v = m.get("reviewerType");
     if (v !== null && !isNull(v)) {
-      const [s, ok] = c.enum(v, "selfImprovement.reviewerType", "admins", "team", "custom", "none");
+      const [s, ok] = c.enum(v, "selfImprovement.reviewerType", ...SELF_IMPROVEMENT_REVIEWER_TYPES);
       if (ok) si.reviewerType = s;
     }
     const ev = m.get("reviewerEmails");

@@ -1,9 +1,9 @@
 // Slack name resolver: channel names and user names or e-mail addresses to IDs (port of slack/resolver.go).
-import { integrationActive } from "@openfactory/core";
 import type { Integration } from "@openfactory/core";
-import { NameLists, addId, sortIds, type NameMap } from "../namelist";
-import type { IntegrationDeps, NameResolver } from "../types";
-import { equalFold, integrationSecret } from "../util";
+import { addId, type NameMap } from "../namelist";
+import { BaseNameResolver } from "../resolver";
+import type { IntegrationDeps } from "../types";
+import { integrationSecret } from "../util";
 import { SlackApiError, SlackClient } from "./client";
 import { PROVIDER } from "./responder";
 
@@ -16,69 +16,30 @@ interface ListResponse {
   response_metadata?: { next_cursor?: string };
 }
 
-function normalizeName(list: string, name: string): string {
-  let n = name.trim();
-  if (list === "channels") n = n.replace(/^#/, "").trim();
-  return n.toLowerCase();
-}
-
-export class SlackNameResolver implements NameResolver {
-  private readonly lists: NameLists;
+export class SlackNameResolver extends BaseNameResolver {
   constructor(
-    private readonly deps: IntegrationDeps,
+    deps: IntegrationDeps,
     private readonly apiBaseUrl = "",
   ) {
-    this.lists = new NameLists(deps.now ? () => deps.now!().getTime() : undefined);
+    super(deps, {
+      label: "Slack",
+      providers: [PROVIDER],
+      integrationProvider: PROVIDER,
+      kinds: ["channels", "users", "itemUsers"],
+    });
   }
 
-  /** kind is channels, users or itemUsers. A channel name ignores a leading "#". */
-  async resolveNames(
-    teamId: string,
-    provider: string,
-    kind: string,
-    names: string[],
-  ): Promise<Record<string, string[]>> {
-    if (!equalFold(provider, PROVIDER)) throw new Error(`the Slack resolver cannot list ${provider} objects`);
-    let list: string;
-    switch (kind) {
-      case "channels":
-        list = "channels";
-        break;
-      case "users":
-      case "itemUsers":
-        list = "users";
-        break;
-      default:
-        throw new Error(`the Slack resolver cannot resolve "${kind}"`);
-    }
-    let all: Integration[];
-    try {
-      all = (await this.deps.store.listIntegrations(teamId)).filter((i) => equalFold(i.provider, PROVIDER));
-    } catch (e) {
-      throw new Error(`could not read the Slack integrations: ${(e as Error).message}`, { cause: e });
-    }
-    const ints = all.filter(integrationActive);
-    if (ints.length === 0) throw new Error("the team has no active Slack integration");
-    const keys = names.map((n) => normalizeName(list, n));
-    const out: NameMap = {};
-    let firstErr: Error | undefined;
-    let ok = 0;
-    for (const in_ of ints) {
-      let byName: NameMap;
-      try {
-        byName = await this.lists.lookup(`${in_.id}/${list}`, keys, () => this.fetchList(in_, list));
-      } catch (e) {
-        firstErr ??= e as Error;
-        continue;
-      }
-      ok++;
-      names.forEach((n, i) => {
-        for (const id of byName[keys[i]!] ?? []) addId(out, n, id);
-      });
-    }
-    if (ok === 0) throw firstErr!;
-    sortIds(out);
-    return out;
+  /** A channel name ignores a leading "#". */
+  protected override normalize(kind: string, name: string): string {
+    let n = name.trim();
+    if (kind === "channels") n = n.replace(/^#/, "").trim();
+    return n.toLowerCase();
+  }
+
+  /** kind is channels, users or itemUsers; itemUsers reads the user list. */
+  protected override lookup(in_: Integration, kind: string, keys: string[]): Promise<NameMap> {
+    const list = kind === "channels" ? "channels" : "users";
+    return this.lists.lookup(`${in_.id}/${list}`, keys, () => this.fetchList(in_, list));
   }
 
   private async fetchList(in_: Integration, kind: string): Promise<NameMap> {

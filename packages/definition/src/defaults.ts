@@ -6,7 +6,6 @@ import { DEFAULT_AGENT_FILES } from "./default-agents.generated.ts";
 import { invalid } from "./errors.ts";
 import { codeForgeValues, FACTORY_FILE } from "./factory.ts";
 import { goQuote, goTrimSpace } from "./gofmt.ts";
-import type { RepoRef } from "./types.ts";
 import { yamlString } from "./yamlemit.ts";
 
 /** DEFAULT_AGENT_NAMES lists the default agents in pipeline order. */
@@ -24,8 +23,8 @@ export interface DefaultDefinitionOptions {
   name: string;
   description?: string;
   alias?: string;
-  /** codeForge may be "" (GITHUB). */
-  repositories?: Partial<RepoRef>[];
+  /** The repositories as the caller gave them. An empty codeForge means GITHUB; the compiler validates the rest. */
+  repositories?: { codeForge?: string; owner?: string; name?: string }[];
   /** Default DEFAULT_MODEL. */
   model?: string;
   /** Subset of DEFAULT_AGENT_NAMES; foreman is always included. Empty: all. */

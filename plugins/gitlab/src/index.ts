@@ -11,21 +11,15 @@
 // Worker vars: PLUGIN_VERSION (optional version string).
 
 import type {
-  CommitStatus,
-  FileDiff,
   ForgePlugin,
   ForgeTarget,
   HostApi,
   IngressPlugin,
   PluginInfo,
-  PullRequestInput,
-  PullRequestRef,
-  ReviewInput,
-  ReviewThread,
   WebhookResult,
 } from "@openfactory/plugin-api";
-import { notSupported, rpc } from "@openfactory/plugin-api";
-import { PluginWorker, pluginInfo } from "@openfactory/plugin-api/worker";
+import { rpc } from "@openfactory/plugin-api";
+import { ForgePluginWorker, pluginInfo, type ForgeSpec } from "@openfactory/plugin-api/worker";
 import { FORGE_NAME, GitLabClient } from "./client";
 import { PROVIDER, handleWebhook } from "./webhook";
 
@@ -62,7 +56,14 @@ export function clientFor(t: ForgeTarget, fetchFn?: typeof fetch): GitLabClient 
   });
 }
 
-export class Plugin extends PluginWorker<Env> implements ForgePlugin, IngressPlugin {
+export class Plugin extends ForgePluginWorker<Env> implements ForgePlugin, IngressPlugin {
+  protected readonly forge: ForgeSpec = {
+    name: FORGE_NAME,
+    label: "gitlab",
+    client: (t) => clientFor(t),
+    unsupported: ["commentWorkItem", "setWorkItemState", "attachPullRequestToWorkItem"],
+  };
+
   async info(): Promise<PluginInfo> {
     return pluginInfo(
       {
@@ -74,111 +75,6 @@ export class Plugin extends PluginWorker<Env> implements ForgePlugin, IngressPlu
       },
       this.env.PLUGIN_VERSION,
     );
-  }
-
-  async name(_t: ForgeTarget): Promise<string> {
-    return FORGE_NAME;
-  }
-
-  cloneUrl(t: ForgeTarget, owner: string, repo: string): Promise<string> {
-    return rpc(() => clientFor(t).cloneUrl(owner, repo));
-  }
-
-  defaultBranch(t: ForgeTarget, owner: string, repo: string): Promise<string> {
-    return rpc(() => clientFor(t).defaultBranch(owner, repo));
-  }
-
-  createPullRequest(t: ForgeTarget, owner: string, repo: string, pr: PullRequestInput): Promise<PullRequestRef> {
-    return rpc(() => clientFor(t).createPullRequest(owner, repo, pr));
-  }
-
-  getPullRequest(t: ForgeTarget, owner: string, repo: string, number: number): Promise<PullRequestRef> {
-    return rpc(() => clientFor(t).getPullRequest(owner, repo, number));
-  }
-
-  comment(t: ForgeTarget, owner: string, repo: string, number: number, body: string): Promise<void> {
-    return rpc(() => clientFor(t).comment(owner, repo, number, body));
-  }
-
-  commentIssue(t: ForgeTarget, owner: string, repo: string, number: number, body: string): Promise<void> {
-    return rpc(() => clientFor(t).commentIssue(owner, repo, number, body));
-  }
-
-  commentWorkItem(_t: ForgeTarget, _project: string, _id: number, _body: string): Promise<void> {
-    return rpc(() => {
-      throw notSupported("gitlab: comment on a work item");
-    });
-  }
-
-  setCommitStatus(t: ForgeTarget, owner: string, repo: string, sha: string, status: CommitStatus): Promise<void> {
-    return rpc(() => clientFor(t).setCommitStatus(owner, repo, sha, status));
-  }
-
-  getFiles(
-    t: ForgeTarget,
-    owner: string,
-    repo: string,
-    ref: string,
-    path: string,
-  ): Promise<{ files: Record<string, string>; commitSha: string }> {
-    return rpc(() => clientFor(t).getFiles(owner, repo, ref, path));
-  }
-
-  replyInThread(
-    t: ForgeTarget,
-    owner: string,
-    repo: string,
-    number: number,
-    threadRef: string,
-    body: string,
-  ): Promise<void> {
-    return rpc(() => clientFor(t).replyInThread(owner, repo, number, threadRef, body));
-  }
-
-  resolveThread(t: ForgeTarget, owner: string, repo: string, number: number, threadRef: string): Promise<void> {
-    return rpc(() => clientFor(t).resolveThread(owner, repo, number, threadRef));
-  }
-
-  submitReview(t: ForgeTarget, owner: string, repo: string, number: number, review: ReviewInput): Promise<void> {
-    return rpc(() => clientFor(t).submitReview(owner, repo, number, review));
-  }
-
-  markReady(t: ForgeTarget, owner: string, repo: string, number: number): Promise<void> {
-    return rpc(() => clientFor(t).markReady(owner, repo, number));
-  }
-
-  setWorkItemState(_t: ForgeTarget, _project: string, _id: number, _state: string): Promise<void> {
-    return rpc(() => {
-      throw notSupported("gitlab: set the state of a work item");
-    });
-  }
-
-  attachPullRequestToWorkItem(_t: ForgeTarget, _project: string, _id: number, _pr: PullRequestRef): Promise<void> {
-    return rpc(() => {
-      throw notSupported("gitlab: attach a pull request to a work item");
-    });
-  }
-
-  requestReviewers(t: ForgeTarget, owner: string, repo: string, number: number, logins: string[]): Promise<void> {
-    return rpc(() => clientFor(t).requestReviewers(owner, repo, number, logins));
-  }
-
-  login(t: ForgeTarget): Promise<string> {
-    return rpc(() => clientFor(t).login());
-  }
-
-  getReviewThread(
-    t: ForgeTarget,
-    owner: string,
-    repo: string,
-    number: number,
-    threadRef: string,
-  ): Promise<ReviewThread> {
-    return rpc(() => clientFor(t).reviewThread(owner, repo, number, threadRef));
-  }
-
-  getFileDiff(t: ForgeTarget, owner: string, repo: string, number: number, path: string): Promise<FileDiff> {
-    return rpc(() => clientFor(t).fileDiff(owner, repo, number, path));
   }
 
   handleWebhook(req: Request, host: HostApi): Promise<WebhookResult> {

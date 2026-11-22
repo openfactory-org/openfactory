@@ -90,7 +90,7 @@ const intake = (f: Fixture, ev: CoreEvent) =>
     }),
   );
 
-const fullPR = (state: string): PullRequestRef => ({
+const fullPR = (state: PullRequestRef["state"]): PullRequestRef => ({
   forge: "GITHUB",
   repo: "acme/api",
   number: 42,
@@ -99,7 +99,7 @@ const fullPR = (state: string): PullRequestRef => ({
   state,
 });
 /** The same pull request with another spelling of the repository and no URL. */
-const samePR = (state: string): PullRequestRef => ({
+const samePR = (state: PullRequestRef["state"]): PullRequestRef => ({
   forge: "GITHUB",
   repo: "ACME/api",
   number: 42,
@@ -113,7 +113,7 @@ interface LinkCase {
   noRoot?: boolean;
   link(f: Fixture, pr: PullRequestRef): Promise<void>;
   /** The state the second link leaves. */
-  second: string;
+  second: PullRequestRef["state"];
 }
 
 const linkCases: LinkCase[] = [

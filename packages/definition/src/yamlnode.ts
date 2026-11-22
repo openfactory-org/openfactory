@@ -8,6 +8,7 @@
 import { isAlias, isMap, isPair, isScalar, isSeq, LineCounter, parseAllDocuments, type Document } from "yaml";
 import { goFloat, goQuote, goTrimSpace } from "./gofmt.ts";
 import { decodeBool, decodeFloat, decodeInt, resolvePlain, shortTag } from "./yaml-resolve.ts";
+import { isOneOf } from "@openfactory/core";
 import type { ValidationError } from "./types.ts";
 
 export type NodeKind = "map" | "seq" | "scalar" | "alias";
@@ -389,10 +390,11 @@ export class Doc {
     return [i, true];
   }
 
-  enum(n: YNode | null | undefined, path: string, ...allowed: string[]): [string, boolean] {
+  /** enum returns the value when it is one of allowed, else "" (with an error). */
+  enum<T extends string>(n: YNode | null | undefined, path: string, ...allowed: readonly T[]): [T, true] | ["", false] {
     const [s, ok] = this.str(n, path);
     if (!ok) return ["", false];
-    if (allowed.includes(s)) return [s, true];
+    if (isOneOf(allowed, s)) return [s, true];
     this.errf(n, path, `${path} must be one of ${allowed.join(", ")} (got ${goQuote(s)})`);
     return ["", false];
   }

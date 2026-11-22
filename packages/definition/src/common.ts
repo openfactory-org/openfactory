@@ -4,6 +4,9 @@
 import {
   BUILTIN_MCP_PREFIX,
   BUILTIN_MCP_PROVIDERS,
+  builtinMCPProvider,
+  type CodeForge,
+  HARNESS_AUTH_SOURCES,
   harnessForModel,
   normalizeHost,
   resolvePolicy,
@@ -29,12 +32,12 @@ export const mcpServerNameRe = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 // RE2 \s is ASCII white space.
 export const emailRe = /^[^@\t\n\f\r ]+@[^@\t\n\f\r ]+\.[^@\t\n\f\r ]+$/;
 
-/** builtinMCPProvider returns the provider of a builtin/<provider> managedId and whether it is known. */
-export function builtinMCPProvider(managedId: string): { provider: string; known: boolean } | null {
-  if (!managedId.startsWith(BUILTIN_MCP_PREFIX)) return null;
-  const p = managedId.slice(BUILTIN_MCP_PREFIX.length);
-  return { provider: p, known: BUILTIN_MCP_PROVIDERS.includes(p) };
-}
+/**
+ * NO_FORGE is the code forge of a repository reference whose codeForge failed
+ * to parse. The parser has reported an error, so the compile fails and the
+ * value never reaches a compiled definition.
+ */
+export const NO_FORGE = "" as CodeForge;
 
 function normalizeHarnessType(s: string): HarnessType | null {
   switch (s) {
@@ -133,7 +136,7 @@ export function parseAuth(c: Doc, n: YNode | null, path: string): HarnessAuth | 
   const m = c.mapping(n, path);
   if (m === null) return null;
   try {
-    const [src, ok] = c.enum(m.require("source"), m.field("source"), "managedSecret", "workerEnvironment");
+    const [src, ok] = c.enum(m.require("source"), m.field("source"), ...HARNESS_AUTH_SOURCES);
     if (!ok) {
       m.get("secretName");
       return null;
@@ -240,8 +243,7 @@ function parseMCPServer(c: Doc, n: YNode | null, path: string): [MCPServer, bool
     if (v !== null && !isNull(v)) {
       managedId = c.nonEmptyStr(v, m.field("managedId"))[0];
       s.managedId = managedId;
-      const b = builtinMCPProvider(managedId);
-      if (b !== null && !b.known) {
+      if (managedId.startsWith(BUILTIN_MCP_PREFIX) && !builtinMCPProvider(managedId).known) {
         c.errf(
           v,
           m.field("managedId"),

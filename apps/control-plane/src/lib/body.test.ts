@@ -1,6 +1,17 @@
 import { OfError } from "@openfactory/core";
 import { describe, expect, it } from "vitest";
-import { readBytesCapped, readTextCapped, readTextPrefix } from "./body";
+import {
+  bodyObject,
+  optBool,
+  optNullableStringMap,
+  optObject,
+  optString,
+  optStringArray,
+  optStringMap,
+  readBytesCapped,
+  readTextCapped,
+  readTextPrefix,
+} from "./body";
 
 /** A body stream of n chunks of size bytes each, with no Content-Length. */
 function chunked(n: number, size: number): ReadableStream<Uint8Array> {
@@ -48,5 +59,44 @@ describe("readTextPrefix", () => {
   it("keeps the first max bytes and drops the rest", async () => {
     expect(await readTextPrefix(new Response(chunked(4, 3)), 7)).toBe("aaaaaaa");
     expect(await readTextPrefix(new Response("ab"), 7)).toBe("ab");
+  });
+});
+
+describe("field type errors", () => {
+  it.each([
+    { name: "string", fn: () => optString({ f: 1 }, "f"), want: 'field "f" must be a string' },
+    { name: "boolean", fn: () => optBool({ f: "yes" }, "f"), want: 'field "f" must be a boolean' },
+    { name: "string array", fn: () => optStringArray({ f: [1] }, "f"), want: 'field "f" must be an array of strings' },
+    {
+      name: "string map",
+      fn: () => optStringMap({ f: { a: 1 } }, "f"),
+      want: 'field "f" must be an object with string values',
+    },
+    {
+      name: "nullable string map",
+      fn: () => optNullableStringMap({ f: { a: 1 } }, "f"),
+      want: 'field "f" must be an object with string or null values',
+    },
+    { name: "object", fn: () => optObject({ f: [] }, "f"), want: 'field "f" must be an object' },
+    { name: "body", fn: () => bodyObject("x"), want: "malformed JSON body: expected an object" },
+  ])("names the JSON type: $name", ({ fn, want }) => {
+    const err = (() => {
+      try {
+        fn();
+      } catch (e) {
+        return e;
+      }
+      return undefined;
+    })();
+    expect(err).toBeInstanceOf(OfError);
+    expect((err as OfError).code).toBe("invalid_request");
+    expect((err as OfError).detail).toBe(want);
+  });
+
+  it("treats null as an absent field", () => {
+    expect(optString({ f: null }, "f")).toBeUndefined();
+    expect(optObject({ f: null }, "f")).toBeUndefined();
+    expect(optObject({ f: { a: 1 } }, "f")).toEqual({ a: 1 });
+    expect(bodyObject(undefined, true)).toEqual({});
   });
 });

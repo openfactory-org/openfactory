@@ -4,7 +4,7 @@ import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
 import { doName, newRoutedId, newToken } from "@openfactory/core";
 import type { SandboxProvider, TaskStatus } from "@openfactory/sandbox";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Ack, OutboxEnvelope, OutboxKind, OutboxPayloads } from "../../contracts/do-messages";
 import { registerProvider, unregisterProvider } from "./providers";
 
@@ -146,6 +146,41 @@ describe("DispatchDO admission", () => {
     const st = await d.state();
     expect(st.leases.some((l) => l.run_id === r3)).toBe(false);
     expect(st.waiting.find((w) => w.run_id === r3)?.hold).toBe("spend");
+  });
+});
+
+describe("DispatchDO usage", () => {
+  it("re-runs the admission pass only when the factory crosses its spend limit", async () => {
+    const team = "use" + newToken("w");
+    const stub = env.DISPATCH.getByName(doName.dispatch(team));
+    const d = dispatch(team);
+    await d.receive(
+      msg("dispatch.limits", { factoryId: "fu", versionId: "v", maxConcurrentRuns: 1, spendLimit: { daily: 1 } }),
+    );
+    const tok = newToken("w");
+    const leased = newRoutedId("run", tok);
+    const queued = newRoutedId("run", tok);
+    await d.receive(request(leased, "fu", 1000));
+    await d.receive(request(queued, "fu", 2000));
+    const now = Date.now();
+    await runInDurableObject(stub, async (instance) => {
+      const i = instance as unknown as DispatchApi & { admission(): void };
+      const spy = vi.spyOn(i, "admission");
+      const usage = (seq: number, costUsd: number, factoryId = "fu") =>
+        i.receive(msg("dispatch.usage", { runId: leased, session: 1, seq, factoryId, runCreatedMs: now, costUsd }));
+      await usage(1, 0.3);
+      await usage(2, 0.9);
+      expect(spy).toHaveBeenCalledTimes(0);
+      await usage(3, 1.5);
+      expect(spy).toHaveBeenCalledTimes(1);
+      await usage(4, 2);
+      expect(spy).toHaveBeenCalledTimes(1);
+      spy.mockRestore();
+    });
+    // The pass that ran on the crossing put the queued row on hold.
+    const st = await d.state();
+    expect(st.waiting.find((w) => w.run_id === queued)?.hold).toBe("spend");
+    expect(st.leases.map((l) => l.run_id)).toEqual([leased]);
   });
 });
 

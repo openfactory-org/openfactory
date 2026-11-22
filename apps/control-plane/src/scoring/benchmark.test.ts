@@ -2,6 +2,7 @@
 // TestCorrectnessScorerRubric, TestBenchmarkValidation (request part), TestDiffFiles,
 // TestMakeTaskFromRun.
 import { describe, expect, it } from "vitest";
+import type { RepoAtCommit, RepoSubstitution } from "@openfactory/core";
 import {
   CORRECTNESS_SCORER,
   aggregate,
@@ -99,11 +100,11 @@ describe("aggregate", () => {
 
 describe("repo substitutions and rubric", () => {
   it("replaces matching repositories and keeps the input", () => {
-    const refs = [
+    const refs: RepoAtCommit[] = [
       { codeForge: "GITHUB", owner: "acme", repo: "app", ref: SHA },
       { codeForge: "GITLAB", owner: "acme", repo: "app", ref: SHA },
     ];
-    const subs = [
+    const subs: RepoSubstitution[] = [
       {
         source: { codeForge: "GITHUB", owner: "Acme", name: "App" },
         target: { codeForge: "GITHUB", owner: "bench", name: "app" },

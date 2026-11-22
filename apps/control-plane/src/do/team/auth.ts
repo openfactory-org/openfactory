@@ -11,7 +11,7 @@ import { bodyObject, optBool, optNullableStringMap, optString, str, type JsonObj
 import type { Migration } from "../../lib/sql/migrate";
 import { all, first } from "../../lib/sql/query";
 import { listResponse, msOf } from "../../lib/page";
-import { findFactory } from "./factories";
+import { findFactory } from "./factories/repo";
 import { created, noContent, type OpCall, type TeamKit, type TeamOp } from "./kit";
 
 export const migrations: readonly Migration[] = [
@@ -32,6 +32,14 @@ CREATE TABLE api_keys (id TEXT PRIMARY KEY, user_id TEXT NOT NULL DEFAULT '', pr
   created_ms INTEGER NOT NULL, data TEXT NOT NULL);
 CREATE INDEX api_keys_user ON api_keys (user_id);
 CREATE INDEX api_keys_created ON api_keys (created_ms, id);
+`,
+  },
+  {
+    version: 5,
+    name: "users_kind_role",
+    sql: `
+CREATE INDEX users_kind_name ON users (kind, name);
+CREATE INDEX users_role_kind ON users (role, kind);
 `,
   },
 ];
@@ -405,7 +413,24 @@ function userOf(kit: TeamKit, id: string): User {
 function findServiceAccount(kit: TeamKit, ref: string): User | undefined {
   const u = getUser(kit, ref);
   if (u && isServiceAccount(u)) return u;
-  return listUsers(kit).find((x) => isServiceAccount(x) && x.name === ref);
+  const r = first<{ data: string }>(
+    kit.sql,
+    "SELECT data FROM users WHERE kind = ? AND name = ? ORDER BY created_ms, id LIMIT 1",
+    USER_KIND_SERVICE_ACCOUNT,
+    ref,
+  );
+  return r ? (JSON.parse(r.data) as User) : undefined;
+}
+
+/** The number of admins that are people (not service accounts). */
+function adminCount(kit: TeamKit): number {
+  return (
+    first<{ n: number }>(
+      kit.sql,
+      "SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND kind != ?",
+      USER_KIND_SERVICE_ACCOUNT,
+    )?.n ?? 0
+  );
 }
 
 function serviceAccountOf(kit: TeamKit, ref: string): User {
@@ -513,7 +538,7 @@ export const ops: Record<string, TeamOp> = {
         if (!validRole(role)) throw new OfError("invalid_request", "role must be admin, editor or user");
         const r = normalizeRole(role);
         if (u.role === "admin" && r !== "admin") {
-          const admins = listUsers(kit).filter((x) => x.role === "admin" && !isServiceAccount(x)).length;
+          const admins = adminCount(kit);
           if (admins <= 1) throw new OfError("conflict", "cannot demote the team's last admin");
         }
         u.role = r;

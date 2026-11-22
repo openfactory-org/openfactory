@@ -12,17 +12,8 @@ import { intake } from "../select";
 import { autoRespondToThreadReplies, member, openInboxItem, privateUrl } from "../shared";
 import type { IntegrationDeps, Logger, WebhookOutcome } from "../types";
 import { consoleLogger } from "../types";
-import {
-  Dedupe,
-  constantTimeEqual,
-  errMessage,
-  errorResponse,
-  hmacSha256Hex,
-  integrationSecret,
-  readBody,
-  equalFold,
-  setCapped,
-} from "../util";
+import { Dedupe, constantTimeEqual, errMessage, hmacSha256Hex, integrationSecret, equalFold, setCapped } from "../util";
+import { handleIntegrationWebhook } from "../webhook";
 import { SlackClient, respondUrl, textOfBlocks, type UserInfo } from "./client";
 import { ACTION_PREFIX, type ActionValue } from "./responder";
 
@@ -33,6 +24,8 @@ export const INTERACTIONS_PATH = "/integrations/slack/interactions";
 export const DEFAULT_TIMESTAMP_TOLERANCE_MS = 5 * 60_000;
 /** The config key of the opt-in that links a Slack account by e-mail address. */
 export const CONFIG_LINK_BY_EMAIL = "link_by_email";
+
+const SIGNATURE_FAILED = { code: "invalid_signature", message: "Slack request signature verification failed" };
 
 /** The v0 signature of a request. */
 export async function sign(secret: string, timestamp: string, body: string): Promise<string> {
@@ -158,46 +151,42 @@ export class SlackHandler {
   }
 
   async handleEvents(req: Request): Promise<WebhookOutcome> {
-    let body: string;
-    try {
-      body = await readBody(req);
-    } catch (e) {
-      return { response: errorResponse(413, "payload_too_large", errMessage(e)) };
-    }
-    let env: EventEnvelope;
-    try {
-      env = JSON.parse(body) as EventEnvelope;
-    } catch {
-      return { response: errorResponse(400, "invalid_payload", "payload is not valid JSON") };
-    }
-    let found: Awaited<ReturnType<SlackHandler["findIntegration"]>> = { integration: null, error: null };
-    if (env.type !== "url_verification") found = await this.findIntegration(env.api_app_id ?? "", env.team_id ?? "");
-    if (!(await this.verify(req, body, found.integration))) {
-      return { response: errorResponse(401, "invalid_signature", "Slack request signature verification failed") };
-    }
-    if (env.type === "url_verification") {
-      return {
-        response: new Response(env.challenge ?? "", { status: 200, headers: { "Content-Type": "text/plain" } }),
-      };
-    }
-    if (env.type !== "event_callback") return { response: new Response(null, { status: 200 }) };
-    if (found.error || !found.integration) {
-      this.log.info("event ignored", { app: env.api_app_id, team: env.team_id, err: found.error?.message });
-      return { response: new Response(null, { status: 200 }) };
-    }
-    if (this.dedupe.isSeen(env.event_id ?? "")) return { response: new Response(null, { status: 200 }) };
-    const in_ = found.integration;
-    // Slack expects an answer within 3 seconds: the work runs after the response.
-    return {
-      response: new Response(null, { status: 200 }),
-      background: async () => {
-        try {
-          await this.handleEvent(in_, env);
-        } catch (e) {
-          this.log.warn("handle slack event", { event_id: env.event_id, err: errMessage(e) });
+    return handleIntegrationWebhook<EventEnvelope>(req, {
+      parse: (body) => JSON.parse(body) as EventEnvelope,
+      invalidPayload: "payload is not valid JSON",
+      // url_verification names no workspace: verify checks it against every Slack record.
+      select: async (env) =>
+        env.type === "url_verification"
+          ? { integration: null, error: null }
+          : this.findIntegration(env.api_app_id ?? "", env.team_id ?? ""),
+      verify: (r, body, _env, found) => this.verify(r, body, found.integration),
+      unauthorized: SIGNATURE_FAILED,
+      accept: (env, found) => {
+        if (env.type === "url_verification") {
+          return {
+            response: new Response(env.challenge ?? "", { status: 200, headers: { "Content-Type": "text/plain" } }),
+          };
         }
+        if (env.type !== "event_callback") return { response: new Response(null, { status: 200 }) };
+        if (found.error || !found.integration) {
+          this.log.info("event ignored", { app: env.api_app_id, team: env.team_id, err: found.error?.message });
+          return { response: new Response(null, { status: 200 }) };
+        }
+        if (this.dedupe.isSeen(env.event_id ?? "")) return { response: new Response(null, { status: 200 }) };
+        const in_ = found.integration;
+        // Slack expects an answer within 3 seconds: the work runs after the response.
+        return {
+          response: new Response(null, { status: 200 }),
+          background: async () => {
+            try {
+              await this.handleEvent(in_, env);
+            } catch (e) {
+              this.log.warn("handle slack event", { event_id: env.event_id, err: errMessage(e) });
+            }
+          },
+        };
       },
-    };
+    });
   }
 
   private async userInfo(c: SlackClient | null, id: string): Promise<UserInfo | null> {
@@ -453,37 +442,35 @@ export class SlackHandler {
   // ---------- Interactivity ----------
 
   async handleInteractions(req: Request): Promise<WebhookOutcome> {
-    let body: string;
-    try {
-      body = await readBody(req);
-    } catch (e) {
-      return { response: errorResponse(413, "payload_too_large", errMessage(e)) };
-    }
-    const form = new URLSearchParams(body);
-    let in_: Interaction;
-    try {
-      in_ = JSON.parse(form.get("payload") ?? "") as Interaction;
-    } catch {
-      return { response: errorResponse(400, "invalid_payload", "invalid interaction payload") };
-    }
-    const found = await this.findIntegration(in_.api_app_id ?? "", in_.team?.id ?? "");
-    if (!(await this.verify(req, body, found.integration))) {
-      return { response: errorResponse(401, "invalid_signature", "Slack request signature verification failed") };
-    }
-    const ok = new Response(null, { status: 200 });
-    if (found.error || !found.integration || in_.type !== "block_actions" || !in_.actions || in_.actions.length === 0) {
-      return { response: ok };
-    }
-    const act = in_.actions[0]!;
-    if (!act.action_id.startsWith(ACTION_PREFIX)) return { response: ok };
-    let v: ActionValue;
-    try {
-      v = JSON.parse(act.value) as ActionValue;
-    } catch {
-      return { response: ok };
-    }
-    const team = found.integration.team_id;
-    return { response: ok, background: () => this.handleAction(team, in_, v) };
+    return handleIntegrationWebhook<Interaction>(req, {
+      parse: (body) => JSON.parse(new URLSearchParams(body).get("payload") ?? "") as Interaction,
+      invalidPayload: "invalid interaction payload",
+      select: (in_) => this.findIntegration(in_.api_app_id ?? "", in_.team?.id ?? ""),
+      verify: (r, body, _in, found) => this.verify(r, body, found.integration),
+      unauthorized: SIGNATURE_FAILED,
+      accept: (in_, found) => {
+        const ok = new Response(null, { status: 200 });
+        if (
+          found.error ||
+          !found.integration ||
+          in_.type !== "block_actions" ||
+          !in_.actions ||
+          in_.actions.length === 0
+        ) {
+          return { response: ok };
+        }
+        const act = in_.actions[0]!;
+        if (!act.action_id.startsWith(ACTION_PREFIX)) return { response: ok };
+        let v: ActionValue;
+        try {
+          v = JSON.parse(act.value) as ActionValue;
+        } catch {
+          return { response: ok };
+        }
+        const team = found.integration.team_id;
+        return { response: ok, background: () => this.handleAction(team, in_, v) };
+      },
+    });
   }
 
   private async respond(url: string, body: Record<string, unknown>): Promise<void> {

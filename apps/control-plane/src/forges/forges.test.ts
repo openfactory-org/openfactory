@@ -17,7 +17,7 @@ import {
   repoOwner,
   selectIntegration,
 } from "./util/select";
-import { GitHubClient, resetGitHubCaches, deriveWebURL } from "./github/client";
+import { GitHubClient, resetGitHubCaches, deriveWebURL, parseInstallationId } from "./github/client";
 import { Normalizer, aliasFromLabels, checkName, isDefinitionPath, normalizeRepo } from "./github/events";
 import { handleGitHubWebhook, type GitHubWebhookDeps } from "./github/webhook";
 import { ForgeResponder, Resolver, forgeFromProvider, integrationProvider } from "./registry";
@@ -259,6 +259,21 @@ describe("GitHubClient", () => {
   beforeEach(async () => {
     resetGitHubCaches();
     if (!pem) pem = (await rsaPKCS1()).pem;
+  });
+
+  it.each([
+    ["", 0],
+    [" 42 ", 42],
+    ["+7", 7],
+  ] as const)("parses installation_id %j", (s, want) => {
+    expect(parseInstallationId(s)).toBe(want);
+  });
+
+  it.each([
+    ["4x2", '"4x2" is not an integer'],
+    ["99999999999999999999", '"99999999999999999999" is out of range'],
+  ] as const)("refuses installation_id %j with a plain message", (s, msg) => {
+    expect(() => parseInstallationId(s)).toThrow(new Error(msg));
   });
 
   it("derives the web URL", () => {
