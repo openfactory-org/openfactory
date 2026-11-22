@@ -14,7 +14,7 @@
 // - hello reconciles the task cache with the tasks the worker holds. Tasks
 //   that were never leased to this worker are ignored (06 correction 20).
 // - capacity.report goes to DispatchDO on every change (lane per worker).
-import { doName, newId } from "@openfactory/core";
+import { doName, newId, partitionOf } from "@openfactory/core";
 import { ProviderError, type SandboxTask, type TaskStatus } from "@openfactory/sandbox";
 import {
   WORKER_SUBPROTOCOL,
@@ -27,11 +27,12 @@ import {
   type WireFrame,
   type WireHello,
 } from "../../../../../packages/sandbox/src/microvm/wire";
-import type { TeamRpc, WorkerHubRpc } from "../../contracts/do-messages";
+import type { Ack, OutboxEnvelope, TeamRpc, WorkerHubRpc } from "../../contracts/do-messages";
 import type { Env } from "../../contracts/env";
 import { BaseDO, type Migration } from "../../lib/base";
 import { b64url, fromAnyB64, fromB64url, randomBytes } from "../../lib/bytes";
 import { dest } from "../../lib/outbox/dest";
+import type { OutboxRow } from "../../lib/outbox/outbox";
 import { isoOf } from "../../lib/page";
 import { all, first } from "../../lib/sql/query";
 import type { WorkerRecord } from "../team/workers";
@@ -51,6 +52,8 @@ export const HANDSHAKE_MS = 10_000;
 export const CALL_TIMEOUT_MS = 60_000;
 export const PING_TEXT = '{"type":"ping"}';
 export const PONG_TEXT = '{"type":"pong"}';
+/** Custom outbox destination: WorkDO.sandboxState of a run. */
+const SANDBOX_STATE_DEST = "sandbox-state:";
 
 /** Settings of the hub; tests may change them. */
 export const hubSettings = {
@@ -249,6 +252,38 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
         generation: gen,
       },
     });
+  }
+
+  /** Outbox row that tells the run's WorkDO that a task exited (WorkDO.sandboxState). Call inside tx. */
+  private notifyExit(s: TaskStatus): void {
+    if (s.state !== "exited") return;
+    let runId: string;
+    let session: number;
+    try {
+      const i = s.taskId.lastIndexOf(".");
+      runId = s.taskId.slice(0, i);
+      session = Number(s.taskId.slice(i + 1));
+      partitionOf(runId);
+    } catch {
+      return; // not a routed run ID: nothing to tell
+    }
+    this.enqueue({
+      dest: `${SANDBOX_STATE_DEST}${runId}`,
+      kind: "sandbox.state",
+      lane: `task:${s.taskId}`,
+      msgId: `${s.taskId}:exited`,
+      payload: { runId, session, status: s },
+    });
+  }
+
+  protected override async deliverCustom(envelope: OutboxEnvelope, row: OutboxRow): Promise<Ack | void> {
+    if (!row.dest.startsWith(SANDBOX_STATE_DEST)) return super.deliverCustom(envelope, row);
+    const p = envelope.payload as unknown as { runId: string; session: number; status: TaskStatus };
+    const work = this.env.WORK.getByName(doName.work(this.teamId(), partitionOf(p.runId))) as unknown as {
+      sandboxState(runId: string, session: number, status: TaskStatus): Promise<{ ok: true }>;
+    };
+    await work.sandboxState(p.runId, p.session, p.status);
+    return { ok: true };
   }
 
   private team(): TeamRpc {
@@ -461,7 +496,9 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
           toDestroy.push(r.task_id);
           continue;
         }
+        const old = this.statusOf(r);
         this.sql.exec("UPDATE hub_tasks SET status = ?, updated_ms = ? WHERE task_id = ?", JSON.stringify(s), now, r.task_id);
+        if (s.state === "exited" && old.state !== "exited") this.notifyExit(s);
       }
       for (const id of held.keys()) {
         if (!this.row(id)) console.warn(`WorkerHubDO ${rec.id}: ignoring task ${id}, not leased to this worker`);
@@ -519,6 +556,7 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
         if (merged === old) return false;
         this.sql.exec("UPDATE hub_tasks SET status = ?, updated_ms = ? WHERE task_id = ?", JSON.stringify(merged), Date.now(), s.taskId);
         if (merged.state === "exited" && old.state !== "exited") {
+          this.notifyExit(merged);
           this.reportCapacity();
           return true;
         }

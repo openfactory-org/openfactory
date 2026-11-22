@@ -363,6 +363,13 @@ describe("slots", () => {
     expect(await rejection(hub(id).taskAssign(task(3)))).toBe("at_capacity");
     w.report({ taskId: task(1).taskId, state: "exited", reason: "completed", exitCode: 0 });
     await eventually("exited", async () => (await hub(id).taskStatus(task(1).taskId)).state === "exited");
+    // The exit goes to the run's WorkDO (sandboxState) through the outbox and is delivered.
+    await eventually("exit delivered to WorkDO", () =>
+      runInDurableObject(hub(id), async (_i, state) => {
+        const n = state.storage.sql.exec("SELECT COUNT(*) AS n FROM outbox WHERE kind = 'sandbox.state'").one().n;
+        return n === 0;
+      }),
+    );
     expect((await hub(id).taskAssign(task(3))).state).toBe("accepted");
     await eventually("slots used", async () => (await workerView(id)).slots_used === 2);
   });

@@ -9,7 +9,7 @@ import { LocalProvider, type DevWorker } from "../../../../../packages/sandbox/s
 import { MicroVMProvider, type WorkerShape } from "../../../../../packages/sandbox/src/microvm/provider";
 import type { TeamRpc } from "../../contracts/do-messages";
 import type { Env } from "../../contracts/env";
-import { registerProvider } from "../dispatch/providers";
+import { registerProvider, setWorkerProviderFactory } from "../dispatch/providers";
 import { isOpError } from "./op";
 import type { WorkerRecord, WorkerStatus } from "../team/workers";
 
@@ -63,3 +63,4 @@ export function workerProvider(env: Env, teamId: string, workerId: string): Sand
 }
 
 registerProvider("local", localProvider);
+setWorkerProviderFactory(workerProvider);
