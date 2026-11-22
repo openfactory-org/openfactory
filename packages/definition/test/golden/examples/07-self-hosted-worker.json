@@ -2,7 +2,7 @@
  "compiled": {
   "schemaVersion": "v1",
   "name": "self-hosted",
-  "description": "Runs every agent on a self-hosted worker inside the company network.",
+  "description": "Runs every agent on a self-hosted microVM worker inside the company network.",
   "credentialStrategy": "EXECUTOR",
   "codeForges": [
    "GITLAB"
@@ -37,12 +37,13 @@
      "type": "claude",
      "model": "claude-opus-5-5",
      "auth": {
-      "source": "workerEnvironment"
+      "source": "managedSecret",
+      "secretName": "ANTHROPIC_API_KEY"
      }
     },
     "machine": {
      "name": "linux-worker",
-     "description": "Linux sandbox image for the self-hosted Kubernetes worker",
+     "description": "Linux sandbox image for the self-hosted microVM worker",
      "setupCommands": [
       "make bootstrap"
      ],
@@ -73,19 +74,20 @@
     "id": "",
     "factory_id": "",
     "name": "implement",
-    "description": "Implements billing changes with Claude Code using worker credentials",
+    "description": "Implements billing changes with Claude Code on the self-hosted worker",
     "type": "IMPLEMENT",
     "instructions": "Implement the change on the branch you are given, run `make test lint`, and\nopen or update a draft merge request with your validation evidence. Use the\n`internal-docs` MCP server for internal API references. Never merge.",
     "harness": {
      "type": "claude",
      "model": "claude-opus-5-5",
      "auth": {
-      "source": "workerEnvironment"
+      "source": "managedSecret",
+      "secretName": "ANTHROPIC_API_KEY"
      }
     },
     "machine": {
      "name": "linux-worker",
-     "description": "Linux sandbox image for the self-hosted Kubernetes worker",
+     "description": "Linux sandbox image for the self-hosted microVM worker",
      "setupCommands": [
       "make bootstrap"
      ],
@@ -116,19 +118,20 @@
     "id": "",
     "factory_id": "",
     "name": "review",
-    "description": "Reviews with Codex using worker credentials",
+    "description": "Reviews with Codex using a managed secret",
     "type": "REVIEW",
     "instructions": "Review the merge request independently: requirements, correctness, tests,\nsecurity and conventions. Re-run the tests. Return a verdict of accept,\nrevise or needs-human-decision with numbered findings. Never approve or merge.",
     "harness": {
      "type": "codex",
      "model": "gpt-5.3-codex",
      "auth": {
-      "source": "workerEnvironment"
+      "source": "managedSecret",
+      "secretName": "OPENAI_API_KEY"
      }
     },
     "machine": {
      "name": "linux-worker",
-     "description": "Linux sandbox image for the self-hosted Kubernetes worker",
+     "description": "Linux sandbox image for the self-hosted microVM worker",
      "setupCommands": [
       "make bootstrap"
      ],
@@ -180,7 +183,7 @@
   "machines": {
    "linux-worker": {
     "name": "linux-worker",
-    "description": "Linux sandbox image for the self-hosted Kubernetes worker",
+    "description": "Linux sandbox image for the self-hosted microVM worker",
     "setupCommands": [
      "make bootstrap"
     ],
@@ -197,7 +200,8 @@
     "type": "claude",
     "model": "claude-opus-5-5",
     "auth": {
-     "source": "workerEnvironment"
+     "source": "managedSecret",
+     "secretName": "ANTHROPIC_API_KEY"
     }
    },
    "secrets": null,

@@ -73,12 +73,10 @@ describe("loadPlugins", () => {
     expect(Object.keys(reg.forgePlugins()).sort()).toEqual(["acme", "acme-forge", "acme_cloud"]);
   });
 
-  it("rejects the stub Workers behind the real service bindings that have no info()", async () => {
+  it("loads the stub plugin Workers behind the real service bindings (vitest.config.ts)", async () => {
     const reg = await loadPlugins(env, { ...quiet, timeoutMs: 2000 });
-    const bound = reg.rejected.map((r) => r.binding).sort();
-    expect(bound).toContain("PLUGIN_GITLAB");
-    expect(bound).toContain("PLUGIN_AZUREDEVOPS");
-    expect(reg.rejected.every((r) => r.reason.startsWith("unreachable"))).toBe(true);
+    expect(reg.rejected).toEqual([]);
+    expect(Object.keys(reg.forgePlugins()).sort()).toEqual(["azure_devops", "azuredevops", "gitlab"]);
   });
 });
 

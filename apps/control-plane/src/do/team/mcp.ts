@@ -14,6 +14,9 @@ import type { Migration } from "../../lib/sql/migrate";
 import { listResponse } from "../../lib/page";
 import { all, first } from "../../lib/sql/query";
 import { noContent, type OpCall, type TeamKit, type TeamOp } from "./index";
+import { MCP_STATE_TYPE, MCP_TOKEN_TYPE } from "../../mcp/envelope";
+import { b64, fromB64 } from "../../lib/bytes";
+import { registerRewrapSource, type RewrapSource } from "./secrets";
 
 export const migrations: readonly Migration[] = [
   {
@@ -331,6 +334,31 @@ export const ops: Record<string, TeamOp> = { ...restOps, ...internalOps };
 
 export function setup(_kit: TeamKit): void {
   registerPreflight("mcp servers", preflightMCPServers);
+  registerRewrapSource(mcpEnvelopes("mcp_oauth_tokens", "server_id", (id) => `mcp-oauth:${id}`, MCP_TOKEN_TYPE));
+  registerRewrapSource(mcpEnvelopes("mcp_oauth_states", "state", (id) => `mcp-oauth-state:${id}`, MCP_STATE_TYPE));
+}
+
+/**
+ * The MCP OAuth token and state envelopes (base64 text, src/mcp/envelope.ts):
+ * the same format as secret envelopes, so POST /secrets/rewrap includes them.
+ */
+function mcpEnvelopes(table: string, keyCol: string, nameOf: (key: string) => string, type: string): RewrapSource {
+  const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
+  return {
+    name: table,
+    list: (k) =>
+      all<{ key: string; envelope: string }>(k.sql, `SELECT ${keyCol} AS key, envelope FROM ${table} WHERE envelope != ''`).map((r) => ({
+        key: r.key,
+        id: { teamId: k.teamId(), factoryId: "", name: nameOf(r.key), type },
+        envelope: fromB64(r.envelope),
+      })),
+    replace: (k, key, old, next) => {
+      const cur = first<{ envelope: string }>(k.sql, `SELECT envelope FROM ${table} WHERE ${keyCol} = ?`, key);
+      if (!cur || !sameBytes(fromB64(cur.envelope), old)) return false;
+      k.sql.exec(`UPDATE ${table} SET envelope = ? WHERE ${keyCol} = ?`, b64(next), key);
+      return true;
+    },
+  };
 }
 
 type ServerMap = Record<string, MCPServer> | undefined;

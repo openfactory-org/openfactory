@@ -1,12 +1,22 @@
 {
   "name": "@openfactory/control-plane",
   "version": "0.0.0",
-  "private": true,
+  "private": false,
   "description": "Open Factory control plane: Worker, Durable Objects, wrangler.jsonc.",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "!src/**/*.test.ts",
+    "wrangler.jsonc",
+    "tsconfig.json",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "test": "vitest run",

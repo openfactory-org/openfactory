@@ -32,6 +32,12 @@
     },
     {
       "path": "../../packages/definition"
+    },
+    {
+      "path": "../../providers/daytona"
+    },
+    {
+      "path": "../../providers/boatdev"
     }
   ]
 }

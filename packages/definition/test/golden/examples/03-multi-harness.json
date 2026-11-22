@@ -33,10 +33,10 @@
     "machine": {
      "name": "linux-large",
      "description": "Larger Linux machine for API builds",
-     "vcpus": 8,
-     "memoryGb": 32,
+     "vcpus": 4,
+     "memoryGb": 8,
      "os": "linux",
-     "arch": "aarch64",
+     "arch": "x86_64",
      "image": "ghcr.io/acme/platform-dev:2026.10",
      "registryCredentialSecretName": "GHCR_PULL_CREDENTIAL"
     },
@@ -119,10 +119,10 @@
     "machine": {
      "name": "linux-large",
      "description": "Larger Linux machine for API builds",
-     "vcpus": 8,
-     "memoryGb": 32,
+     "vcpus": 4,
+     "memoryGb": 8,
      "os": "linux",
-     "arch": "aarch64",
+     "arch": "x86_64",
      "image": "ghcr.io/acme/platform-dev:2026.10",
      "registryCredentialSecretName": "GHCR_PULL_CREDENTIAL"
     },
@@ -203,10 +203,10 @@
     "machine": {
      "name": "linux-large",
      "description": "Larger Linux machine for API builds",
-     "vcpus": 8,
-     "memoryGb": 32,
+     "vcpus": 4,
+     "memoryGb": 8,
      "os": "linux",
-     "arch": "aarch64",
+     "arch": "x86_64",
      "image": "ghcr.io/acme/platform-dev:2026.10",
      "registryCredentialSecretName": "GHCR_PULL_CREDENTIAL"
     },
@@ -287,10 +287,10 @@
     "machine": {
      "name": "linux-large",
      "description": "Larger Linux machine for API builds",
-     "vcpus": 8,
-     "memoryGb": 32,
+     "vcpus": 4,
+     "memoryGb": 8,
      "os": "linux",
-     "arch": "aarch64",
+     "arch": "x86_64",
      "image": "ghcr.io/acme/platform-dev:2026.10",
      "registryCredentialSecretName": "GHCR_PULL_CREDENTIAL"
     },
@@ -358,10 +358,10 @@
    "linux-large": {
     "name": "linux-large",
     "description": "Larger Linux machine for API builds",
-    "vcpus": 8,
-    "memoryGb": 32,
+    "vcpus": 4,
+    "memoryGb": 8,
     "os": "linux",
-    "arch": "aarch64",
+    "arch": "x86_64",
     "image": "ghcr.io/acme/platform-dev:2026.10",
     "registryCredentialSecretName": "GHCR_PULL_CREDENTIAL"
    }

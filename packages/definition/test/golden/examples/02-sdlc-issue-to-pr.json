@@ -2,7 +2,7 @@
  "compiled": {
   "schemaVersion": "v1",
   "name": "sdlc",
-  "description": "Turns labeled issues into reviewed pull requests for the web and iOS apps.",
+  "description": "Turns labeled issues into reviewed pull requests for a web app and its API.",
   "alias": "sdlc",
   "repositories": [
    {
@@ -13,7 +13,7 @@
    {
     "codeForge": "GITHUB",
     "owner": "acme",
-    "name": "ios-app"
+    "name": "api-service"
    }
   ],
   "integrationsSet": false,
@@ -453,9 +453,9 @@
     "id": "",
     "factory_id": "",
     "name": "verify",
-    "description": "Verifies iOS changes on a macOS simulator and records visual evidence",
+    "description": "Verifies UI changes in a headless browser and records visual evidence",
     "type": "VERIFY",
-    "instructions": "You verify changes to the iOS app. The foreman sends you a branch, a pull\nrequest and the acceptance criteria.\n\n1. Check out the branch and build the app for the iPhone simulator.\n2. Run the unit and UI test schemes that cover the change.\n3. Launch the app in the simulator and exercise each acceptance criterion.\n   Capture a screenshot or short recording for every user-visible state.\n4. Report a pass or fail per criterion with the evidence and the exact\n   commands you ran.\n\nNever push commits, approve or merge. Report problems to the foreman instead\nof fixing them.",
+    "instructions": "You verify changes to the web app. The foreman sends you a branch, a pull\nrequest and the acceptance criteria.\n\n1. Check out the branch, install the dependencies and build the app.\n2. Run the unit and end-to-end test suites that cover the change.\n3. Start the app and exercise each acceptance criterion in a headless browser.\n   Capture a screenshot for every user-visible state.\n4. Report a pass or fail per criterion with the evidence and the exact\n   commands you ran.\n\nNever push commits, approve or merge. Report problems to the foreman instead\nof fixing them.",
     "harness": {
      "type": "claude",
      "model": "claude-sonnet-5-5",
@@ -465,17 +465,17 @@
      }
     },
     "machine": {
-     "name": "macos-xcode",
-     "description": "macOS machine with Xcode and simulators for the iOS app",
+     "name": "linux-verify",
+     "description": "Linux machine with a headless browser for UI verification",
      "setupCommands": [
-      "xcodebuild -version",
-      "brew bundle --file=ios-app/Brewfile"
+      "corepack enable",
+      "pnpm install --frozen-lockfile"
      ],
-     "vcpus": 8,
-     "memoryGb": 14,
-     "os": "macos",
-     "arch": "aarch64",
-     "macVersion": "26",
+     "vcpus": 4,
+     "memoryGb": 8,
+     "os": "linux",
+     "arch": "x86_64",
+     "image": "mcr.microsoft.com/playwright:v1.50.0-noble",
      "failureSessionRetentionMinutes": 30
     },
     "secrets": [
@@ -544,7 +544,7 @@
     "name": "issue-intake",
     "enabled": true,
     "agent": "foreman",
-    "prompt": "An issue was labeled `factory-ready`. Take it from intake to a reviewed pull\nrequest. For iOS changes, dispatch the `verify` agent after implementation and\ninclude its evidence in the handoff. Do not merge.",
+    "prompt": "An issue was labeled `factory-ready`. Take it from intake to a reviewed pull\nrequest. For changes to the user interface, dispatch the `verify` agent after implementation and\ninclude its evidence in the handoff. Do not merge.",
     "triggers": [
      {
       "provider": "github",
@@ -555,7 +555,7 @@
        ],
        "repos": [
         "acme/web-app",
-        "acme/ios-app"
+        "acme/api-service"
        ]
       }
      }
@@ -576,7 +576,7 @@
       "filter": {
        "repos": [
         "acme/web-app",
-        "acme/ios-app"
+        "acme/api-service"
        ],
        "review_states": [
         "changes_requested"
@@ -601,18 +601,18 @@
     "arch": "x86_64",
     "image": "node:22-bookworm"
    },
-   "macos-xcode": {
-    "name": "macos-xcode",
-    "description": "macOS machine with Xcode and simulators for the iOS app",
+   "linux-verify": {
+    "name": "linux-verify",
+    "description": "Linux machine with a headless browser for UI verification",
     "setupCommands": [
-     "xcodebuild -version",
-     "brew bundle --file=ios-app/Brewfile"
+     "corepack enable",
+     "pnpm install --frozen-lockfile"
     ],
-    "vcpus": 8,
-    "memoryGb": 14,
-    "os": "macos",
-    "arch": "aarch64",
-    "macVersion": "26",
+    "vcpus": 4,
+    "memoryGb": 8,
+    "os": "linux",
+    "arch": "x86_64",
+    "image": "mcr.microsoft.com/playwright:v1.50.0-noble",
     "failureSessionRetentionMinutes": 30
    }
   },
@@ -790,9 +790,9 @@
   "skills": [
    {
     "name": "repository-conventions",
-    "description": "Coding, testing and pull request conventions shared by the web and iOS repositories. Use before changing code or opening a pull request.",
+    "description": "Coding, testing and pull request conventions shared by the web app and API repositories. Use before changing code or opening a pull request.",
     "path": "skills/repository-conventions/SKILL.md",
-    "content": "---\nname: repository-conventions\ndescription: Coding, testing and pull request conventions shared by the web and iOS repositories. Use before changing code or opening a pull request.\n---\n\n# Repository conventions\n\n- Branches: `factory/\u003cshort-slug\u003e`. One logical change per pull request.\n- Commits: imperative subject under 72 characters, body explains why.\n- Web app (`acme/web-app`): TypeScript strict mode, `pnpm lint`, `pnpm test`,\n  `pnpm build` must pass. Components live in `src/components/\u003cName\u003e/`.\n- iOS app (`acme/ios-app`): Swift 6, `xcodebuild test -scheme App`, SwiftLint\n  clean. Snapshot tests live in `AppTests/Snapshots`.\n- Pull request description sections: Summary, Changes, Validation, Screenshots,\n  Risks.\n- Never commit generated files listed in `.gitignore` or any credentials.\n",
+    "content": "---\nname: repository-conventions\ndescription: Coding, testing and pull request conventions shared by the web app and API repositories. Use before changing code or opening a pull request.\n---\n\n# Repository conventions\n\n- Branches: `factory/\u003cshort-slug\u003e`. One logical change per pull request.\n- Commits: imperative subject under 72 characters, body explains why.\n- Web app (`acme/web-app`): TypeScript strict mode, `pnpm lint`, `pnpm test`,\n  `pnpm build` must pass. Components live in `src/components/\u003cName\u003e/`.\n- API service (`acme/api-service`): TypeScript strict mode, `pnpm lint`,\n  `pnpm test`. Integration tests live in `test/integration/`.\n- Pull request description sections: Summary, Changes, Validation, Screenshots,\n  Risks.\n- Never commit generated files listed in `.gitignore` or any credentials.\n",
     "scope": "factory"
    }
   ]

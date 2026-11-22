@@ -14,6 +14,7 @@ import type { OutboxRow } from "../../lib/outbox/outbox";
 import { listResponse, msOf, pageFrom, sqlPage } from "../../lib/page";
 import type { Migration } from "../../lib/sql/migrate";
 import { first } from "../../lib/sql/query";
+import { pruneIndex, type RetentionRpc } from "../../retention/sweep";
 import m0001 from "./migrations/0001_init";
 
 const MIGRATIONS: readonly Migration[] = [{ version: 1, name: "init", sql: m0001 }];
@@ -37,7 +38,7 @@ interface TeamSub {
   topics: string[];
 }
 
-export class IndexDO extends BaseDO implements IndexRpc {
+export class IndexDO extends BaseDO implements IndexRpc, RetentionRpc {
   readonly live: LiveHub;
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -322,11 +323,11 @@ export class IndexDO extends BaseDO implements IndexRpc {
 
   /**
    * Paged reads of the read model. op:
-   *   runs          factory_id, work_item_id, parent_run_id, root_run_id, creator, state (comma list), source, model
-   *   workItems     factory_id, stage (comma list)
-   *   inbox         user_id (recipient or assignee), factory_id, resolved ("true"/"false"), unread ("true", with user_id)
-   *   scores        factory_id, scorer_id, run_id
-   *   benchmarkRuns factory_id, suite
+   *   runs          factory_id, work_item_id, parent_run_id, root_run_id, creator, state (comma list), source, model, since_ms
+   *   workItems     factory_id, stage (comma list), since_ms
+   *   inbox         user_id (recipient or assignee), factory_id, work_item_id, resolved ("true"/"false"), unread ("true", with user_id), since_ms
+   *   scores        factory_id, scorer_id, run_id, state (comma list), since_ms
+   *   benchmarkRuns factory_id, suite, state (comma list), since_ms
    *   deadLetters
    *   prFacts       pr_key, repo, head_branch
    *   metricEvents  factory_id or work_item_id, since_ms
@@ -353,6 +354,14 @@ export class IndexDO extends BaseDO implements IndexRpc {
         args.push(...vals);
       }
     };
+    /** since_ms: rows created at or after this time (unix ms). */
+    const since = (col = "created_ms") => {
+      const v = Number(q["since_ms"] ?? "");
+      if (q["since_ms"] && Number.isFinite(v)) {
+        where.push(`${col} >= ?`);
+        args.push(v);
+      }
+    };
     const data = (rows: Record<string, SqlStorageValue>[]) => rows.map((r) => JSON.parse(String(r["data"])) as unknown);
     switch (op) {
       case "runs": {
@@ -364,17 +373,20 @@ export class IndexDO extends BaseDO implements IndexRpc {
         eq("source", "source");
         eq("model", "model");
         inList("state", "state");
+        since();
         const r = sqlPage(this.sql, { select: "SELECT id, created_ms, data FROM run_summaries", where, args }, page);
         return listResponse(data(r.rows), r.next);
       }
       case "workItems": {
         eq("factory_id", "factory_id");
         inList("stage", "stage");
+        since();
         const r = sqlPage(this.sql, { select: "SELECT id, created_ms, data FROM work_item_summaries", where, args }, page);
         return listResponse(data(r.rows), r.next);
       }
       case "inbox": {
         eq("factory_id", "factory_id");
+        eq("work_item_id", "work_item_id");
         if (q["resolved"] === "true" || q["resolved"] === "false") {
           where.push("resolved = ?");
           args.push(q["resolved"] === "true" ? 1 : 0);
@@ -388,6 +400,7 @@ export class IndexDO extends BaseDO implements IndexRpc {
           where.push("id NOT IN (SELECT inbox_id FROM inbox_reads WHERE user_id = ?)");
           args.push(user);
         }
+        since();
         const r = sqlPage(this.sql, { select: "SELECT id, created_ms, data FROM inbox", where, args }, page);
         const items = r.rows.map((row) => {
           const it = JSON.parse(String(row["data"])) as J;
@@ -403,12 +416,16 @@ export class IndexDO extends BaseDO implements IndexRpc {
         eq("factory_id", "factory_id");
         eq("scorer_id", "scorer_id");
         eq("run_id", "run_id");
+        inList("state", "state");
+        since();
         const r = sqlPage(this.sql, { select: "SELECT id, created_ms, data FROM scores", where, args }, page);
         return listResponse(data(r.rows), r.next);
       }
       case "benchmarkRuns": {
         eq("factory_id", "factory_id");
         eq("suite", "suite");
+        inList("state", "state");
+        since();
         const r = sqlPage(this.sql, { select: "SELECT id, created_ms, data FROM benchmark_summaries", where, args }, page);
         return listResponse(data(r.rows), r.next);
       }
@@ -500,5 +517,10 @@ export class IndexDO extends BaseDO implements IndexRpc {
       );
       return r ? { originDO: r.origin_do, msgId: r.origin_msg_id } : null;
     });
+  }
+
+  /** One bounded retention step of the read model (retention.sweep job). */
+  async retentionSweep(): Promise<{ more: boolean }> {
+    return this.rpc(() => this.tx(() => ({ more: pruneIndex(this.sql, Date.now()).more })));
   }
 }

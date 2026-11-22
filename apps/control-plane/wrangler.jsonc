@@ -131,11 +131,27 @@
     "OF_LOG_LEVEL": "info",
     "OF_MAX_ORCHESTRATION_DEPTH": "1",
     "OF_MAX_SANDBOXES": "0",
+    "OF_OBJECT_STORE_RETENTION": "0",
+    "OF_CORRECTNESS_MODEL": "",
+    "OF_ANALYSIS_MODEL": "",
+    "OF_IMPROVEMENT_AGENT": "",
+    "OF_CLOUD_ID_ISSUER_URL": "",
+    "OF_OIDC_REDIRECT_URL": "",
+    "OF_OIDC_SCOPES": "",
+    "OF_OIDC_ALLOWED_DOMAINS": "",
+    "OF_OIDC_GROUPS_CLAIM": "",
+    "OF_OIDC_ADMIN_GROUPS": "",
+    "OF_OIDC_EDITOR_GROUPS": "",
+    "OF_OIDC_DEFAULT_ROLE": "",
+    "OF_OIDC_DISPLAY_NAME": "",
+    "OF_DAYTONA_TIER": "3",
+    "OF_DAYTONA_TARGET": "",
   },
 
   // Secrets are set with `wrangler secret put` or `wrangler deploy --secrets-file`.
   // Optional: OF_SECRET_KEY_PREVIOUS, OF_SIGNING_KEY_PREVIOUS (rotation),
-  // OF_OIDC_CLIENT_SECRET, OF_CLOUD_ID_KEY.
+  // OF_OIDC_CLIENT_SECRET, OF_CLOUD_ID_KEY, OF_DAYTONA_API_KEY, OF_BOATDEV_API_KEY
+  // (the daytona and boatdev sandbox providers are available only when their key is set).
   "secrets": {
     "required": ["OF_SECRET_KEY", "OF_SIGNING_KEY", "OF_R2_ACCESS_KEY_ID", "OF_R2_SECRET_ACCESS_KEY"],
   },

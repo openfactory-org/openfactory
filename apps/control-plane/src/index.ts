@@ -13,6 +13,12 @@ import { handleCloudIdRoute } from "./cloudid/routes";
 import { errorResponse, type Handler, type RouteContext } from "./http/handler";
 import { API_PREFIX, Router } from "./http/router";
 import { ROUTES } from "./http/routes";
+import { handleMcpRequest } from "./mcp/index";
+import { handleCompactionJob } from "./compaction/consumer";
+import { handleRetentionJob } from "./retention/consumer";
+import { SCORING_JOB_KINDS, handleScoringJob } from "./scoring/jobs";
+import { teamOfOrigin } from "./notify/index";
+import { bindMcpBackends } from "./wiring";
 
 export { BenchmarkDO } from "./do/benchmark/index";
 export { DispatchDO } from "./do/dispatch/index";
@@ -114,12 +120,57 @@ async function handleServer(request: Request, env: Env, ctx: ExecutionContext, u
   return problemResponse(notImplemented(`${url.pathname} is not implemented yet`), { instance: url.pathname, requestId });
 }
 
+/** The MCP paths: /mcp, /api/v1/mcp/factory, /mcp/proxy/*, /mcp/integrations/*, /.well-known/oauth-*, /oauth/*. */
+function isMcpPath(path: string): boolean {
+  return (
+    path === "/mcp" ||
+    path.startsWith("/mcp/") ||
+    path === API_PREFIX + "/mcp/factory" ||
+    path.startsWith("/.well-known/oauth-") ||
+    path.startsWith("/oauth/")
+  );
+}
+
+const SCORING_KINDS = new Set<string>(SCORING_JOB_KINDS);
+
+/** The team of a job: from the DO name it names, else the default team. */
+function teamOfJob(msg: JobMessage): string {
+  const name = "workDO" in msg ? msg.workDO : "doName" in msg ? msg.doName : "";
+  return teamOfOrigin(name) || DEFAULT_TEAM;
+}
+
+async function handleJob(env: Env, msg: JobMessage): Promise<void> {
+  if (SCORING_KINDS.has(msg.kind)) return handleScoringJob(env, msg, teamOfJob(msg));
+  switch (msg.kind) {
+    case "retention.sweep":
+      return handleRetentionJob(env, msg);
+    case "compaction.run":
+      return handleCompactionJob(env, msg);
+  }
+  console.warn("queue: unknown job kind", (msg as { kind?: string }).kind);
+}
+
+/** Hourly at minute 0: one retention step for the team's TeamDO and IndexDO (each step sends the next). */
+async function scheduleRetention(env: Env, scheduledTime: number): Promise<void> {
+  const d = new Date(scheduledTime);
+  if (d.getUTCMinutes() !== 0) return;
+  const hour = Math.floor(scheduledTime / 3_600_000);
+  const names = [doName.team(DEFAULT_TEAM), doName.index(DEFAULT_TEAM)];
+  await env.JOBS.sendBatch(names.map((n) => ({ body: { kind: "retention.sweep", msgId: `retention:${n}:${hour}`, doName: n } satisfies JobMessage })));
+}
+
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     const url = new URL(request.url);
     const requestId = requestIdOf(request);
     if (url.pathname === "/healthz") return new Response("ok\n");
     if (url.pathname === "/readyz") return new Response("ok\n");
+    // MCP before the REST API: /api/v1/mcp/factory is the Factory MCP alias.
+    if (isMcpPath(url.pathname)) {
+      bindMcpBackends(env);
+      const res = await handleMcpRequest(request, env);
+      if (res) return withRequestId(res, requestId);
+    }
     if (url.pathname === API_PREFIX || url.pathname.startsWith(API_PREFIX + "/")) {
       return handleApi(request, env, ctx, url, requestId);
     }
@@ -127,7 +178,7 @@ export default {
     return env.ASSETS.fetch(request);
   },
 
-  async scheduled(_controller, env, ctx): Promise<void> {
+  async scheduled(controller, env, ctx): Promise<void> {
     // Safety net (1/min): re-arm the alarms of the team's TeamDO and DispatchDO, then owner hooks.
     const jobs: Promise<unknown>[] = [
       env.TEAM.getByName(doName.team(DEFAULT_TEAM)).ensureAlarm(),
@@ -135,14 +186,25 @@ export default {
         Promise.resolve(),
       env.INDEX.getByName(doName.index(DEFAULT_TEAM)).ensureAlarm(),
       ...cronHooksList().map((h) => h(env, ctx)),
+      scheduleRetention(env, controller.scheduledTime),
     ];
     for (const r of await Promise.allSettled(jobs)) {
       if (r.status === "rejected") console.error("cron: safety net step failed", r.reason);
     }
   },
 
-  async queue(batch, _env, _ctx): Promise<void> {
-    // Unordered fan-out jobs (judge results, scoring, retention, compaction). Owner: WS13.
-    for (const msg of batch.messages) msg.ack();
+  async queue(batch, env, _ctx): Promise<void> {
+    // Unordered fan-out jobs (judge results, scoring, retention, compaction). Every handler is idempotent.
+    await Promise.all(
+      batch.messages.map(async (msg) => {
+        try {
+          await handleJob(env, msg.body);
+          msg.ack();
+        } catch (e) {
+          console.error("queue: job failed", msg.body.kind, msg.body.msgId, e);
+          msg.retry({ delaySeconds: Math.min(300, 2 ** Math.min(msg.attempts, 8)) });
+        }
+      }),
+    );
   },
 } satisfies ExportedHandler<Env, JobMessage>;

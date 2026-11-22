@@ -4,6 +4,7 @@
 // src/do/team/integrations.ts), secretsGet (WS4, src/do/team/secrets.ts),
 // userForgeTokenGet (this workstream, src/do/team/schedules.ts).
 import { doName, type Integration } from "@openfactory/core";
+import type { ForgePlugin } from "@openfactory/plugin-api";
 import type { CallMeta } from "../contracts/do-messages";
 import type { Env } from "../contracts/env";
 import { Resolver, type IntegrationSource, type SecretSource, type UserTokenSource } from "./registry";
@@ -52,6 +53,21 @@ export function teamUserTokens(env: Env): UserTokenSource {
   };
 }
 
+/**
+ * Forge plugins by name: every PLUGIN_<NAME> service binding of env (the
+ * bundled gitlab and azuredevops, and any plugin an extended build binds).
+ * The name is the binding suffix in lower case.
+ */
+export function forgePluginBindings(env: Env): Record<string, ForgePlugin> {
+  const out: Record<string, ForgePlugin> = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (k.startsWith("PLUGIN_") && v !== null && (typeof v === "object" || typeof v === "function")) {
+      out[k.slice("PLUGIN_".length).toLowerCase()] = v as ForgePlugin;
+    }
+  }
+  return out;
+}
+
 let cached: { env: Env; resolver: Resolver } | undefined;
 
 /** The forge Resolver of this isolate for env (clients and tokens cached per isolate). */
@@ -61,7 +77,7 @@ export function resolverFor(env: Env): Resolver {
     integrations: teamIntegrations(env),
     secrets: teamSecrets(env),
     userTokens: teamUserTokens(env),
-    plugins: { gitlab: env.PLUGIN_GITLAB, azuredevops: env.PLUGIN_AZUREDEVOPS },
+    plugins: forgePluginBindings(env),
   });
   cached = { env, resolver };
   return resolver;

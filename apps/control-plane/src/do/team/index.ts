@@ -28,6 +28,7 @@ import { ROUTES } from "../../http/routes";
 import type { RouteRole } from "../../http/handler";
 import { isFactoryScoped, requireRole } from "../../auth/roles";
 import { BaseDO, type MessageHandler } from "../../lib/base";
+import { pruneAttachments, retentionMs, type RetentionRpc } from "../../retention/sweep";
 import { LiveHub, isUpgrade } from "../../lib/live/index";
 import type { EnqueueInput } from "../../lib/outbox/outbox";
 import type { Migration } from "../../lib/sql/migrate";
@@ -37,6 +38,7 @@ import * as factories from "./factories";
 import * as integrations from "./integrations";
 import * as mcp from "./mcp";
 import * as schedules from "./schedules";
+import * as scoring from "./scoring";
 import * as secrets from "./secrets";
 import * as settings from "./settings";
 import * as workers from "./workers";
@@ -123,7 +125,7 @@ export function isOpError(v: unknown): v is OpError {
 
 export const QUERY_PREFIX = "?";
 
-const MODULES: Record<string, TeamModule> = { auth, secrets, factories, settings, workers, integrations, schedules, mcp };
+const MODULES: Record<string, TeamModule> = { auth, secrets, factories, settings, workers, integrations, schedules, mcp, scoring };
 
 function allMigrations(): Migration[] {
   const list = Object.entries(MODULES).flatMap(([name, m]) =>
@@ -150,9 +152,15 @@ function allOps(): Map<string, TeamOp> {
 }
 
 const ROUTE_BY_OP = new Map(ROUTES.map((r) => [r.operationId, r]));
-const OPS = allOps();
+// Computed on first use: the modules import ./index, so a module-level call
+// could run while one of them is still initializing (import cycle).
+let opsCache: Map<string, TeamOp> | undefined;
+function opsMap(): Map<string, TeamOp> {
+  opsCache ??= allOps();
+  return opsCache;
+}
 
-export class TeamDO extends BaseDO implements TeamRpc {
+export class TeamDO extends BaseDO implements TeamRpc, RetentionRpc {
   readonly live: LiveHub;
   private readonly kit: TeamKit;
 
@@ -220,7 +228,7 @@ export class TeamDO extends BaseDO implements TeamRpc {
    */
   async api(meta: CallMeta, op: string, params: Record<string, string>, body: unknown): Promise<unknown> {
     try {
-      const fn = OPS.get(op);
+      const fn = opsMap().get(op);
       if (!fn) throw notImplemented(`${op} is not implemented yet`);
       const route = ROUTE_BY_OP.get(op);
       const role: RouteRole | "" = route?.role ?? "";
@@ -312,6 +320,23 @@ export class TeamDO extends BaseDO implements TeamRpc {
 
   workersRevoke(meta: CallMeta, workerId: string): Promise<unknown> {
     return this.rpc(() => workers.workersRevoke(this.kit, meta, workerId));
+  }
+
+  /**
+   * One retention step (retention.sweep job): deletes uploaded attachments in
+   * R2 older than OF_OBJECT_STORE_RETENTION, one list page per call. The list
+   * cursor is kept between steps.
+   */
+  async retentionSweep(): Promise<{ more: boolean }> {
+    return this.rpc(async () => {
+      const keep = retentionMs(this.env);
+      if (keep <= 0) return { more: false };
+      const cursor = await this.ctx.storage.get<string>("retention:attachments-cursor");
+      const out = await pruneAttachments(this.env.DATA, Date.now(), keep, cursor);
+      if (out.more && out.cursor) await this.ctx.storage.put("retention:attachments-cursor", out.cursor);
+      else await this.ctx.storage.delete("retention:attachments-cursor");
+      return { more: out.more };
+    });
   }
 
   /** POST /secrets/rewrap: rewraps every envelope under the current key. */
