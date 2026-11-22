@@ -18,7 +18,6 @@ github.com/openfactory-org/openfactory/internal/machine/mmds
 github.com/openfactory-org/openfactory/internal/machine/snapshot
 github.com/openfactory-org/openfactory/internal/machine/store
 github.com/openfactory-org/openfactory/internal/machine/vm
-github.com/openfactory-org/openfactory/internal/machine/vminit
 github.com/openfactory-org/openfactory/internal/machine/vmnet
 github.com/openfactory-org/openfactory/internal/naming
 github.com/openfactory-org/openfactory/internal/redact
@@ -28,6 +27,7 @@ github.com/openfactory-org/openfactory/internal/runner/runnertest
 github.com/openfactory-org/openfactory/internal/runnerclient
 github.com/openfactory-org/openfactory/internal/runnerproto
 github.com/openfactory-org/openfactory/internal/sandbox/direct
+github.com/openfactory-org/openfactory/internal/sandbox/direct/directtest
 github.com/openfactory-org/openfactory/internal/sandbox/internal/ws
 github.com/openfactory-org/openfactory/internal/sandbox/netguard
 github.com/openfactory-org/openfactory/internal/sandbox/netlock

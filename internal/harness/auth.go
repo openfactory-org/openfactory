@@ -11,26 +11,14 @@ import (
 
 // Credential map keys accepted in HarnessRequest.Auth (in addition to env-var names).
 //
-// The planner (engine.Planner) resolves an agent's harness.auth into req.Auth. Two shapes are accepted:
+// The control plane resolves an agent's harness.auth into req.Auth. Two shapes are accepted:
 //
-//  1. Env-var shaped: {"ANTHROPIC_API_KEY": "..."}, {"AWS_BEARER_TOKEN_BEDROCK": "...", "AWS_REGION": "..."},
-//     {"AWS_ACCESS_KEY_ID": ..., "AWS_SECRET_ACCESS_KEY": ..., "AWS_SESSION_TOKEN": ..., "AWS_REGION": ...},
-//     {"OPENAI_API_KEY": "..."}.
+//  1. Env-var shaped: {"ANTHROPIC_API_KEY": "..."}, {"CLAUDE_CODE_OAUTH_TOKEN": "..."}, {"OPENAI_API_KEY": "..."}.
 //  2. Typed secret: {"type": "<rtcore.SecretType>", "value": "<secret value>"} where value is either the raw key
-//     or a JSON object. Bedrock JSON fields: apiKey|api_key|token, accessKeyId|access_key_id,
-//     secretAccessKey|secret_access_key, sessionToken|session_token, region. "region" may also be a
-//     sibling key of "type"/"value".
+//     or a JSON object with the field apiKey|api_key|key.
 const (
-	AuthKeyType   = "type"
-	AuthKeyValue  = "value"
-	AuthKeyRegion = "region"
-)
-
-// The Bedrock secret types. The runtime still maps them while the Go control
-// plane accepts them; they go away with it.
-const (
-	SecretBedrockKey    rtcore.SecretType = "anthropic_bedrock_api_key"    //nolint:gosec // G101: a secret type name, not a credential
-	SecretBedrockAccess rtcore.SecretType = "anthropic_bedrock_access_key" //nolint:gosec // G101: a secret type name, not a credential
+	AuthKeyType  = "type"
+	AuthKeyValue = "value"
 )
 
 // ErrAuthMismatch is returned when the credential type is not usable by the harness.
@@ -39,22 +27,16 @@ var ErrAuthMismatch = errors.New("credential type not supported by harness")
 // ClaudeAuthEnv maps credentials for Claude Code:
 //   - Anthropic API key        -> ANTHROPIC_API_KEY
 //   - Claude Code OAuth token  -> CLAUDE_CODE_OAUTH_TOKEN (made with `claude setup-token`)
-//   - Bedrock API key          -> AWS_BEARER_TOKEN_BEDROCK, AWS_REGION, CLAUDE_CODE_USE_BEDROCK=1
-//   - Bedrock access key       -> AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY[, AWS_SESSION_TOKEN], AWS_REGION, CLAUDE_CODE_USE_BEDROCK=1
 func ClaudeAuthEnv(auth map[string]string) (map[string]string, error) {
 	env := map[string]string{}
 	if len(auth) == 0 {
 		return env, nil
 	}
-	region := firstNonEmpty(auth["AWS_REGION"], auth[AuthKeyRegion], auth["AWS_DEFAULT_REGION"])
-	copyIf(env, auth, "ANTHROPIC_BASE_URL", "ANTHROPIC_SMALL_FAST_MODEL", "ANTHROPIC_BEDROCK_BASE_URL")
+	copyIf(env, auth, "ANTHROPIC_BASE_URL", "ANTHROPIC_SMALL_FAST_MODEL")
 
 	if typ := auth[AuthKeyType]; typ != "" {
 		val := auth[AuthKeyValue]
 		fields := parseSecretJSON(val)
-		if r := pick(fields, "region", "aws_region", "awsRegion"); r != "" {
-			region = r
-		}
 		switch rtcore.SecretType(typ) {
 		case rtcore.SecretAnthropicKey:
 			key := firstNonEmpty(pick(fields, "apiKey", "api_key", "key"), rawIfNotJSON(val, fields))
@@ -70,17 +52,8 @@ func ClaudeAuthEnv(auth map[string]string) (map[string]string, error) {
 			}
 			env["CLAUDE_CODE_OAUTH_TOKEN"] = tok
 			return env, nil
-		case SecretBedrockKey:
-			tok := firstNonEmpty(pick(fields, "apiKey", "api_key", "token", "bearerToken"), rawIfNotJSON(val, fields))
-			return bedrockEnv(env, map[string]string{"AWS_BEARER_TOKEN_BEDROCK": tok}, region)
-		case SecretBedrockAccess:
-			return bedrockEnv(env, map[string]string{
-				"AWS_ACCESS_KEY_ID":     pick(fields, "accessKeyId", "access_key_id", "aws_access_key_id"),
-				"AWS_SECRET_ACCESS_KEY": pick(fields, "secretAccessKey", "secret_access_key", "aws_secret_access_key"),
-				"AWS_SESSION_TOKEN":     pick(fields, "sessionToken", "session_token", "aws_session_token"),
-			}, region)
 		default:
-			return nil, fmt.Errorf("%w: claude accepts anthropic_api_key, anthropic_oauth_token, anthropic_bedrock_api_key or anthropic_bedrock_access_key, got %q", ErrAuthMismatch, typ)
+			return nil, fmt.Errorf("%w: claude accepts anthropic_api_key or anthropic_oauth_token, got %q", ErrAuthMismatch, typ)
 		}
 	}
 
@@ -94,37 +67,9 @@ func ClaudeAuthEnv(auth map[string]string) (map[string]string, error) {
 	case auth["CLAUDE_CODE_OAUTH_TOKEN"] != "":
 		env["CLAUDE_CODE_OAUTH_TOKEN"] = auth["CLAUDE_CODE_OAUTH_TOKEN"]
 		return env, nil
-	case auth["AWS_BEARER_TOKEN_BEDROCK"] != "":
-		return bedrockEnv(env, map[string]string{"AWS_BEARER_TOKEN_BEDROCK": auth["AWS_BEARER_TOKEN_BEDROCK"]}, region)
-	case auth["AWS_ACCESS_KEY_ID"] != "":
-		return bedrockEnv(env, map[string]string{
-			"AWS_ACCESS_KEY_ID":     auth["AWS_ACCESS_KEY_ID"],
-			"AWS_SECRET_ACCESS_KEY": auth["AWS_SECRET_ACCESS_KEY"],
-			"AWS_SESSION_TOKEN":     auth["AWS_SESSION_TOKEN"],
-		}, region)
 	case auth["OPENAI_API_KEY"] != "" || auth["CODEX_API_KEY"] != "":
 		return nil, fmt.Errorf("%w: claude cannot use an OpenAI API key", ErrAuthMismatch)
 	}
-	return env, nil
-}
-
-func bedrockEnv(env, creds map[string]string, region string) (map[string]string, error) {
-	if tok, ok := creds["AWS_BEARER_TOKEN_BEDROCK"]; ok && tok == "" {
-		return nil, errors.New("bedrock API key is empty")
-	}
-	if _, ok := creds["AWS_ACCESS_KEY_ID"]; ok && (creds["AWS_ACCESS_KEY_ID"] == "" || creds["AWS_SECRET_ACCESS_KEY"] == "") {
-		return nil, errors.New("bedrock access key requires an access key id and secret access key")
-	}
-	if region == "" {
-		return nil, errors.New("bedrock credentials require an AWS region")
-	}
-	for k, v := range creds {
-		if v != "" {
-			env[k] = v
-		}
-	}
-	env["AWS_REGION"] = region
-	env["CLAUDE_CODE_USE_BEDROCK"] = "1"
 	return env, nil
 }
 
@@ -148,8 +93,8 @@ func CodexAuthEnv(auth map[string]string) (map[string]string, error) {
 		}
 	} else {
 		key = firstNonEmpty(auth["CODEX_API_KEY"], auth["OPENAI_API_KEY"])
-		if key == "" && (auth["ANTHROPIC_API_KEY"] != "" || auth["AWS_BEARER_TOKEN_BEDROCK"] != "" || auth["AWS_ACCESS_KEY_ID"] != "") {
-			return nil, fmt.Errorf("%w: codex cannot use Anthropic or Bedrock credentials", ErrAuthMismatch)
+		if key == "" && (auth["ANTHROPIC_API_KEY"] != "" || auth["CLAUDE_CODE_OAUTH_TOKEN"] != "") {
+			return nil, fmt.Errorf("%w: codex cannot use Anthropic credentials", ErrAuthMismatch)
 		}
 	}
 	if key != "" {

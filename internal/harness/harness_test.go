@@ -53,15 +53,7 @@ func TestClaudeAuthEnv(t *testing.T) {
 		{"typed oauth token", map[string]string{"type": "anthropic_oauth_token", "value": " tok "}, map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "tok"}, false},
 		{"oauth token env", map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "tok"}, map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "tok"}, false},
 		{"empty oauth token", map[string]string{"type": "anthropic_oauth_token", "value": ""}, nil, true},
-		{"bedrock api key", map[string]string{"type": "anthropic_bedrock_api_key", "value": `{"apiKey":"b","region":"us-west-2"}`},
-			map[string]string{"AWS_BEARER_TOKEN_BEDROCK": "b", "AWS_REGION": "us-west-2", "CLAUDE_CODE_USE_BEDROCK": "1"}, false},
-		{"bedrock api key raw", map[string]string{"type": "anthropic_bedrock_api_key", "value": "b", "region": "eu-west-1"},
-			map[string]string{"AWS_BEARER_TOKEN_BEDROCK": "b", "AWS_REGION": "eu-west-1", "CLAUDE_CODE_USE_BEDROCK": "1"}, false},
-		{"bedrock access key", map[string]string{"type": "anthropic_bedrock_access_key", "value": `{"accessKeyId":"A","secretAccessKey":"S","region":"us-east-1"}`},
-			map[string]string{"AWS_ACCESS_KEY_ID": "A", "AWS_SECRET_ACCESS_KEY": "S", "AWS_REGION": "us-east-1", "CLAUDE_CODE_USE_BEDROCK": "1"}, false},
-		{"bedrock env", map[string]string{"AWS_ACCESS_KEY_ID": "A", "AWS_SECRET_ACCESS_KEY": "S", "AWS_SESSION_TOKEN": "T", "AWS_REGION": "r"},
-			map[string]string{"AWS_ACCESS_KEY_ID": "A", "AWS_SECRET_ACCESS_KEY": "S", "AWS_SESSION_TOKEN": "T", "AWS_REGION": "r", "CLAUDE_CODE_USE_BEDROCK": "1"}, false},
-		{"bedrock missing region", map[string]string{"AWS_BEARER_TOKEN_BEDROCK": "b"}, nil, true},
+		{"unknown type rejected", map[string]string{"type": "generic", "value": "b"}, nil, true},
 		{"openai rejected", map[string]string{"type": "openai_api_key", "value": "sk"}, nil, true},
 	}
 	for _, tt := range tests {
@@ -92,35 +84,6 @@ func TestCodexAuthEnv(t *testing.T) {
 	}
 	if _, err := harness.CodexAuthEnv(map[string]string{"type": "anthropic_api_key", "value": "k"}); !errors.Is(err, harness.ErrAuthMismatch) {
 		t.Fatalf("err = %v", err)
-	}
-}
-
-func TestModelsAndReasoning(t *testing.T) {
-	if harness.DefaultModel("claude-code") != "claude-opus-5-5" || harness.DefaultModel(rtcore.HarnessCodex) == "" || harness.DefaultModel("open") != "" {
-		t.Fatal("defaults")
-	}
-	if err := harness.ValidateReasoningLevel(rtcore.HarnessCodex, "xhigh"); err != nil {
-		t.Fatal(err)
-	}
-	if err := harness.ValidateReasoningLevel(rtcore.HarnessClaude, "minimal"); err == nil {
-		t.Fatal("claude has no minimal")
-	}
-	if err := harness.ValidateReasoningLevel("open", "high"); err == nil {
-		t.Fatal("an unknown harness rejects reasoningLevel")
-	}
-}
-
-func TestHarnessForModel(t *testing.T) {
-	for model, want := range map[string]rtcore.HarnessType{
-		"claude-opus-5-5": rtcore.HarnessClaude, "Claude-Sonnet-4-6": rtcore.HarnessClaude, "sonnet": rtcore.HarnessClaude,
-		"anthropic.claude-haiku-4-5": rtcore.HarnessClaude,
-		"gpt-5":                      rtcore.HarnessCodex, "gpt-5.3-codex": rtcore.HarnessCodex, "o3": rtcore.HarnessCodex, "o4-mini": rtcore.HarnessCodex,
-		"codex-mini-latest": rtcore.HarnessCodex,
-		"auto":              "", "gemini-2.5-pro": "", "": "", "custom:llama": "", "opus-like": "",
-	} {
-		if got := harness.HarnessForModel(model); got != want {
-			t.Errorf("HarnessForModel(%q) = %q, want %q", model, got, want)
-		}
 	}
 }
 

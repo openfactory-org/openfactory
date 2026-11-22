@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 )
 
 // The help text of every command must not show the value of an environment
@@ -17,7 +16,8 @@ func TestHelpDoesNotShowSecretValues(t *testing.T) {
 	const secret = "of_SENTINEL_secret_value_9f3a"
 	for _, name := range []string{
 		"OF_API_KEY", "OF_SERVER", "OF_SECRET_KEY", "OF_SIGNING_KEY", "OF_DATABASE_URL",
-		"OF_OIDC_CLIENT_SECRET", "OF_BOOTSTRAP_TOKEN",
+		"OF_OIDC_CLIENT_SECRET", "OF_BOOTSTRAP_TOKEN", "OF_RUNNER_TOKEN",
+		"OF_ENROLLMENT_TOKEN",
 	} {
 		t.Setenv(name, secret)
 	}
@@ -52,8 +52,8 @@ func TestGlobalFlagsReadEnvironment(t *testing.T) {
 	if err := root.ParseFlags(nil); err != nil {
 		t.Fatal(err)
 	}
-	// newRootCmd keeps its globals private, so check through a client command.
-	sub, _, err := root.Find([]string{"secret", "list"})
+	// newRootCmd keeps its globals private, so check through a subcommand.
+	sub, _, err := root.Find([]string{"worker", "status"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestGlobalFlagsReadEnvironment(t *testing.T) {
 	if f := root.PersistentFlags().Lookup("api-key"); f.DefValue != "" || f.Value.String() != "key-from-env" {
 		t.Errorf("api-key: default %q, value %q", f.DefValue, f.Value.String())
 	}
-	if f := root.PersistentFlags().Lookup("server"); f.DefValue != "http://localhost:8080" || f.Value.String() != "http://env.test" {
+	if f := root.PersistentFlags().Lookup("server"); f.DefValue != "http://localhost:8787" || f.Value.String() != "http://env.test" {
 		t.Errorf("server: default %q, value %q", f.DefValue, f.Value.String())
 	}
 	if err := root.PersistentFlags().Parse([]string{"--api-key", "key-from-flag"}); err != nil {
@@ -80,7 +80,6 @@ func TestGlobalFlagsReadEnvironment(t *testing.T) {
 	}
 }
 
-// A server setting has no flag. serve has only --config.
 // Every command that the root help names in parentheses exists.
 func TestRootHelpNamesExistingCommands(t *testing.T) {
 	root := newRootCmd()
@@ -94,14 +93,6 @@ func TestRootHelpNamesExistingCommands(t *testing.T) {
 	}
 }
 
-func TestServeHasOnlyConfigFlag(t *testing.T) {
-	var names []string
-	newServeCmd().Flags().VisitAll(func(f *pflag.Flag) { names = append(names, f.Name) })
-	if len(names) != 1 || names[0] != "config" {
-		t.Errorf("serve flags = %v, want only config", names)
-	}
-}
-
 // Each worker flag has an environment variable.
 func TestWorkerFlagsReadEnvironment(t *testing.T) {
 	t.Setenv("OF_WORKER_ID", "w-1")
@@ -110,11 +101,10 @@ func TestWorkerFlagsReadEnvironment(t *testing.T) {
 	t.Setenv("OF_WORKER_LABELS", "region=eu, pool=gpu")
 	t.Setenv("OF_WORKER_ONE_SHOT", "true")
 	t.Setenv("OF_METRICS_ADDR", ":9090")
-	t.Setenv("OF_SANDBOX_BACKEND", "kubernetes")
 	f := newWorkerCmd(&globals{}).Flags()
 	for name, want := range map[string]string{
 		"id": "w-1", "name": "Worker one", "capacity": "4", "label": "[region=eu,pool=gpu]",
-		"one-shot": "true", "metrics-addr": ":9090", "backend": "kubernetes",
+		"one-shot": "true", "metrics-addr": ":9090",
 	} {
 		if got := f.Lookup(name).Value.String(); got != want {
 			t.Errorf("--%s = %q, want %q", name, got, want)

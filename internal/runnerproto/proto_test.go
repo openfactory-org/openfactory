@@ -200,8 +200,8 @@ func TestGitCredentialFromContractJSON(t *testing.T) {
 
 func TestCloudTokenFromContractJSON(t *testing.T) {
 	var req CloudTokenRequest
-	strictDecode(t, `{"audience": "sts.amazonaws.com", "ttl_seconds": 3600}`, &req)
-	if req.Audience != "sts.amazonaws.com" || req.TTLSeconds != 3600 {
+	strictDecode(t, `{"audience": "//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/p/providers/of", "ttl_seconds": 3600}`, &req)
+	if req.Audience != "//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/p/providers/of" || req.TTLSeconds != 3600 {
 		t.Errorf("request = %+v", req)
 	}
 	var resp CloudTokenResponse

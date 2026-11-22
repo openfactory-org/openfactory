@@ -17,10 +17,10 @@ const backendLocal = "local"
 
 func newWorkerCmd(g *globals) *cobra.Command {
 	var (
-		backend, id, name, metricsAddr, keyFile string
-		oneShot, process                        bool
-		capacity                                int
-		labels                                  []string
+		id, name, metricsAddr, keyFile string
+		oneShot, process               bool
+		capacity                       int
+		labels                         []string
 	)
 	cmd := &cobra.Command{
 		Use:   "worker",
@@ -72,15 +72,11 @@ Example:
 				}
 				lbls[k] = v
 			}
-			backend = strings.ToLower(strings.TrimSpace(backend))
-			if process {
-				backend = backendLocal
-			}
-			if backend != backendLocal {
-				return fmt.Errorf("unknown --backend %q (want local, or use --process)", backend)
+			if !process {
+				return errors.New("pass --process to run the dev process worker, or use a subcommand (enroll, run, status, drain, doctor)")
 			}
 			return runWorkerV2(cmd.Context(), g, workerV2Flags{
-				backend: backend, id: id, name: name, metricsAddr: metricsAddr, keyFile: keyFile,
+				backend: backendLocal, id: id, name: name, metricsAddr: metricsAddr, keyFile: keyFile,
 				oneShot: oneShot, capacity: capacity, labels: lbls,
 			})
 		},
@@ -88,7 +84,6 @@ Example:
 	host, _ := os.Hostname()
 	f := cmd.Flags()
 	f.BoolVar(&process, "process", false, "run each session as a runner process on this host (development and tests only)")
-	f.StringVar(&backend, "backend", envOr("OF_SANDBOX_BACKEND", backendLocal), "sandbox backend: local (the same as --process) (env OF_SANDBOX_BACKEND)")
 	f.StringVar(&id, "id", envOr("OF_WORKER_ID", sanitizeID(host)), "worker id agents reference as workerHost (env OF_WORKER_ID)")
 	f.StringVar(&name, "name", os.Getenv("OF_WORKER_NAME"), "display name (env OF_WORKER_NAME; default: the id)")
 	f.IntVar(&capacity, "capacity", envInt("OF_WORKER_CAPACITY"), "maximum concurrent sandboxes, 0 = unlimited (env OF_WORKER_CAPACITY)")
@@ -96,7 +91,6 @@ Example:
 	f.BoolVar(&oneShot, "one-shot", envBool("OF_WORKER_ONE_SHOT"), "take exactly one sandbox and exit when it exited; the exit code is 0 only for the reason completed (env OF_WORKER_ONE_SHOT)")
 	f.StringVar(&metricsAddr, "metrics-addr", os.Getenv("OF_METRICS_ADDR"), "serve worker Prometheus metrics on this address, e.g. :9090 (env OF_METRICS_ADDR; default off)")
 	f.StringVar(&keyFile, "key-file", os.Getenv("OF_WORKER_KEY_FILE"), "Ed25519 private key file of an enrolled worker, for the challenge of the control plane (env OF_WORKER_KEY_FILE)")
-	cmd.AddCommand(newWorkerListCmd(g))
 	cmd.AddCommand(newWorkerHostCmds(g)...)
 	return cmd
 }

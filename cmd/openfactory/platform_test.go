@@ -2,8 +2,6 @@ package main
 
 import (
 	"bytes"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -19,30 +17,23 @@ func runCLI(t *testing.T, args ...string) (stdout, stderr string, err error) {
 	return out.String(), errb.String(), err
 }
 
-func TestInitWritesV1(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "acme")
-	if _, _, err := runCLI(t, "init", dir, "--repo", "acme/app"); err != nil {
-		t.Fatal(err)
-	}
-	b, err := os.ReadFile(filepath.Join(dir, "factory.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(b), "schemaVersion: v1\n") {
-		t.Fatalf("init did not write schemaVersion v1:\n%s", b)
-	}
-	if _, stderr, err := runCLI(t, "validate", dir); err != nil || strings.Contains(stderr, "warning") {
-		t.Fatalf("validate v1: %v %q", err, stderr)
-	}
-}
-
-func TestWorkerRejectsUnknownBackends(t *testing.T) {
-	for _, tc := range []struct{ backend, want string }{
-		{"docker", "unknown --backend"},
-		{"vm", "unknown --backend"},
+// Only the process backend is left: the worker without a subcommand needs
+// --process, and the old --backend flag is gone.
+func TestWorkerNeedsProcess(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"no process", []string{"worker", "--api-key", "k", "--id", "w1"}, "--process"},
+		{"backend flag", []string{"worker", "--api-key", "k", "--id", "w1", "--backend", "docker"}, "unknown flag: --backend"},
+		{"no key", []string{"worker", "--process", "--id", "w1"}, "--api-key"},
+		{"reserved id", []string{"worker", "--process", "--api-key", "k", "--id", "server"}, "reserved"},
 	} {
-		t.Run(tc.backend, func(t *testing.T) {
-			_, _, err := runCLI(t, "worker", "--api-key", "k", "--id", "w1", "--backend", tc.backend)
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("OF_API_KEY", "")
+			t.Setenv("OF_WORKER_KEY_FILE", "")
+			_, _, err := runCLI(t, tc.args...)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("error %v, want %q", err, tc.want)
 			}

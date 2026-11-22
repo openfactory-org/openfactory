@@ -13,7 +13,7 @@ import (
 func CredentialSecretTypes(h rtcore.HarnessType) []rtcore.SecretType {
 	switch NormalizeType(string(h)) {
 	case rtcore.HarnessClaude:
-		return []rtcore.SecretType{rtcore.SecretAnthropicKey, rtcore.SecretAnthropicOAuth, SecretBedrockKey, SecretBedrockAccess}
+		return []rtcore.SecretType{rtcore.SecretAnthropicKey, rtcore.SecretAnthropicOAuth}
 	case rtcore.HarnessCodex:
 		return []rtcore.SecretType{rtcore.SecretOpenAIKey}
 	}
@@ -29,9 +29,8 @@ func AcceptsCredentialType(h rtcore.HarnessType, typ rtcore.SecretType) bool {
 // credentialEnvNames are the environment variables that hold a model
 // credential for each harness CLI.
 var credentialEnvNames = map[rtcore.HarnessType][]string{
-	rtcore.HarnessClaude: {"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN",
-		"AWS_BEARER_TOKEN_BEDROCK", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"},
-	rtcore.HarnessCodex: {"OPENAI_API_KEY", "CODEX_API_KEY"},
+	rtcore.HarnessClaude: {"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_VERTEX"},
+	rtcore.HarnessCodex:  {"OPENAI_API_KEY", "CODEX_API_KEY"},
 }
 
 // HasCredentialEnv reports whether env already holds a model credential for

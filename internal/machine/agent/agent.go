@@ -166,12 +166,16 @@ func Run(ctx context.Context, o Options) error {
 	go every(ctx, time.Hour, prune)
 
 	facts := hostcheck.Facts(ctx, host, cfg, o.Version)
+	features := []string{FeatureGitCache}
+	if cfg.Snapshots {
+		features = append(features, FeatureSnapshotRestore)
+	}
 	err = direct.RunWorkerV2(ctx, direct.WorkerV2Options{
 		ServerURL: strings.TrimRight(cfg.ControlURL, "/"),
 		WorkerID:  id.WorkerID, Key: id.Key, Name: cfg.Name, Labels: cfg.Labels,
 		Capacity: cfg.Slots, Slots: cfg.Slots,
 		Slot:    &direct.SlotSize{VCPUs: cfg.Slot.VCPUs, MemoryMiB: cfg.Slot.MemoryMiB, ScratchGiB: cfg.Slot.ScratchGiB},
-		Backend: be, Version: o.Version, Facts: &facts,
+		Backend: be, Version: o.Version, Facts: &facts, Features: features,
 		OnWelcome: func(w direct.Welcome) {
 			tok.set(w.AccessToken)
 			status.welcome(w)
@@ -194,6 +198,15 @@ func readFile(p string) string {
 	data, _ := os.ReadFile(p) //nolint:gosec // G304: fixed system path
 	return string(data)
 }
+
+// Features that the microVM worker announces in hello.
+const (
+	// FeatureGitCache: the worker keeps a git mirror cache and takes the
+	// git_cache extras of task.assign.
+	FeatureGitCache = "git_cache"
+	// FeatureSnapshotRestore: the worker boots VMs from a template snapshot.
+	FeatureSnapshotRestore = "snapshot_restore"
+)
 
 // NetConfig builds the VM network configuration.
 func NetConfig(cfg config.Config, resolvConf string) vmnet.Config {

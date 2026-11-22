@@ -17,7 +17,7 @@ import (
 )
 
 // newNetguardCmd returns the command that runs the egress proxy of a task.
-// The Kubernetes backend runs it as a sidecar of a restricted task Pod.
+// The runner of a restricted sandbox and the microVM worker host start it.
 func newNetguardCmd() *cobra.Command {
 	var (
 		listen       string
@@ -32,8 +32,10 @@ func newNetguardCmd() *cobra.Command {
 		Short: "Run the egress proxy that enforces a network policy",
 		Long: `Run an HTTP forward proxy (plain HTTP and CONNECT tunnels) that enforces
 one network policy. A request to a host that the policy does not allow gets a
-403 answer. The Kubernetes backend runs one proxy as a sidecar of each
-restricted sandbox Pod, with the policy of that sandbox.
+403 answer. A sandbox with a restricted policy runs one proxy, with the
+policy of that sandbox; the in-sandbox lock lets only the proxy reach the
+network. On a microVM worker host the proxy of each VM listens on the tap
+address of the VM.
 
 The proxy never dials a private, loopback, link-local, carrier-grade NAT,
 cloud metadata or other reserved address, even when the policy allows the host

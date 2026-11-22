@@ -32,7 +32,7 @@ type WorkerV2Options struct {
 	Labels   map[string]string
 	// Capacity limits tasks that are not exited (0 means no limit).
 	Capacity int
-	// Backend runs the tasks: tasklocal, or k8stask.
+	// Backend runs the tasks: tasklocal (dev worker) or the microVM backend.
 	Backend rtcore.TaskBackend
 	Version string
 	// OneShot makes the worker take exactly one task and return when it exited.
@@ -69,6 +69,9 @@ type WorkerV2Options struct {
 	// Slots and Slot describe the slots of a microVM worker.
 	Slots int
 	Slot  *SlotSize
+	// Features lists the optional features that the worker announces in
+	// hello, for example "git_cache" and "snapshot_restore".
+	Features []string
 }
 
 var (
@@ -565,7 +568,7 @@ func (w *workerV2) hello(ctx context.Context) HelloV2 {
 	return HelloV2{
 		WorkerID: w.opts.WorkerID, Name: w.opts.Name, Backend: w.opts.Backend.Name(), Labels: w.opts.Labels,
 		Capacity: w.opts.Capacity, Version: w.opts.Version, OneShot: w.opts.OneShot, Tasks: tasks,
-		ProtocolMinor: ProtocolMinorV2, Facts: w.opts.Facts, Slots: w.opts.Slots, Slot: w.opts.Slot,
+		ProtocolMinor: ProtocolMinorV2, Features: w.opts.Features, Facts: w.opts.Facts, Slots: w.opts.Slots, Slot: w.opts.Slot,
 		Draining: draining,
 	}
 }

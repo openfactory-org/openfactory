@@ -4,22 +4,16 @@ import (
 	"context"
 	"io"
 	"net"
-	"net/http"
-	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/openfactory-org/openfactory/internal/core"
 	"github.com/openfactory-org/openfactory/internal/machine/ctlstream"
 	"github.com/openfactory-org/openfactory/internal/machine/vm"
 	"github.com/openfactory-org/openfactory/internal/rtcore"
 	"github.com/openfactory-org/openfactory/internal/sandbox/direct"
+	"github.com/openfactory-org/openfactory/internal/sandbox/direct/directtest"
 )
-
-type hubStore struct{ core.Store }
-
-func (hubStore) UpsertWorker(context.Context, *core.Worker) error { return nil }
 
 // cutProxy forwards TCP to a target and can cut every live connection.
 type cutProxy struct {
@@ -80,24 +74,12 @@ func eventually(t *testing.T, what string, ok func() bool) {
 
 // The microVM backend behind the worker protocol client: a task keeps
 // running while the connection is down, ends while disconnected, and the
-// reconnect restores its final status in the hub (the port of
-// TestV2ReconnectRestoresStatuses).
+// reconnect restores its final status in the hub (the fake hub of
+// directtest).
 func TestV2ReconnectRestoresStatuses(t *testing.T) {
 	e := newEnv(t, nil)
-	hub := direct.NewHub(hubStore{}, direct.HubOptions{
-		HeartbeatInterval: 100 * time.Millisecond,
-		Authenticate: func(_ context.Context, token string) (string, string, error) {
-			if token == "test-key" {
-				return "team_1", "usr_1", nil
-			}
-			return "", "", core.ErrUnauthorized
-		},
-	})
-	mux := http.NewServeMux()
-	hub.Register(mux)
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-	proxy := newCutProxy(t, srv.Listener.Addr().String())
+	hub := directtest.New(t, directtest.Options{APIKey: "test-key", HeartbeatMS: 100})
+	proxy := newCutProxy(t, hub.Addr())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() {
@@ -106,33 +88,32 @@ func TestV2ReconnectRestoresStatuses(t *testing.T) {
 			Capacity: 2, Slots: 2, Backend: e.b, MinBackoff: 20 * time.Millisecond, MaxBackoff: 50 * time.Millisecond,
 		})
 	}()
-	hb := hub.WorkerBackend("build-01")
-	eventually(t, "connect", func() bool { return hub.Connected("build-01") })
+	eventually(t, "connect", hub.Connected)
 
 	task := testTask(1)
-	st, err := hb.Start(context.Background(), task)
+	st, err := hub.Assign(context.Background(), task, nil)
 	if err != nil || st.State != rtcore.TaskAccepted {
-		t.Fatalf("start = %+v, %v", st, err)
+		t.Fatalf("assign = %+v, %v", st, err)
 	}
 	eventually(t, "running in the hub", func() bool {
-		s, err := hb.Status(context.Background(), task.TaskID)
-		return err == nil && s.State == rtcore.TaskRunning
+		s, ok := hub.Status(task.TaskID)
+		return ok && s.State == rtcore.TaskRunning
 	})
 
 	// Cut the connection; the VM ends while the worker is offline.
 	proxy.cut()
-	eventually(t, "disconnect", func() bool { return !hub.Connected("build-01") })
-	if s, err := hb.Status(context.Background(), task.TaskID); err != nil || s.State != rtcore.TaskRunning {
-		t.Fatalf("status while disconnected = %+v, %v", s, err)
+	eventually(t, "disconnect", func() bool { return !hub.Connected() })
+	if s, ok := hub.Status(task.TaskID); !ok || s.State != rtcore.TaskRunning {
+		t.Fatalf("status while disconnected = %+v, %v", s, ok)
 	}
 	code := 3
 	e.vmm.vm(vm.VMID(0, task.TaskID)).end(vm.Exit{Report: &ctlstream.Frame{Phase: ctlstream.ExitPhaseRunner, ExitCode: &code}})
 
 	eventually(t, "restored status", func() bool {
-		s, err := hb.Status(context.Background(), task.TaskID)
-		return err == nil && s.State == rtcore.TaskExited && s.Reason == rtcore.SandboxProcessFailed
+		s, ok := hub.Status(task.TaskID)
+		return ok && hub.Connections() >= 2 && s.State == rtcore.TaskExited && s.Reason == rtcore.SandboxProcessFailed
 	})
-	if err := hb.Destroy(context.Background(), task.TaskID); err != nil {
+	if err := hub.Destroy(context.Background(), task.TaskID); err != nil {
 		t.Fatal(err)
 	}
 	eventually(t, "destroyed on the worker", func() bool {

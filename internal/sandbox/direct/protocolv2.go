@@ -181,20 +181,6 @@ type statusBody struct {
 	Status rtcore.TaskStatus `json:"status"`
 }
 
-// toErrorV2 maps a wire error of version 2 onto sentinel errors.
-func (e *rpcError) toErrorV2() error {
-	switch e.Code {
-	case codeNotFound:
-		return fmt.Errorf("%s: %w", e.Message, rtcore.ErrNotFound)
-	case codeInvalidSpec:
-		return fmt.Errorf("%s: %w", e.Message, rtcore.ErrInvalid)
-	case codeAtCapacity:
-		return fmt.Errorf("%s: %w", e.Message, rtcore.ErrAtCapacity)
-	default:
-		return errors.New(e.Message)
-	}
-}
-
 // errorForV2 maps a backend error onto a wire error of version 2.
 func errorForV2(err error) *rpcError {
 	code := codeInternal

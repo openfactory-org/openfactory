@@ -14,7 +14,7 @@ import (
 func TestDropDefaultAuth(t *testing.T) {
 	// The process environment of the test must hold no credential.
 	for _, k := range []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN",
-		"AWS_BEARER_TOKEN_BEDROCK", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "OPENAI_API_KEY", "CODEX_API_KEY"} {
+		"CLAUDE_CODE_USE_VERTEX", "OPENAI_API_KEY", "CODEX_API_KEY"} {
 		t.Setenv(k, "")
 	}
 	auth := map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "tok-fake"}
@@ -28,7 +28,7 @@ func TestDropDefaultAuth(t *testing.T) {
 		{name: "no credential in the environment", harness: "claude", wantKept: true},
 		{name: "environment variable", harness: "claude", env: map[string]string{"ANTHROPIC_API_KEY": "sk-fake"}},
 		{name: "agent secret", harness: "claude", secretEnv: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "tok-other"}},
-		{name: "bedrock switch", harness: "claude", env: map[string]string{"CLAUDE_CODE_USE_BEDROCK": "1"}},
+		{name: "vertex switch", harness: "claude", env: map[string]string{"CLAUDE_CODE_USE_VERTEX": "1"}},
 		{name: "credential of another harness", harness: "claude", env: map[string]string{"OPENAI_API_KEY": "sk-fake"}, wantKept: true},
 		{name: "codex key", harness: "codex", env: map[string]string{"OPENAI_API_KEY": "sk-fake"}},
 	}

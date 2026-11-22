@@ -12,17 +12,26 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-// Validator validates values against the schema files of one directory.
+// Validator validates values against the schema files of one directory. It
+// is safe for concurrent use: fake servers validate from their handlers.
 type Validator struct {
 	t   testing.TB
 	dir string
+	mu  sync.Mutex // guards c: the compiler is not safe for concurrent use
 	c   *jsonschema.Compiler
+}
+
+func (v *Validator) compile(ref string) (*jsonschema.Schema, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.c.Compile(v.url(ref))
 }
 
 // New loads every *.json file of dir.
@@ -60,7 +69,7 @@ func URL(dir, file string) string {
 // pointer such as "session.json#/$defs/StartRequest".
 func (v *Validator) Validate(ref string, value any) error {
 	v.t.Helper()
-	sch, err := v.c.Compile(v.url(ref))
+	sch, err := v.compile(ref)
 	if err != nil {
 		v.t.Fatalf("compile %s: %v", ref, err)
 	}
@@ -78,7 +87,7 @@ func (v *Validator) Validate(ref string, value any) error {
 // ValidateJSON validates raw JSON against ref.
 func (v *Validator) ValidateJSON(ref string, data []byte) error {
 	v.t.Helper()
-	sch, err := v.c.Compile(v.url(ref))
+	sch, err := v.compile(ref)
 	if err != nil {
 		v.t.Fatalf("compile %s: %v", ref, err)
 	}

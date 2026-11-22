@@ -1,5 +1,5 @@
 // Package ws is a small, dependency-free RFC 6455 WebSocket implementation used by
-// the Kubernetes exec client and the direct worker protocol.
+// the direct worker protocol.
 //
 // It supports client dialing through a regular *http.Client (so TLS client
 // certificates, custom CAs and proxies configured on the transport keep working),

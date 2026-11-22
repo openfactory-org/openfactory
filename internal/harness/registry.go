@@ -4,8 +4,8 @@
 // and process streaming.
 //
 // Every harness runs inside a rtcore.Sandbox and only touches it through
-// Sandbox.Start/Exec/WriteFile/ReadFile, so the same adapter works for local,
-// docker, kubernetes and remote (direct) sandboxes.
+// Sandbox.Start/Exec/WriteFile/ReadFile, so the same adapter works in every
+// sandbox provider, in a microVM and on a dev worker.
 package harness
 
 import (

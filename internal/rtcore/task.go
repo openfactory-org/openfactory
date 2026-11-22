@@ -67,16 +67,6 @@ const (
 	TaskEnvBootstrapToken = "OF_BOOTSTRAP_TOKEN" //nolint:gosec // G101: an environment variable name, not a credential
 )
 
-// TaskImage is an image that holds a harness CLI.
-//
-// Deprecated: the sandbox image carries the harness CLIs. TaskImage,
-// Task.RunnerImage and Task.ToolImages stay only until the Go control plane
-// is deleted; the runtime ignores them.
-type TaskImage struct {
-	Name  string `json:"name"`
-	Image string `json:"image"`
-}
-
 // TaskPlatform is the platform that the sandbox must have.
 type TaskPlatform struct {
 	OS   string `json:"os"`
@@ -107,8 +97,6 @@ type Task struct {
 	TeamID                  string             `json:"team_id"`
 	FactoryID               string             `json:"factory_id,omitempty"`
 	Image                   string             `json:"image"`
-	RunnerImage             string             `json:"runner_image,omitempty"`
-	ToolImages              []TaskImage        `json:"tool_images,omitempty"`
 	Platform                TaskPlatform       `json:"platform"`
 	Resources               TaskResources      `json:"resources"`
 	Env                     map[string]string  `json:"env"`
@@ -229,9 +217,6 @@ func (t Task) Validate() error {
 // replaced by "***". The receiver does not change. Use the copy for logs.
 func (t Task) Redacted() Task {
 	c := t
-	if t.ToolImages != nil {
-		c.ToolImages = append([]TaskImage(nil), t.ToolImages...)
-	}
 	if t.Env != nil {
 		c.Env = make(map[string]string, len(t.Env))
 		for k, v := range t.Env {

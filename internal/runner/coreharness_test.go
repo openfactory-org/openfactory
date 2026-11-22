@@ -257,7 +257,7 @@ func TestCoreHarnessErrors(t *testing.T) {
 		{"no end", []rtcore.HarnessEvent{{Kind: "message", Content: "hi"}}, nil, "agent_failed", "harness exited without completing the turn"},
 		{"nothing", nil, nil, "agent_failed", "harness exited without completing the turn"},
 		{"start error", nil, errors.New("prepare sandbox: disk full"), "agent_failed", "prepare sandbox: disk full"},
-		{"start auth error", nil, errors.New("harness auth: cloud credentials require an AWS region"), "harness_auth_failed", "harness auth: cloud credentials require an AWS region"},
+		{"start auth error", nil, errors.New("harness auth: cloud credentials require a project"), "harness_auth_failed", "harness auth: cloud credentials require a project"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -3,13 +3,12 @@
 // needed on the worker host. A worker runs the tasks that the control plane
 // assigns, and the runner in each task talks to the control plane directly.
 //
-// Server side, Hub accepts worker connections at GET /api/v1/workers/connect
-// (authenticated with a team API key as a bearer token), records workers and
-// their heartbeats through rtcore.Store.UpsertWorker, and gives the dispatcher
-// one rtcore.TaskBackend for each worker ID (HubBackend). Worker side,
-// RunWorkerV2 connects (reconnecting with exponential backoff), registers its
-// id/name/labels/capacity/backend and runs tasks with a local
-// rtcore.TaskBackend (kubernetes, or local for development).
+// The hub is part of the control plane (WorkerHubDO in apps/control-plane).
+// It accepts worker connections at GET /api/v1/workers/connect. This package
+// is the worker side: RunWorkerV2 connects (reconnecting with exponential
+// backoff), registers its id/name/labels/capacity/backend and runs tasks with
+// a local rtcore.TaskBackend (the process backend of the dev worker, or the
+// microVM backend).
 //
 // There is one wire protocol, version 2 (WebSocket subprotocol
 // "openfactory.worker.v2"). protocolv2.go describes it. Version 1, which
@@ -35,6 +34,8 @@ const (
 	// plane routes the connection by it; hello and auth.response must name
 	// the same ID.
 	HeaderWorkerID = "OF-Worker-ID"
+	// closePolicy is the WebSocket close code for a refused connection.
+	closePolicy = 1008
 	// pingFrame is the liveness frame of an enrolled worker. The hub answers
 	// {"type":"pong"}.
 	pingFrame = `{"type":"ping"}`
@@ -113,9 +114,10 @@ type Heartbeat struct {
 
 var workerIDRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
-// ReservedWorkerIDs cannot be used by remote workers: they name built-in
-// backends.
-var ReservedWorkerIDs = []string{"server", "local", "kubernetes", "direct", "managed"}
+// ReservedWorkerIDs cannot be used by remote workers: they name the team
+// default (server), built-in hosts and the sandbox providers, which are also
+// workerHost values.
+var ReservedWorkerIDs = []string{"server", "local", "direct", "managed", "cloudflare-sandbox", "daytona", "boatdev"}
 
 // ValidateWorkerID checks a worker id: 1–64 characters of letters, digits,
 // ".", "_" and "-", starting with a letter or digit; ids that name built-in
