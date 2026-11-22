@@ -26,8 +26,9 @@
     "gen:protos": "node tools/gen/schema-types.mjs schemas/runner/v1 packages/runner-proto/src/generated && node tools/gen/schema-types.mjs schemas/worker/v2 packages/worker-proto/src/generated",
     "gen:schemas": "npm run gen:schemas -w @openfactory/definition --if-present",
     "gen:docs": "npm run docs-gen -w @openfactory/definition --if-present",
+    "gen:skills": "node packages/core/scripts/gen-skills.mjs",
     "gen:cf-types": "npm run cf-types --workspaces --if-present",
-    "gen": "npm run gen:api && npm run gen:protos && npm run gen:schemas && npm run gen:docs && npm run gen:cf-types",
+    "gen": "npm run gen:api && npm run gen:protos && npm run gen:schemas && npm run gen:docs && npm run gen:skills && npm run gen:cf-types",
     "gen:check": "npm run gen && node tools/gen/check-clean.mjs",
     "build": "npm run build --workspaces --if-present",
     "validate-examples": "node apps/cli/dist/index.js validate examples/*/",
@@ -35,6 +36,7 @@
     "contract:go": "node tools/contract/run.mjs --target go --binary bin/openfactory-go-final",
     "dev": "wrangler dev -c apps/control-plane/wrangler.jsonc",
     "check:ownership": "node tools/check-ownership.mjs",
+    "check:ledger": "node tools/test-ledger-check.mjs",
     "ci": "npm run format:check && npm run lint && npm run typecheck && npm run gen:check && npm run test && npm run build && npm run validate-examples && npm run contract"
   },
   "devDependencies": {
@@ -45,6 +47,7 @@
     "@modelcontextprotocol/sdk": "1.32.2",
     "@noble/curves": "2.4.0",
     "@types/node": "24.19.2",
+    "esbuild": "0.28.2",
     "eslint": "10.15.0",
     "jose": "6.2.18",
     "json-schema-to-typescript": "16.0.0",

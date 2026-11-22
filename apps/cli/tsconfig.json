@@ -6,13 +6,16 @@
     "tsBuildInfoFile": "dist/types/.tsbuildinfo",
     "types": ["node"]
   },
-  "include": ["src", "test"],
+  "include": ["src", "test", "package.json"],
   "references": [
     {
       "path": "../../packages/core"
     },
     {
       "path": "../../packages/api-client"
+    },
+    {
+      "path": "../../packages/definition"
     }
   ]
 }

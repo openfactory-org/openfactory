@@ -12,7 +12,12 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "build": "node scripts/build.mjs",
     "test": "vitest run",
     "typecheck": "tsc -b"
-  }
+  },
+  "files": [
+    "dist/index.js",
+    "dist/index.js.map"
+  ]
 }
