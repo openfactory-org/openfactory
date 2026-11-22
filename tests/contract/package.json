@@ -10,6 +10,8 @@
   },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "contract:worker": "node ../../tools/contract/run.mjs --target worker",
+    "contract:go": "node ../../tools/contract/run.mjs --target go --binary bin/openfactory-go-final"
   }
 }

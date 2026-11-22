@@ -1,0 +1,8 @@
+# Factory of the managed definition check.
+schemaVersion: v1
+name: of-local-def
+alias: of-local-def
+description: Managed definition check.
+repositories: []
+agentDefaults:
+  model: claude-sonnet-5-5

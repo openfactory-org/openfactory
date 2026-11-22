@@ -1,0 +1,9 @@
+# Definition of the git-sourced factory check. It lives in the test
+# repository, in the directory of-local-definition on the main branch.
+schemaVersion: v1
+name: of-local-gh-def
+alias: of-local-gh-def
+description: Git-sourced definition check.
+repositories: []
+agentDefaults:
+  model: claude-sonnet-5-5
