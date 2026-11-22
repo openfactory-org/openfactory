@@ -77,6 +77,23 @@ export function requireRole(p: Principal | undefined | null, factoryId: string, 
   return p;
 }
 
+/**
+ * The check of an owner DO for a call from a REST route: the principal must
+ * belong to the team of the DO and have at least `min` on the factory of the
+ * resource ("" checks the team role). Internal calls (integrations, the
+ * runner, timers) carry no principal and pass.
+ */
+export function authorizeInTeam(
+  p: Principal | undefined | null,
+  teamId: string,
+  factoryId: string,
+  min: RouteRole,
+): void {
+  if (!p) return;
+  if (p.teamId && p.teamId !== teamId) throw new OfError("not_authorized", "resource belongs to another team");
+  requireRole(p, factoryId, min);
+}
+
 // ---------- actions (extension point for custom authorizers) ----------
 
 export type ActionCategory = "read" | "operate" | "write" | "admin";

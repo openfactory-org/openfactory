@@ -6,6 +6,7 @@ import type { CoreEvent } from "../../contracts/do-messages";
 import type { Env } from "../../contracts/env";
 import { normalizeProvider } from "../../engine/intake";
 import type { ForgeResolver } from "../../forges/forge";
+import { splitRepo } from "../../forges/util/text";
 
 export type OnboardingReason = "unlinked" | "non_member";
 
@@ -96,8 +97,8 @@ export async function postOnboardingNotice(
   if (await env.DATA.head(key)) return false;
   const body = onboardingComment(ev.actor.handle || ev.actor.external_id, reason, env.OF_PUBLIC_URL ?? "");
   const f = await forges.forge({ teamId, factoryId, codeForge: "GITHUB", repo: src.repo });
-  const i = src.repo.indexOf("/");
-  await f.comment(src.repo.slice(0, i), src.repo.slice(i + 1), src.number, body);
+  const [owner, name] = splitRepo(src.repo);
+  await f.comment(owner, name, src.number, body);
   await env.DATA.put(key, new Date().toISOString());
   return true;
 }

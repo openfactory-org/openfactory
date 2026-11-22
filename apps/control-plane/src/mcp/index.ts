@@ -20,7 +20,7 @@ import { serveProxy } from "./registry/proxy";
 import { INTEGRATION_PATH_PREFIX, PROXY_PATH_PREFIX } from "./registry/store";
 import { authErrorResponse, defaultRunBackend, runError, runToken, type McpRunBackend } from "./run";
 import { mcpRuntime } from "./runtime";
-import { defaultFactoryBackend, type FactoryMcpBackend } from "./server/backend";
+import { defaultFactoryBackend, withExecutionCtx, type FactoryMcpBackend } from "./server/backend";
 import { FACTORY_MCP_INSTRUCTIONS, FACTORY_TOOLS, type FactoryCtx } from "./server/tools";
 
 export { verifyFactoryMcpToken } from "./auth/handlers";
@@ -35,23 +35,41 @@ export interface McpBackends {
   factory: FactoryMcpBackend;
 }
 
-const backends: McpBackends = {
+const DEFAULT_BACKENDS: McpBackends = {
   run: defaultRunBackend,
   integrations: unavailableIntegrations,
   factory: defaultFactoryBackend,
 };
 
-/** Replaces backends (wiring of the integration clients; fakes in tests). */
-export function setMcpBackends(b: Partial<McpBackends>): void {
-  Object.assign(backends, b);
+/** Backends for an env. Registered once at module load (wiring.ts); called per request. */
+export type McpBackendResolver = (env: Env) => Partial<McpBackends>;
+
+let resolver: McpBackendResolver | undefined;
+let overrides: Partial<McpBackends> = {};
+
+/**
+ * Sets the per-env backend resolver. Each request resolves its own backends
+ * from its env, so concurrent requests with different envs do not share them.
+ * Returns the previous resolver.
+ */
+export function setMcpBackendResolver(r: McpBackendResolver | undefined): McpBackendResolver | undefined {
+  const prev = resolver;
+  resolver = r;
+  return prev;
 }
 
+/** Replaces backends for every env (fakes in tests). They win over the resolver. */
+export function setMcpBackends(b: Partial<McpBackends>): void {
+  overrides = { ...overrides, ...b };
+}
+
+/** Removes the backends of setMcpBackends. */
 export function resetMcpBackends(): void {
-  Object.assign(backends, {
-    run: defaultRunBackend,
-    integrations: unavailableIntegrations,
-    factory: defaultFactoryBackend,
-  });
+  overrides = {};
+}
+
+function backendsFor(env: Env): McpBackends {
+  return { ...DEFAULT_BACKENDS, ...resolver?.(env), ...overrides };
 }
 
 const FACTORY_SERVER: McpServer<FactoryCtx> = {
@@ -90,13 +108,19 @@ async function factoryPrincipal(request: Request, env: Env): Promise<Principal |
   }
 }
 
-async function serveFactory(request: Request, env: Env, path: string): Promise<Response> {
+async function serveFactory(
+  request: Request,
+  env: Env,
+  path: string,
+  backends: McpBackends,
+  executionCtx: ExecutionContext | undefined,
+): Promise<Response> {
   const p = await factoryPrincipal(request, env);
   if (typeof p === "string") return unauthorized(env, path, p);
   const ctx: FactoryCtx = {
     env,
     principal: p,
-    backend: backends.factory,
+    backend: withExecutionCtx(backends.factory, executionCtx),
     publicURL: (env.OF_PUBLIC_URL ?? "").replace(/\/+$/, ""),
   };
   return serveMcp(request, FACTORY_SERVER, ctx);
@@ -112,6 +136,7 @@ function twoSegments(rest: string): [string, string] | null {
 async function serveRunEndpoint(
   request: Request,
   env: Env,
+  backends: McpBackends,
   kind: "proxy" | "integration",
   a: string,
   b: string,
@@ -143,21 +168,26 @@ async function serveRunEndpoint(
  * Serves the MCP paths of the control plane, or returns null when the path is
  * not one of them (so the caller tries the next handler).
  */
-export async function handleMcpRequest(request: Request, env: Env): Promise<Response | null> {
+export async function handleMcpRequest(
+  request: Request,
+  env: Env,
+  executionCtx?: ExecutionContext,
+): Promise<Response | null> {
   const url = new URL(request.url);
   const path = url.pathname;
   try {
-    if (path === FACTORY_MCP_PATH || path === FACTORY_MCP_ALIAS_PATH) return await serveFactory(request, env, path);
+    if (path === FACTORY_MCP_PATH || path === FACTORY_MCP_ALIAS_PATH)
+      return await serveFactory(request, env, path, backendsFor(env), executionCtx);
     if (path.startsWith(PROXY_PATH_PREFIX)) {
       const seg = twoSegments(path.slice(PROXY_PATH_PREFIX.length));
       return seg
-        ? await serveRunEndpoint(request, env, "proxy", seg[0], seg[1])
+        ? await serveRunEndpoint(request, env, backendsFor(env), "proxy", seg[0], seg[1])
         : runError(404, "not_found", "not found");
     }
     if (path.startsWith(INTEGRATION_PATH_PREFIX)) {
       const seg = twoSegments(path.slice(INTEGRATION_PATH_PREFIX.length));
       return seg
-        ? await serveRunEndpoint(request, env, "integration", seg[0], seg[1])
+        ? await serveRunEndpoint(request, env, backendsFor(env), "integration", seg[0], seg[1])
         : runError(404, "not_found", "not found");
     }
     if (path.startsWith("/.well-known/oauth-") || path.startsWith("/oauth/"))

@@ -2,13 +2,17 @@ package agent
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/openfactory-org/openfactory/internal/machine/cache"
 	"github.com/openfactory-org/openfactory/internal/machine/config"
+	"github.com/openfactory-org/openfactory/internal/machine/image"
+	"github.com/openfactory-org/openfactory/internal/machine/snapshot"
 	"github.com/openfactory-org/openfactory/internal/machine/store"
 	"github.com/openfactory-org/openfactory/internal/machine/vmnet"
 	"github.com/openfactory-org/openfactory/internal/rtcore"
@@ -95,5 +99,39 @@ func TestOfflineStatus(t *testing.T) {
 	c.DataDir = t.TempDir()
 	if _, err := OfflineStatus(c); err == nil {
 		t.Fatal("not enrolled")
+	}
+}
+
+// pruneDisk removes the snapshot templates of images that are no longer cached.
+func TestPruneDiskSnapshots(t *testing.T) {
+	c := config.Default()
+	c.DataDir = t.TempDir()
+	c.Disk.ImagesMaxGiB, c.Disk.GitcacheMaxGiB = 100, 100
+	images := &image.Store{Dir: c.DataDir}
+	digest := "sha256:" + strings.Repeat("a", 64)
+	dir := images.DigestDir(digest)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(dir, "rootfs.ext4"), []byte("ext4"), 0o444)
+	_ = os.WriteFile(filepath.Join(dir, "meta.json"), []byte(`{"digest":"`+digest+`"}`), 0o644)
+	snaps := &snapshot.Manager{Dir: filepath.Join(c.DataDir, "snapshots")}
+	for _, k := range []string{"key-" + digest, "key-sha256:gone"} {
+		if err := os.MkdirAll(filepath.Join(snaps.Dir, k), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var tools string
+	snapKey := func(img image.Image, t string) string { tools = t; return "key-" + img.Digest }
+	gc := &cache.Cache{Dir: filepath.Join(c.DataDir, "gitcache")}
+	pruneDisk(c, images, gc, snaps, snapKey, "1.2.3", "amd64", func(string) bool { return false }, slog.Default())
+	if _, err := os.Stat(filepath.Join(snaps.Dir, "key-"+digest)); err != nil {
+		t.Fatal("pruned the template of a cached image")
+	}
+	if _, err := os.Stat(filepath.Join(snaps.Dir, "key-sha256:gone")); err == nil {
+		t.Fatal("kept the template of an image that is gone")
+	}
+	if !strings.HasSuffix(tools, "tools/1.2.3-amd64/tools.ext4") {
+		t.Fatalf("tools path %q", tools)
 	}
 }

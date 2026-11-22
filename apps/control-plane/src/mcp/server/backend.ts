@@ -45,8 +45,19 @@ export interface WorkItemPatch {
 }
 
 export interface FactoryMcpBackend {
-  /** Calls a REST operation (path below /api/v1) as p. Returns the JSON body; throws OfError on 4xx/5xx. */
-  api<T = unknown>(env: Env, p: Principal, method: string, path: string, body?: unknown): Promise<T>;
+  /**
+   * Calls a REST operation (path below /api/v1) as p. Returns the JSON body;
+   * throws OfError on 4xx/5xx. executionCtx is the MCP request's context:
+   * background work of the route (waitUntil) runs on it.
+   */
+  api<T = unknown>(
+    env: Env,
+    p: Principal,
+    method: string,
+    path: string,
+    body?: unknown,
+    executionCtx?: ExecutionContext,
+  ): Promise<T>;
   /** api.ValidateFiles: compiles a definition tree without saving it. */
   validateFiles(env: Env, files: Record<string, string>): Promise<unknown>;
   /** Sets local_owner, labels and appends a timeline event of a work item. */
@@ -63,8 +74,38 @@ export interface FactoryMcpBackend {
 
 const router = new Router(ROUTES);
 
+/**
+ * The context passed to a route handler. With the request's context, waitUntil
+ * goes to it. Without one, the promises are collected and awaited before
+ * callRoute returns, so background work is never dropped.
+ */
+function routeCtx(executionCtx: ExecutionContext | undefined): { ctx: ExecutionContext; settle: () => Promise<void> } {
+  if (executionCtx) return { ctx: executionCtx, settle: async () => undefined };
+  const pending: Promise<unknown>[] = [];
+  const ctx = {
+    waitUntil: (pr: Promise<unknown>) => void pending.push(pr),
+    passThroughOnException: () => undefined,
+    props: {},
+  } as unknown as ExecutionContext;
+  const settle = async () => {
+    while (pending.length > 0) {
+      for (const r of await Promise.allSettled(pending.splice(0))) {
+        if (r.status === "rejected") console.error("mcp: background work of a route failed", r.reason);
+      }
+    }
+  };
+  return { ctx, settle };
+}
+
 /** Calls a route handler in process with a pre-authenticated principal. */
-export async function callRoute<T>(env: Env, p: Principal, method: string, path: string, body?: unknown): Promise<T> {
+export async function callRoute<T>(
+  env: Env,
+  p: Principal,
+  method: string,
+  path: string,
+  body?: unknown,
+  executionCtx?: ExecutionContext,
+): Promise<T> {
   const url = new URL(API_PREFIX + path, env.OF_PUBLIC_URL || "http://localhost");
   const m = router.match(method, url.pathname.slice(API_PREFIX.length));
   if (m.kind !== "match") throw new OfError("internal_error", `no route ${method} ${path}`);
@@ -75,19 +116,17 @@ export async function callRoute<T>(env: Env, p: Principal, method: string, path:
     reqBody = JSON.stringify(body);
   }
   const request = new Request(url, { method, headers, ...(reqBody !== undefined ? { body: reqBody } : {}) });
+  const rc = routeCtx(executionCtx);
   const res = await m.route.handler(request, env, {
     params: m.params,
     url,
     requestId: "mcp",
     route: m.route,
-    executionCtx: {
-      waitUntil: () => undefined,
-      passThroughOnException: () => undefined,
-      props: {},
-    } as unknown as ExecutionContext,
+    executionCtx: rc.ctx,
     principal: p,
   });
   const text = await res.text();
+  await rc.settle();
   let out: unknown = null;
   if (text.trim() !== "") {
     try {
@@ -102,6 +141,16 @@ export async function callRoute<T>(env: Env, p: Principal, method: string, path:
     throw new OfError(code, e?.detail ?? "");
   }
   return out as T;
+}
+
+/** b with every api call running on executionCtx (the MCP request's context). */
+export function withExecutionCtx(b: FactoryMcpBackend, executionCtx: ExecutionContext | undefined): FactoryMcpBackend {
+  if (!executionCtx) return b;
+  return {
+    ...b,
+    api: <T>(env: Env, p: Principal, method: string, path: string, body?: unknown, ctx?: ExecutionContext) =>
+      b.api<T>(env, p, method, path, body, ctx ?? executionCtx),
+  };
 }
 
 async function workOp(env: Env, p: Principal, id: string, op: string, body: unknown): Promise<unknown> {

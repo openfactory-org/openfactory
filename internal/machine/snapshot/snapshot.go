@@ -97,7 +97,8 @@ type Manager struct {
 	Settle time.Duration
 
 	mu       sync.Mutex
-	building map[string]bool
+	building map[string]bool // keys that EnsureAsync builds or waits to build
+	current  string          // the key that Build writes now
 	build    sync.Mutex
 }
 
@@ -122,8 +123,8 @@ func (m *Manager) Get(key string) *vm.SnapshotFiles {
 
 // EnsureAsync builds the template of key in the background when it does
 // not exist and no build of it runs. spec is a template spec: no image
-// session data, no cache disks.
-func (m *Manager) EnsureAsync(key string, spec vm.Spec) {
+// session data, no cache disks. The build ends when ctx ends.
+func (m *Manager) EnsureAsync(ctx context.Context, key string, spec vm.Spec) {
 	if m.Get(key) != nil {
 		return
 	}
@@ -143,7 +144,7 @@ func (m *Manager) EnsureAsync(key string, spec vm.Spec) {
 			delete(m.building, key)
 			m.mu.Unlock()
 		}()
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer cancel()
 		if err := m.Build(ctx, key, spec); err != nil {
 			m.log().Warn("snapshot template build failed", "key", key, "err", err)
@@ -153,12 +154,20 @@ func (m *Manager) EnsureAsync(key string, spec vm.Spec) {
 
 // Build boots a template VM, pauses it after hello, saves the snapshot
 // and the scratch disk, and removes the VM.
-func (m *Manager) Build(ctx context.Context, key string, spec vm.Spec) error {
+func (m *Manager) Build(ctx context.Context, key string, spec vm.Spec) (err error) {
 	m.build.Lock()
 	defer m.build.Unlock()
 	if m.Get(key) != nil {
 		return nil
 	}
+	m.mu.Lock()
+	m.current = key
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		m.current = ""
+		m.mu.Unlock()
+	}()
 	spec.Template = true
 	spec.Cache = nil
 	spec.Snapshot = nil
@@ -198,6 +207,11 @@ func (m *Manager) Build(ctx context.Context, key string, spec vm.Spec) error {
 	if err := os.MkdirAll(tmp, 0o700); err != nil {
 		return err
 	}
+	defer func() {
+		if err != nil {
+			_ = os.RemoveAll(tmp)
+		}
+	}()
 	for src, name := range map[string]string{files.State: "vm.state", files.Mem: "mem", files.Scratch: "scratch.ext4"} {
 		dst := filepath.Join(tmp, name)
 		if err := os.Rename(src, dst); err != nil {
@@ -219,11 +233,23 @@ func (m *Manager) Build(ctx context.Context, key string, spec vm.Spec) error {
 	return nil
 }
 
-// Prune removes templates whose key keep rejects.
+// Prune removes templates whose key keep rejects and the files of failed
+// builds. It never touches the template that Build writes now.
 func (m *Manager) Prune(keep func(key string) bool) {
+	// Holding mu keeps Build from starting a key while Prune runs.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	current := m.current
 	entries, _ := os.ReadDir(m.Dir)
 	for _, e := range entries {
-		if e.IsDir() && (strings.HasSuffix(e.Name(), ".tmp") || !keep(e.Name())) {
+		if !e.IsDir() {
+			continue
+		}
+		key, tmp := strings.CutSuffix(e.Name(), ".tmp")
+		if current != "" && key == current {
+			continue
+		}
+		if tmp || !keep(key) {
 			_ = os.RemoveAll(filepath.Join(m.Dir, e.Name()))
 		}
 	}

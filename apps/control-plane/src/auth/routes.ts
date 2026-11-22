@@ -3,7 +3,7 @@
 //   POST /auth/logout             clears the session
 //   GET  /auth/oidc/login         ?return_to=/path
 //   GET  /auth/oidc/callback
-import { DEFAULT_TEAM, OfError, doName } from "@openfactory/core";
+import { DEFAULT_TEAM, OfError, doName, isErrorCode } from "@openfactory/core";
 import type { Env } from "../contracts/env";
 import { serverConfig } from "../config";
 import { csrfOk } from "../http/csrf";
@@ -153,8 +153,10 @@ async function oidcCallback(req: Request, env: Env, url: URL): Promise<Response>
       $error?: { code: string; detail: string; reason?: string };
       user: { id: string; team_id: string; role: string };
     };
-    if (out.$error)
-      throw new OfError("invalid_request", out.$error.detail, out.$error.reason ? { reason: out.$error.reason } : {});
+    if (out.$error) {
+      const code = isErrorCode(out.$error.code) ? out.$error.code : "internal_error";
+      throw new OfError(code, out.$error.detail, out.$error.reason ? { reason: out.$error.reason } : {});
+    }
     const cookie = await issueSessionCookie(env, { u: out.user.id, t: out.user.team_id, p: "oidc" });
     audit("auth.login", "success", {
       provider: "oidc",

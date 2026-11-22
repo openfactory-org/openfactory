@@ -299,6 +299,29 @@ describe("run loop (C2)", () => {
     expect(r2.status).toBe(401);
   });
 
+  it("answers 400 bad_request to an event batch with bad sequence numbers", async () => {
+    const token = newToken("w");
+    const root = await newRootRun(token);
+    await pump(token);
+    const fr = new FakeRunner(taskFor(root.id));
+    await fr.start();
+    await fr.events([{ type: "session.ready", data: { capabilities: [] } }]);
+    const post = (events: unknown[]) =>
+      runner("/runner/v1/session/events", { method: "POST", token: fr.token, body: JSON.stringify({ events }) });
+    const at = new Date().toISOString();
+    for (const events of [
+      [{ seq: 0, type: "turn.started", at }],
+      [
+        { seq: fr.seq + 1, type: "turn.started", at },
+        { seq: fr.seq + 3, type: "turn.started", at },
+      ],
+    ]) {
+      const res = await post(events);
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { code: string }).code).toBe("bad_request");
+    }
+  });
+
   it("a session token outlives no session: end refuses later calls", async () => {
     const token = newToken("w");
     const root = await newRootRun(token);

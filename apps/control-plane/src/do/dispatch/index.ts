@@ -40,6 +40,11 @@ type UsagePayload = OutboxPayloads["dispatch.usage"] & { rootRunId?: string; wor
 
 export class DispatchDO extends BaseDO {
   private seq = 0;
+  /**
+   * First time the sweep saw a task that reports no startedAt. Lost on
+   * eviction, which only delays the destroy of such a task.
+   */
+  private readonly firstSeen = new Map<string, number>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -126,6 +131,8 @@ export class DispatchDO extends BaseDO {
       });
     });
     this.onTimer("bucket", () => this.admission());
+    // A spend hold ends when the UTC day or month of the exceeded limit rolls over.
+    this.onTimer("spend", () => this.admission());
     this.onTimerAsync("sweep", () => this.sweep());
     this.onTimerAsync("reconcile", () => this.reconcile());
   }
@@ -243,7 +250,16 @@ export class DispatchDO extends BaseDO {
       );
     }
     const spendBlocked = new Set<string>();
-    for (const f of new Set(rows.map((r) => r.factory_id))) if (this.factoryOverLimit(f, now)) spendBlocked.add(f);
+    let spendResetMs: number | undefined;
+    for (const f of new Set(rows.map((r) => r.factory_id))) {
+      const over = exceeded(this.limitsOf(f, now));
+      if (!over) continue;
+      spendBlocked.add(f);
+      const reset = Date.parse(over.resets_at);
+      if (spendResetMs === undefined || reset < spendResetMs) spendResetMs = reset;
+    }
+    // Held rows have no queue timeout, and no other event may come: re-run at the rollover.
+    if (spendResetMs !== undefined) this.timers.setEarliest("spend", "spend", spendResetMs);
     const res = admit(
       {
         waiting: rows,
@@ -375,10 +391,6 @@ export class DispatchDO extends BaseDO {
     );
   }
 
-  private factoryOverLimit(factoryId: string, now: number): boolean {
-    return exceeded(this.limitsOf(factoryId, now)) !== undefined;
-  }
-
   private onUsage(p: UsagePayload): void {
     const cur = first<{ cost_usd: number; seq: number }>(
       this.sql,
@@ -506,10 +518,16 @@ export class DispatchDO extends BaseDO {
 
   // ---------- sweep and reconcile ----------
 
-  /** Orphan sweep (dispatch/sweep.go): destroy tasks older than 2 min without a lease. */
+  /**
+   * Orphan sweep (dispatch/sweep.go): destroy tasks older than 2 min without a
+   * lease. Other requests run while this awaits the provider, so the lease
+   * check reads the table just before each destroy, not once up front. A task
+   * without startedAt gets its age from the first sweep that saw it.
+   */
   private async sweep(): Promise<void> {
     const team = this.teamId();
-    const leased = new Set(all<{ task_id: string }>(this.sql, "SELECT task_id FROM leases").map((r) => r.task_id));
+    const leased = (taskId: string) => !!first(this.sql, "SELECT 1 FROM leases WHERE task_id = ?", taskId);
+    const seen = new Set<string>();
     const providers = new Set([
       ...all<{ provider: string }>(this.sql, "SELECT DISTINCT provider FROM leases WHERE provider <> ''").map(
         (r) => r.provider,
@@ -521,20 +539,31 @@ export class DispatchDO extends BaseDO {
       try {
         const p = providerFor(this.env, team, id);
         for (const t of await p.list()) {
-          if (leased.has(t.taskId)) continue;
           try {
             parseTaskId(t.taskId);
           } catch {
             continue;
           }
-          const started = t.startedAt ? Date.parse(t.startedAt) : 0;
-          if (started && now - started < ORPHAN_MIN_AGE_MS) continue;
+          // Read now, with no await before the destroy: a grant can land while
+          // list() or an earlier destroy awaits.
+          if (leased(t.taskId)) continue;
+          const key = `${id}|${t.taskId}`;
+          seen.add(key);
+          const at = Date.now();
+          let started = t.startedAt ? Date.parse(t.startedAt) : NaN;
+          if (Number.isNaN(started)) {
+            started = this.firstSeen.get(key) ?? at;
+            this.firstSeen.set(key, started);
+          }
+          if (at - started < ORPHAN_MIN_AGE_MS) continue;
+          this.firstSeen.delete(key);
           await p.destroy(t.taskId);
         }
       } catch (e) {
         console.warn("dispatch: sweep", id, e instanceof Error ? e.message : String(e));
       }
     }
+    for (const k of this.firstSeen.keys()) if (!seen.has(k)) this.firstSeen.delete(k);
     if (first(this.sql, "SELECT 1 FROM leases LIMIT 1") || first(this.sql, "SELECT 1 FROM waiting LIMIT 1")) {
       this.setTimer("sweep", "sweep", now + SWEEP_EVERY_MS);
     }

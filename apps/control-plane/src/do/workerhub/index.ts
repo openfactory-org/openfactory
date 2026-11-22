@@ -28,6 +28,7 @@ import {
   type WireHello,
 } from "../../../../../packages/sandbox/src/microvm/wire";
 import type { Ack, OutboxEnvelope, TeamRpc, WorkerHubRpc } from "../../contracts/do-messages";
+import { serverConfig } from "../../config";
 import type { Env } from "../../contracts/env";
 import { BaseDO, type Migration } from "../../lib/base";
 import { b64url, fromAnyB64, fromB64url, randomBytes } from "../../lib/bytes";
@@ -131,6 +132,8 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
   private readonly pending = new Map<string, Pending>();
   /** Per-connection message chains: frames of one socket are handled in order. */
   private readonly chains = new Map<string, Promise<void>>();
+  /** Requests of reconcile() that wait for an answer ("drain", "destroy:<task>"). */
+  private readonly inflight = new Set<string>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -358,7 +361,7 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
     if (mode === "apikey" && rec.publicKey !== "") {
       return new Response("this worker is enrolled: connect with its key\n", { status: 401 });
     }
-    if (rec.kind === "process" && (this.env.OF_DEV_PROCESS_WORKERS ?? "").trim().toLowerCase() !== "true") {
+    if (rec.kind === "process" && !serverConfig(this.env).devProcessWorkers) {
       return new Response("development process workers are not allowed\n", { status: 403 });
     }
 
@@ -500,7 +503,6 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
       if (s && s.taskId === t.task_id) held.set(s.taskId, s);
     }
     const replaced: WebSocket[] = [];
-    const toDestroy: string[] = [];
     this.tx(() => {
       for (const other of this.ctx.getWebSockets()) {
         if (other !== ws && this.att(other).phase === "ready") replaced.push(other);
@@ -518,10 +520,7 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
           this.sql.exec("DELETE FROM hub_tasks WHERE task_id = ?", r.task_id);
           continue;
         }
-        if (r.destroyed === 1) {
-          toDestroy.push(r.task_id);
-          continue;
-        }
+        if (r.destroyed === 1) continue; // reconcile() sends the destroy kept while the worker was away
         const old = this.statusOf(r);
         this.sql.exec(
           "UPDATE hub_tasks SET status = ?, updated_ms = ? WHERE task_id = ?",
@@ -543,6 +542,8 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
         slots: hello.slots ?? 0,
       };
       this.setState("hello", JSON.stringify(summary));
+      // The drain flag the worker holds now; reconcile() sends the record's flag when it differs.
+      this.setState("worker_draining", String(!!hello.draining));
       this.reportCapacity();
       this.setTimer("liveness", "liveness", now + LIVENESS_MS);
     });
@@ -565,8 +566,7 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
       welcome.access_token_expires_at = isoOf(t.expiresAt);
     }
     ws.send(JSON.stringify({ type: "welcome", result: welcome }));
-    if (rec.draining && !hello.draining) this.fireAndForget("drain", { draining: true });
-    for (const id of toDestroy) this.destroyHeld(id);
+    this.reconcile();
     await this.pushTeam(this.liveBody(true));
   }
 
@@ -660,7 +660,8 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
       await this.onGone(ws);
       return;
     }
-    this.setTimer("liveness", "liveness", Date.now() + LIVENESS_MS);
+    this.tx(() => this.setTimer("liveness", "liveness", Date.now() + LIVENESS_MS));
+    this.reconcile();
     await this.pushTeam(this.liveBody(true));
   }
 
@@ -687,17 +688,53 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
     });
   }
 
-  private fireAndForget(method: string, params: unknown): void {
-    this.request(method, params).catch((e) => console.warn(`WorkerHubDO: ${method} failed`, e));
+  /**
+   * Sends what the worker still owes the hub, from SQLite state: the drain flag
+   * of the record when the worker holds another one, and the destroys kept
+   * while it was away (rows with destroyed = 1). Runs at hello, on every
+   * liveness tick and after a drain change, so a request that failed, timed
+   * out or was lost with the in-memory state (eviction) is sent again. Each
+   * request is idempotent on the worker.
+   */
+  private reconcile(): void {
+    if (!this.current()) return;
+    const rec = this.record();
+    if (rec && this.state("worker_draining") !== String(rec.draining)) {
+      const draining = rec.draining;
+      this.background("drain", "drain", { draining }, () => {
+        this.tx(() => this.setState("worker_draining", String(draining)));
+        this.reconcile(); // the record may have changed while the request was out
+      });
+    }
+    for (const r of this.rows()) {
+      if (r.destroyed !== 1) continue;
+      const taskId = r.task_id;
+      this.background(`destroy:${taskId}`, "task.destroy", { task_id: taskId }, () =>
+        this.tx(() => this.sql.exec("DELETE FROM hub_tasks WHERE task_id = ? AND destroyed = 1", taskId)),
+      );
+    }
   }
 
-  private destroyHeld(taskId: string): void {
-    this.request("task.destroy", { task_id: taskId })
-      .catch((e) => {
+  /** One request of reconcile(); at most one per key is out. not_found counts as done. */
+  private background(key: string, method: string, params: unknown, done: () => void): void {
+    if (this.inflight.has(key)) return;
+    this.inflight.add(key);
+    const p = this.request(method, params)
+      .catch((e: unknown) => {
         if ((e as ProviderError).kind !== "not_found") throw e;
       })
-      .then(() => this.tx(() => this.sql.exec("DELETE FROM hub_tasks WHERE task_id = ? AND destroyed = 1", taskId)))
-      .catch((e) => console.warn("WorkerHubDO: deferred destroy failed", e));
+      .then(
+        () => {
+          this.inflight.delete(key);
+          done();
+        },
+        (e: unknown) => {
+          this.inflight.delete(key);
+          console.warn(`WorkerHubDO: ${method} failed; the next liveness check sends it again`, e);
+        },
+      )
+      .catch((e: unknown) => console.warn(`WorkerHubDO: ${method} answered, but its state update failed`, e));
+    this.ctx.waitUntil(p);
   }
 
   // ---------- WorkerHubRpc ----------
@@ -863,13 +900,12 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
       this.setState("record", JSON.stringify({ ...rec, draining }));
       this.reportCapacity();
     });
-    if (this.current()) this.fireAndForget("drain", { draining });
+    this.reconcile();
   }
 
   /** A changed record (PATCH, drain, resume) from the REST handler. */
   async configure(rec: WorkerRecord): Promise<void> {
     await this.ready;
-    const before = this.record();
     this.tx(() => {
       this.setState("record", JSON.stringify(rec));
       if (rec.revoked) this.setState("revoked", "1");
@@ -879,7 +915,6 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
       await this.revoke();
       return;
     }
-    if (before && before.draining !== rec.draining && this.current())
-      this.fireAndForget("drain", { draining: rec.draining });
+    this.reconcile();
   }
 }

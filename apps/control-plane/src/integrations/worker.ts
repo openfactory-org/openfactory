@@ -2,7 +2,7 @@
 // RPC (internal ops of src/do/team/integrations.ts) and the secret reader over
 // TeamRpc.secretsResolve. The rest (publish to IngressDO, inbox resolve,
 // account linker) is supplied by the caller.
-import { OfError, doName } from "@openfactory/core";
+import { DEFAULT_TEAM, OfError, doName } from "@openfactory/core";
 import type { ExternalIdentity, Integration, User } from "@openfactory/core";
 import type { CallMeta } from "../contracts/do-messages";
 import type { Env } from "../contracts/env";
@@ -18,8 +18,11 @@ function unwrap<T>(out: unknown): T {
   return out as T;
 }
 
-/** The store of one team over TeamDO.api. */
-export function rpcStore(env: Env, teamId = "default"): IntegrationStore {
+/**
+ * The store of one team over TeamDO.api. The install has one team
+ * (DEFAULT_TEAM), so the team arguments of the store methods are not used.
+ */
+export function rpcStore(env: Env, teamId = DEFAULT_TEAM): IntegrationStore {
   const stub = () => env.TEAM.getByName(doName.team(teamId));
   const call = async <T>(op: string, params: Record<string, string> = {}, body?: unknown): Promise<T> =>
     unwrap<T>(await stub().api(META, op, params, body));
@@ -46,7 +49,7 @@ export function rpcStore(env: Env, teamId = "default"): IntegrationStore {
 }
 
 /** Team secrets by name, decrypted by TeamDO (team scope). */
-export function rpcSecrets(env: Env, teamId = "default"): SecretReader {
+export function rpcSecrets(env: Env, teamId = DEFAULT_TEAM): SecretReader {
   return {
     async get(_team, name) {
       const out = await env.TEAM.getByName(doName.team(teamId)).secretsResolve(META, { factoryId: "", names: [name] });
@@ -61,7 +64,7 @@ export function rpcSecrets(env: Env, teamId = "default"): SecretReader {
 export function integrationDeps(
   env: Env,
   rest: Pick<IntegrationDeps, "publish"> & Partial<IntegrationDeps>,
-  teamId = "default",
+  teamId = DEFAULT_TEAM,
 ): IntegrationDeps {
   return { store: rpcStore(env, teamId), secrets: rpcSecrets(env, teamId), ...rest };
 }

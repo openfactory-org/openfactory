@@ -435,9 +435,14 @@ export const listRuns: Handler = async (_req, env, ctx) => {
   return json(200, res);
 };
 
+/** The run of the route, read through WorkDO.api so that WorkDO checks the caller's role for its factory. */
+async function authorizedRun(env: Env, ctx: RouteContext, runId: string): Promise<Run> {
+  return (await workFor(env, ctx, runId).api(metaOf(ctx), "getRun", { runId }, null)) as Run;
+}
+
 /** GET /api/v1/runs/{runId} */
 export const getRun: Handler = async (_req, env, ctx) => {
-  const run = (await workFor(env, ctx, ctx.params.runId ?? "").getRun(ctx.params.runId ?? "")) as Run;
+  const run = await authorizedRun(env, ctx, ctx.params.runId ?? "");
   return json(200, await viewOf(env, ctx, run));
 };
 
@@ -485,7 +490,7 @@ export const listRunMessages: Handler = async (_req, env, ctx) => {
   if (!Number.isInteger(limit)) throw invalid(`invalid limit ${JSON.stringify(q.get("limit"))}`);
   if (limit <= 0 || limit > 1000) limit = 1000;
   const stub = workFor(env, ctx, runId);
-  const run = (await stub.getRun(runId)) as Run;
+  const run = await authorizedRun(env, ctx, runId);
   const all = await readRunMessages(env, stub, metaOf(ctx), runId, after);
   const roles = q
     .getAll("role")
@@ -545,7 +550,7 @@ export const interruptRun: Handler = async (_req, env, ctx) => {
 export const streamRunEvents: Handler = async (req, env, ctx) => {
   const runId = ctx.params.runId ?? "";
   const stub = workFor(env, ctx, runId);
-  await stub.getRun(runId); // 404 before the stream starts
+  await authorizedRun(env, ctx, runId); // 403 or 404 before the stream starts
   const stopOnIdle = ["1", "true"].includes((ctx.url.searchParams.get("stop_on_idle") ?? "").toLowerCase());
   const pub = publicUrl(env);
   let lastState = "";

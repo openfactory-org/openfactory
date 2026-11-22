@@ -16,7 +16,8 @@ import {
 } from "@openfactory/core";
 import { failureForSandboxReason, gateNetworkPolicy, parseProviderError, type TaskStatus } from "@openfactory/sandbox";
 import type { EndRequest, StartRequest } from "@openfactory/runner-proto";
-import type { Ack, CallMeta, CoreEvent, OutboxEnvelope, OutboxPayloads } from "../../contracts/do-messages";
+import type { Ack, CallMeta, CoreEvent, OutboxEnvelope, OutboxPayloads, Role } from "../../contracts/do-messages";
+import { authorizeInTeam } from "../../auth/roles";
 import type { Env } from "../../contracts/env";
 import { BaseDO, type Migration } from "../../lib/base";
 import { LiveHub, isUpgrade } from "../../lib/live/index";
@@ -250,11 +251,16 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
     };
   }
 
-  /** Runs fn in the current transaction (message handlers, sync timers), then flushes wakes. */
+  /**
+   * Runs fn in the current step (message handlers, sync timers) and flushes
+   * wakes after that step commits (BaseDO.onCommit). A rollback of the step,
+   * from fn or from later work in the same transaction (the dedupe row of
+   * BaseDO.receive), flushes nothing.
+   */
   private withFx<T>(fn: (fx: Fx) => T): T {
     const wakes = { cmd: new Set<string>(), run: new Set<string>() };
     const out = fn(this.makeFx(wakes));
-    queueMicrotask(() => this.afterCommit(wakes));
+    this.onCommit(() => this.afterCommit(wakes));
     return out;
   }
 
@@ -320,8 +326,9 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
     meta: CallMeta,
     input: CreateRunInput,
   ): Promise<{ run: Run; workItemId?: string; followUp?: boolean }> {
-    return this.rpc(() =>
-      this.txFx((fx) => {
+    return this.rpc(() => {
+      this.authorize(meta, input.dispatch?.factoryId ?? input.run?.factoryId ?? "", "user");
+      return this.txFx((fx) => {
         if (input.dispatch) {
           const out = dispatchRoot(fx, input.dispatch);
           // saveWorkItemState: the pins of a trial apply to the children that run_agents starts.
@@ -338,34 +345,39 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
         const run = createRunOnly(fx, r, meta);
         if (r.startingRepoRefs?.length) fx.repo.setRunState(run.id, "repo_refs", JSON.stringify(r.startingRepoRefs));
         return { run };
-      }),
-    );
+      });
+    });
   }
 
   async runsMessage(
-    _meta: CallMeta,
+    meta: CallMeta,
     runId: string,
     input: { message: string; actor: string; attachments?: string[]; messageId?: string },
   ) {
-    return this.rpc(() =>
-      this.txFx((fx) => sendMessage(fx, runId, input.message, input.actor, input.attachments ?? [], input.messageId)),
-    );
+    return this.rpc(() => {
+      this.authorize(meta, this.runFactory(runId), "user");
+      return this.txFx((fx) =>
+        sendMessage(fx, runId, input.message, input.actor, input.attachments ?? [], input.messageId),
+      );
+    });
   }
 
   async runsCancel(meta: CallMeta, runId: string, cascade: boolean): Promise<{ cancelled: string[]; run: Run }> {
-    return this.rpc(() =>
-      this.txFx((fx) => {
+    return this.rpc(() => {
+      this.authorize(meta, this.runFactory(runId), "user");
+      return this.txFx((fx) => {
         const actor = meta.principal?.userId ?? meta.principal?.id ?? "api";
         const done = cancel(fx, runId, actor, cascade);
         return { cancelled: [...done], run: fx.repo.mustRun(runId) };
-      }),
-    );
+      });
+    });
   }
 
   /** Dispatcher.Interrupt. Throws operation_not_supported with reason no_active_turn / unsupported_harness. */
-  async runsInterrupt(_meta: CallMeta, runId: string): Promise<{ ok: true }> {
-    return this.rpc(() =>
-      this.txFx((fx) => {
+  async runsInterrupt(meta: CallMeta, runId: string): Promise<{ ok: true }> {
+    return this.rpc(() => {
+      this.authorize(meta, this.runFactory(runId), "user");
+      return this.txFx((fx) => {
         fx.repo.mustRun(runId);
         const s = fx.repo.latestSession(runId);
         if (!s || s.state !== "active" || !s.active_turn_id) {
@@ -378,8 +390,8 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
         }
         enqueueCommand(fx, s, "turn.interrupt", { turn_id: s.active_turn_id });
         return { ok: true as const };
-      }),
-    );
+      });
+    });
   }
 
   /** run_agents: children in one transaction. Plans are resolved by the caller (TeamDO config). */
@@ -478,10 +490,26 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
     return this.rpc(() => new Repo(this.sql, Date.now).mustRun(runId));
   }
 
+  /**
+   * Authorizes a caller that comes from a REST route on the factory of the
+   * object of the call, like the Go route wrapper: the Worker does not check
+   * the role of factory-scoped routes. A missing object checks the team role
+   * (the op then answers 404). Internal calls carry no principal.
+   */
+  private authorize(meta: CallMeta | undefined, factoryId: string, min: Role): void {
+    authorizeInTeam(meta?.principal, this.teamId(), factoryId, min);
+  }
+
+  /** The factory of a run of this DO, "" when the run does not exist. */
+  private runFactory(runId: string): string {
+    return new Repo(this.sql, Date.now).getRun(runId)?.factory_id ?? "";
+  }
+
   async api(meta: CallMeta, op: string, params: Record<string, string>, body: unknown): Promise<unknown> {
     return this.rpc(() => {
       const repo = new Repo(this.sql, Date.now);
       const runId = params.runId ?? params.id ?? "";
+      this.authorize(meta, opFactory(repo, op, params, body), OP_ROLE[op] ?? "user");
       switch (op) {
         case "getRun":
           return repo.mustRun(runId);
@@ -980,11 +1008,26 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
         const wi = fx.repo.getWorkItem();
         if (!wi || wi.stage !== "complete") return { ok: true } as const;
         if (fx.repo.hasDispatch(input.actionKey, "reopen") !== undefined) return { ok: true } as const;
+        // references.go reopenWorkItem: the stage goes back to triage, with a
+        // "reopened" timeline entry and the projection to IndexDO and RouterDO.
+        const from = wi.stage;
+        const completedAt = wi.completed_at;
         wi.stage = "triage";
         delete wi.completed_at;
-        wi.updated_at = new Date().toISOString();
+        wi.updated_at = new Date(fx.now()).toISOString();
         fx.repo.putWorkItem(wi);
         fx.repo.recordDispatch(input.actionKey, "reopen", wi.id);
+        const ev = input.event;
+        workItemEvent(fx, wi.id, "reopened", "", "system", {
+          from,
+          to: "triage",
+          reason: "event for a reference of the completed work item",
+          provider: ev.provider,
+          event: ev.type,
+          key: sourceKey(ev.source as never),
+          ...(completedAt ? { completed_at: completedAt } : {}),
+        });
+        projectWorkItem(fx, wi);
         return { ok: true } as const;
       }),
     );
@@ -1256,6 +1299,44 @@ export function unresolveInbox(fx: Fx, id: string, actor: string, label?: string
     }
   }
   return it;
+}
+
+/** api() ops whose route needs more than the user role. */
+const OP_ROLE: Partial<Record<string, Role>> = { workItemStage: "editor" };
+
+/** api() ops about a work item: params.id is the work item ID. */
+const WORK_ITEM_OPS = new Set([
+  "getAgentPins",
+  "getWorkItem",
+  "getWorkItemTimeline",
+  "listWorkItemRuns",
+  "listWorkItemInbox",
+  "mcpPatchWorkItem",
+  "mcpLinkPullRequest",
+  "workItemMessage",
+  "workItemCancel",
+  "workItemComplete",
+  "workItemStage",
+]);
+
+/**
+ * The factory of the object of an api() call (routeFactory of the Go route
+ * wrapper): the inbox item, work item or run of the params. "" when the
+ * object does not exist.
+ */
+function opFactory(repo: Repo, op: string, params: Record<string, string>, body: unknown): string {
+  switch (op) {
+    case "getInbox":
+    case "resolveInbox":
+    case "unresolveInbox":
+      return repo.getInbox(params.id ?? "")?.factory_id ?? "";
+    case "createInboxItem": {
+      const b = (body ?? {}) as { factory_id?: string; work_item_id?: string };
+      return b.factory_id ?? repo.getWorkItem(b.work_item_id)?.factory_id ?? "";
+    }
+  }
+  if (WORK_ITEM_OPS.has(op)) return params.id ? (repo.getWorkItem(params.id)?.factory_id ?? "") : "";
+  return repo.getRun(params.runId ?? params.id ?? "")?.factory_id ?? "";
 }
 
 function actorOfMeta(meta: CallMeta): string {

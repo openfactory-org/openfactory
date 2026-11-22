@@ -74,12 +74,18 @@ export class Jwt {
   }
 }
 
+/** v as a JSON object; throws when it is null, an array or a scalar. */
+function jsonObject(v: unknown, part: string): Record<string, unknown> {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) throw new Error(`${part} is not a JSON object`);
+  return v as Record<string, unknown>;
+}
+
 export function parseJwt(tok: string): Jwt {
   const parts = tok.split(".");
   if (parts.length !== 3) throw new Error("jwt: malformed token");
   try {
-    const header = JSON.parse(dec.decode(b64urlDecode(parts[0]!))) as Record<string, unknown>;
-    const claims = JSON.parse(dec.decode(b64urlDecode(parts[1]!))) as Record<string, unknown>;
+    const header = jsonObject(JSON.parse(dec.decode(b64urlDecode(parts[0]!))), "header");
+    const claims = jsonObject(JSON.parse(dec.decode(b64urlDecode(parts[1]!))), "claims");
     return new Jwt(header, claims, parts[0] + "." + parts[1], b64urlDecode(parts[2]!));
   } catch (e) {
     throw new Error(`jwt: ${(e as Error).message}`, { cause: e });

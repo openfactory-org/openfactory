@@ -73,13 +73,23 @@ type Proxy struct {
 
 	bmu     sync.Mutex
 	blocked map[string]*BlockedHost
+	// dropped counts blocked hosts not recorded because blocked is full.
+	dropped int
 
 	transport *http.Transport
 
-	smu sync.Mutex
-	srv *http.Server
-	ln  net.Listener
+	smu    sync.Mutex
+	srv    *http.Server
+	ln     net.Listener
+	closed bool
 }
+
+// Bounds of the blocked-host record. The sandbox chooses the host names, so
+// the record must not grow without limit.
+const (
+	maxBlockedHosts = 1024
+	maxHostLen      = 253 // the longest DNS name
+)
 
 // New creates a proxy for policy. alwaysAllow lists platform hosts that are
 // reachable regardless of the policy.
@@ -210,19 +220,35 @@ func (p *Proxy) logger() *slog.Logger {
 }
 
 // recordBlocked records a blocked attempt.
+// It keeps at most maxBlockedHosts hosts and cuts a host name to maxHostLen.
 func (p *Proxy) recordBlocked(host string) {
 	h := NormalizeHost(host)
+	if len(h) > maxHostLen {
+		h = h[:maxHostLen]
+	}
 	now := time.Now().UTC()
 	p.bmu.Lock()
 	b, ok := p.blocked[h]
-	if !ok {
+	full := false
+	switch {
+	case ok:
+	case len(p.blocked) < maxBlockedHosts:
 		b = &BlockedHost{Host: h, First: now}
 		p.blocked[h] = b
+	default:
+		full = true
+		p.dropped++
 	}
-	b.Count++
-	b.Last = now
+	firstDrop := full && p.dropped == 1
+	if b != nil {
+		b.Count++
+		b.Last = now
+	}
 	p.bmu.Unlock()
-	if !ok {
+	switch {
+	case firstDrop:
+		p.logger().Warn("network policy blocked egress; the blocked-host record is full", "host", h, "max_hosts", maxBlockedHosts)
+	case !ok && !full:
 		p.logger().Warn("network policy blocked egress", "host", h)
 	}
 	if p.OnBlocked != nil {
@@ -449,10 +475,28 @@ func closeWrite(c net.Conn) {
 
 // Serve serves the proxy on l until Close.
 func (p *Proxy) Serve(l net.Listener) error {
-	srv := &http.Server{Handler: p, ReadHeaderTimeout: 30 * time.Second}
+	srv := p.install(l)
+	if srv == nil {
+		return nil
+	}
+	return p.serve(srv, l)
+}
+
+// install records the server of l before it serves, so that Addr and Close
+// see it at once. It returns nil and closes l after Close.
+func (p *Proxy) install(l net.Listener) *http.Server {
 	p.smu.Lock()
+	defer p.smu.Unlock()
+	if p.closed {
+		_ = l.Close()
+		return nil
+	}
+	srv := &http.Server{Handler: p, ReadHeaderTimeout: 30 * time.Second}
 	p.srv, p.ln = srv, l
-	p.smu.Unlock()
+	return srv
+}
+
+func (p *Proxy) serve(srv *http.Server, l net.Listener) error {
 	err := srv.Serve(l)
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
@@ -476,8 +520,12 @@ func (p *Proxy) Start(addr string) (net.Addr, error) {
 	if err != nil {
 		return nil, err
 	}
+	srv := p.install(l)
+	if srv == nil {
+		return nil, net.ErrClosed
+	}
 	go func() {
-		if err := p.Serve(l); err != nil {
+		if err := p.serve(srv, l); err != nil {
 			p.logger().Error("netguard proxy stopped", "err", err)
 		}
 	}()
@@ -497,13 +545,17 @@ func (p *Proxy) Addr() net.Addr {
 // Close stops the proxy and closes idle upstream connections.
 func (p *Proxy) Close() error {
 	p.smu.Lock()
-	srv := p.srv
+	p.closed = true
+	srv, ln := p.srv, p.ln
 	p.smu.Unlock()
 	p.transport.CloseIdleConnections()
 	if srv == nil {
 		return nil
 	}
-	return srv.Close()
+	err := srv.Close()
+	// Close the listener also when Serve did not start yet.
+	_ = ln.Close()
+	return err
 }
 
 // ReportPath is the path of the report that ReportHandler serves.

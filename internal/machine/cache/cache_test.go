@@ -81,6 +81,15 @@ func TestEnsureMirrorAndDisks(t *testing.T) {
 	if c.Prune(0, func(k string) bool { return k == key }) != 0 {
 		t.Fatal("pruned a key in use")
 	}
+	if c.locks.Len() != 0 {
+		t.Fatalf("%d locks kept after Ensure", c.locks.Len())
+	}
+	// A key that Ensure holds is skipped.
+	unlock := c.lock(key)
+	if c.Prune(0, nil) != 0 || c.Latest(key) == "" {
+		t.Fatal("pruned a key that Ensure holds")
+	}
+	unlock()
 	if c.Prune(0, nil) == 0 || c.Latest(key) != "" {
 		t.Fatal("prune")
 	}

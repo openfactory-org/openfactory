@@ -14,7 +14,7 @@ import {
   type PullRequestRef,
   type SourceRef,
 } from "@openfactory/core";
-import type { ForgePlugin, ForgeTarget as PluginTarget } from "@openfactory/plugin-api";
+import { isNotSupported, type ForgePlugin, type ForgeTarget as PluginTarget } from "@openfactory/plugin-api";
 import { GitHubClient, parseInstallationId, type TokenCache } from "./github/client";
 import { AZURE_DEVOPS, GIT, GITHUB, GITLAB, type Forge, type ForgeLookup, type ForgeResolver } from "./forge";
 import { statusCode, type FetchFn } from "./util/http";
@@ -290,9 +290,7 @@ export class Resolver implements ForgeResolver {
   /** Asks a team member for a review of a pull request (port of reviewers.go). */
   async requestReview(teamId: string, pr: PullRequestRef, userId: string): Promise<void> {
     const codeForge = pr.forge || GITHUB;
-    const i = pr.repo.indexOf("/");
-    const owner = i > 0 ? pr.repo.slice(0, i) : "";
-    const repo = i > 0 ? pr.repo.slice(i + 1) : "";
+    const [owner, repo] = splitRepo(pr.repo);
     if (!owner || !repo || !(pr.number > 0)) {
       throw new OfError("invalid_request", `pull request "${pr.url}" needs a repository (owner/name) and a number`);
     }
@@ -304,7 +302,7 @@ export class Resolver implements ForgeResolver {
     try {
       login = await uf.login();
     } catch (e) {
-      if (e instanceof OfError && e.code === "operation_not_supported") throw e;
+      if (isNotSupported(e)) throw e;
       throw new Error(`read the forge login of user ${userId}: ${(e as Error).message}`, { cause: e });
     }
     const tf = await this.forge(l);
@@ -367,9 +365,7 @@ export class PluginForge implements Forge {
     try {
       await this.p.commentIssue(this.t, owner, repo, number, body);
     } catch (e) {
-      const code = (e as { code?: string }).code ?? "";
-      const msg = (e as Error).message ?? "";
-      if (code !== "operation_not_supported" && !msg.startsWith("operation_not_supported")) throw e;
+      if (!isNotSupported(e)) throw e;
       await this.p.comment(this.t, owner, repo, number, body);
     }
   }
@@ -528,7 +524,8 @@ export class ForgeResponder implements Responder {
         await f.replyInThread(owner, name, src.number, thread, body);
         return;
       } catch (e) {
-        if (!(e instanceof OfError && e.code === "operation_not_supported")) throw e;
+        // A plugin Worker's OfError crosses RPC as a plain Error: match the code, not the class.
+        if (!isNotSupported(e)) throw e;
       }
     }
     await f.comment(owner, name, src.number, body);

@@ -5,7 +5,7 @@
 // 11) and arrive here one at a time: deliverNotice makes one attempt. A
 // transient error throws, so the outbox retries with backoff; a permanent
 // error is logged, reported through the failure hook, and not retried.
-import { OfError, isTrackerOperation, type OutboundMessage } from "@openfactory/core";
+import { OfError, isTrackerOperation, toOfError, type OutboundMessage } from "@openfactory/core";
 import type { OutboxEnvelope } from "../contracts/do-messages";
 import type { Env } from "../contracts/env";
 import { resolverFor } from "../forges/env";
@@ -34,14 +34,16 @@ export function normalizeProvider(p: string): string {
 
 /** Whether retrying cannot help. */
 export function permanent(err: unknown): boolean {
-  if (err instanceof OfError) {
+  // toOfError also reads the code of an OfError that crossed RPC as a plain Error.
+  const { error, known } = toOfError(err);
+  if (known) {
     return [
       "resource_not_found",
       "invalid_request",
       "not_authorized",
       "operation_not_supported",
       "authentication_required",
-    ].includes(err.code);
+    ].includes(error.code);
   }
   if (err instanceof ApiError) return !err.temporary();
   const cause = (err as { cause?: unknown } | null)?.cause;
@@ -91,7 +93,8 @@ export class Router {
         await rs.attachPullRequest(teamId, msg.source, msg.pull_request, msg.factory_id);
       }
     } catch (e) {
-      if (e instanceof OfError && e.code === "operation_not_supported") return "skipped";
+      // A plugin tracker's OfError crosses RPC as a plain Error: match on the code.
+      if (toOfError(e).error.code === "operation_not_supported") return "skipped";
       throw e;
     }
     return "delivered";

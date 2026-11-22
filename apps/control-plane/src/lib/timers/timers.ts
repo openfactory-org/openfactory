@@ -1,6 +1,10 @@
 // Named timers multiplexed onto the one DO alarm (01 §5.3). A timer is a row
-// (name, kind, due_ms, payload). BaseDO.alarm runs the due timers through the
-// handler registered for their kind.
+// (name, kind, due_ms, payload, seq). BaseDO.alarm runs the due timers through
+// the handler registered for their kind.
+//
+// Every set() gives the row a new seq from a counter in meta. take() and fail()
+// match on (name, seq), so a handler that sets its own timer again, even to the
+// same due_ms, keeps the new timer.
 import { first } from "../sql/query";
 
 export interface TimerRow<P = unknown> {
@@ -9,7 +13,14 @@ export interface TimerRow<P = unknown> {
   due_ms: number;
   payload: P;
   attempts: number;
+  /** Version of the row: changes on every set(). */
+  seq: number;
 }
+
+type RawTimerRow = Omit<TimerRow, "payload"> & { payload: string };
+
+const TIMER_COLUMNS = "name, kind, due_ms, payload, attempts, seq";
+const SEQ_KEY = "timer_seq";
 
 /** Runs inside transactionSync. Writes and enqueues only; no await. */
 export type SyncTimerHandler<P = unknown> = (t: TimerRow<P>) => void;
@@ -37,13 +48,24 @@ export class Timers {
   /** Creates or moves a timer. Call inside transactionSync with the state change. */
   set(name: string, kind: string, dueMs: number, payload: unknown = null): void {
     this.sql.exec(
-      `INSERT INTO timers (name, kind, due_ms, payload, attempts) VALUES (?, ?, ?, ?, 0)
-       ON CONFLICT(name) DO UPDATE SET kind = excluded.kind, due_ms = excluded.due_ms, payload = excluded.payload, attempts = 0`,
+      `INSERT INTO timers (name, kind, due_ms, payload, attempts, seq) VALUES (?, ?, ?, ?, 0, ?)
+       ON CONFLICT(name) DO UPDATE SET kind = excluded.kind, due_ms = excluded.due_ms, payload = excluded.payload,
+         attempts = 0, seq = excluded.seq`,
       name,
       kind,
       Math.round(dueMs),
       JSON.stringify(payload ?? null),
+      this.nextSeq(),
     );
+  }
+
+  /** Next row version. The counter never goes back, so a deleted row's seq is never reused. */
+  private nextSeq(): number {
+    this.sql.exec(
+      "INSERT INTO meta (k, v) VALUES (?, '1') ON CONFLICT(k) DO UPDATE SET v = CAST(v AS INTEGER) + 1",
+      SEQ_KEY,
+    );
+    return Number(first<{ v: string }>(this.sql, "SELECT v FROM meta WHERE k = ?", SEQ_KEY)!.v);
   }
 
   /** Sets the timer only when it does not exist or is due later than dueMs. */
@@ -62,11 +84,7 @@ export class Timers {
   }
 
   get<P = unknown>(name: string): TimerRow<P> | undefined {
-    const r = first<{ name: string; kind: string; due_ms: number; payload: string; attempts: number }>(
-      this.sql,
-      "SELECT name, kind, due_ms, payload, attempts FROM timers WHERE name = ?",
-      name,
-    );
+    const r = first<RawTimerRow>(this.sql, `SELECT ${TIMER_COLUMNS} FROM timers WHERE name = ?`, name);
     return r ? { ...r, payload: JSON.parse(r.payload) as P } : undefined;
   }
 
@@ -76,8 +94,8 @@ export class Timers {
 
   due(limit = TIMER_BATCH): TimerRow[] {
     return this.sql
-      .exec<{ name: string; kind: string; due_ms: number; payload: string; attempts: number }>(
-        "SELECT name, kind, due_ms, payload, attempts FROM timers WHERE due_ms <= ? ORDER BY due_ms, name LIMIT ?",
+      .exec<RawTimerRow>(
+        `SELECT ${TIMER_COLUMNS} FROM timers WHERE due_ms <= ? ORDER BY due_ms, name LIMIT ?`,
         this.now(),
         limit,
       )
@@ -85,20 +103,20 @@ export class Timers {
       .map((r) => ({ ...r, payload: JSON.parse(r.payload) as unknown }));
   }
 
-  /** Deletes the row if it is still the one that fired (same due_ms). */
+  /** Deletes the row if it is still the one that fired (same seq: no set() since). */
   take(t: TimerRow): boolean {
-    return this.sql.exec("DELETE FROM timers WHERE name = ? AND due_ms = ?", t.name, t.due_ms).rowsWritten > 0;
+    return this.sql.exec("DELETE FROM timers WHERE name = ? AND seq = ?", t.name, t.seq).rowsWritten > 0;
   }
 
-  /** Records a failed run: attempts + 1 and a backoff, unless the timer moved meanwhile. */
+  /** Records a failed run: attempts + 1 and a backoff, unless the timer was set again meanwhile. */
   fail(t: TimerRow): void {
     const attempts = t.attempts + 1;
     this.sql.exec(
-      "UPDATE timers SET attempts = ?, due_ms = ? WHERE name = ? AND due_ms = ?",
+      "UPDATE timers SET attempts = ?, due_ms = ? WHERE name = ? AND seq = ?",
       attempts,
       this.now() + timerBackoff(attempts),
       t.name,
-      t.due_ms,
+      t.seq,
     );
   }
 }

@@ -62,8 +62,10 @@ type Cache struct {
 	HelperEnv func() []string
 	Log       *slog.Logger
 
+	// locks serializes Ensure per key and keeps Prune away from a key that
+	// Ensure uses.
+	locks image.KeyedMutex
 	mu    sync.Mutex
-	locks map[string]*sync.Mutex
 	urls  map[string]string
 }
 
@@ -81,20 +83,7 @@ func (c *Cache) git() Git {
 	return c.Git
 }
 
-func (c *Cache) lock(key string) func() {
-	c.mu.Lock()
-	if c.locks == nil {
-		c.locks = map[string]*sync.Mutex{}
-	}
-	l, ok := c.locks[key]
-	if !ok {
-		l = &sync.Mutex{}
-		c.locks[key] = l
-	}
-	c.mu.Unlock()
-	l.Lock()
-	return l.Unlock
-}
+func (c *Cache) lock(key string) func() { return c.locks.Lock(key) }
 
 // MirrorDir returns the bare mirror of a key.
 func (c *Cache) MirrorDir(key string) string { return filepath.Join(c.Dir, "mirrors", key+".git") }
@@ -206,9 +195,11 @@ func (c *Cache) build(ctx context.Context, key string) error {
 		return err
 	}
 	if err := os.Chmod(tmp, 0o444); err != nil {
+		_ = os.Remove(tmp)
 		return err
 	}
 	if err := os.Rename(tmp, filepath.Join(dir, gen+".ext4")); err != nil {
+		_ = os.Remove(tmp)
 		return err
 	}
 	gens := c.generations(key)
@@ -240,7 +231,8 @@ func (c *Cache) Refresh(ctx context.Context) {
 }
 
 // Prune removes the least recently used repositories until the cache uses
-// at most maxBytes. inUse protects keys of live VMs.
+// at most maxBytes. inUse protects keys of live VMs. A key that Ensure
+// holds (a clone, fetch or disk build in progress) is skipped.
 func (c *Cache) Prune(maxBytes int64, inUse func(key string) bool) int64 {
 	entries, _ := os.ReadDir(filepath.Join(c.Dir, "mirrors"))
 	type repo struct {
@@ -280,11 +272,16 @@ func (c *Cache) Prune(maxBytes int64, inUse func(key string) bool) int64 {
 		if inUse != nil && inUse(r.key) {
 			continue
 		}
+		unlock, ok := c.locks.TryLock(r.key)
+		if !ok {
+			continue
+		}
 		_ = os.RemoveAll(c.MirrorDir(r.key))
 		_ = os.RemoveAll(c.imageDir(r.key))
 		c.mu.Lock()
 		delete(c.urls, r.key)
 		c.mu.Unlock()
+		unlock()
 		total -= r.size
 		freed += r.size
 	}

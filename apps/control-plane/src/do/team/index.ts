@@ -165,6 +165,17 @@ function allOps(): Map<string, TeamOp> {
 }
 
 const ROUTE_BY_OP = new Map(ROUTES.map((r) => [r.operationId, r]));
+
+/**
+ * Minimum role of internal ops (no REST route) that authorize a caller.
+ * Without an entry, authorize() only requires a principal.
+ */
+const INTERNAL_OP_ROLE: Record<string, RouteRole> = {
+  automationForRun: "editor",
+  scoringFactory: "user",
+  webhookForRoute: "user",
+  scoringBenchmarkPlan: "editor",
+};
 // Computed on first use: the modules import ./index, so a module-level call
 // could run while one of them is still initializing (import cycle).
 let opsCache: Map<string, TeamOp> | undefined;
@@ -244,7 +255,7 @@ export class TeamDO extends BaseDO implements TeamRpc, RetentionRpc {
       const fn = opsMap().get(op);
       if (!fn) throw notImplemented(`${op} is not implemented yet`);
       const route = ROUTE_BY_OP.get(op);
-      const role: RouteRole | "" = route?.role ?? "";
+      const role: RouteRole | "" = route?.role ?? INTERNAL_OP_ROLE[op] ?? "";
       const path: Record<string, string> = {};
       const query: Record<string, string> = {};
       for (const [k, v] of Object.entries(params)) {

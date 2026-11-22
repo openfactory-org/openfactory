@@ -31,6 +31,7 @@ import {
   formatOutbound,
   integrationSecret,
   readBody,
+  setCapped,
   stringSet,
 } from "../util";
 import { DEFAULT_TOKEN_TENANT, GRAPH_SCOPE, KeySet, TokenSource } from "./auth";
@@ -372,7 +373,7 @@ export class TeamsHandler implements Responder, EventContextBuilder {
         fetch: this.deps.fetch,
         now: this.deps.now ? () => this.deps.now!().getTime() : undefined,
       });
-      this.tokens.set(key, ts);
+      setCapped(this.tokens, key, ts);
     }
     return ts;
   }
@@ -481,7 +482,7 @@ export class TeamsHandler implements Responder, EventContextBuilder {
         fetch: this.deps.fetch,
         now: this.deps.now ? () => this.deps.now!().getTime() : undefined,
       });
-      this.tokens.set(key, ts);
+      setCapped(this.tokens, key, ts);
     }
     const tok = await ts.getToken();
     return new ApiClient({

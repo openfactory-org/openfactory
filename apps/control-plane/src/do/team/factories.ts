@@ -161,6 +161,7 @@ function putFactory(kit: TeamKit, f: FactoryRecord): void {
     msOf(f.created_at) || Date.now(),
     JSON.stringify(f),
   );
+  runtimeCache(kit).delete(f.id);
 }
 
 export function factoryUrl(kit: TeamKit, id: string): string {
@@ -657,6 +658,7 @@ function setFactoryIntegrations(
   providers: string[],
   settings: Record<string, Record<string, string> | undefined>,
 ): void {
+  runtimeCache(kit).delete(factoryId);
   kit.sql.exec("DELETE FROM factory_integrations WHERE factory_id = ?", factoryId);
   providers.forEach((p, i) =>
     kit.sql.exec(
@@ -694,7 +696,21 @@ export interface ApplyResult {
   invalid?: boolean;
 }
 
-const runtimeCache = new Map<string, { versionId: string; snapshot: unknown }>();
+/**
+ * configSnapshot results by factory ID, per TeamDO instance. The key is the
+ * kit (one per instance), so nothing leaks across teams or test instances
+ * that share the module.
+ */
+const runtimeCaches = new WeakMap<TeamKit, Map<string, { versionId: string; snapshot: unknown }>>();
+
+function runtimeCache(kit: TeamKit): Map<string, { versionId: string; snapshot: unknown }> {
+  let m = runtimeCaches.get(kit);
+  if (!m) {
+    m = new Map();
+    runtimeCaches.set(kit, m);
+  }
+  return m;
+}
 
 /**
  * ApplyDefinition. Stores an invalid version with its errors (the active
@@ -776,7 +792,7 @@ export async function applyDefinition(kit: TeamKit, factoryId: string, input: Ap
         spendLimit: def.spendLimit ?? null,
       },
     });
-    runtimeCache.delete(factoryId);
+    runtimeCache(kit).delete(factoryId);
     kit.live.broadcast(
       "definitions",
       { type: "event", id: "", event: "definition", data: factoryView(kit, nf) },
@@ -825,7 +841,7 @@ export async function configSnapshot(kit: TeamKit, factoryId: string): Promise<u
   const f = findFactory(kit, factoryId);
   if (!f) throw new OfError("resource_not_found", `factory ${factoryId} not found`);
   const vid = f.active_version_id ?? "";
-  const hit = runtimeCache.get(f.id);
+  const hit = runtimeCache(kit).get(f.id);
   if (hit && hit.versionId === vid) return hit.snapshot;
   const rt = first<{ data: string }>(kit.sql, "SELECT data FROM factory_runtime WHERE factory_id = ?", f.id);
   const snapshot = {
@@ -842,7 +858,7 @@ export async function configSnapshot(kit: TeamKit, factoryId: string): Promise<u
     ),
     integrations: getFactoryIntegrations(kit, f.id),
   };
-  runtimeCache.set(f.id, { versionId: vid, snapshot });
+  runtimeCache(kit).set(f.id, { versionId: vid, snapshot });
   return snapshot;
 }
 
@@ -1405,7 +1421,7 @@ function deleteFactoryRows(kit: TeamKit, id: string): void {
     kit.sql.exec(`DELETE FROM ${t} WHERE factory_id = ?`, id);
   }
   kit.sql.exec("DELETE FROM factories WHERE id = ?", id);
-  runtimeCache.delete(id);
+  runtimeCache(kit).delete(id);
 }
 
 // ---------- ops ----------

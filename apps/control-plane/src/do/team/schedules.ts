@@ -424,6 +424,35 @@ async function applyFiles(
   }
 }
 
+/**
+ * Stores value as the team secret secretName, then runs apply. When apply
+ * fails, restores the previous value (or deletes the new secret) so that the
+ * stored secret keeps matching the active definition. An empty value skips the
+ * secret and only runs apply.
+ */
+async function applyWithSecret(
+  kit: TeamKit,
+  secretName: string,
+  value: string,
+  apply: () => Promise<void>,
+): Promise<void> {
+  if (!value) return apply();
+  const old = await secrets.getSecretValue(kit, "", secretName);
+  const oldType = old !== undefined ? secrets.typeOf(kit, "", secretName) : "generic";
+  await secrets.putSecret(kit, "", secretName, "generic", value);
+  try {
+    await apply();
+  } catch (e) {
+    try {
+      if (old !== undefined) await secrets.putSecret(kit, "", secretName, oldType, old);
+      else kit.tx(() => kit.sql.exec("DELETE FROM secrets WHERE factory_id = '' AND name = ?", secretName));
+    } catch (x) {
+      console.warn("restore webhook secret after a failed apply", secretName, x);
+    }
+    throw e;
+  }
+}
+
 function newWebhookSecret(scheme: string): string {
   return scheme === "standard_webhooks" ? generateSecret(AUTH_SIGNATURE, scheme) : generateSecret("token", "");
 }
@@ -508,21 +537,7 @@ async function createWebhook(kit: TeamKit, c: OpCall): Promise<unknown> {
     enabled,
   });
   files[webhookFile(name)] = doc;
-  const oldType = existing ? secrets.typeOf(kit, "", secretName) : "generic";
-  if (store) await secrets.putSecret(kit, "", secretName, "generic", store);
-  try {
-    await applyFiles(kit, c, f, files, "Add webhook " + name);
-  } catch (e) {
-    if (store) {
-      try {
-        if (existing) await secrets.putSecret(kit, "", secretName, oldType, old!);
-        else kit.tx(() => kit.sql.exec("DELETE FROM secrets WHERE factory_id = '' AND name = ?", secretName));
-      } catch (x) {
-        console.warn("restore webhook secret after a failed apply", secretName, x);
-      }
-    }
-    throw e;
-  }
+  await applyWithSecret(kit, secretName, store, () => applyFiles(kit, c, f, files, "Add webhook " + name));
   const wh = listWebhooks(kit, f.id).find((w) => w.name === name);
   if (!wh) throw new OfError("resource_not_found", `webhook ${name}`);
   let url = ingressURL(kit.env.OF_PUBLIC_URL ?? "", { id: wh.id, auth_mode: "" });
@@ -563,6 +578,7 @@ async function updateWebhook(kit: TeamKit, c: OpCall): Promise<unknown> {
   const doc = files[path];
   if (doc === undefined) throw new OfError("resource_not_found", "webhook file " + path);
   const edits: Record<string, unknown> = {};
+  let store = "";
   if (req.secret !== undefined) {
     if (wh.auth_mode !== AUTH_SIGNATURE)
       throw new OfError(
@@ -570,14 +586,14 @@ async function updateWebhook(kit: TeamKit, c: OpCall): Promise<unknown> {
         "secret can only be supplied for signature webhooks; use rotate-secret instead",
       );
     if (req.secret.trim() === "") throw new OfError("invalid_request", "secret cannot be empty");
-    await secrets.putSecret(kit, "", wh.secret_name, "generic", req.secret);
+    store = req.secret;
     if (req.enabled === undefined) edits["enabled"] = true;
   }
   if (req.enabled !== undefined) edits["enabled"] = req.enabled;
   if (req.delivery_id_header !== undefined)
     edits["deliveryIdHeader"] = req.delivery_id_header === "" ? null : req.delivery_id_header;
   files[path] = factories.editYamlDocument(doc, edits);
-  await applyFiles(kit, c, f, files, "Update webhook " + wh.name);
+  await applyWithSecret(kit, wh.secret_name, store, () => applyFiles(kit, c, f, files, "Update webhook " + wh.name));
   const nwh = listWebhooks(kit, f.id).find((w) => w.name === wh.name);
   if (!nwh) throw new OfError("resource_not_found", `webhook ${wh.name}`);
   return webhookView(kit, nwh);
@@ -588,17 +604,19 @@ async function rotateSecret(kit: TeamKit, c: OpCall): Promise<unknown> {
   const req = (c.body ?? {}) as { secret?: string };
   const files = await managedFiles(kit, f);
   let reveal = "";
+  let store: string;
   if (req.secret) {
     if (wh.auth_mode !== AUTH_SIGNATURE)
       throw new OfError("invalid_request", "secret can only be supplied for signature webhooks");
-    await secrets.putSecret(kit, "", wh.secret_name, "generic", req.secret);
+    store = req.secret;
   } else if (wh.auth_mode === AUTH_SIGNATURE && wh.signature_scheme !== "standard_webhooks") {
     throw new OfError("invalid_request", 'supply the provider\'s new signing secret in "secret"');
   } else {
-    reveal = newWebhookSecret(wh.signature_scheme ?? "");
-    await secrets.putSecret(kit, "", wh.secret_name, "generic", reveal);
+    store = reveal = newWebhookSecret(wh.signature_scheme ?? "");
   }
-  await applyFiles(kit, c, f, files, "Rotate webhook secret " + wh.name);
+  await applyWithSecret(kit, wh.secret_name, store, () =>
+    applyFiles(kit, c, f, files, "Rotate webhook secret " + wh.name),
+  );
   const base = ingressURL(kit.env.OF_PUBLIC_URL ?? "", { id: wh.id, auth_mode: "" });
   const resp: Record<string, unknown> = { webhook: webhookView(kit, wh), ingress_url: base };
   if (reveal) {

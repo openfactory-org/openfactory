@@ -226,7 +226,7 @@ func (f *Firecracker) Start(ctx context.Context, s Spec) (VM, error) {
 	if ht <= 0 {
 		ht = 30 * time.Second
 	}
-	hello, err := v.acceptBoot(ht)
+	hello, err := v.acceptBoot(ctx, ht)
 	if err != nil {
 		return fail(err)
 	}
@@ -372,13 +372,22 @@ type fcVM struct {
 	pid  int
 	cg   string
 
-	mu      sync.Mutex
-	ln      net.Listener
-	conn    *ctlstream.Conn
-	key     string
-	report  *ctlstream.Frame
-	killed  bool
-	running chan struct{}
+	mu   sync.Mutex
+	ln   net.Listener
+	conn *ctlstream.Conn
+	// raw is the connection under conn; readDone is closed when the reader
+	// of conn returned.
+	raw      net.Conn
+	readDone chan struct{}
+	key      string
+	report   *ctlstream.Frame
+	killed   bool
+	// closed is set by Cleanup: no listener may open after it.
+	closed bool
+	// killTimer ends the VM when a cancel grace ran out; killAt is its time.
+	killTimer *time.Timer
+	killAt    time.Time
+	running   chan struct{}
 	// runningOnce guards running.
 	runningOnce sync.Once
 	mmdsRead    chan struct{}
@@ -410,8 +419,9 @@ func (v *fcVM) closeListener() {
 }
 
 // acceptBoot accepts the one connection of vm-init after a boot or a
-// restore and reads its hello. No agent code runs in the guest yet.
-func (v *fcVM) acceptBoot(timeout time.Duration) (ctlstream.Frame, error) {
+// restore and reads its hello. No agent code runs in the guest yet. The
+// wait ends at timeout or when ctx ends.
+func (v *fcVM) acceptBoot(ctx context.Context, timeout time.Duration) (ctlstream.Frame, error) {
 	type res struct {
 		c   net.Conn
 		err error
@@ -424,26 +434,42 @@ func (v *fcVM) acceptBoot(timeout time.Duration) (ctlstream.Frame, error) {
 		c, err := ln.Accept()
 		ch <- res{c, err}
 	}()
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
 	var r res
+	var waitErr error
 	select {
 	case r = <-ch:
-	case <-time.After(timeout):
-		v.closeListener()
-		return ctlstream.Frame{}, ErrGuestStart
+	case <-deadline.C:
+		waitErr = ErrGuestStart
+	case <-ctx.Done():
+		waitErr = fmt.Errorf("%w: %w", ErrGuestStart, ctx.Err())
 	}
 	v.closeListener()
+	if waitErr != nil {
+		// Closing the listener ends Accept. A connection it accepted at the
+		// same moment must not leak.
+		if r := <-ch; r.c != nil {
+			_ = r.c.Close()
+		}
+		return ctlstream.Frame{}, waitErr
+	}
 	if r.err != nil {
 		return ctlstream.Frame{}, fmt.Errorf("%w: %w", ErrGuestStart, r.err)
 	}
 	_ = r.c.SetReadDeadline(time.Now().Add(timeout))
+	stop := context.AfterFunc(ctx, func() { _ = r.c.Close() })
 	conn := ctlstream.New(r.c)
 	hello, err := conn.Expect(ctlstream.TypeHello, nil)
-	if err != nil {
+	if !stop() || err != nil {
 		_ = conn.Close()
+		if err == nil {
+			err = ctx.Err()
+		}
 		return hello, fmt.Errorf("%w: %w", ErrGuestStart, err)
 	}
 	_ = r.c.SetReadDeadline(time.Time{})
-	v.setConn(conn)
+	v.setConn(conn, r.c)
 	return hello, nil
 }
 
@@ -472,16 +498,20 @@ func (v *fcVM) acceptResume() {
 		}
 		_ = c.SetReadDeadline(time.Time{})
 		v.closeListener()
-		v.setConn(conn)
+		v.setConn(conn, c)
 		return
 	}
 }
 
-func (v *fcVM) setConn(c *ctlstream.Conn) {
+func (v *fcVM) setConn(c *ctlstream.Conn, raw net.Conn) {
+	done := make(chan struct{})
 	v.mu.Lock()
-	v.conn = c
+	v.conn, v.raw, v.readDone = c, raw, done
 	v.mu.Unlock()
-	go v.read(c)
+	go func() {
+		defer close(done)
+		v.read(c)
+	}()
 }
 
 func (v *fcVM) currentConn() *ctlstream.Conn {
@@ -509,12 +539,7 @@ func (v *fcVM) read(c *ctlstream.Conn) {
 			if !errors.Is(err, io.EOF) {
 				v.f.log().Warn("control stream", "vm", v.spec.VMID, "err", err)
 			}
-			if ln, lerr := v.f.listen(v.spec, v.f.Jail.Root(v.spec.VMID)); lerr == nil {
-				v.mu.Lock()
-				v.ln = ln
-				v.mu.Unlock()
-				go v.acceptResume()
-			}
+			v.relisten()
 			return
 		}
 		switch fr.Type {
@@ -533,6 +558,31 @@ func (v *fcVM) read(c *ctlstream.Conn) {
 			_ = c.Write(ctlstream.Frame{Type: ctlstream.TypeExitAck})
 		}
 	}
+}
+
+// relisten opens the listener again for the reconnect of vm-init. It opens
+// none after Cleanup.
+func (v *fcVM) relisten() {
+	v.mu.Lock()
+	closed := v.closed
+	v.mu.Unlock()
+	if closed {
+		return
+	}
+	ln, err := v.f.listen(v.spec, v.f.Jail.Root(v.spec.VMID))
+	if err != nil {
+		return
+	}
+	v.mu.Lock()
+	if v.closed {
+		// Cleanup ran while the listener opened.
+		v.mu.Unlock()
+		_ = ln.Close()
+		return
+	}
+	v.ln = ln
+	v.mu.Unlock()
+	go v.acceptResume()
 }
 
 func newKey() string {
@@ -582,14 +632,44 @@ func (v *fcVM) Cancel(ctx context.Context, grace time.Duration) error {
 		// vm-init turned Ctrl-Alt-Del into SIGINT for PID 1: a cancel with 10 s grace.
 		_ = v.api.Action(ctx, ActionSendCtrlAltDel)
 	}
-	time.AfterFunc(grace+5*time.Second, func() {
+	v.armKill(grace + 5*time.Second)
+	return nil
+}
+
+// armKill kills the VM after d. A later cancel can bring the kill closer but
+// never moves it later.
+func (v *fcVM) armKill(d time.Duration) {
+	at := time.Now().Add(d)
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.closed || (v.killTimer != nil && !at.Before(v.killAt)) {
+		return
+	}
+	select {
+	case <-v.gone:
+		return
+	default:
+	}
+	if v.killTimer != nil {
+		v.killTimer.Stop()
+	}
+	v.killAt = at
+	v.killTimer = time.AfterFunc(d, func() {
 		select {
 		case <-v.gone:
 		default:
 			_ = v.Kill(context.Background())
 		}
 	})
-	return nil
+}
+
+// stopKill stops the kill timer of a cancel.
+func (v *fcVM) stopKill() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.killTimer != nil {
+		v.killTimer.Stop()
+	}
 }
 
 func (v *fcVM) Kill(context.Context) error {
@@ -623,8 +703,8 @@ func (v *fcVM) watch() {
 		break
 	}
 	v.goneOnce.Do(func() { close(v.gone) })
-	// Give the reader a moment to store a report that raced with the end.
-	time.Sleep(50 * time.Millisecond)
+	v.stopKill()
+	v.drainReader()
 	v.mu.Lock()
 	e := Exit{Report: v.report, Killed: v.killed}
 	v.mu.Unlock()
@@ -633,8 +713,36 @@ func (v *fcVM) watch() {
 	close(v.exit)
 }
 
+// readerDrain bounds the wait of watch for the reader after the VM ended.
+const readerDrain = time.Second
+
+// drainReader waits until the reader of the control stream stored the frames
+// that vm-init sent before Firecracker ended, for example an exit report.
+// The read deadline ends a stream whose peer did not close.
+func (v *fcVM) drainReader() {
+	v.mu.Lock()
+	raw, done := v.raw, v.readDone
+	v.mu.Unlock()
+	if done == nil {
+		return
+	}
+	if raw != nil {
+		_ = raw.SetReadDeadline(time.Now().Add(readerDrain))
+	}
+	t := time.NewTimer(2 * readerDrain)
+	defer t.Stop()
+	select {
+	case <-done:
+	case <-t.C:
+	}
+}
+
 func (v *fcVM) Cleanup(ctx context.Context) error {
 	v.cleanOnce.Do(func() {
+		v.mu.Lock()
+		v.closed = true
+		v.mu.Unlock()
+		v.stopKill()
 		_ = v.Kill(ctx)
 		if v.pid > 1 {
 			deadline := time.Now().Add(5 * time.Second)

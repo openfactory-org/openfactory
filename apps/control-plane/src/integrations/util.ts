@@ -1,6 +1,8 @@
 // Shared helpers of the integrations (port of forgeutil webhook.go and text.go).
 import { OfError } from "@openfactory/core";
 import type { Integration, OutboundMessage } from "@openfactory/core";
+import { timingSafeEqual } from "../lib/bytes";
+import { readTextCapped } from "../lib/body";
 import type { SecretReader } from "./types";
 
 const enc = new TextEncoder();
@@ -38,16 +40,25 @@ export async function hmacSha256Hex(secret: string | Uint8Array, data: string | 
 
 /** Compares two byte strings without an early exit. Different lengths are not equal. */
 export function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) return false;
-  let d = 0;
-  for (let i = 0; i < a.length; i++) d |= a[i]! ^ b[i]!;
-  return d === 0;
+  return timingSafeEqual(a, b);
 }
 
-/** Constant-time compare of two secrets. Empty values never match. */
+/**
+ * Constant-time compare of two secrets. Empty values never match. Both values
+ * are padded to the same length before the compare, so the time does not
+ * depend on where they differ or on whether their lengths differ.
+ */
 export function constantTimeEqual(a: string, b: string): boolean {
   if (a === "" || b === "") return false;
-  return bytesEqual(enc.encode(a), enc.encode(b));
+  const x = enc.encode(a);
+  const y = enc.encode(b);
+  const n = Math.max(x.length, y.length);
+  const px = new Uint8Array(n);
+  const py = new Uint8Array(n);
+  px.set(x);
+  py.set(y);
+  const same = timingSafeEqual(px, py);
+  return same && x.length === y.length;
 }
 
 /** Checks a hex HMAC-SHA256 signature (an optional "sha256=" prefix is stripped). */
@@ -59,11 +70,12 @@ export async function verifyHmacSha256Hex(secret: string, body: string | Uint8Ar
   return bytesEqual(await hmacSha256(secret, body), got);
 }
 
-/** Reads at most MAX_WEBHOOK_BODY bytes of the request body as text. Throws when it is longer. */
+/**
+ * Reads the request body as text. It buffers at most MAX_WEBHOOK_BODY bytes
+ * and throws an invalid_request OfError when the body is longer.
+ */
 export async function readBody(req: Request): Promise<string> {
-  const buf = new Uint8Array(await req.arrayBuffer());
-  if (buf.length > MAX_WEBHOOK_BODY) throw new Error("request body too large");
-  return new TextDecoder().decode(buf);
+  return readTextCapped(req, MAX_WEBHOOK_BODY, "request body");
 }
 
 export function jsonResponse(status: number, v: unknown): Response {
@@ -176,4 +188,21 @@ export function errMessage(e: unknown): string {
 /** Case-insensitive equality (Go strings.EqualFold, simple folding). */
 export function equalFold(a: string, b: string): boolean {
   return a.toLowerCase() === b.toLowerCase();
+}
+
+/** Default size cap of the per-handler lookup caches (users, channels, tokens). */
+export const CACHE_MAX_ENTRIES = 1000;
+
+/**
+ * Sets a key in a cache map and drops the oldest entries (insertion order)
+ * so the map never holds more than max entries.
+ */
+export function setCapped<K, V>(m: Map<K, V>, key: K, value: V, max = CACHE_MAX_ENTRIES): void {
+  m.delete(key);
+  while (m.size >= max) {
+    const oldest = m.keys().next();
+    if (oldest.done) break;
+    m.delete(oldest.value);
+  }
+  m.set(key, value);
 }

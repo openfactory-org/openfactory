@@ -255,6 +255,24 @@ describe("cancel, destroy and list", () => {
     for (const v of f.sandboxes.values()) v.state = "stopped";
     expect((await p.status(t.taskId)).reason).toBe("cancelled");
   });
+  it("the cancel mark lives on the sandbox, not in the provider object", async () => {
+    // The control plane builds a new provider object for each call.
+    const f = fakeDaytona();
+    const t = sampleTask();
+    await provider({}, f).p.start(t);
+    for (const v of f.sandboxes.values()) v.state = "started";
+    await provider({}, f).p.cancel(t.taskId, 30);
+    const sb = [...f.sandboxes.values()][0]!;
+    expect(sb.labels).toMatchObject({ "of-install": INSTALL, "of-cancel": "1" });
+    sb.state = "stopped";
+    expect((await provider({}, f).p.status(t.taskId)).reason).toBe("cancelled");
+    expect((await provider({}, f).p.list())[0]!.reason).toBe("cancelled");
+    // Without a cancel, a stopped sandbox is evicted.
+    const t2 = sampleTask();
+    await provider({}, f).p.start(t2);
+    for (const v of f.sandboxes.values()) if (v.labels?.["of-cancel"] !== "1") v.state = "stopped";
+    expect((await provider({}, f).p.status(t2.taskId)).reason).toBe("evicted");
+  });
   it("list sends the labels as a JSON string", async () => {
     const { f, p } = provider();
     const t = sampleTask();

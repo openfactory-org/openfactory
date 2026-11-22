@@ -20,8 +20,10 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -49,6 +51,10 @@ const (
 const DefaultMaxMessageSize = 64 << 20
 
 const acceptGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+// defaultCloseTimeout bounds the write of the close frame. A peer that
+// stopped reading (a half-open TCP connection) cannot hold Close longer.
+const defaultCloseTimeout = 5 * time.Second
 
 // CloseError is returned by ReadMessage when the peer closed the connection.
 type CloseError struct {
@@ -85,13 +91,21 @@ type Conn struct {
 	closeOnce sync.Once
 	closeSent bool
 	closed    chan struct{}
+	// closeTimeout is defaultCloseTimeout; tests shorten it.
+	closeTimeout time.Duration
+
+	// dmu guards readTimer. readExpired is set when the read deadline
+	// passed and closed the connection.
+	dmu         sync.Mutex
+	readTimer   *time.Timer
+	readExpired atomic.Bool
 }
 
 func newConn(rwc io.ReadWriteCloser, br *bufio.Reader, client bool, proto string) *Conn {
 	if br == nil {
 		br = bufio.NewReader(rwc)
 	}
-	return &Conn{rwc: rwc, br: br, client: client, Subprotocol: proto, closed: make(chan struct{})}
+	return &Conn{rwc: rwc, br: br, client: client, Subprotocol: proto, closed: make(chan struct{}), closeTimeout: defaultCloseTimeout}
 }
 
 // Dial opens a client connection. url may use ws, wss, http or https schemes.
@@ -126,7 +140,12 @@ func Dial(ctx context.Context, client *http.Client, url string, header http.Head
 		req.Header.Set("Sec-WebSocket-Protocol", strings.Join(subprotocols, ", "))
 	}
 
-	hc := http1Client(client)
+	hc, own := http1Client(client)
+	if own {
+		// The transport is a private clone. A connection that is not
+		// upgraded (a refused handshake) would stay in its idle pool forever.
+		defer hc.CloseIdleConnections()
+	}
 	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, nil, err
@@ -162,7 +181,9 @@ func (e *HandshakeError) Error() string {
 	return fmt.Sprintf("ws: handshake failed: HTTP %d: %s", e.StatusCode, strings.TrimSpace(e.Body))
 }
 
-func http1Client(c *http.Client) *http.Client {
+// http1Client returns a client forced to HTTP/1.1. own reports that its
+// transport is a private clone that the caller must release.
+func http1Client(c *http.Client) (_ *http.Client, own bool) {
 	if c == nil {
 		c = http.DefaultClient
 	}
@@ -175,7 +196,7 @@ func http1Client(c *http.Client) *http.Client {
 	default:
 		// Unknown round tripper (e.g. test wrapper); use as-is.
 		cp := *c
-		return &cp
+		return &cp, false
 	}
 	t := base.Clone()
 	t.ForceAttemptHTTP2 = false
@@ -188,7 +209,7 @@ func http1Client(c *http.Client) *http.Client {
 	t.TLSClientConfig.NextProtos = []string{"http/1.1"}
 	cp := *c
 	cp.Transport = t
-	return &cp
+	return &cp, true
 }
 
 // Upgrade performs the server side of the handshake. If subprotocols is
@@ -338,6 +359,9 @@ func (c *Conn) ReadMessage() (int, []byte, error) {
 	for {
 		fin, op, payload, err := c.readFrame(max)
 		if err != nil {
+			if c.readExpired.Load() {
+				return 0, nil, fmt.Errorf("ws: read: %w", os.ErrDeadlineExceeded)
+			}
 			return 0, nil, err
 		}
 		switch op {
@@ -448,8 +472,38 @@ func (c *Conn) fail(code int, reason string) error {
 	return &CloseError{Code: code, Reason: reason}
 }
 
-// CloseWithStatus sends a close frame (once) and closes the underlying connection.
+// SetReadDeadline closes the connection when no ReadMessage call returned
+// before t. ReadMessage then returns an error that wraps
+// os.ErrDeadlineExceeded. Call it again after each message to keep an idle
+// timeout. A zero t removes the deadline.
+func (c *Conn) SetReadDeadline(t time.Time) error {
+	c.dmu.Lock()
+	defer c.dmu.Unlock()
+	if c.readTimer != nil {
+		c.readTimer.Stop()
+		c.readTimer = nil
+	}
+	if t.IsZero() {
+		return nil
+	}
+	c.readTimer = time.AfterFunc(time.Until(t), func() {
+		c.readExpired.Store(true)
+		c.shutdown()
+	})
+	return nil
+}
+
+// CloseWithStatus sends a close frame (once) and closes the underlying
+// connection. It returns within closeTimeout also when the peer stopped
+// reading or another writer is stuck (after 5 s).
 func (c *Conn) CloseWithStatus(code int, reason string) error {
+	// Closing the connection ends a write that blocks, ours or another one
+	// that holds wmu.
+	force := time.AfterFunc(c.closeTimeout, c.shutdown)
+	defer force.Stop()
+	if d, ok := c.rwc.(interface{ SetWriteDeadline(time.Time) error }); ok {
+		_ = d.SetWriteDeadline(time.Now().Add(c.closeTimeout))
+	}
 	c.wmu.Lock()
 	if !c.closeSent {
 		payload := make([]byte, 2+len(reason))
@@ -473,5 +527,10 @@ func (c *Conn) shutdown() {
 	c.closeOnce.Do(func() {
 		close(c.closed)
 		_ = c.rwc.Close()
+		c.dmu.Lock()
+		if c.readTimer != nil {
+			c.readTimer.Stop()
+		}
+		c.dmu.Unlock()
 	})
 }

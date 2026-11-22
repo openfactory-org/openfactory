@@ -26,7 +26,13 @@ import type { Run, RunSession, WorkItem } from "../engine/types";
 import type { Forge, ForgeResolver } from "../forges/forge";
 import { resolverFor } from "../forges/env";
 import { expandWith } from "../secrets/expand";
-import type { SecretsBuilder, StartConfig, StartConfigBuilder } from "./startconfig";
+import {
+  deniedWithoutRequired,
+  mcpServerUrlsOf,
+  type SecretsBuilder,
+  type StartConfig,
+  type StartConfigBuilder,
+} from "./startconfig";
 
 export const ORCHESTRATION_SERVER = "factory";
 export const RUNNER_SETUP_TIMEOUT_S = 1800;
@@ -732,7 +738,11 @@ export function startConfigOf(env: Env, run: Run, session: RunSession, plan: Run
     else if (srv.url) mcp[name] = { url: srv.url };
     else if (srv.command) mcp[name] = { command: srv.command, ...(srv.args ? { args: srv.args } : {}) };
   }
-  const required = requiredHosts(run.config, { controlUrl: base, r2AccountId: env.OF_R2_ACCOUNT_ID ?? "" });
+  const required = requiredHosts(run.config, {
+    controlUrl: base,
+    r2AccountId: env.OF_R2_ACCOUNT_ID ?? "",
+    mcpServerUrls: mcpServerUrlsOf(run.config),
+  });
   const np = run.config.network_policy;
   const outEnv = { ...plan.env };
   if (plan.workDir) outEnv.OF_WORKDIR = plan.workDir;
@@ -771,7 +781,7 @@ export function startConfigOf(env: Env, run: Run, session: RunSession, plan: Run
     network_policy: {
       restricted: !!np?.restricted,
       allowed_hosts: np?.restricted ? [...new Set([...(np.allowed_hosts ?? []), ...required])].sort() : [],
-      denied_hosts: np?.restricted ? (np.denied_hosts ?? []).filter((h) => !required.includes(h)) : [],
+      denied_hosts: np?.restricted ? deniedWithoutRequired(np.denied_hosts, required) : [],
       always_allow: required,
     },
     egress_lock: np?.restricted ? "required" : "off",

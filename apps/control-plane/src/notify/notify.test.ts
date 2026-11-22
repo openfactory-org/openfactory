@@ -225,11 +225,12 @@ describe("eventctx", () => {
     expect(b.envelope.payload_truncated).toBe(true);
     expect(b.files[1]!.data.length).toBeLessThanOrEqual(ec.MAX_PAYLOAD_BYTES);
     expect(b.envelope.context_files!.length).toBe(40);
-    expect(b.envelope.context_files![0]).toBe("context/ok.txt");
+    // A path that climbs above its root is refused, not re-rooted.
+    expect(b.envelope.context_files![0]).toBe("context/f0");
     expect(b.envelope.omitted!.map((o) => o.reason)).toEqual([
       "private",
       "bad file name",
-      "the context size limit was reached",
+      "bad file name",
       "the context size limit was reached",
     ]);
   });
@@ -308,7 +309,5 @@ describe("eventctx", () => {
     expect(ref).toMatch(/^eventctx\/[0-9a-f]{64}$/);
     expect(await ec.storeBundle(bucket, b)).toBe(ref);
     expect(await ec.loadBundle(bucket, ref)).toEqual(b);
-    expect(await ec.release(bucket, [ref, ref, "other"])).toBe(1);
-    expect(await ec.loadBundle(bucket, ref)).toBeNull();
   });
 });

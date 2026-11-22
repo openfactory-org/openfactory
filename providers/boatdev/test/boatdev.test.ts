@@ -266,18 +266,24 @@ describe("state mapping (02 §3.4)", () => {
 });
 
 describe("cancel, destroy and list", () => {
-  it("cancel runs kill as root and marks the task", async () => {
-    const { f, p } = provider();
+  it("cancel runs kill as root and keeps no state in the provider object", async () => {
+    // The control plane builds a new provider object for each call: no call may
+    // depend on state that an earlier call left in memory.
+    const f = fakeBoat();
     const t = sampleTask();
-    await p.start(t);
-    await p.cancel(t.taskId, 30);
+    await provider(f).p.start(t);
+    await provider(f).p.cancel(t.taskId, 30);
     const [c] = f.mock.find("POST", "/sandboxes/:id/commands");
     expect(JSON.parse(c!.body)).toEqual({
       command: "sudo -n kill -TERM $(cat /run/openfactory/runner.pid)",
       timeoutSeconds: 15,
     });
     f.sandboxes.get("sbx_1")!.state = "archived";
-    expect((await p.status(t.taskId)).reason).toBe("cancelled");
+    // Same answer from the object that cancelled and from a new one: the boat state.
+    const { p } = provider(f);
+    expect((await p.status(t.taskId)).reason).toBe("evicted");
+    await p.cancel(t.taskId, 30);
+    expect((await p.status(t.taskId)).reason).toBe("evicted");
   });
 
   it("destroy sends the confirm header and treats 404 as done", async () => {

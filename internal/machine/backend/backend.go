@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -89,6 +90,7 @@ type Options struct {
 	// FreeDisk returns the free bytes of the data directory.
 	FreeDisk func() (int64, error)
 	// Prune frees disk (LRU of images and git cache) when a check fails.
+	// The backend calls it without holding its lock, so it may call InUse.
 	Prune func()
 	// RefuseUnrestricted, when set, refuses unrestricted tasks with this
 	// message (a foreign firewall drops forwarded traffic).
@@ -119,11 +121,28 @@ type task struct {
 	netRm    string
 	helper   Helper
 	flags    endFlags
-	watchers []chan rtcore.TaskStatus
+	watchers []*watcher
 	deadline *time.Timer
 	cleanup  *time.Timer
 	gone     time.Time // destroyed at
+	// ctx is the context of the launch; stop ends it (Destroy, or the end
+	// of the task).
+	ctx  context.Context
+	stop context.CancelFunc
+	// launched closes when the VM of the task ended, or when the task ended
+	// without a VM. Until then the task holds its slot and its network.
 	launched chan struct{}
+}
+
+// watcher is one Watch channel. done closes with ch on the exited status.
+type watcher struct {
+	ch   chan rtcore.TaskStatus
+	done chan struct{}
+}
+
+func (b *Backend) newTask(rec store.Record, full rtcore.Task, ex Extras) *task {
+	ctx, stop := context.WithCancel(b.ctx)
+	return &task{rec: rec, full: full, extras: ex, ctx: ctx, stop: stop, launched: make(chan struct{})}
 }
 
 // Extras are the worker extras of task.assign.
@@ -154,6 +173,8 @@ func New(ctx context.Context, o Options) (*Backend, error) {
 	}
 	return b, nil
 }
+
+var _ rtcore.Drainable = (*Backend)(nil)
 
 // Name returns "firecracker".
 func (b *Backend) Name() string { return Name }
@@ -218,6 +239,11 @@ func (b *Backend) StartWithExtras(_ context.Context, t rtcore.Task, raw json.Raw
 	slot := -1
 	live := 0
 	for i, s := range b.slots {
+		if s == t.TaskID {
+			// Another Start of this task checks the disk now.
+			b.mu.Unlock()
+			return rtcore.TaskStatus{}, fmt.Errorf("task %s is starting: %w", t.TaskID, rtcore.ErrAtCapacity)
+		}
 		if s == "" && slot < 0 {
 			slot = i
 		}
@@ -229,27 +255,36 @@ func (b *Backend) StartWithExtras(_ context.Context, t rtcore.Task, raw json.Raw
 		b.mu.Unlock()
 		return rtcore.TaskStatus{}, fmt.Errorf("all %d slots are in use: %w", len(b.slots), rtcore.ErrAtCapacity)
 	}
+	// Reserve the slot, then check the disk without the lock: Prune calls InUse.
+	b.slots[slot] = t.TaskID
+	b.mu.Unlock()
+	release := func() {
+		if b.slots[slot] == t.TaskID {
+			b.slots[slot] = ""
+		}
+	}
 	if err := b.checkDisk(live); err != nil {
+		b.mu.Lock()
+		release()
 		b.mu.Unlock()
 		return rtcore.TaskStatus{}, err
 	}
 	now := b.o.Now().UTC()
 	st := rtcore.TaskStatus{TaskID: t.TaskID, State: rtcore.TaskAccepted, SandboxID: vm.VMID(slot, t.TaskID)}
-	tk := &task{
-		full: t, extras: ex, launched: make(chan struct{}),
-		rec: store.Record{
-			TaskID: t.TaskID, VMID: st.SandboxID, Slot: slot, Status: st, BootID: b.o.BootID, Task: t,
-			Deadline: now.Add(time.Duration(t.MaxSessionSeconds+60) * time.Second),
-		},
-	}
+	tk := b.newTask(store.Record{
+		TaskID: t.TaskID, VMID: st.SandboxID, Slot: slot, Status: st, BootID: b.o.BootID, Task: t,
+		Deadline: now.Add(time.Duration(t.MaxSessionSeconds+60) * time.Second),
+	}, t, ex)
+	b.mu.Lock()
 	if err := b.o.Store.Put(tk.rec); err != nil {
+		release()
 		b.mu.Unlock()
+		tk.stop()
 		return rtcore.TaskStatus{}, fmt.Errorf("record task: %w", err)
 	}
-	b.slots[slot] = t.TaskID
 	b.tasks[t.TaskID] = tk
 	b.mu.Unlock()
-	go b.launch(tk) //nolint:gosec // G118: the VM outlives the request; launch uses the backend context
+	go b.launch(tk) //nolint:gosec // G118: the VM outlives the request; launch uses the task context
 	return st, nil
 }
 
@@ -300,7 +335,7 @@ func (b *Backend) checkSpec(t rtcore.Task, ex Extras) error {
 
 // checkDisk refuses a task when the disk cannot hold one more full scratch
 // disk plus the reserve. Sparse scratch files can fill up, so each live VM
-// counts with its full size. Call it with b.mu held.
+// counts with its full size. Call it without b.mu: Prune calls InUse.
 func (b *Backend) checkDisk(live int) error {
 	if b.o.FreeDisk == nil {
 		return nil
@@ -345,19 +380,20 @@ func (b *Backend) setStatusLocked(tk *task, st rtcore.TaskStatus) {
 	if err := b.o.Store.Put(tk.rec); err != nil {
 		b.log.Warn("record task", "task", tk.rec.TaskID, "err", err)
 	}
-	for _, ch := range tk.watchers {
+	for _, w := range tk.watchers {
 		select {
-		case ch <- st:
+		case w.ch <- st:
 		default:
 			// Drop the oldest status for a slow watcher; the final one must arrive.
 			select {
-			case <-ch:
+			case <-w.ch:
 			default:
 			}
-			ch <- st
+			w.ch <- st
 		}
 		if st.State == rtcore.TaskExited {
-			close(ch)
+			close(w.ch)
+			close(w.done)
 		}
 	}
 	if st.State == rtcore.TaskExited {
@@ -365,8 +401,12 @@ func (b *Backend) setStatusLocked(tk *task, st rtcore.TaskStatus) {
 	}
 }
 
-// fail ends a task that never got a running VM.
+// fail ends a task that never got a running VM. A cancelled task ends as
+// cancelled: its launch fails because Destroy ended the launch context.
 func (b *Backend) fail(tk *task, reason rtcore.SandboxReason, msg string) {
+	if b.cancelled(tk) {
+		reason, msg = rtcore.SandboxCancelled, ""
+	}
 	b.log.Warn("task failed", "task", tk.rec.TaskID, "reason", reason, "msg", msg)
 	b.teardown(tk)
 	b.finish(tk, reason, nil, msg)
@@ -374,6 +414,7 @@ func (b *Backend) fail(tk *task, reason rtcore.SandboxReason, msg string) {
 
 func (b *Backend) finish(tk *task, reason rtcore.SandboxReason, code *int, msg string) {
 	now := b.o.Now().UTC()
+	tk.stop()
 	b.mu.Lock()
 	if tk.deadline != nil {
 		tk.deadline.Stop()
@@ -424,7 +465,7 @@ func (b *Backend) cancelled(tk *task) bool {
 // session document and waits for its end.
 func (b *Backend) launch(tk *task) {
 	defer close(tk.launched)
-	ctx := b.ctx
+	ctx := tk.ctx
 	t := tk.full
 	b.setStatus(tk, rtcore.TaskStatus{State: rtcore.TaskStarting})
 	c := b.o.Config
@@ -470,8 +511,9 @@ func (b *Backend) launch(tk *task) {
 			cacheDisks = append(cacheDisks, p)
 			cacheKeys = append(cacheKeys, r.Key)
 		}
+		// The mirror serves later tasks too: it lives with the backend, not the task.
 		go func(r GitRepo) {
-			if err := b.o.Cache.Ensure(context.WithoutCancel(ctx), r.Key, r.CloneURL); err != nil {
+			if err := b.o.Cache.Ensure(b.ctx, r.Key, r.CloneURL); err != nil {
 				b.log.Info("git cache", "key", r.Key, "err", err)
 			}
 		}(r)
@@ -484,7 +526,7 @@ func (b *Backend) launch(tk *task) {
 		if key := b.o.SnapKey(img, tools); key != "" {
 			snap = b.o.Snapshots.Get(key)
 			if snap == nil {
-				b.o.Snapshots.EnsureAsync(key, vm.Spec{
+				b.o.Snapshots.EnsureAsync(b.ctx, key, vm.Spec{
 					VMID: "vm-tpl-" + key[:8], Arch: t.Platform.Arch, Slot: 255, UID: c.Jail.UIDBase + 255, GID: c.Jail.UIDBase + 255,
 					VCPUs: c.Slot.VCPUs, MemoryMiB: c.Slot.MemoryMiB, ScratchGiB: c.Slot.ScratchGiB,
 					Kernel: b.o.Kernel, Tools: tools, Image: img.Path, Scratch: scratch, Debug: c.Debug.SerialConsole,
@@ -566,12 +608,23 @@ func (b *Backend) launch(tk *task) {
 	}
 	b.mu.Lock()
 	tk.vm = v
+	cancelled := tk.flags.cancelled
 	b.mu.Unlock()
+	if cancelled {
+		// Destroy or Cancel came while the VM started and saw no VM to stop.
+		_ = v.Kill(context.Background())
+		select {
+		case <-v.Wait():
+		case <-time.After(30 * time.Second):
+		}
+		b.fail(tk, rtcore.SandboxCancelled, "")
+		return
+	}
 	doc := b.document(tk, img, n, cacheKeys)
 	if err := v.Go(ctx, doc); err != nil {
-		_ = v.Kill(ctx)
+		// fail keeps the jail for the failure retention time, then cleans it.
+		_ = v.Kill(context.Background())
 		b.fail(tk, rtcore.SandboxProcessFailed, "hand the session to the VM: "+err.Error())
-		_ = v.Cleanup(context.Background())
 		return
 	}
 	b.mu.Lock()
@@ -736,22 +789,35 @@ func (b *Backend) Status(_ context.Context, id string) (rtcore.TaskStatus, error
 	return tk.rec.Status, nil
 }
 
-// Watch sends the current status and each change until the task exited.
-func (b *Backend) Watch(_ context.Context, id string) (<-chan rtcore.TaskStatus, error) {
+// Watch sends the current status and each change. The channel closes after
+// the exited status or when ctx ends.
+func (b *Backend) Watch(ctx context.Context, id string) (<-chan rtcore.TaskStatus, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	tk, ok := b.tasks[id]
 	if !ok {
 		return nil, fmt.Errorf("task %s: %w", id, rtcore.ErrNotFound)
 	}
-	ch := make(chan rtcore.TaskStatus, 8)
-	ch <- tk.rec.Status
+	w := &watcher{ch: make(chan rtcore.TaskStatus, 8), done: make(chan struct{})}
+	w.ch <- tk.rec.Status
 	if tk.rec.Status.State == rtcore.TaskExited {
-		close(ch)
-		return ch, nil
+		close(w.ch)
+		return w.ch, nil
 	}
-	tk.watchers = append(tk.watchers, ch)
-	return ch, nil
+	tk.watchers = append(tk.watchers, w)
+	go func() {
+		select {
+		case <-ctx.Done():
+			b.mu.Lock()
+			defer b.mu.Unlock()
+			if i := slices.Index(tk.watchers, w); i >= 0 {
+				tk.watchers = slices.Delete(tk.watchers, i, i+1)
+				close(w.ch)
+			}
+		case <-w.done:
+		}
+	}()
+	return w.ch, nil
 }
 
 // Cancel asks the runner to stop. After grace seconds the VM is killed.
@@ -786,13 +852,27 @@ func (b *Backend) Destroy(ctx context.Context, id string) error {
 	}
 	tk.flags.cancelled = true
 	v := tk.vm
+	b.mu.Unlock()
+	// End a launch in progress: the context stops the image pull and the VM
+	// start, and a VM that starts anyway sees the flag and is killed.
+	tk.stop()
+	if v != nil {
+		_ = v.Kill(ctx)
+	}
+	// launch returns after the VM ended. Release nothing before that: a new
+	// task could get the slot and the tap of a VM that still runs.
+	select {
+	case <-tk.launched:
+	case <-ctx.Done():
+		return fmt.Errorf("destroy task %s: wait for the VM to stop: %w", id, ctx.Err())
+	}
+	b.mu.Lock()
+	v = tk.vm
 	if tk.cleanup != nil {
 		tk.cleanup.Stop()
 	}
 	b.mu.Unlock()
 	if v != nil {
-		_ = v.Kill(ctx)
-		<-tk.launched
 		_ = v.Cleanup(ctx)
 	}
 	b.teardown(tk)
@@ -871,20 +951,25 @@ func (b *Backend) adopt(ctx context.Context) error {
 	var want []vm.AdoptRecord
 	byVM := map[string]*task{}
 	for _, r := range recs {
-		tk := &task{rec: r, full: r.Task, launched: make(chan struct{})}
-		close(tk.launched)
+		tk := b.newTask(r, r.Task, Extras{})
 		b.tasks[r.TaskID] = tk
 		if r.Status.State == rtcore.TaskExited {
+			tk.stop()
+			close(tk.launched)
 			continue
 		}
 		now := b.o.Now().UTC()
 		if r.BootID != "" && b.o.BootID != "" && r.BootID != b.o.BootID {
 			b.setStatusLocked(tk, rtcore.TaskStatus{State: rtcore.TaskExited, Reason: rtcore.SandboxNodeLost, Message: "the host rebooted", EndedAt: &now})
+			tk.stop()
+			close(tk.launched)
 			continue
 		}
 		var spec vm.Spec
 		if len(r.Spec) == 0 || json.Unmarshal(r.Spec, &spec) != nil || r.StreamKey == "" {
 			b.setStatusLocked(tk, rtcore.TaskStatus{State: rtcore.TaskExited, Reason: rtcore.SandboxUnknown, Message: "the agent restarted before the VM started", EndedAt: &now})
+			tk.stop()
+			close(tk.launched)
 			continue
 		}
 		want = append(want, vm.AdoptRecord{VMID: r.VMID, Spec: spec, StreamKey: r.StreamKey})
@@ -903,6 +988,8 @@ func (b *Backend) adopt(ctx context.Context) error {
 		if !ok {
 			now := b.o.Now().UTC()
 			b.setStatusLocked(tk, rtcore.TaskStatus{State: rtcore.TaskExited, Reason: rtcore.SandboxUnknown, Message: "the VM is gone after an agent restart", EndedAt: &now})
+			tk.stop()
+			close(tk.launched)
 			continue
 		}
 		if tk.rec.Slot >= 0 && tk.rec.Slot < len(b.slots) {
@@ -911,7 +998,10 @@ func (b *Backend) adopt(ctx context.Context) error {
 		tk.vm = v
 		b.adoptNetwork(ctx, tk)
 		b.log.Info("adopted VM", "task", tk.rec.TaskID, "vm", id)
-		go b.supervise(tk, v)
+		go func() {
+			defer close(tk.launched)
+			b.supervise(tk, v)
+		}()
 	}
 	return nil
 }

@@ -19,6 +19,7 @@ import { iso, ms, priorRetries, sortedUnique } from "../../engine/sessions";
 import { queuedEventId, taskIdOf } from "../../engine/timeline";
 import type { Run, RunSession } from "../../engine/types";
 import { dest } from "../../lib/outbox/dest";
+import { deniedWithoutRequired, mcpServerUrlsOf } from "../../runner-api/startconfig";
 import { endSession, requestSlot, timeline, timerName, transition, type Fx } from "./engine";
 
 export type Grant = OutboxPayloads["dispatch.grant"];
@@ -40,8 +41,12 @@ export type GrantPrep =
 export function taskPolicy(fx: Fx, run: Run): TaskNetworkPolicy | undefined {
   const np = run.config.network_policy;
   if (!np?.restricted) return undefined;
-  const required = requiredHosts(run.config, { controlUrl: fx.cfg.controlUrl, r2AccountId: fx.cfg.r2AccountId });
-  const denied = (np.denied_hosts ?? []).filter((h) => !required.includes(h.toLowerCase()));
+  const required = requiredHosts(run.config, {
+    controlUrl: fx.cfg.controlUrl,
+    r2AccountId: fx.cfg.r2AccountId,
+    mcpServerUrls: mcpServerUrlsOf(run.config),
+  });
+  const denied = deniedWithoutRequired(np.denied_hosts, required);
   return {
     mode: "restricted",
     allowedHosts: sortedUnique([...(np.allowed_hosts ?? []), ...required]),

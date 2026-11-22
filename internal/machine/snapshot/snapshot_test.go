@@ -103,3 +103,66 @@ func TestBuildAndGet(t *testing.T) {
 		t.Fatal("prune")
 	}
 }
+
+// blockVMM starts a template VM only when the test releases it or ctx ends.
+type blockVMM struct {
+	started chan struct{}
+	release chan struct{}
+	vm      *fakeTemplateVM
+}
+
+func (f *blockVMM) Start(ctx context.Context, _ vm.Spec) (vm.VM, error) {
+	close(f.started)
+	select {
+	case <-f.release:
+		return f.vm, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+func (f *blockVMM) Adopt(context.Context, []vm.AdoptRecord) ([]vm.VM, error) { return nil, nil }
+
+func TestEnsureAsyncEndsWithContext(t *testing.T) {
+	vmm := &blockVMM{started: make(chan struct{}), release: make(chan struct{}), vm: &fakeTemplateVM{dir: t.TempDir()}}
+	m := &Manager{Dir: t.TempDir(), VMM: vmm, Settle: time.Millisecond}
+	ctx, cancel := context.WithCancel(context.Background())
+	m.EnsureAsync(ctx, "k1", vm.Spec{VMID: "vm-tpl-k1"})
+	<-vmm.started
+	cancel()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		m.mu.Lock()
+		busy := m.building["k1"]
+		m.mu.Unlock()
+		if !busy {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the build did not end with its context")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if m.Get("k1") != nil {
+		t.Fatal("template after a cancelled build")
+	}
+}
+
+func TestPruneSkipsTheBuildInProgress(t *testing.T) {
+	dir := t.TempDir()
+	for _, d := range []string{"k1.tmp", "old.tmp", "k2"} {
+		if err := os.MkdirAll(filepath.Join(dir, d), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m := &Manager{Dir: dir}
+	m.current = "k1"
+	m.Prune(func(string) bool { return false })
+	if _, err := os.Stat(filepath.Join(dir, "k1.tmp")); err != nil {
+		t.Fatal("Prune removed the template that Build writes")
+	}
+	for _, d := range []string{"old.tmp", "k2"} {
+		if _, err := os.Stat(filepath.Join(dir, d)); err == nil {
+			t.Fatalf("Prune kept %s", d)
+		}
+	}
+}

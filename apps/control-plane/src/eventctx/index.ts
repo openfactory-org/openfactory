@@ -4,7 +4,9 @@
 // stored in R2 by the SHA-256 of their JSON (plan rule 9): WorkDO keeps only
 // the reference.
 import { OfError, type Event, type FileDiff, type ReviewThread, type SourceRef } from "@openfactory/core";
+import { isNotSupported } from "@openfactory/plugin-api";
 import type { ForgeResolver } from "../forges/forge";
+import { splitRepo } from "../forges/util/text";
 import { b64, fromB64, sha256Hex, utf8 } from "../lib/bytes";
 
 export const DIR = ".openfactory/events";
@@ -66,13 +68,19 @@ export function messageDir(messageId: string): string {
   return DIR + "/" + safeName(messageId);
 }
 
-/** A clean relative path, or "" when p escapes or is empty. */
+/**
+ * A clean relative path, or "" when p is empty, absolute (a leading slash or a
+ * drive letter) or goes above its root with "..".
+ */
 export function cleanRel(p: string): string {
+  const s = p.replace(/\\/g, "/");
+  if (s.startsWith("/") || /^[A-Za-z]:/.test(s)) return "";
   const parts: string[] = [];
-  for (const seg of p.replace(/\\/g, "/").split("/")) {
+  for (const seg of s.split("/")) {
     if (seg === "" || seg === ".") continue;
-    if (seg === "..") parts.pop();
-    else parts.push(seg);
+    if (seg !== "..") parts.push(seg);
+    else if (parts.length === 0) return "";
+    else parts.pop();
   }
   return parts.join("/");
 }
@@ -112,17 +120,20 @@ async function runBuilders(ev: Event, builders: Builder[]): Promise<{ files: Fil
   const want = normalize(ev.provider);
   for (const bl of [...defaultBuilders(), ...builders]) {
     if (normalize(bl.provider()) !== want) continue;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const r = await Promise.race([
         bl.eventContext(ev),
-        new Promise<never>((_, rej) =>
-          setTimeout(() => rej(new Error("context deadline exceeded")), BUILDER_TIMEOUT_MS),
-        ),
+        new Promise<never>((_, rej) => {
+          timer = setTimeout(() => rej(new Error("context deadline exceeded")), BUILDER_TIMEOUT_MS);
+        }),
       ]);
       omitted.push(...(r.omitted ?? []));
       files.push(...r.files);
     } catch (e) {
       omitted.push({ name: "context", reason: (e as Error).message });
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
     }
   }
   return { files, omitted };
@@ -266,15 +277,12 @@ export async function loadBundle(bucket: R2Bucket, ref: string): Promise<Bundle 
   return decode(await obj.text());
 }
 
-/** How long bundles stay when no run end removes them first. */
+/**
+ * How long bundles stay in R2. A bundle has no single owner: the runs that one
+ * event starts share its key, and a retry stores the same key again. So a run
+ * end never removes a bundle; only expire does.
+ */
 export const RETENTION_MS = 7 * 24 * 3600_000;
-
-/** Removes the bundles of refs (a run ended). Returns the number removed. */
-export async function release(bucket: R2Bucket, refs: string[]): Promise<number> {
-  const keys = [...new Set(refs.filter((r) => r.startsWith(R2_PREFIX)))];
-  for (let i = 0; i < keys.length; i += 1000) await bucket.delete(keys.slice(i, i + 1000));
-  return keys.length;
-}
 
 /** Removes bundles uploaded before now minus RETENTION_MS. Returns the number removed. */
 export async function expire(bucket: R2Bucket, nowMs: number): Promise<number> {
@@ -513,7 +521,8 @@ function oneLine(s: string): string {
 }
 
 function readReason(what: string, err: unknown): string {
-  if (err instanceof OfError && err.code === "operation_not_supported") return "this forge cannot read " + what;
+  // A plugin Worker's OfError crosses RPC as a plain Error: match the code, not the class.
+  if (isNotSupported(err)) return "this forge cannot read " + what;
   return "could not read " + what + ": " + oneLine((err as Error).message);
 }
 
@@ -580,9 +589,7 @@ export function reviewBuilders(src: ForgeResolver | null): Builder[] {
       const s = ev.source;
       if (!s.thread_ref || !s.number || s.number <= 0 || !s.repo || (s.kind && s.kind !== "pull_request"))
         return { files: [] };
-      const i = s.repo.indexOf("/");
-      const owner = i > 0 ? s.repo.slice(0, i) : "";
-      const repo = i > 0 ? s.repo.slice(i + 1) : "";
+      const [owner, repo] = splitRepo(s.repo);
       if (!owner || !repo) return { files: [] };
       const leftOut = (reason: string) => ({
         files: [],

@@ -36,6 +36,7 @@ type fakeVM struct {
 	cancel  time.Duration
 	killed  bool
 	cleaned bool
+	goErr   error
 }
 
 func newFakeVM(id string) *fakeVM {
@@ -47,6 +48,9 @@ func (f *fakeVM) StreamKey() string        { return f.key }
 func (f *fakeVM) Running() <-chan struct{} { return f.running }
 func (f *fakeVM) Wait() <-chan vm.Exit     { return f.exit }
 func (f *fakeVM) Go(_ context.Context, d mmds.Document) error {
+	if f.goErr != nil {
+		return f.goErr
+	}
 	f.mu.Lock()
 	f.doc = d
 	f.mu.Unlock()
@@ -84,6 +88,7 @@ type fakeVMM struct {
 	vms      map[string]*fakeVM
 	adopt    []vm.VM
 	startErr error
+	goErr    error
 }
 
 func (f *fakeVMM) Start(_ context.Context, s vm.Spec) (vm.VM, error) {
@@ -94,6 +99,7 @@ func (f *fakeVMM) Start(_ context.Context, s vm.Spec) (vm.VM, error) {
 	}
 	f.specs = append(f.specs, s)
 	v := newFakeVM(s.VMID)
+	v.goErr = f.goErr
 	if f.vms == nil {
 		f.vms = map[string]*fakeVM{}
 	}
@@ -138,6 +144,33 @@ type fakeHelper struct{ stopped bool }
 
 func (h *fakeHelper) Stop()    { h.stopped = true }
 func (h *fakeHelper) PID() int { return 0 }
+
+// gatedVMM starts a VM only when the test releases it. With honorCtx, a
+// cancelled start context ends the start with an error.
+type gatedVMM struct {
+	fakeVMM
+	started  chan struct{}
+	release  chan struct{}
+	honorCtx bool
+}
+
+func newGatedVMM(honorCtx bool) *gatedVMM {
+	return &gatedVMM{started: make(chan struct{}), release: make(chan struct{}), honorCtx: honorCtx}
+}
+
+func (g *gatedVMM) Start(ctx context.Context, s vm.Spec) (vm.VM, error) {
+	close(g.started)
+	if g.honorCtx {
+		select {
+		case <-g.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	} else {
+		<-g.release
+	}
+	return g.fakeVMM.Start(ctx, s)
+}
 
 type fakeCache struct{}
 
@@ -538,5 +571,205 @@ func TestResolveUser(t *testing.T) {
 	}
 	if u := resolveUser("image", "node"); u.Name != "node" {
 		t.Fatalf("image name %+v", u)
+	}
+}
+
+// Prune runs without the backend lock, so it may call InUse.
+func TestDiskCheckPrunesWithoutTheLock(t *testing.T) {
+	var free int64 = 10 << 30
+	var mu sync.Mutex
+	var e *env
+	e = newEnv(t, func(o *Options) {
+		o.FreeDisk = func() (int64, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			return free, nil
+		}
+		o.Prune = func() {
+			e.b.InUse("sha256:abc")
+			mu.Lock()
+			free = 1 << 40
+			mu.Unlock()
+		}
+	})
+	done := make(chan error, 1)
+	go func() {
+		_, err := e.b.Start(context.Background(), testTask(1))
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("start after prune: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Start deadlocked: the disk check holds the lock while Prune calls InUse")
+	}
+	// A failed disk check releases the reserved slot.
+	e2 := newEnv(t, func(o *Options) { o.FreeDisk = func() (int64, error) { return 1 << 30, nil } })
+	if _, err := e2.b.Start(context.Background(), testTask(1)); !errors.Is(err, rtcore.ErrAtCapacity) || e2.b.SlotsUsed() != 0 {
+		t.Fatalf("disk full: %v, %d slots used", err, e2.b.SlotsUsed())
+	}
+}
+
+// Destroy while the VM starts: the VM that starts anyway is killed and
+// cleaned, and the slot stays taken until then.
+func TestDestroyWaitsForTheVMStart(t *testing.T) {
+	g := newGatedVMM(false)
+	e := newEnv(t, func(o *Options) { o.VMM = g })
+	task := testTask(1)
+	st, err := e.b.Start(context.Background(), task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-g.started
+	done := make(chan error, 1)
+	go func() { done <- e.b.Destroy(context.Background(), task.TaskID) }()
+	select {
+	case err := <-done:
+		t.Fatalf("Destroy returned while the VM starts: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if e.b.SlotsUsed() != 1 {
+		t.Fatal("the slot was released while the VM starts")
+	}
+	close(g.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	v := g.vm(st.SandboxID)
+	v.mu.Lock()
+	killed, cleaned := v.killed, v.cleaned
+	v.mu.Unlock()
+	if !killed || !cleaned || e.b.SlotsUsed() != 0 {
+		t.Fatalf("killed %v cleaned %v slots %d", killed, cleaned, e.b.SlotsUsed())
+	}
+	if s, _ := e.b.Status(context.Background(), task.TaskID); s.Reason != rtcore.SandboxCancelled {
+		t.Fatalf("status %+v", s)
+	}
+}
+
+// Destroy ends the context of the launch, so a VM start that honors it ends at once.
+func TestDestroyCancelsTheLaunch(t *testing.T) {
+	g := newGatedVMM(true)
+	e := newEnv(t, func(o *Options) { o.VMM = g })
+	task := testTask(1)
+	if _, err := e.b.Start(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	<-g.started
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := e.b.Destroy(ctx, task.TaskID); err != nil {
+		t.Fatalf("destroy: %v", err)
+	}
+	if s, _ := e.b.Status(context.Background(), task.TaskID); s.Reason != rtcore.SandboxCancelled || e.b.SlotsUsed() != 0 {
+		t.Fatalf("status %+v, %d slots", s, e.b.SlotsUsed())
+	}
+}
+
+// A VM that does not take the session keeps its jail for the retention time.
+func TestGoFailureKeepsTheJail(t *testing.T) {
+	vmm := &fakeVMM{goErr: errors.New("vsock closed")}
+	e := newEnv(t, func(o *Options) { o.VMM = vmm })
+	task := testTask(1)
+	task.FailureRetentionSeconds = 3600
+	st, err := e.b.Start(context.Background(), task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fin := waitState(t, e.b, task.TaskID, rtcore.TaskExited)
+	if fin.Reason != rtcore.SandboxProcessFailed {
+		t.Fatalf("status %+v", fin)
+	}
+	v := vmm.vm(st.SandboxID)
+	v.mu.Lock()
+	cleaned := v.cleaned
+	v.mu.Unlock()
+	if cleaned {
+		t.Fatal("the jail was removed before the failure retention time")
+	}
+	if err := e.b.Destroy(context.Background(), task.TaskID); err != nil {
+		t.Fatal(err)
+	}
+	v.mu.Lock()
+	cleaned = v.cleaned
+	v.mu.Unlock()
+	if !cleaned {
+		t.Fatal("destroy must remove the jail")
+	}
+}
+
+func TestWatchEndsWithContext(t *testing.T) {
+	e := newEnv(t, nil)
+	task := testTask(1)
+	if _, err := e.b.Start(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e.b, task.TaskID, rtcore.TaskRunning)
+	ctx, cancel := context.WithCancel(context.Background())
+	ch, err := e.b.Watch(ctx, task.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case _, ok := <-ch:
+			if !ok {
+				e.b.mu.Lock()
+				n := len(e.b.tasks[task.TaskID].watchers)
+				e.b.mu.Unlock()
+				if n != 0 {
+					t.Fatalf("%d watchers kept", n)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("the watch channel stays open after its context ended")
+		}
+	}
+}
+
+// ctxCache blocks Ensure until its context ends.
+type ctxCache struct{ ended chan struct{} }
+
+func (ctxCache) Latest(string) string { return "" }
+func (c ctxCache) Ensure(ctx context.Context, _, _ string) error {
+	<-ctx.Done()
+	close(c.ended)
+	return ctx.Err()
+}
+
+// The mirror refresh ends with the backend.
+func TestGitCacheEndsWithTheBackend(t *testing.T) {
+	c := ctxCache{ended: make(chan struct{})}
+	dir := t.TempDir()
+	st, err := store.New(filepath.Join(dir, "tasks"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	e := newEnv(t, nil)
+	o := e.opts
+	o.Cache, o.Store = c, st
+	b, err := New(ctx, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := "https://github.com/acme/app.git"
+	extras := []byte(`{"git_cache":[{"key":"` + gitcachekey.Key(repo) + `","clone_url":"` + repo + `"}]}`)
+	task := testTask(1)
+	if _, err := b.StartWithExtras(context.Background(), task, extras); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, b, task.TaskID, rtcore.TaskRunning)
+	cancel()
+	select {
+	case <-c.ended:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the git cache refresh ignores the end of the backend")
 	}
 }

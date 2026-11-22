@@ -1,9 +1,12 @@
 // DispatchDO admission (port of internal/dispatch/limits_test.go, asserted
 // exact): concurrent claims never exceed maxConcurrentRuns; grants are FIFO.
 import { env } from "cloudflare:workers";
+import { runInDurableObject } from "cloudflare:test";
 import { doName, newRoutedId, newToken } from "@openfactory/core";
+import type { SandboxProvider, TaskStatus } from "@openfactory/sandbox";
 import { describe, expect, it } from "vitest";
 import type { Ack, OutboxEnvelope, OutboxKind, OutboxPayloads } from "../../contracts/do-messages";
+import { registerProvider, unregisterProvider } from "./providers";
 
 interface DispatchApi {
   receive(m: OutboxEnvelope): Promise<Ack>;
@@ -12,6 +15,7 @@ interface DispatchApi {
     leases: { run_id: string; session: number; factory_id: string }[];
   }>;
   spendGate(f: string): Promise<{ allowed: boolean }>;
+  pump(): Promise<void>;
 }
 
 function dispatch(team: string): DispatchApi {
@@ -142,5 +146,103 @@ describe("DispatchDO admission", () => {
     const st = await d.state();
     expect(st.leases.some((l) => l.run_id === r3)).toBe(false);
     expect(st.waiting.find((w) => w.run_id === r3)?.hold).toBe("spend");
+  });
+});
+
+describe("DispatchDO spend hold rollover", () => {
+  it("a spend hold arms a timer at the UTC day rollover, and the timer releases the row", async () => {
+    const team = "roll" + newToken("w");
+    const d = dispatch(team);
+    await d.receive(
+      msg("dispatch.limits", { factoryId: "fr", versionId: "v", maxConcurrentRuns: 0, spendLimit: { daily: 1 } }),
+    );
+    const tok = newToken("w");
+    const now = Date.now();
+    await d.receive(
+      msg("dispatch.usage", {
+        runId: newRoutedId("run", tok),
+        session: 1,
+        seq: 1,
+        factoryId: "fr",
+        runCreatedMs: now,
+        costUsd: 2,
+      }),
+    );
+    const held = newRoutedId("run", tok);
+    await d.receive(request(held, "fr", 0));
+    expect((await d.state()).waiting.find((w) => w.run_id === held)?.hold).toBe("spend");
+
+    const stub = env.DISPATCH.getByName(doName.dispatch(team));
+    await runInDurableObject(stub, (_i, state) => {
+      const sql = state.storage.sql;
+      const t = sql.exec<{ due_ms: number }>("SELECT due_ms FROM timers WHERE name = 'spend'").toArray();
+      const n = new Date();
+      expect(t.map((r) => r.due_ms)).toEqual([Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() + 1)]);
+      // Simulate the rollover: the spend now belongs to a past day, and the timer is due.
+      sql.exec("UPDATE spend_totals SET start = '2000-01-01' WHERE period = 'daily'");
+      sql.exec("UPDATE timers SET due_ms = 1 WHERE name = 'spend'");
+    });
+    await d.pump();
+    const st = await d.state();
+    expect(st.waiting.some((w) => w.run_id === held)).toBe(false);
+    expect(st.leases.some((l) => l.run_id === held)).toBe(true);
+  });
+});
+
+describe("DispatchDO orphan sweep", () => {
+  it("re-reads leases after list() and spares tasks without startedAt until they are old", async () => {
+    const team = "swp" + newToken("w");
+    const stub = env.DISPATCH.getByName(doName.dispatch(team));
+    const tok = newToken("w");
+    const old = new Date(Date.now() - 10 * 60_000).toISOString();
+    const granted = `${newRoutedId("run", tok)}.1`;
+    const noStart = `${newRoutedId("run", tok)}.1`;
+    const orphan = `${newRoutedId("run", tok)}.1`;
+    const destroyed: string[] = [];
+    const id = "sweeptest-" + newToken("w");
+    let onList: () => void = () => undefined;
+    const provider = {
+      id,
+      async list(): Promise<TaskStatus[]> {
+        await new Promise((r) => setTimeout(r, 1));
+        // A grant lands while the provider answers.
+        onList();
+        return [
+          { taskId: granted, state: "running", startedAt: old },
+          { taskId: noStart, state: "accepted" },
+          { taskId: orphan, state: "running", startedAt: old },
+          { taskId: "not-a-task-id", state: "running", startedAt: old },
+        ];
+      },
+      async destroy(taskId: string) {
+        destroyed.push(taskId);
+      },
+    } as unknown as SandboxProvider;
+    registerProvider(id, () => provider);
+    try {
+      await runInDurableObject(stub, async (instance, state) => {
+        const sql = state.storage.sql;
+        onList = () =>
+          sql.exec(
+            `INSERT INTO leases (run_id, session, task_id, factory_id, target_key, provider, work_do, granted_ms)
+             VALUES (?, 1, ?, 'f', ?, ?, 'w', ?)`,
+            granted.slice(0, -2),
+            granted,
+            `provider:${id}`,
+            id,
+            Date.now(),
+          );
+        const sweep = () => (instance as unknown as { sweep(): Promise<void> }).sweep();
+        await sweep();
+        expect(destroyed).toEqual([orphan]);
+        // Still young by first sight: a second sweep spares it too.
+        onList = () => undefined;
+        await sweep();
+        expect(destroyed.includes(noStart)).toBe(false);
+        expect(destroyed.includes(granted)).toBe(false);
+      });
+    } finally {
+      unregisterProvider(id);
+    }
   });
 });

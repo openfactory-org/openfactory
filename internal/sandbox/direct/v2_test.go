@@ -144,9 +144,30 @@ func testTask(n int) rtcore.Task {
 	}
 }
 
+// drainTasks is a fakeTasks that holds the drain state (rtcore.Drainable),
+// like the microVM backend.
+type drainTasks struct {
+	*fakeTasks
+	dmu      sync.Mutex
+	draining bool
+}
+
+func (d *drainTasks) Draining() bool {
+	d.dmu.Lock()
+	defer d.dmu.Unlock()
+	return d.draining
+}
+
+func (d *drainTasks) SetDraining(v bool) {
+	d.dmu.Lock()
+	d.draining = v
+	d.dmu.Unlock()
+}
+
 type v2Env struct {
 	hub     *directtest.Hub
 	backend *fakeTasks
+	drain   *drainTasks
 	cancel  context.CancelFunc
 	done    chan error
 }
@@ -158,19 +179,31 @@ type v2Opts struct {
 	image    string
 	metrics  *worker.Metrics
 	features []string
+	// drainable makes the backend hold the drain state.
+	drainable bool
+	// wrap replaces the backend with a wrapper of the fake.
+	wrap func(*fakeTasks) rtcore.TaskBackend
 }
 
 func startV2(t *testing.T, o v2Opts) *v2Env {
 	t.Helper()
 	hub := directtest.New(t, directtest.Options{APIKey: "good-key", HeartbeatMS: 100})
 	e := &v2Env{hub: hub, backend: newFakeTasks(), done: make(chan error, 1)}
+	var backend rtcore.TaskBackend = e.backend
+	if o.drainable {
+		e.drain = &drainTasks{fakeTasks: e.backend}
+		backend = e.drain
+	}
+	if o.wrap != nil {
+		backend = o.wrap(e.backend)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	e.cancel = cancel
 	t.Cleanup(cancel)
 	go func() {
 		e.done <- RunWorkerV2(ctx, WorkerV2Options{
 			ServerURL: hub.URL(), APIKey: "good-key", WorkerID: "edge-1", Capacity: o.capacity,
-			Backend: e.backend, OneShot: o.oneShot, TaskEnv: o.taskEnv, DefaultImage: o.image, Metrics: o.metrics,
+			Backend: backend, OneShot: o.oneShot, TaskEnv: o.taskEnv, DefaultImage: o.image, Metrics: o.metrics,
 			Features: o.features, MinBackoff: 20 * time.Millisecond, MaxBackoff: 50 * time.Millisecond,
 		})
 	}()
@@ -544,4 +577,82 @@ func TestV2TaskFailureMetricHasPhaseRun(t *testing.T) {
 	if v := m.Value(worker.MetricTaskFailures, "run", "completed"); v != 0 {
 		t.Errorf("a completed task counts as a failure: %v", v)
 	}
+}
+
+// With a rtcore.Drainable backend, the hub and the operator change one
+// drain state.
+func TestV2DrainSharedWithTheBackend(t *testing.T) {
+	e := startV2(t, v2Opts{drainable: true})
+	ctx := context.Background()
+	// The hub drains: the backend refuses new tasks too.
+	if err := e.hub.Drain(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	if !e.drain.Draining() {
+		t.Fatal("the hub drain did not reach the backend")
+	}
+	if err := e.hub.Drain(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	// The operator drains on the host (worker drain): the worker refuses
+	// task.assign and the next hello says draining.
+	e.drain.SetDraining(true)
+	if _, err := e.hub.Assign(ctx, testTask(1), nil); !errors.Is(err, rtcore.ErrAtCapacity) {
+		t.Fatalf("assign while the operator drains: %v", err)
+	}
+	e.hub.Drop()
+	eventually(t, "reconnect", func() bool { return e.hub.Connections() == 2 && e.hub.Connected() })
+	if h, _ := e.hub.Hello(); !h.Draining {
+		t.Fatal("hello must say draining after an operator drain")
+	}
+}
+
+// slowDestroy holds Destroy until the test releases it and records whether
+// its context ended.
+type slowDestroy struct {
+	*fakeTasks
+	started chan struct{}
+	release chan struct{}
+	ctxErr  chan error
+}
+
+func (s *slowDestroy) Destroy(ctx context.Context, id string) error {
+	close(s.started)
+	<-s.release
+	s.ctxErr <- ctx.Err()
+	return s.fakeTasks.Destroy(ctx, id)
+}
+
+// A dropped connection does not cancel a request that the worker serves.
+func TestV2RequestOutlivesTheConnection(t *testing.T) {
+	sd := &slowDestroy{started: make(chan struct{}), release: make(chan struct{}), ctxErr: make(chan error, 1)}
+	e := startV2(t, v2Opts{wrap: func(f *fakeTasks) rtcore.TaskBackend { sd.fakeTasks = f; return sd }})
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = e.hub.Destroy(ctx, "run_1.1")
+	}()
+	<-sd.started
+	e.hub.Drop()
+	eventually(t, "reconnect", func() bool { return e.hub.Connections() == 2 && e.hub.Connected() })
+	close(sd.release)
+	if err := <-sd.ctxErr; err != nil {
+		t.Fatalf("the destroy context ended with the connection: %v", err)
+	}
+}
+
+// The worker pings on each heartbeat and drops a connection that brings no
+// frame for readTimeoutBeats heartbeats.
+func TestV2HalfOpenConnection(t *testing.T) {
+	e := startV2(t, v2Opts{}) // heartbeat 100 ms: read deadline 300 ms
+	// An idle connection whose hub answers the pings stays.
+	time.Sleep(600 * time.Millisecond)
+	if n := e.hub.Connections(); n != 1 {
+		t.Fatalf("an idle healthy connection was dropped: %d connections", n)
+	}
+	// A hub that stops answering looks half-open: the worker reconnects.
+	e.hub.Mute(true)
+	eventually(t, "reconnect after a silent hub", func() bool { return e.hub.Connections() >= 2 })
+	e.hub.Mute(false)
+	eventually(t, "connected", e.hub.Connected)
 }

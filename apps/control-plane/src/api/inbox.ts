@@ -4,6 +4,7 @@
 import { doName, OfError, partitionOf, tokenKind } from "@openfactory/core";
 import { type Handler, type RouteContext } from "../http/handler";
 import type { Env } from "../contracts/env";
+import { factoryAccess } from "./measure";
 import { json, metaOf, teamOf, workFor } from "./runs";
 
 function ownerIsWork(id: string): boolean {
@@ -26,7 +27,9 @@ export const listTeamInbox: Handler = async (_req, env, ctx) => {
 
 /** GET /api/v1/factories/{uid}/inbox */
 export const listInbox: Handler = async (_req, env, ctx) => {
-  const q = { ...Object.fromEntries(ctx.url.searchParams), factory_id: ctx.params.uid ?? "", scope: "team" };
+  // {uid} may be an alias or a name: IndexDO filters and authorizes by factory ID.
+  const { factory_id } = await factoryAccess(env, ctx);
+  const q = { ...Object.fromEntries(ctx.url.searchParams), factory_id, scope: "team" };
   return json(200, await index(env, ctx).list(metaOf(ctx), "inbox", q));
 };
 

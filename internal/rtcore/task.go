@@ -148,6 +148,16 @@ type TaskBackend interface {
 	Preflight(ctx context.Context) error
 }
 
+// Drainable is a TaskBackend that holds the drain state of its worker. The
+// worker protocol client and the local control socket of the worker both
+// read and change the state through it, so they never disagree.
+type Drainable interface {
+	// Draining reports whether the backend refuses new tasks.
+	Draining() bool
+	// SetDraining makes Start refuse new tasks, or take them again.
+	SetDraining(draining bool)
+}
+
 // TaskID returns the ID of the task for one session of one run.
 func TaskID(runID string, session int) string {
 	return runID + "." + strconv.Itoa(session)

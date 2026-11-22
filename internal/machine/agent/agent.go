@@ -131,10 +131,16 @@ func Run(ctx context.Context, o Options) error {
 		snapKey = newSnapKey(cfg, kernel)
 	}
 
-	be, err := backend.New(ctx, backend.Options{
+	arch := hostcheck.GoArch(machine(host))
+	// prune reads be: the backend calls it only after New returned.
+	var be *backend.Backend
+	prune := func() {
+		pruneDisk(cfg, images, gc, snaps, snapKey, o.Version, arch, be.InUse, log)
+	}
+	be, err = backend.New(ctx, backend.Options{
 		Config: cfg, VMM: vmm, Images: images, Net: applier, NetConfig: netCfg, Cache: gc, Store: st,
 		Snapshots: snaps, SnapKey: snapKey, Kernel: kernel, Exe: o.Exe, Version: o.Version,
-		Arch: hostcheck.GoArch(machine(host)), BootID: store.BootID("/proc/sys/kernel/random/boot_id"),
+		Arch: arch, BootID: store.BootID("/proc/sys/kernel/random/boot_id"), Prune: prune,
 		FreeDisk: func() (int64, error) {
 			free, _, err := image.FreeBytes(cfg.DataDir)
 			return free, err
@@ -146,12 +152,6 @@ func Run(ctx context.Context, o Options) error {
 	})
 	if err != nil {
 		return err
-	}
-	prune := func() {
-		if _, err := images.Prune(int64(cfg.Disk.ImagesMaxGiB)<<30, be.InUse); err != nil {
-			log.Warn("image prune", "err", err)
-		}
-		gc.Prune(int64(cfg.Disk.GitcacheMaxGiB)<<30, be.InUse)
 	}
 	cleanOrphans(ctx, applier, netCfg, cfg, be, vmm.Jail, log)
 
@@ -187,6 +187,34 @@ func Run(ctx context.Context, o Options) error {
 		return nil
 	}
 	return err
+}
+
+// pruneDisk frees disk: the least recently used images and git mirrors
+// above their limits, then the snapshot templates of images that are no
+// longer cached. inUse protects what live VMs use.
+func pruneDisk(cfg config.Config, images *image.Store, gc *cache.Cache, snaps *snapshot.Manager, snapKey backend.SnapshotKey,
+	version, arch string, inUse func(string) bool, log *slog.Logger,
+) {
+	if _, err := images.Prune(int64(cfg.Disk.ImagesMaxGiB)<<30, inUse); err != nil {
+		log.Warn("image prune", "err", err)
+	}
+	gc.Prune(int64(cfg.Disk.GitcacheMaxGiB)<<30, inUse)
+	if snaps == nil || snapKey == nil {
+		return
+	}
+	imgs, err := images.List()
+	if err != nil {
+		log.Warn("snapshot prune", "err", err)
+		return
+	}
+	tools := images.ToolsPath(version, arch)
+	keep := map[string]bool{}
+	for _, img := range imgs {
+		if k := snapKey(img, tools); k != "" {
+			keep[k] = true
+		}
+	}
+	snaps.Prune(func(key string) bool { return keep[key] })
 }
 
 func machine(e hostcheck.Env) string {

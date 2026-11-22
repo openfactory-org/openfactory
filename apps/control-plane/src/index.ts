@@ -15,10 +15,12 @@ import { API_PREFIX, Router } from "./http/router";
 import { ROUTES } from "./http/routes";
 import { handleMcpRequest } from "./mcp/index";
 import { handleCompactionJob } from "./compaction/consumer";
+import { expire as expireEventContext } from "./eventctx";
 import { handleRetentionJob } from "./retention/consumer";
 import { SCORING_JOB_KINDS, handleScoringJob } from "./scoring/jobs";
 import { teamOfOrigin } from "./notify/index";
-import { bindMcpBackends } from "./wiring";
+// Registers the engine, provider and MCP backends on load.
+import "./wiring";
 
 export { BenchmarkDO } from "./do/benchmark/index";
 export { DispatchDO } from "./do/dispatch/index";
@@ -104,7 +106,9 @@ async function handleApi(
           },
         );
       }
-      // Team-wide routes are checked here and again in the owner DO; factory-scoped routes in the owner DO.
+      // Team-wide routes are checked here and again in the owner DO. Factory-scoped routes are checked
+      // with the role for the resource's factory: in the owner DO (TeamDO, WorkDO, IndexDO, BenchmarkDO),
+      // or in the handler when the DO cannot know the route role (api/measure.ts, api/webhooks.ts).
       if (!isFactoryScoped(m.route)) requireRole(p, "", m.route.role);
       rctx.principal = p;
     }
@@ -173,10 +177,14 @@ async function handleJob(env: Env, msg: JobMessage): Promise<void> {
   console.warn("queue: unknown job kind", (msg as { kind?: string }).kind);
 }
 
-/** Hourly at minute 0: one retention step for the team's TeamDO and IndexDO (each step sends the next). */
+/**
+ * Hourly at minute 0: one retention step for the team's TeamDO and IndexDO
+ * (each step sends the next), and removal of expired event context bundles.
+ */
 async function scheduleRetention(env: Env, scheduledTime: number): Promise<void> {
   const d = new Date(scheduledTime);
   if (d.getUTCMinutes() !== 0) return;
+  await expireEventContext(env.DATA, scheduledTime);
   const hour = Math.floor(scheduledTime / 3_600_000);
   const names = [doName.team(DEFAULT_TEAM), doName.index(DEFAULT_TEAM)];
   await env.JOBS.sendBatch(
@@ -194,8 +202,7 @@ export default {
     if (url.pathname === "/readyz") return new Response("ok\n");
     // MCP before the REST API: /api/v1/mcp/factory is the Factory MCP alias.
     if (isMcpPath(url.pathname)) {
-      bindMcpBackends(env);
-      const res = await handleMcpRequest(request, env);
+      const res = await handleMcpRequest(request, env, ctx);
       if (res) return withRequestId(res, requestId);
     }
     if (url.pathname === API_PREFIX || url.pathname.startsWith(API_PREFIX + "/")) {

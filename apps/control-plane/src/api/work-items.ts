@@ -4,6 +4,7 @@ import { doName } from "@openfactory/core";
 import { runView } from "../engine/view";
 import type { Run, WorkItem } from "../engine/types";
 import type { Handler } from "../http/handler";
+import { factoryAccess } from "./measure";
 import { json, metaOf, teamOf, workFor } from "./runs";
 
 async function body(req: Request): Promise<unknown> {
@@ -13,7 +14,9 @@ async function body(req: Request): Promise<unknown> {
 
 /** GET /api/v1/factories/{uid}/work-items */
 export const listWorkItems: Handler = async (_req, env, ctx) => {
-  const q = { ...Object.fromEntries(ctx.url.searchParams), factory_id: ctx.params.uid ?? "" };
+  // {uid} may be an alias or a name: IndexDO filters and authorizes by factory ID.
+  const { factory_id } = await factoryAccess(env, ctx);
+  const q = { ...Object.fromEntries(ctx.url.searchParams), factory_id };
   return json(200, await env.INDEX.getByName(doName.index(teamOf(ctx))).list(metaOf(ctx), "workItems", q));
 };
 

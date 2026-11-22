@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -51,7 +50,7 @@ type initProc struct {
 	conn       *ctlstream.Conn
 	key        string
 	runnerPID  int
-	cancelCh   chan int
+	cancel     cancelQueue
 	tail       *ctlstream.Tail
 	runnerDone chan unix.WaitStatus
 	exitAck    chan struct{}
@@ -118,7 +117,6 @@ func (g *initProc) connect(hello ctlstream.Frame, limit time.Duration) error {
 }
 
 func (g *initProc) run() error {
-	runtime.LockOSThread()
 	if err := mountAll([][4]string{
 		{"proc", "/proc", "proc", ""}, {"sysfs", "/sys", "sysfs", ""}, {"devtmpfs", "/dev", "devtmpfs", ""},
 		{"tmpfs", "/run", "tmpfs", "mode=0755"}, {"tmpfs", "/mnt", "tmpfs", "mode=0755"},
@@ -131,16 +129,17 @@ func (g *initProc) run() error {
 		if os.Getenv("OF_VMINIT_DEBUG") == "" {
 			_ = unix.Dup3(int(null.Fd()), 2, 0)
 		}
+		_ = null.Close()
 	}
 	_ = unix.Reboot(unix.LINUX_REBOOT_CMD_CAD_OFF)
-	g.cancelCh = make(chan int, 4)
+	g.cancel = newCancelQueue()
 	g.exitAck = make(chan struct{}, 1)
 	sigs := make(chan os.Signal, 4)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		for s := range sigs {
 			if s == syscall.SIGINT { // Ctrl-Alt-Del from the host
-				g.cancelCh <- 10
+				g.cancel.push(10)
 			}
 		}
 	}()
@@ -477,18 +476,27 @@ func (g *initProc) supervise(env []string, uid, gid, maxSession int) error {
 	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
 		return err
 	}
-	pr, pw, err := os.Pipe()
+	null, err := os.OpenFile("/dev/null", os.O_RDWR, 0)
 	if err != nil {
 		return err
 	}
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		_ = null.Close()
+		return err
+	}
 	g.tail = ctlstream.NewTail(4096)
-	go func() { _, _ = io.Copy(g.tail, pr) }()
-	null, _ := os.OpenFile("/dev/null", os.O_RDWR, 0)
+	go func() {
+		_, _ = io.Copy(g.tail, pr)
+		_ = pr.Close()
+	}()
 	pid, err := syscall.ForkExec(RunnerBinary, []string{"openfactory", "runner"}, &syscall.ProcAttr{
 		Dir: Workspace, Env: env, Files: []uintptr{null.Fd(), null.Fd(), pw.Fd()},
 		Sys: &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid), Groups: []uint32{}}, Setsid: true}, //nolint:gosec // G115: uids fit
 	})
+	// The runner has its own copies now.
 	_ = pw.Close()
+	_ = null.Close()
 	if err != nil {
 		return fmt.Errorf("start the runner: %w", err)
 	}
@@ -502,23 +510,27 @@ func (g *initProc) supervise(env []string, uid, gid, maxSession int) error {
 	if maxSession > 0 {
 		deadline = time.After(time.Duration(maxSession+60) * time.Second)
 	}
-	var kill <-chan time.Time
+	// A second cancel or the session deadline can bring the SIGKILL closer
+	// but never moves it later.
+	var kill killClock
 	for {
 		select {
 		case ws := <-g.runnerDone:
+			kill.stop()
 			g.report(ws)
 			return nil
-		case grace := <-g.cancelCh:
+		case grace := <-g.cancel.ch:
 			_ = unix.Kill(pid, unix.SIGTERM)
 			if grace <= 0 {
 				_ = unix.Kill(-1, unix.SIGKILL)
 			}
-			kill = time.After(time.Duration(grace) * time.Second)
+			kill.arm(time.Duration(grace) * time.Second)
 		case <-deadline:
 			_ = unix.Kill(pid, unix.SIGTERM)
-			kill = time.After(30 * time.Second)
-		case <-kill:
+			kill.arm(30 * time.Second)
+		case <-kill.C():
 			_ = unix.Kill(-1, unix.SIGKILL)
+			kill.stop()
 		}
 	}
 }
@@ -553,7 +565,7 @@ func (g *initProc) readLoop() {
 			}
 			switch f.Type {
 			case ctlstream.TypeCancel:
-				g.cancelCh <- f.GraceSeconds
+				g.cancel.push(f.GraceSeconds)
 			case ctlstream.TypeExitAck:
 				select {
 				case g.exitAck <- struct{}{}:

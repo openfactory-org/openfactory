@@ -104,6 +104,8 @@ class FakeWorker {
   requests: WireFrame[] = [];
   draining = false;
   waiters: (() => void)[] = [];
+  /** Methods whose next request fails with "unavailable". */
+  failNext = new Set<string>();
 
   constructor(
     readonly id: string,
@@ -206,6 +208,7 @@ class FakeWorker {
     const reply = (result?: unknown, error?: { code: string; message: string }) =>
       this.send({ type: "response", id: f.id, ...(error ? { error } : { result }) });
     const p = (f.params ?? {}) as { task?: { task_id: string }; task_id?: string; draining?: boolean };
+    if (this.failNext.delete(String(f.method))) return reply(undefined, { code: "unavailable", message: "busy" });
     switch (f.method) {
       case "task.assign": {
         if (this.draining) return reply(undefined, { code: "at_capacity", message: "draining" });
@@ -268,6 +271,13 @@ function routeCtx(operationId: string, params: Record<string, string>, principal
     executionCtx: { waitUntil() {}, passThroughOnException() {}, props: {} } as unknown as ExecutionContext,
     principal,
   };
+}
+
+/** Runs the hub's liveness check now (the timer fires every LIVENESS_MS). */
+async function liveness(id: string): Promise<void> {
+  await runInDurableObject(hub(id) as unknown as DurableObjectStub, (inst) =>
+    (inst as unknown as { checkLiveness(): Promise<void> }).checkLiveness(),
+  );
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -428,6 +438,37 @@ describe("drain and revoke", () => {
     expect((await hub(id).taskAssign(task(1))).state).toBe("accepted");
   });
 
+  it("a resume asked while the worker is away reaches it at the next hello", async () => {
+    const { id, keys } = await enroll();
+    const w = new FakeWorker(id, keys);
+    await w.connect();
+    const req = () => new Request("http://localhost/x", { method: "POST" });
+    await drainWorker(req(), env, routeCtx("drainWorker", { id }));
+    await eventually("drain request", async () => w.draining);
+    w.drop();
+    await eventually("offline", async () => !(await hub(id).live()).online);
+    await resumeWorker(req(), env, routeCtx("resumeWorker", { id }));
+    // The worker comes back still draining (hello.draining = true).
+    expect(await w.connect()).toBe(101);
+    await eventually("resume request", async () => !w.draining);
+    expect((await hub(id).taskAssign(task(1))).state).toBe("accepted");
+  });
+
+  it("sends a failed drain again at the next liveness check", async () => {
+    const { id, keys } = await enroll();
+    const w = new FakeWorker(id, keys);
+    await w.connect();
+    w.failNext.add("drain");
+    await hub(id).drain(true);
+    await eventually("failed drain request", async () => w.requests.some((r) => r.method === "drain"));
+    expect(w.draining).toBe(false);
+    // Liveness ticks until the hub has seen the error answer and sends the drain again.
+    await eventually("drain sent again", async () => {
+      await liveness(id);
+      return w.draining;
+    });
+  });
+
   it("revoke closes the socket, refuses connections and git credentials", async () => {
     const { id, keys } = await enroll();
     setGitCredentialMinter(async (_kit, input) => ({
@@ -542,6 +583,31 @@ describe("reconnect", () => {
     expect(await rejection(hub(id).taskStatus(task(1).taskId))).toBe("not_found");
     await w.connect();
     await eventually("destroyed on the worker", async () => !w.tasks.has(task(1).taskId));
+  });
+
+  it("sends a kept destroy again at the next liveness check when the first one fails", async () => {
+    const { id, keys } = await enroll();
+    const w = new FakeWorker(id, keys);
+    await w.connect();
+    await hub(id).taskAssign(task(1));
+    w.drop();
+    await eventually("offline", async () => !(await hub(id).live()).online);
+    await hub(id).taskDestroy(task(1).taskId);
+    w.failNext.add("task.destroy");
+    await w.connect();
+    await eventually("failed destroy", async () => w.requests.some((r) => r.method === "task.destroy"));
+    expect(w.tasks.has(task(1).taskId)).toBe(true);
+    await eventually("destroyed on the worker", async () => {
+      await liveness(id);
+      return !w.tasks.has(task(1).taskId);
+    });
+    await eventually("row removed", () =>
+      runInDurableObject(
+        hub(id) as unknown as DurableObjectStub,
+        (_inst, state) =>
+          state.storage.sql.exec("SELECT 1 FROM hub_tasks WHERE task_id = ?", task(1).taskId).toArray().length === 0,
+      ),
+    );
   });
 
   it("replaces an older connection of the same worker", async () => {

@@ -206,9 +206,12 @@ export class BoatdevProvider implements SandboxProvider {
   readonly id = PROVIDER_ID;
   private readonly base: string;
   private readonly f: typeof fetch;
-  /** taskId → sandbox ID. WorkDO keeps it too; the label lookup is the fallback. */
+  /**
+   * taskId → sandbox ID, a cache for the life of this object only. The control
+   * plane builds a new provider object for each call, so every lookup must also
+   * work from the label lookup alone.
+   */
   private readonly ids = new Map<string, string>();
-  private readonly cancelled = new Set<string>();
 
   constructor(private readonly cfg: BoatdevConfig) {
     if (!cfg.apiKey) throw new ProviderError("invalid", "boatdev: the API key is empty");
@@ -438,31 +441,32 @@ export class BoatdevProvider implements SandboxProvider {
     if (res.ok) {
       const sb = BoatdevProvider.unwrap(await res.json());
       this.ids.set(task.taskId, sb.id);
-      return mapBoatSandbox(task.taskId, sb, this.ctx(task.taskId));
+      return mapBoatSandbox(task.taskId, sb);
     }
     const err = await this.readError(res);
     if (err.status === 409 && (err.code === "idempotency_key_reused" || err.code === "idempotency_in_progress")) {
       const sb = await this.findByLabel(task.taskId);
-      if (sb) return mapBoatSandbox(task.taskId, sb, this.ctx(task.taskId));
+      if (sb) return mapBoatSandbox(task.taskId, sb);
       if (err.code === "idempotency_in_progress") return { taskId: task.taskId, state: "accepted" };
     }
     throw this.toProviderError(err, "start");
   }
 
-  private ctx(taskId: string): Ctx {
-    return { cancelRequested: this.cancelled.has(taskId) };
-  }
-
   async status(taskId: string): Promise<TaskStatus> {
     const sb = await this.get(taskId);
     if (!sb) throw new ProviderError("not_found", `boatdev: no sandbox for task ${taskId}`);
-    return mapBoatSandbox(taskId, sb, this.ctx(taskId));
+    return mapBoatSandbox(taskId, sb);
   }
 
+  /**
+   * Sends SIGTERM to the runner. The boat API documents no call to change the labels
+   * of a sandbox, so nothing on the provider side records the cancel: status()
+   * reports the sandbox state as boat sees it. WorkDO owns the cancel: it ends
+   * the session when it sends the cancel and does not read the reason after.
+   */
   async cancel(taskId: string, graceSeconds: number): Promise<void> {
     const sb = await this.get(taskId);
     if (!sb) return;
-    this.cancelled.add(taskId);
     const res = await this.call("POST", `/sandboxes/${encodeURIComponent(sb.id)}/commands`, {
       command: "sudo -n kill -TERM $(cat /run/openfactory/runner.pid)",
       timeoutSeconds: Math.max(1, Math.min(15, Math.round(graceSeconds))),
@@ -499,7 +503,7 @@ export class BoatdevProvider implements SandboxProvider {
         const label = sb.labels?.["of-task"];
         if (!label) continue;
         const taskId = taskIdFromLabel(label);
-        out.push(mapBoatSandbox(taskId, sb, this.ctx(taskId)));
+        out.push(mapBoatSandbox(taskId, sb));
       }
       cursor = b.pageInfo?.nextCursor ?? undefined;
       if (!cursor) break;

@@ -17,12 +17,40 @@ export type StartConfig = Omit<StartResponse, "run_id" | "session" | "session_to
 export type StartConfigBuilder = (env: Env, run: Run, session: RunSession) => Promise<StartConfig>;
 export type SecretsBuilder = (env: Env, run: Run, session: RunSession) => Promise<SecretsResponse>;
 
+/**
+ * The denied hosts of a restricted policy without the hosts the session needs.
+ * Host names compare without case; required hosts are already lower case.
+ */
+export function deniedWithoutRequired(
+  denied: readonly string[] | null | undefined,
+  required: readonly string[],
+): string[] {
+  return (denied ?? []).filter((h) => !required.includes(h.trim().toLowerCase()));
+}
+
+/**
+ * The URLs of the MCP servers in a run configuration. Required hosts take
+ * their hosts, like engine.RequiredHosts of the Go server with cfg.MCPServers.
+ */
+export function mcpServerUrlsOf(cfg: Pick<Run["config"], "mcp_servers">): string[] {
+  const urls: string[] = [];
+  for (const srv of Object.values(cfg.mcp_servers ?? {})) {
+    const url = (srv as { url?: unknown } | null)?.url;
+    if (typeof url === "string" && url) urls.push(url);
+  }
+  return urls;
+}
+
 const publicUrl = (env: Env) => (env.OF_PUBLIC_URL ?? "").replace(/\/+$/, "");
 
 export const defaultStartConfig: StartConfigBuilder = async (env, run, session) => {
   const cfg = run.config;
   const base = publicUrl(env);
-  const required = requiredHosts(cfg, { controlUrl: base, r2AccountId: env.OF_R2_ACCOUNT_ID ?? "" });
+  const required = requiredHosts(cfg, {
+    controlUrl: base,
+    r2AccountId: env.OF_R2_ACCOUNT_ID ?? "",
+    mcpServerUrls: mcpServerUrlsOf(cfg),
+  });
   const np = cfg.network_policy;
   const idle = cfg.idle_timeout_set ? (cfg.idle_timeout_minutes ?? 0) * 60 : 600;
   const maxSession = Math.round(parseDuration(env.OF_MAX_SESSION_DURATION, 8 * 3_600_000) / 1000);
@@ -47,7 +75,7 @@ export const defaultStartConfig: StartConfigBuilder = async (env, run, session) 
     network_policy: {
       restricted: !!np?.restricted,
       allowed_hosts: np?.restricted ? [...new Set([...(np.allowed_hosts ?? []), ...required])].sort() : [],
-      denied_hosts: np?.restricted ? (np.denied_hosts ?? []).filter((h) => !required.includes(h)) : [],
+      denied_hosts: np?.restricted ? deniedWithoutRequired(np.denied_hosts, required) : [],
       always_allow: required,
     },
     egress_lock: np?.restricted ? "required" : "off",

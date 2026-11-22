@@ -5,6 +5,7 @@ import type { Scorer } from "@openfactory/core";
 import type { Env } from "../contracts/env";
 import { callMeta, teamOf, type RouteContext } from "../http/handler";
 import { unwrapOp } from "../scoring/clients";
+import { requireRole } from "../auth/roles";
 
 export interface FactoryAccess {
   factory_id: string;
@@ -12,12 +13,19 @@ export interface FactoryAccess {
   scorers: Scorer[];
 }
 
-/** Authorizes the caller on the factory of the path ({uid}) and returns its ID, team and scorers. */
+/**
+ * Resolves the factory of the path ({uid}: an ID, alias or name) and returns
+ * its ID, team and scorers. TeamDO checks that the caller is of the team;
+ * this checks the route role on the resolved factory (the scoringFactory op
+ * has no route, so TeamDO cannot know the route role).
+ */
 export async function factoryAccess(env: Env, ctx: RouteContext): Promise<FactoryAccess> {
   const stub = env.TEAM.getByName(doName.team(teamOf(ctx)));
   const params: Record<string, string> = { ...ctx.params };
   for (const [k, v] of ctx.url.searchParams) params["?" + k] = v;
-  return unwrapOp<FactoryAccess>(await stub.api(callMeta(ctx), "scoringFactory", params, undefined));
+  const f = unwrapOp<FactoryAccess>(await stub.api(callMeta(ctx), "scoringFactory", params, undefined));
+  requireRole(ctx.principal, f.factory_id, ctx.route.role);
+  return f;
 }
 
 /** IndexDO.list with the call meta of the request. */

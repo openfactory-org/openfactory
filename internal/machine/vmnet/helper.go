@@ -80,7 +80,9 @@ type Helper struct {
 	mu      sync.Mutex
 	cmd     *exec.Cmd
 	stopped bool
-	done    chan struct{}
+	// stopCh is closed by Stop. It ends the wait between restarts.
+	stopCh chan struct{}
+	done   chan struct{}
 }
 
 // HelperOptions configures StartHelper.
@@ -104,19 +106,7 @@ var ErrHelperNotReady = errors.New("network helper did not listen in time")
 
 // StartHelper starts the helper and waits until it listens.
 func StartHelper(ctx context.Context, spec HelperSpec, o HelperOptions) (*Helper, error) {
-	h := &Helper{spec: spec, log: o.Logger, start: o.Start, onFail: o.OnFail, backoff: o.Backoff, tries: o.Tries, done: make(chan struct{})}
-	if h.log == nil {
-		h.log = slog.Default()
-	}
-	if h.start == nil {
-		h.start = startAs
-	}
-	if h.backoff <= 0 {
-		h.backoff = time.Second
-	}
-	if h.tries <= 0 {
-		h.tries = 5
-	}
+	h := newHelper(spec, o)
 	if err := h.launch(); err != nil {
 		return nil, err
 	}
@@ -132,12 +122,44 @@ func StartHelper(ctx context.Context, spec HelperSpec, o HelperOptions) (*Helper
 	return h, nil
 }
 
+func newHelper(spec HelperSpec, o HelperOptions) *Helper {
+	h := &Helper{
+		spec: spec, log: o.Logger, start: o.Start, onFail: o.OnFail, backoff: o.Backoff, tries: o.Tries,
+		stopCh: make(chan struct{}), done: make(chan struct{}),
+	}
+	if h.log == nil {
+		h.log = slog.Default()
+	}
+	if h.start == nil {
+		h.start = startAs
+	}
+	if h.backoff <= 0 {
+		h.backoff = time.Second
+	}
+	if h.tries <= 0 {
+		h.tries = 5
+	}
+	return h
+}
+
+// errHelperStopped means Stop ran while a process started.
+var errHelperStopped = errors.New("network helper stopped")
+
 func (h *Helper) launch() error {
 	cmd, err := h.start(h.spec.Args(), h.spec.UID)
 	if err != nil {
 		return fmt.Errorf("start network helper: %w", err)
 	}
 	h.mu.Lock()
+	if h.stopped {
+		// Stop ran while the process started: it must not outlive Stop.
+		h.mu.Unlock()
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = cmd.Wait()
+		return errHelperStopped
+	}
 	h.cmd = cmd
 	h.mu.Unlock()
 	return nil
@@ -165,8 +187,15 @@ func (h *Helper) supervise() {
 			}
 			return
 		}
-		time.Sleep(h.backoff)
+		select {
+		case <-h.stopCh:
+			return
+		case <-time.After(h.backoff):
+		}
 		if err := h.launch(); err != nil {
+			if errors.Is(err, errHelperStopped) {
+				return
+			}
 			if h.onFail != nil {
 				h.onFail(err)
 			}
@@ -178,7 +207,10 @@ func (h *Helper) supervise() {
 // Stop ends the helper and waits for it.
 func (h *Helper) Stop() {
 	h.mu.Lock()
-	h.stopped = true
+	if !h.stopped {
+		h.stopped = true
+		close(h.stopCh)
+	}
 	cmd := h.cmd
 	h.mu.Unlock()
 	if cmd != nil && cmd.Process != nil {

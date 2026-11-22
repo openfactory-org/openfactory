@@ -5,6 +5,7 @@
 // at the end of this file.
 import { OfError, doName, type Event, type Webhook, type WebhookDelivery } from "@openfactory/core";
 import type { Env } from "../contracts/env";
+import { requireRole } from "../auth/roles";
 import { callMeta, json, opParams, opResult, teamApi, teamOf, type Handler, type RouteContext } from "../http/handler";
 import { teamIntegrations, teamSecrets, resolverFor } from "../forges/env";
 import { handleGitHubWebhook, type FactoryInfo } from "../forges/github/webhook";
@@ -24,11 +25,17 @@ export const deleteWebhook: Handler = teamApi();
 /** POST /api/v1/webhooks/{id}/rotate-secret */
 export const rotateWebhookSecret: Handler = teamApi();
 
-/** The webhook of the route, authorized by TeamDO for the route role. */
+/**
+ * The webhook of the route. TeamDO checks that the caller is of the team;
+ * this checks the route role on the webhook's factory (the webhookForRoute op
+ * has no route, so TeamDO cannot know the route role).
+ */
 async function webhookForRoute(env: Env, ctx: RouteContext): Promise<Webhook> {
   const stub = env.TEAM.getByName(doName.team(teamOf(ctx)));
   const res = opResult(await stub.api(callMeta(ctx), "webhookForRoute", opParams(ctx), undefined));
-  return (await res.json()) as Webhook;
+  const wh = (await res.json()) as Webhook;
+  requireRole(ctx.principal, wh.factory_id, ctx.route.role);
+  return wh;
 }
 
 function ingressStub(env: Env, ctx: RouteContext, webhookId: string) {

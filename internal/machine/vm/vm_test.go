@@ -235,12 +235,20 @@ func TestCloneFileSparse(t *testing.T) {
 type fakeGuest struct {
 	exitCode int
 	oomKills int
-	dead     atomic.Bool
-	keySeen  atomic.Value
+	// lateExit makes Firecracker end first and the exit frame arrive this
+	// much later.
+	lateExit time.Duration
+	// silent makes the guest never connect.
+	silent  bool
+	dead    atomic.Bool
+	keySeen atomic.Value
 }
 
 func (g *fakeGuest) run(t *testing.T, root string, phase string) {
 	t.Helper()
+	if g.silent {
+		return
+	}
 	path := filepath.Join(root, "v.sock_1024")
 	var c net.Conn
 	var err error
@@ -267,6 +275,10 @@ func (g *fakeGuest) run(t *testing.T, root string, phase string) {
 			_ = conn.Write(ctlstream.Frame{Type: ctlstream.TypeMMDSRead})
 			_ = conn.Write(ctlstream.Frame{Type: ctlstream.TypeRunnerStarted, PID: 10})
 		case ctlstream.TypeCancel:
+			if g.lateExit > 0 {
+				g.dead.Store(true)
+				time.Sleep(g.lateExit)
+			}
 			code := g.exitCode
 			_ = conn.Write(ctlstream.Frame{Type: ctlstream.TypeExit, Phase: ctlstream.ExitPhaseRunner, ExitCode: &code, OOMKills: g.oomKills})
 		case ctlstream.TypeExitAck:
@@ -507,4 +519,102 @@ func TestFirecrackerRestoreAndAdopt(t *testing.T) {
 	}
 	_ = av.Cleanup(context.Background())
 	_ = v.Cleanup(context.Background())
+}
+
+// TestFirecrackerStartHonorsContext ends the wait for vm-init when the
+// context of Start ends, long before HelloTimeout.
+func TestFirecrackerStartHonorsContext(t *testing.T) {
+	root := shortTemp(t)
+	g := &fakeGuest{silent: true}
+	f, _ := newTestFirecracker(t, root, g, ctlstream.PhaseBoot)
+	f.HelloTimeout = 30 * time.Second
+	s := testSpec(root)
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := f.Start(ctx, s)
+	if !errors.Is(err, ErrGuestStart) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Start = %v, want ErrGuestStart and the context error", err)
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("Start waited %v after the context ended", d)
+	}
+	if _, err := os.Stat(f.Jail.JailDir(s.VMID)); !os.IsNotExist(err) {
+		t.Fatal("jail kept after a canceled start")
+	}
+}
+
+// TestFirecrackerLateExitReport checks that the exit report that vm-init
+// sent before Firecracker ended reaches Wait even when the reader is slow.
+// It also checks that the kill timer of the cancel stops at the exit and
+// that a second cancel does not move it later.
+func TestFirecrackerLateExitReport(t *testing.T) {
+	root := shortTemp(t)
+	g := &fakeGuest{exitCode: 7, lateExit: 300 * time.Millisecond}
+	f, _ := newTestFirecracker(t, root, g, ctlstream.PhaseBoot)
+	v, err := f.Start(context.Background(), testSpec(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = v.Cleanup(context.Background()) }()
+	if err := v.Go(context.Background(), mmds.Document{OpenFactory: mmds.Payload{V: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	fv := v.(*fcVM)
+	if err := v.Cancel(context.Background(), time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	fv.mu.Lock()
+	first := fv.killAt
+	fv.mu.Unlock()
+	_ = v.Cancel(context.Background(), 2*time.Hour)
+	fv.mu.Lock()
+	second := fv.killAt
+	fv.mu.Unlock()
+	if !second.Equal(first) {
+		t.Fatalf("a second cancel moved the kill from %v to %v", first, second)
+	}
+	select {
+	case e := <-v.Wait():
+		if e.Report == nil || e.Report.ExitCode == nil || *e.Report.ExitCode != 7 {
+			t.Fatalf("exit %+v: the late report was lost", e)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no exit")
+	}
+	fv.mu.Lock()
+	timer := fv.killTimer
+	fv.mu.Unlock()
+	if timer == nil || timer.Stop() {
+		t.Fatal("the kill timer of the cancel still runs after the exit")
+	}
+}
+
+// TestFirecrackerNoListenerAfterCleanup checks that a broken control stream
+// does not open a new listener after Cleanup.
+func TestFirecrackerNoListenerAfterCleanup(t *testing.T) {
+	root := shortTemp(t)
+	g := &fakeGuest{}
+	f, _ := newTestFirecracker(t, root, g, ctlstream.PhaseBoot)
+	s := testSpec(root)
+	v, err := f.Start(context.Background(), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v.Cleanup(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	fv := v.(*fcVM)
+	// The reader saw the stream break just before Cleanup ran.
+	if err := os.MkdirAll(f.Jail.Root(s.VMID), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fv.relisten()
+	fv.mu.Lock()
+	ln := fv.ln
+	fv.mu.Unlock()
+	if ln != nil {
+		_ = ln.Close()
+		t.Fatal("a listener opened after Cleanup")
+	}
 }

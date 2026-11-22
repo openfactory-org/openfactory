@@ -104,7 +104,7 @@ export class IngressDO extends BaseDO {
     this.onMessage("ingress.deliver", (p) => {
       this.insert(p.event, p.dedupeKey);
     });
-    this.onTimerAsync("deliver", () => this.deliverHead());
+    this.onTimerAsync("deliver", (t) => this.deliverHead(t.due_ms));
     this.onTimer("purge", () => {
       this.sql.exec("DELETE FROM events WHERE state = 'done' AND received_ms < ?", Date.now() - EVENT_TTL_MS);
       if (first(this.sql, "SELECT 1 FROM events WHERE state = 'done' LIMIT 1"))
@@ -165,8 +165,11 @@ export class IngressDO extends BaseDO {
     });
   }
 
-  /** Delivers pending events in order until one fails or none is due. */
-  private async deliverHead(): Promise<void> {
+  /**
+   * Delivers pending events in order until one fails or none is due.
+   * firedAt is the due_ms of the "deliver" timer that runs this step.
+   */
+  private async deliverHead(firedAt: number): Promise<void> {
     for (let i = 0; i < 25; i++) {
       const head = first<EventRow & Record<string, SqlStorageValue>>(
         this.sql,
@@ -174,7 +177,7 @@ export class IngressDO extends BaseDO {
       );
       if (!head) return;
       if (head.next_ms > Date.now()) {
-        this.setTimer("deliver", "deliver", head.next_ms);
+        this.tx(() => this.setTimer("deliver", "deliver", head.next_ms));
         return;
       }
       let res: IntakeResult;
@@ -221,7 +224,9 @@ export class IngressDO extends BaseDO {
       });
       return;
     }
-    this.setTimer("deliver", "deliver", Date.now());
+    // More events wait: continue in the next alarm. BaseDO deletes the timer
+    // that fired when its due_ms is unchanged, so the new due_ms must differ.
+    this.tx(() => this.setTimer("deliver", "deliver", Math.max(Date.now(), firedAt + 1)));
   }
 
   private enqueue_dead(id: string, attempts: number, error: string): void {

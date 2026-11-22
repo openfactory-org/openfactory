@@ -80,6 +80,12 @@ export function fakeDaytona(): FakeDaytona {
     s.sandboxes.delete(sb.name!);
     return FetchMock.empty(200);
   });
+  api.on("PUT", "/sandbox/:name/labels", (req) => {
+    const sb = byIdOrName(req.params.name!);
+    if (!sb) return FetchMock.json({ statusCode: 404, message: "Sandbox not found" }, 404);
+    sb.labels = req.json<{ labels: Record<string, string> }>().labels;
+    return FetchMock.json({ labels: sb.labels });
+  });
   api.on("GET", "/sandbox", ({ url }) => {
     const want = JSON.parse(url.searchParams.get("labels") ?? "{}") as Record<string, string>;
     return FetchMock.json(

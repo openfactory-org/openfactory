@@ -91,6 +91,10 @@ var (
 	errUnknownMethod = errors.New("unknown method")
 )
 
+// readTimeoutBeats is the number of heartbeat intervals without a frame from
+// the hub after which the worker drops the connection.
+const readTimeoutBeats = 3
+
 // oneShotFlushWait is the longest time that a one-shot worker waits to report
 // the end of its task when it has no connection.
 const oneShotFlushWait = 30 * time.Second
@@ -108,7 +112,28 @@ type workerV2 struct {
 	accepted int    // one-shot: tasks accepted
 	oneTask  string // one-shot: the task
 	result   *rtcore.TaskStatus
-	draining bool // the hub asked the worker to take no new task
+	draining bool // the hub asked the worker to take no new task; unused with a rtcore.Drainable backend
+}
+
+// isDraining reports whether the worker takes no new task. A backend that
+// implements rtcore.Drainable holds the state.
+func (w *workerV2) isDraining() bool {
+	if d, ok := w.opts.Backend.(rtcore.Drainable); ok {
+		return d.Draining()
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.draining
+}
+
+func (w *workerV2) setDraining(draining bool) {
+	if d, ok := w.opts.Backend.(rtcore.Drainable); ok {
+		d.SetDraining(draining)
+		return
+	}
+	w.mu.Lock()
+	w.draining = draining
+	w.mu.Unlock()
 }
 
 // v2Client is one live connection of the worker.
@@ -509,8 +534,12 @@ func (w *workerV2) session(ctx context.Context) (connected bool, err error) {
 		<-cctx.Done()
 		_ = wsc.Close()
 	}()
+	// The hub answers each ping with a pong, so a connection that brings no
+	// frame for readTimeoutBeats heartbeats is half-open: drop it and reconnect.
+	defer func() { _ = wsc.SetReadDeadline(time.Time{}) }()
 
 	for {
+		_ = wsc.SetReadDeadline(time.Now().Add(readTimeoutBeats * interval))
 		_, data, err := wsc.ReadMessage()
 		if err != nil {
 			var ce *ws.CloseError
@@ -524,7 +553,9 @@ func (w *workerV2) session(ctx context.Context) (connected bool, err error) {
 			continue
 		}
 		go func(m message) {
-			result, err := w.handle(cctx, &m)
+			// The worker context, not the connection context: a dropped
+			// connection must not stop a Start or a Destroy halfway.
+			result, err := w.handle(w.ctx, &m)
 			resp := &message{Type: typeResponse, ID: m.ID}
 			if err != nil {
 				resp.Error = errorForV2(err)
@@ -544,12 +575,10 @@ func (w *workerV2) heartbeats(ctx context.Context, c *v2Client, interval time.Du
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if w.opts.Key != nil {
-				// An enrolled worker talks to a hub that answers this exact
-				// text without waking up.
-				if err := c.ws.WriteMessage(ws.OpText, []byte(pingFrame)); err != nil {
-					return
-				}
+			// The hub answers this exact text without waking up. The pong
+			// keeps the read deadline of session from expiring.
+			if err := c.ws.WriteMessage(ws.OpText, []byte(pingFrame)); err != nil {
+				return
 			}
 			hb, _ := json.Marshal(Heartbeat{Active: w.active(), Capacity: w.opts.Capacity})
 			if err := c.send(&message{Type: typeHeartbeat, Params: hb}); err != nil {
@@ -562,9 +591,7 @@ func (w *workerV2) heartbeats(ctx context.Context, c *v2Client, interval time.Du
 // hello returns the hello of a new connection.
 func (w *workerV2) hello(ctx context.Context) HelloV2 {
 	tasks := w.snapshot(ctx)
-	w.mu.Lock()
-	draining := w.draining
-	w.mu.Unlock()
+	draining := w.isDraining()
 	return HelloV2{
 		WorkerID: w.opts.WorkerID, Name: w.opts.Name, Backend: w.opts.Backend.Name(), Labels: w.opts.Labels,
 		Capacity: w.opts.Capacity, Version: w.opts.Version, OneShot: w.opts.OneShot, Tasks: tasks,
@@ -622,9 +649,7 @@ func (w *workerV2) handle(ctx context.Context, m *message) (any, error) {
 		if err := json.Unmarshal(m.Params, &p); err != nil {
 			return nil, fmt.Errorf("%w: bad drain params", rtcore.ErrInvalid)
 		}
-		w.mu.Lock()
-		w.draining = p.Draining
-		w.mu.Unlock()
+		w.setDraining(p.Draining)
 		w.log.Info("drain changed", "draining", p.Draining)
 		return struct{}{}, nil
 	}
@@ -636,12 +661,13 @@ func (w *workerV2) assign(ctx context.Context, task rtcore.Task, extras json.Raw
 	if err := task.Validate(); err != nil {
 		return rtcore.TaskStatus{}, fmt.Errorf("%w: %w", rtcore.ErrInvalid, err)
 	}
+	draining := w.isDraining()
 	w.mu.Lock()
 	if st, ok := w.status[task.TaskID]; ok {
 		w.mu.Unlock()
 		return st, nil
 	}
-	if w.draining {
+	if draining {
 		w.mu.Unlock()
 		w.rejected("draining")
 		return rtcore.TaskStatus{}, fmt.Errorf("worker is draining: %w", rtcore.ErrAtCapacity)

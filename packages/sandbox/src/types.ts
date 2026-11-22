@@ -183,8 +183,11 @@ export type ProviderErrorKind =
   "at_capacity" | "rate_limited" | "unavailable" | "not_found" | "invalid" | "conflict" | "internal";
 
 /**
- * A provider failure. Over RPC the class is lost; the message keeps the form
- * `provider_error:<kind>: <message>` so `parseProviderError` can rebuild it.
+ * A provider failure. Over RPC the class and its fields are lost; only the
+ * message survives. The message has the form
+ * `provider_error:<kind>[;retry_after=<seconds>][;code=<code>]: <detail>`, so
+ * `parseProviderError` can rebuild the kind, the retry delay and the provider
+ * code. `code` is URI-encoded.
  *
  * DispatchDO mapping (startFailed in dispatch/claim.go):
  * - at_capacity, rate_limited: requeue without using a retry
@@ -201,25 +204,56 @@ export class ProviderError extends Error {
     readonly retryAfterSeconds?: number,
     readonly providerCode?: string,
   ) {
-    super(`provider_error:${kind}: ${detail}`);
+    super(providerErrorMessage(kind, detail, retryAfterSeconds, providerCode));
   }
+}
+
+const PROVIDER_ERROR_KINDS: readonly string[] = [
+  "at_capacity",
+  "rate_limited",
+  "unavailable",
+  "not_found",
+  "invalid",
+  "conflict",
+  "internal",
+];
+
+function providerErrorMessage(
+  kind: ProviderErrorKind,
+  detail: string,
+  retryAfterSeconds?: number,
+  providerCode?: string,
+): string {
+  let meta = "";
+  if (retryAfterSeconds !== undefined && Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0)
+    meta += `;retry_after=${retryAfterSeconds}`;
+  if (providerCode) meta += `;code=${encodeURIComponent(providerCode)}`;
+  return `provider_error:${kind}${meta}: ${detail}`;
 }
 
 export function parseProviderError(e: unknown): ProviderError | undefined {
   if (e instanceof ProviderError) return e;
   if (!(e instanceof Error)) return undefined;
-  const m = /^provider_error:([a-z_]+): ([\s\S]*)$/.exec(e.message);
-  if (!m) return undefined;
-  const kinds: readonly string[] = [
-    "at_capacity",
-    "rate_limited",
-    "unavailable",
-    "not_found",
-    "invalid",
-    "conflict",
-    "internal",
-  ];
-  return kinds.includes(m[1]!) ? new ProviderError(m[1] as ProviderErrorKind, m[2]!) : undefined;
+  const m = /^provider_error:([a-z_]+)((?:;[a-z_]+=[^;:\s]*)*): ([\s\S]*)$/.exec(e.message);
+  if (!m || !PROVIDER_ERROR_KINDS.includes(m[1]!)) return undefined;
+  let retryAfter: number | undefined;
+  let code: string | undefined;
+  for (const part of m[2]!.split(";").slice(1)) {
+    const i = part.indexOf("=");
+    const k = part.slice(0, i);
+    const v = part.slice(i + 1);
+    if (k === "retry_after") {
+      const n = Number(v);
+      if (v !== "" && Number.isFinite(n) && n >= 0) retryAfter = n;
+    } else if (k === "code" && v !== "") {
+      try {
+        code = decodeURIComponent(v);
+      } catch {
+        code = v;
+      }
+    }
+  }
+  return new ProviderError(m[1] as ProviderErrorKind, m[3]!, retryAfter, code);
 }
 
 // ---------- Provider ----------

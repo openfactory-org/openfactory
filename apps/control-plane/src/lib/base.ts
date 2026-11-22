@@ -5,6 +5,8 @@
 // Rules (plan "Rules for the port"):
 // - One this.tx(...) (transactionSync) per request or alarm step. No await inside.
 // - Effects leave only through this.enqueue(...) inside that transaction.
+// - Code that must wait for the commit (live pushes, an outbox kick) goes to
+//   this.onCommit(...): it runs after the step commits and is dropped on rollback.
 // - alarm() catches every error and always sets the next alarm.
 import { DurableObject } from "cloudflare:workers";
 import { OfError, toOfError } from "@openfactory/core";
@@ -42,7 +44,11 @@ export abstract class BaseDO extends DurableObject<Env> implements OutboxReceive
   private readonly syncTimers = new Map<string, SyncTimerHandler>();
   private readonly asyncTimers = new Map<string, AsyncTimerHandler>();
   private readonly messageHandlers = new Map<string, MessageHandler>();
+  /** Async timer handlers that run now in this isolate, by timer name. */
+  private readonly runningTimers = new Map<string, Promise<void>>();
   private armedAt: number | null = null;
+  /** Post-commit callbacks of the running step; null outside a step. */
+  private commitCallbacks: (() => void)[] | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -106,9 +112,62 @@ export abstract class BaseDO extends DurableObject<Env> implements OutboxReceive
 
   /** One transactionSync, then re-arms the alarm when timers or outbox changed. */
   protected tx<T>(fn: () => T): T {
-    const out = this.ctx.storage.transactionSync(fn);
-    this.armAlarm();
+    return this.step(fn, true);
+  }
+
+  /**
+   * Runs fn in transactionSync. Callbacks that fn registers with onCommit run
+   * after the commit (after the alarm is re-armed when arm is true), and are
+   * dropped when fn throws. A step inside a step is a savepoint: its callbacks
+   * join the outer step, and a throw drops only its own.
+   */
+  private step<T>(fn: () => T, arm: boolean): T {
+    const outer = this.commitCallbacks;
+    if (outer) {
+      const mark = outer.length;
+      try {
+        return this.ctx.storage.transactionSync(fn);
+      } catch (e) {
+        outer.length = mark;
+        throw e;
+      }
+    }
+    const callbacks: (() => void)[] = [];
+    this.commitCallbacks = callbacks;
+    let out: T;
+    try {
+      out = this.ctx.storage.transactionSync(fn);
+    } finally {
+      this.commitCallbacks = null;
+    }
+    if (arm) this.armAlarm();
+    for (const cb of callbacks) {
+      try {
+        cb();
+      } catch (e) {
+        console.error(`${this.constructor.name}: post-commit callback failed`, e);
+      }
+    }
     return out;
+  }
+
+  /**
+   * Runs fn after the current step (this.tx, a received message, a sync timer)
+   * commits; drops it when the step rolls back. Outside a step fn runs in a
+   * microtask. fn must not throw: an error is logged and ignored.
+   */
+  protected onCommit(fn: () => void): void {
+    if (this.commitCallbacks) {
+      this.commitCallbacks.push(fn);
+      return;
+    }
+    queueMicrotask(() => {
+      try {
+        fn();
+      } catch (e) {
+        console.error(`${this.constructor.name}: post-commit callback failed`, e);
+      }
+    });
   }
 
   /** Writes an outbox row. Call inside this.tx() with the state change. */
@@ -256,13 +315,27 @@ export abstract class BaseDO extends DurableObject<Env> implements OutboxReceive
       const async_ = this.asyncTimers.get(t.kind);
       try {
         if (sync) {
-          this.ctx.storage.transactionSync(() => {
+          this.step(() => {
             if (this.timers.take(t)) sync(t);
-          });
+          }, false);
         } else if (async_) {
-          await async_(t);
-          // Done unless the handler moved the timer.
-          this.timers.take(t);
+          // A second alarm() (pump(), waitUntil(this.alarm())) can run while the
+          // first awaits this handler. Wait for the running handler instead of
+          // running it twice: it owns the timer and records its own failure.
+          const running = this.runningTimers.get(t.name);
+          if (running) {
+            await running.catch(() => undefined);
+            continue;
+          }
+          const run = async_(t);
+          this.runningTimers.set(t.name, run);
+          try {
+            await run;
+            // Done unless the handler moved the timer.
+            this.timers.take(t);
+          } finally {
+            if (this.runningTimers.get(t.name) === run) this.runningTimers.delete(t.name);
+          }
         } else {
           console.error(`${this.constructor.name}: no handler for timer kind ${t.kind}; dropping ${t.name}`);
           this.timers.take(t);
@@ -288,7 +361,11 @@ export abstract class BaseDO extends DurableObject<Env> implements OutboxReceive
     const next = Math.max(min, 1);
     if (force || this.armedAt === null || next < this.armedAt) {
       this.armedAt = next;
-      void this.ctx.storage.setAlarm(next);
+      this.ctx.storage.setAlarm(next).catch((e: unknown) => {
+        // Forget the failed time, or a stale armedAt blocks the next armAlarm.
+        if (this.armedAt === next) this.armedAt = null;
+        console.error(`${this.constructor.name}: cannot set alarm`, e);
+      });
     }
   }
 

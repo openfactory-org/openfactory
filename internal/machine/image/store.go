@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -57,8 +56,9 @@ type Store struct {
 	// RemoteOptions are added to every registry call (tests).
 	RemoteOptions []remote.Option
 
-	mu    sync.Mutex
-	locks map[string]*sync.Mutex
+	// locks serializes the builds of one digest, tools disk or scratch
+	// template, and keeps Prune away from a key that a build uses.
+	locks KeyedMutex
 }
 
 func (s *Store) run() Run {
@@ -75,20 +75,7 @@ func (s *Store) log() *slog.Logger {
 	return s.Log
 }
 
-func (s *Store) lock(key string) func() {
-	s.mu.Lock()
-	if s.locks == nil {
-		s.locks = map[string]*sync.Mutex{}
-	}
-	l, ok := s.locks[key]
-	if !ok {
-		l = &sync.Mutex{}
-		s.locks[key] = l
-	}
-	s.mu.Unlock()
-	l.Lock()
-	return l.Unlock
-}
+func (s *Store) lock(key string) func() { return s.locks.Lock(key) }
 
 func (s *Store) imagesDir() string { return filepath.Join(s.Dir, "images") }
 
@@ -168,9 +155,14 @@ func (s *Store) writeMeta(m Image) error {
 	}
 	p := filepath.Join(s.DigestDir(m.Digest), "meta.json")
 	if err := os.WriteFile(p+".tmp", data, 0o644); err != nil { //nolint:gosec // G306: image metadata is not secret
+		_ = os.Remove(p + ".tmp")
 		return err
 	}
-	return os.Rename(p+".tmp", p)
+	if err := os.Rename(p+".tmp", p); err != nil {
+		_ = os.Remove(p + ".tmp")
+		return err
+	}
+	return nil
 }
 
 func (s *Store) convert(ctx context.Context, img v1.Image, ref, digest string) (Image, error) {
@@ -249,8 +241,8 @@ func wrapDisk(err error) error {
 // runtime binary at /openfactory, an empty /etc and the mount points. exe
 // is the binary to put in it, normally the agent's own executable.
 func (s *Store) EnsureTools(ctx context.Context, version, arch, exe string) (string, error) {
-	dir := filepath.Join(s.Dir, "tools", version+"-"+arch)
-	out := filepath.Join(dir, "tools.ext4")
+	out := s.ToolsPath(version, arch)
+	dir := filepath.Dir(out)
 	defer s.lock("tools:" + version + arch)()
 	if _, err := os.Stat(out); err == nil {
 		now := time.Now()
@@ -298,6 +290,12 @@ func (s *Store) EnsureTools(ctx context.Context, version, arch, exe string) (str
 	return out, os.Rename(img, out)
 }
 
+// ToolsPath returns the path of the tools disk of a runtime version. The
+// file exists after EnsureTools.
+func (s *Store) ToolsPath(version, arch string) string {
+	return filepath.Join(s.Dir, "tools", version+"-"+arch, "tools.ext4")
+}
+
 // EnsureScratch returns the empty scratch template of gib GiB.
 func (s *Store) EnsureScratch(ctx context.Context, gib int) (string, error) {
 	dir := filepath.Join(s.Dir, "scratch-templates")
@@ -315,36 +313,30 @@ func (s *Store) EnsureScratch(ctx context.Context, gib int) (string, error) {
 		return "", wrapDisk(err)
 	}
 	if err := os.Chmod(tmp, 0o444); err != nil {
+		_ = os.Remove(tmp)
 		return "", err
 	}
-	return out, os.Rename(tmp, out)
+	if err := os.Rename(tmp, out); err != nil {
+		_ = os.Remove(tmp)
+		return "", err
+	}
+	return out, nil
 }
 
 // Prune deletes least recently used images until images/ and tools/ use at
-// most maxBytes. inUse protects the digests of live VMs.
+// most maxBytes. inUse protects the digests of live VMs. A digest that
+// Ensure holds (a conversion or a cache hit in progress) is skipped.
 func (s *Store) Prune(maxBytes int64, inUse func(digest string) bool) (freed int64, err error) {
-	entries, err := os.ReadDir(s.imagesDir())
+	imgs, err := s.List()
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return 0, nil
-		}
 		return 0, err
 	}
-	var imgs []Image
 	var total int64
-	for _, e := range entries {
-		if !e.IsDir() || !strings.HasPrefix(e.Name(), "sha256-") {
-			continue
-		}
-		m, err := s.Meta(strings.Replace(e.Name(), "-", ":", 1))
-		if err != nil {
-			continue
-		}
+	for i, m := range imgs {
 		if fi, err := os.Stat(m.Path); err == nil {
-			m.Size = DiskUsage(fi)
+			imgs[i].Size = DiskUsage(fi)
 		}
-		total += m.Size
-		imgs = append(imgs, m)
+		total += imgs[i].Size
 	}
 	total += dirUsage(filepath.Join(s.Dir, "tools"))
 	sort.Slice(imgs, func(i, j int) bool { return imgs[i].LastUsed.Before(imgs[j].LastUsed) })
@@ -355,7 +347,13 @@ func (s *Store) Prune(maxBytes int64, inUse func(digest string) bool) (freed int
 		if inUse != nil && inUse(m.Digest) {
 			continue
 		}
-		if err := os.RemoveAll(s.DigestDir(m.Digest)); err != nil {
+		unlock, ok := s.locks.TryLock(m.Digest)
+		if !ok {
+			continue
+		}
+		err := os.RemoveAll(s.DigestDir(m.Digest))
+		unlock()
+		if err != nil {
 			return freed, err
 		}
 		s.log().Info("image pruned", "digest", m.Digest, "ref", m.Ref)
@@ -363,6 +361,27 @@ func (s *Store) Prune(maxBytes int64, inUse func(digest string) bool) (freed int
 		freed += m.Size
 	}
 	return freed, nil
+}
+
+// List returns the cached images.
+func (s *Store) List() ([]Image, error) {
+	entries, err := os.ReadDir(s.imagesDir())
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var imgs []Image
+	for _, e := range entries {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), "sha256-") {
+			continue
+		}
+		if m, err := s.Meta(strings.Replace(e.Name(), "-", ":", 1)); err == nil {
+			imgs = append(imgs, m)
+		}
+	}
+	return imgs, nil
 }
 
 func dirUsage(dir string) int64 {

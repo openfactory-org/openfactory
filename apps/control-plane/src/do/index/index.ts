@@ -6,7 +6,8 @@
 // (/api/v1/stream): the Worker opens a hibernatable WebSocket on
 // /subscribe/team and IndexDO sends LiveFrame events after each projection.
 import { OfError, newRoutedId, newToken } from "@openfactory/core";
-import type { CallMeta, IndexRpc, LiveFrame, OutboxPayloads } from "../../contracts/do-messages";
+import { requireRole } from "../../auth/roles";
+import type { CallMeta, IndexRpc, LiveFrame, OutboxPayloads, Role } from "../../contracts/do-messages";
 import type { Env } from "../../contracts/env";
 import { BaseDO } from "../../lib/base";
 import { LiveHub, isUpgrade } from "../../lib/live/index";
@@ -333,8 +334,24 @@ export class IndexDO extends BaseDO implements IndexRpc, RetentionRpc {
    *   metricEvents  factory_id or work_item_id, since_ms
    * Paging: limit, cursor, sort_order. Returns {items, page_info}.
    */
-  async list(_meta: CallMeta, op: string, params: Record<string, string>): Promise<unknown> {
-    return this.rpc(() => this.listSync(op, params));
+  async list(meta: CallMeta, op: string, params: Record<string, string>): Promise<unknown> {
+    return this.rpc(() => {
+      this.authorize(meta, params["factory_id"] ?? "", op === "deadLetters" ? "admin" : "user");
+      return this.listSync(op, params);
+    });
+  }
+
+  /**
+   * Authorizes a caller that comes from a REST route: the principal must be of
+   * this team and have at least `min` on the factory ("" = the team role).
+   * The Worker does not check the role of factory-scoped routes, so this DO
+   * does. Internal calls (integrations, scoring, metrics) carry no principal.
+   */
+  private authorize(meta: CallMeta | undefined, factoryId: string, min: Role): void {
+    const p = meta?.principal;
+    if (!p) return;
+    if (p.teamId && p.teamId !== this.teamId()) throw new OfError("not_authorized", "resource belongs to another team");
+    requireRole(p, factoryId, min);
   }
 
   private listSync(op: string, q: Record<string, string>): unknown {
@@ -478,10 +495,7 @@ export class IndexDO extends BaseDO implements IndexRpc, RetentionRpc {
       case "metricEvents": {
         eq("factory_id", "factory_id");
         eq("work_item_id", "work_item_id");
-        if (q["since_ms"]) {
-          where.push("at_ms >= ?");
-          args.push(Number(q["since_ms"]));
-        }
+        since("at_ms");
         const r = sqlPage(
           this.sql,
           {
@@ -508,10 +522,15 @@ export class IndexDO extends BaseDO implements IndexRpc, RetentionRpc {
   }
 
   /** One inbox item from the read model (team-level items are owned here). */
-  async getInboxItem(_meta: CallMeta, inboxId: string): Promise<unknown> {
+  async getInboxItem(meta: CallMeta, inboxId: string): Promise<unknown> {
     return this.rpc(() => {
-      const r = first<{ data: string }>(this.sql, "SELECT data FROM inbox WHERE id = ?", inboxId);
+      const r = first<{ data: string; factory_id: string }>(
+        this.sql,
+        "SELECT data, factory_id FROM inbox WHERE id = ?",
+        inboxId,
+      );
       if (!r) throw new OfError("resource_not_found", `inbox item ${inboxId} not found`);
+      this.authorize(meta, r.factory_id, "user");
       return JSON.parse(r.data) as unknown;
     });
   }
@@ -522,9 +541,9 @@ export class IndexDO extends BaseDO implements IndexRpc, RetentionRpc {
       const user = meta.principal?.userId ?? meta.principal?.id ?? "";
       if (!user) throw new OfError("authentication_required");
       this.tx(() => {
-        if (!first(this.sql, "SELECT 1 FROM inbox WHERE id = ?", inboxId)) {
-          throw new OfError("resource_not_found", `inbox item ${inboxId} not found`);
-        }
+        const r = first<{ factory_id: string }>(this.sql, "SELECT factory_id FROM inbox WHERE id = ?", inboxId);
+        if (!r) throw new OfError("resource_not_found", `inbox item ${inboxId} not found`);
+        this.authorize(meta, r.factory_id, "user");
         this.sql.exec(
           "INSERT OR IGNORE INTO inbox_reads (inbox_id, user_id, read_ms) VALUES (?, ?, ?)",
           inboxId,

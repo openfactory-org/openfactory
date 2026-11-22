@@ -186,6 +186,38 @@ describe("review context builder", () => {
     const rf = new Reader(undefined, undefined, new OfError("operation_not_supported", "no"));
     b = await build("m", reviewEvent(), true, reviewBuilders(new Source(rf)));
     expect(omitted(b)["context/review_thread.json"]).toContain("this forge cannot read the review thread");
+
+    // The same answer from a plugin Worker: RPC turns the OfError into a plain Error.
+    const pf = new Reader(undefined, undefined, new Error("operation_not_supported: no"));
+    b = await build("m", reviewEvent(), true, reviewBuilders(new Source(pf)));
+    expect(omitted(b)["context/review_thread.json"]).toContain("this forge cannot read the review thread");
+    expect(omitted(b)["context/file_diff.patch"]).toContain("this forge cannot read the diff");
+  });
+
+  it("splits a repository with subgroups at the last slash", async () => {
+    const seen: unknown[][] = [];
+    const rf = {
+      reviewThread: async (...a: unknown[]) => {
+        seen.push(a);
+        return { ref: "d1", path: "x.go", resolved: false, comments: [] };
+      },
+      fileDiff: async (...a: unknown[]) => {
+        seen.push(a);
+        return { path: "x.go", patch: "@@ -1 +1 @@\n-a\n+b" };
+      },
+    };
+    const ev = reviewEvent();
+    ev.provider = "gitlab";
+    ev.source = { provider: "gitlab", kind: "pull_request", repo: "acme/platform/api", number: 7, thread_ref: "d1" };
+    ev.payload = undefined;
+    const src = new Source(rf);
+    const b = await build("m", ev, true, reviewBuilders(src));
+    expect(seen).toEqual([
+      ["acme/platform", "api", 7, "d1"],
+      ["acme/platform", "api", 7, "x.go"],
+    ]);
+    expect(src.lookups[0]).toMatchObject({ codeForge: "GITLAB", repo: "acme/platform/api" });
+    expect(fileMap(b)[DIR + "file_diff.patch"]).toContain("+b");
   });
 
   it("does not call the forge for a comment without a thread", async () => {

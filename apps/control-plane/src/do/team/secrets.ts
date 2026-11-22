@@ -129,13 +129,19 @@ export function typeOf(kit: TeamKit, factoryId: string, name: string): string {
   return r?.type ?? "";
 }
 
-/** Put: validates, seals and stores; an existing name in the scope keeps its ID. */
+/**
+ * Put: validates, seals and stores; an existing name in the scope keeps its ID.
+ * With createOnly, an existing name is a conflict. The check runs in the same
+ * transaction as the write, after the value is sealed, so a concurrent create
+ * of the same name cannot be overwritten.
+ */
 export async function putSecret(
   kit: TeamKit,
   factoryId: string,
   name: string,
   type: string,
   value: string,
+  opts: { createOnly?: boolean } = {},
 ): Promise<Secret> {
   const typ = type || "generic";
   validateName(name);
@@ -145,6 +151,7 @@ export async function putSecret(
   return kit.tx(() => {
     const now = new Date().toISOString();
     const cur = rowOf(kit, factoryId, name);
+    if (cur && opts.createOnly) throw secretExists(name);
     const old = cur ? toSecret(cur) : undefined;
     const sec: Secret = {
       id: old?.id ?? newId("sec"),
@@ -270,6 +277,10 @@ function scopeOf(kit: TeamKit, c: OpCall, bodyFactory = ""): string {
   return f.id;
 }
 
+function secretExists(name: string): OfError {
+  return new OfError("conflict", `secret ${JSON.stringify(name)} already exists; use PUT to update its value`);
+}
+
 function findSecret(kit: TeamKit, factoryId: string, name: string): Secret {
   const r = rowOf(kit, factoryId, name);
   if (!r) throw new OfError("resource_not_found", `secret ${name} not found`);
@@ -293,9 +304,8 @@ export const ops: Record<string, TeamOp> = {
     const value = str(b, "value");
     validateApiValue(name, value);
     const fid = scopeOf(kit, c, str(b, "factory_id"));
-    if (rowOf(kit, fid, name))
-      throw new OfError("conflict", `secret ${JSON.stringify(name)} already exists; use PUT to update its value`);
-    return created(await putSecret(kit, fid, name, type, value));
+    if (rowOf(kit, fid, name)) throw secretExists(name);
+    return created(await putSecret(kit, fid, name, type, value, { createOnly: true }));
   },
 
   getSecret: (kit, c) => findSecret(kit, scopeOf(kit, c), c.params["name"]!),

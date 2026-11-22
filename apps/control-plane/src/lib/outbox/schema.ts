@@ -34,4 +34,10 @@ CREATE TABLE timers (
 CREATE INDEX timers_due ON timers (due_ms);
 `,
   },
+  {
+    version: 2,
+    name: "timer_seq",
+    // Row version of a timer: take() and fail() match on it, not on due_ms.
+    sql: `ALTER TABLE timers ADD COLUMN seq INTEGER NOT NULL DEFAULT 0`,
+  },
 ];

@@ -167,19 +167,33 @@ export class Outbox {
       .toArray()
       .filter((r) => !this.inflight.has(r.id));
     if (rows.length === 0) return res;
-    // Lease before the first await, so an interleaved drain or a restart does not resend at once.
-    for (const r of rows) {
-      this.inflight.add(r.id);
-      this.sql.exec("UPDATE outbox SET next_ms = ? WHERE id = ?", now + OUTBOX_LEASE_MS, r.id);
-    }
+    // inflight keeps an interleaved drain of this isolate off these rows.
+    for (const r of rows) this.inflight.add(r.id);
     try {
       for (let i = 0; i < rows.length; i += OUTBOX_PARALLEL) {
-        await Promise.all(rows.slice(i, i + OUTBOX_PARALLEL).map((r) => this.deliverOne(r, res)));
+        const batch = this.lease(rows.slice(i, i + OUTBOX_PARALLEL));
+        await Promise.all(batch.map((r) => this.deliverOne(r, res)));
       }
     } finally {
       for (const r of rows) this.inflight.delete(r.id);
     }
     return res;
+  }
+
+  /**
+   * Leases one batch just before its delivery, so a restart does not resend it
+   * at once. A lease taken for the whole pass would expire while earlier
+   * batches are slow. Returns the rows that are still pending.
+   */
+  private lease(batch: OutboxRow[]): OutboxRow[] {
+    return this.d.storage.transactionSync(() => {
+      const until = this.now() + OUTBOX_LEASE_MS;
+      return batch.filter(
+        (r) =>
+          this.sql.exec("UPDATE outbox SET next_ms = ? WHERE id = ? AND state = 'pending'", until, r.id).rowsWritten >
+          0,
+      );
+    });
   }
 
   private async deliverOne(row: OutboxRow, res: DrainResult): Promise<void> {

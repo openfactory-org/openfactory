@@ -112,6 +112,15 @@ type Hub struct {
 	statuses map[string]rtcore.TaskStatus
 	beats    int
 	nextID   int
+	mute     bool // no pong: the connection looks half-open to the worker
+}
+
+// Mute stops (or restarts) the pong answers, so the connection looks
+// half-open to the worker.
+func (h *Hub) Mute(m bool) {
+	h.mu.Lock()
+	h.mute = m
+	h.mu.Unlock()
 }
 
 // New starts a hub on a test server. The server closes at the end of the test.
@@ -223,7 +232,12 @@ func (h *Hub) serve(w http.ResponseWriter, r *http.Request) {
 			h.beats++
 			h.mu.Unlock()
 		case "ping":
-			_ = wsc.WriteMessage(ws.OpText, []byte(`{"type":"pong"}`))
+			h.mu.Lock()
+			mute := h.mute
+			h.mu.Unlock()
+			if !mute {
+				_ = wsc.WriteMessage(ws.OpText, []byte(`{"type":"pong"}`))
+			}
 		}
 	}
 }

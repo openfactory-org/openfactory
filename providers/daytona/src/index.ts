@@ -50,6 +50,12 @@ export const CREATE_RATE_BY_TIER: Record<number, number> = { 1: 300, 2: 400, 3: 
 /** Port of the in-sandbox toolbox daemon (VERIFY with `ss -ltnp` in the live check). */
 export const DEFAULT_DAEMON_PORTS = [2280];
 export const ENTRYPOINT = ["/usr/bin/tini", "-g", "--", "/opt/openfactory/bootstrap.sh"];
+/**
+ * Label that cancel() sets on the sandbox. The control plane builds a new
+ * provider object for each call, so the cancel request must live on the
+ * provider side for a later status() or list() to report "cancelled".
+ */
+export const CANCEL_LABEL = "of-cancel";
 
 export interface DaytonaConfig {
   apiKey: string;
@@ -185,7 +191,6 @@ export class DaytonaProvider implements SandboxProvider {
   private readonly api: string;
   private readonly toolbox: string;
   private readonly f: typeof fetch;
-  private readonly cancelled = new Set<string>();
 
   constructor(private readonly cfg: DaytonaConfig) {
     if (!cfg.apiKey) throw new ProviderError("invalid", "daytona: the API key is empty");
@@ -440,7 +445,13 @@ export class DaytonaProvider implements SandboxProvider {
     const body = await this.createBody(task);
     const res = await this.call("POST", `${this.api}/sandbox`, body);
     this.reportRate(res);
-    if (res.ok) return mapDaytonaSandbox(task.taskId, (await res.json()) as DaytonaSandbox, this.ctx(task));
+    if (res.ok) {
+      const sb = (await res.json()) as DaytonaSandbox;
+      return mapDaytonaSandbox(task.taskId, sb, {
+        cancelRequested: cancelRequested(sb),
+        nativeEgress: this.nativeFor(task),
+      });
+    }
     const err = await this.toError(res, "start");
     // The name is the idempotency key: a concurrent create with the same name wins.
     if (err.kind === "conflict" || /already exists/i.test(err.detail)) {
@@ -450,16 +461,12 @@ export class DaytonaProvider implements SandboxProvider {
     throw err;
   }
 
-  private ctx(task?: SandboxTask): { cancelRequested: boolean; nativeEgress: boolean } {
-    let native = false;
-    if (task) {
-      try {
-        native = this.planEgress(task.networkPolicy).egress === "native";
-      } catch {
-        native = false;
-      }
+  private nativeFor(task: SandboxTask): boolean {
+    try {
+      return this.planEgress(task.networkPolicy).egress === "native";
+    } catch {
+      return false;
     }
-    return { cancelRequested: task ? this.cancelled.has(task.taskId) : false, nativeEgress: native };
   }
 
   private reportRate(res: Response): void {
@@ -478,7 +485,7 @@ export class DaytonaProvider implements SandboxProvider {
     // networkPolicyError matters only when a native list was requested; the sandbox has one then.
     return mapDaytonaSandbox(taskId, sb, {
       exitCode,
-      cancelRequested: this.cancelled.has(taskId),
+      cancelRequested: cancelRequested(sb),
       nativeEgress: !!sb.networkPolicyError,
     });
   }
@@ -492,7 +499,7 @@ export class DaytonaProvider implements SandboxProvider {
   async cancel(taskId: string, _graceSeconds: number): Promise<void> {
     const sb = await this.getSandbox(taskId);
     if (!sb) return;
-    this.cancelled.add(taskId);
+    await this.markCancelled(sb);
     if (sb.state !== "started") return;
     const res = await this.call("POST", `${this.toolboxBase(sb)}/process/execute`, {
       command: "kill -TERM $(cat /run/openfactory/runner.pid)",
@@ -500,6 +507,20 @@ export class DaytonaProvider implements SandboxProvider {
     });
     if (res.status === 404) return;
     await this.json(res, "cancel");
+  }
+
+  /**
+   * Sets CANCEL_LABEL. The call replaces all labels, so it sends the current
+   * ones too: of-install and of-task drive list() and the orphan sweep.
+   * VERIFY in the live check: PUT /sandbox/{idOrName}/labels with {labels}.
+   */
+  private async markCancelled(sb: DaytonaSandbox): Promise<void> {
+    if (cancelRequested(sb)) return;
+    const labels = { ...(sb.labels ?? {}), [CANCEL_LABEL]: "1" };
+    const res = await this.call("PUT", `${this.api}/sandbox/${encodeURIComponent(sb.id)}/labels`, { labels });
+    if (res.status === 404) return;
+    if (!res.ok) throw await this.toError(res, "cancel label");
+    sb.labels = labels;
   }
 
   async destroy(taskId: string): Promise<void> {
@@ -532,13 +553,17 @@ export class DaytonaProvider implements SandboxProvider {
         if (!label) continue;
         const taskId = taskIdFromLabel(label);
         // The list skips the toolbox call: the orphan sweep needs presence and state only.
-        out.push(mapDaytonaSandbox(taskId, sb, { cancelRequested: this.cancelled.has(taskId) }));
+        out.push(mapDaytonaSandbox(taskId, sb, { cancelRequested: cancelRequested(sb) }));
       }
       cursor = Array.isArray(b) ? undefined : (b.nextCursor ?? undefined);
       if (!cursor) break;
     }
     return out;
   }
+}
+
+function cancelRequested(sb: DaytonaSandbox): boolean {
+  return sb.labels?.[CANCEL_LABEL] === "1";
 }
 
 export function createDaytonaProvider(cfg: DaytonaConfig): DaytonaProvider {

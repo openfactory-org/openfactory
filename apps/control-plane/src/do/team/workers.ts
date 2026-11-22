@@ -8,6 +8,7 @@
 // version, slots used, last seen) with the internal op "workers.hubState".
 import { OfError, invalid, newId, notFound } from "@openfactory/core";
 import type { CallMeta, Principal, TeamRpc } from "../../contracts/do-messages";
+import { serverConfig } from "../../config";
 import { bodyObject, optStringArray, optStringMap, optString, type JsonObject } from "../../lib/body";
 import { fromAnyB64, randomToken, sha256Hex } from "../../lib/bytes";
 import { isoOf, listResponse } from "../../lib/page";
@@ -322,8 +323,9 @@ function nameTaken(kit: TeamKit, name: string, exceptId = ""): boolean {
   return first(kit.sql, "SELECT 1 FROM workers WHERE name = ? AND id != ?", name, exceptId) !== undefined;
 }
 
-function devAllowed(kit: TeamKit): boolean {
-  return (kit.env.OF_DEV_PROCESS_WORKERS ?? "").trim().toLowerCase() === "true";
+/** OF_DEV_PROCESS_WORKERS, parsed like the other boolean vars (serverConfig). */
+export function devAllowed(kit: Pick<TeamKit, "env">): boolean {
+  return serverConfig(kit.env).devProcessWorkers;
 }
 
 // ---------- enrollment ----------

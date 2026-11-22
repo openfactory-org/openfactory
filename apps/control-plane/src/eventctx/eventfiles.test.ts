@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import type { Event } from "@openfactory/core";
 import { utf8 } from "../lib/bytes";
-import { build, decode, encode, promptSection, type Builder } from "./index";
+import { build, cleanRel, decode, encode, promptSection, type Builder } from "./index";
 
 const dec = new TextDecoder();
 const files = (b: { files: { path: string; data: Uint8Array }[] } | null) =>
@@ -98,10 +98,69 @@ describe("event files of webhook and chat runs", () => {
     const b = await build("m", ev, true, [failing, many]);
     const reasons = (b!.envelope.omitted ?? []).map((o) => `${o.name}: ${o.reason}`);
     expect(reasons).toContain("context: rate limited");
-    expect(reasons.filter((r) => r.endsWith("the context size limit was reached"))).toHaveLength(2);
-    // "../../etc" is cleaned to "etc" (inside context/): 42 files, 40 kept.
+    // "../../etc" goes above context/: it is refused, not cleaned to "etc".
+    expect(reasons).toContain("../../etc: bad file name");
+    expect(reasons.filter((r) => r.endsWith("the context size limit was reached"))).toHaveLength(1);
     expect(b!.envelope.context_files).toHaveLength(40);
+    expect(b!.envelope.context_files).not.toContain("context/etc");
     expect(await build("", ev, true)).toBeNull();
     expect(await build("m", null, true)).toBeNull();
+  });
+
+  it("cleanRel refuses absolute paths and paths above the root", () => {
+    const cases: [string, string][] = [
+      ["thread.json", "thread.json"],
+      ["a/./b//c.txt", "a/b/c.txt"],
+      ["a/../b.txt", "b.txt"],
+      ["a\\b.txt", "a/b.txt"],
+      ["", ""],
+      [".", ""],
+      ["a/..", ""],
+      ["..", ""],
+      ["../etc/passwd", ""],
+      ["a/../../etc", ""],
+      ["/abs/file", ""],
+      ["\\abs\\file", ""],
+      ["C:/x.txt", ""],
+      ["c:x.txt", ""],
+    ];
+    for (const [in_, want] of cases) expect(cleanRel(in_), in_).toBe(want);
+  });
+
+  it("a builder that answers in time leaves no timer behind", async () => {
+    const set = globalThis.setTimeout;
+    const clear = globalThis.clearTimeout;
+    const live = new Set<unknown>();
+    globalThis.setTimeout = ((fn: () => void, ms?: number) => {
+      const id = set(fn, ms);
+      live.add(id);
+      return id;
+    }) as typeof setTimeout;
+    globalThis.clearTimeout = ((id: Parameters<typeof clearTimeout>[0]) => {
+      live.delete(id);
+      clear(id);
+    }) as typeof clearTimeout;
+    try {
+      const ev = {
+        id: "e",
+        team_id: "t",
+        provider: "slack",
+        type: "message",
+        actor: { provider: "slack" },
+        source: {},
+        received_at: "",
+      } as unknown as Event;
+      const failing: Builder = {
+        provider: () => "slack",
+        eventContext: async () => {
+          throw new Error("rate limited");
+        },
+      };
+      await build("m", ev, true, [threadBuilder, failing]);
+      expect(live.size).toBe(0);
+    } finally {
+      globalThis.setTimeout = set;
+      globalThis.clearTimeout = clear;
+    }
   });
 });

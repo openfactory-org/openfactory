@@ -241,7 +241,7 @@ export async function finishLogin(
   const atHash = payload["at_hash"];
   if (typeof atHash === "string" && atHash !== "") {
     const h = await sha256(utf8(tok.access_token ?? ""));
-    if (b64url(h.subarray(0, 16)) !== atHash)
+    if (!timingSafeEqual(b64url(h.subarray(0, 16)), atHash))
       throw new LoginFailure("provider_error", "at_hash: access token hash does not match value in ID token");
   }
   return identityFromClaims(c, String(payload.sub ?? ""), payload as Record<string, unknown>);

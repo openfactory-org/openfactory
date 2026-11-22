@@ -3,7 +3,7 @@
 // effects applied together (C1, N1). The Worker verifies tokens and holds
 // long-polls; WorkDO decides.
 import type { EndRequest, StartRequest } from "@openfactory/runner-proto";
-import { runnerFailureCode, type FailureCode } from "@openfactory/core";
+import { isOfError, runnerFailureCode, type FailureCode } from "@openfactory/core";
 import { iso, ms, setFailureMessage } from "../../engine/sessions";
 import { priorRetries } from "../../engine/sessions";
 import type { Run, RunnerCommand, RunnerEvent, RunSession } from "../../engine/types";
@@ -160,8 +160,8 @@ export function appendEvents(
     res = fx.repo.appendEvents(s, events);
   } catch (e) {
     if (e instanceof SeqGapError) return rerr(409, "seq_gap", "event sequence gap", e.ack);
-    if (e instanceof Error && e.message.startsWith("invalid_request")) return rerr(400, "bad_request", e.message);
-    if (e instanceof Error && e.message.startsWith("conflict")) return unauthorized("session ended");
+    if (isOfError(e, "invalid_request")) return rerr(400, "bad_request", e.message);
+    if (isOfError(e, "conflict")) return unauthorized("session ended");
     throw e;
   }
   fx.repo.putSession(s);

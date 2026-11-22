@@ -21,6 +21,10 @@ type DNSRelay struct {
 	Logger    *slog.Logger
 	// Timeout of one upstream exchange (5 s).
 	Timeout time.Duration
+	// MaxInflight bounds the UDP exchanges and the TCP connections that run
+	// at the same time (256). The relay drops a UDP query and closes a TCP
+	// connection above the bound: the guest resolver retries.
+	MaxInflight int
 	// port of the upstreams; 0 means 53. Tests change it.
 	port int
 }
@@ -35,6 +39,9 @@ func (r *DNSRelay) Run(ctx context.Context) error {
 	}
 	if r.Logger == nil {
 		r.Logger = slog.Default()
+	}
+	if r.MaxInflight <= 0 {
+		r.MaxInflight = 256
 	}
 	var lc net.ListenConfig
 	pc, err := lc.ListenPacket(ctx, "udp4", r.Listen)
@@ -51,10 +58,11 @@ func (r *DNSRelay) Run(ctx context.Context) error {
 		_ = pc.Close()
 		_ = ln.Close()
 	}()
+	sem := make(chan struct{}, r.MaxInflight)
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go func() { defer wg.Done(); r.serveUDP(pc) }()
-	go func() { defer wg.Done(); r.serveTCP(ln) }()
+	go func() { defer wg.Done(); r.serveUDP(pc, sem) }()
+	go func() { defer wg.Done(); r.serveTCP(ln, sem) }()
 	wg.Wait()
 	return ctx.Err()
 }
@@ -67,7 +75,20 @@ func (r *DNSRelay) upstream(i int) string {
 	return net.JoinHostPort(r.Upstreams[i%len(r.Upstreams)].String(), strconv.Itoa(port))
 }
 
-func (r *DNSRelay) serveUDP(pc net.PacketConn) {
+// udpBufs holds the 64 KiB buffers of the UDP exchanges.
+var udpBufs = sync.Pool{New: func() any { b := make([]byte, 65535); return &b }}
+
+// acquire takes a slot of sem without waiting.
+func acquire(sem chan struct{}) bool {
+	select {
+	case sem <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (r *DNSRelay) serveUDP(pc net.PacketConn, sem chan struct{}) {
 	buf := make([]byte, 65535)
 	n := 0
 	for {
@@ -75,10 +96,15 @@ func (r *DNSRelay) serveUDP(pc net.PacketConn) {
 		if err != nil {
 			return
 		}
-		q := append([]byte(nil), buf[:size]...)
+		if !acquire(sem) {
+			continue // too many exchanges: drop the query
+		}
+		bp := udpBufs.Get().(*[]byte)
+		q := append((*bp)[:0], buf[:size]...)
 		up := r.upstream(n)
 		n++
 		go func() {
+			defer func() { udpBufs.Put(bp); <-sem }()
 			d := net.Dialer{Timeout: r.Timeout}
 			c, err := d.DialContext(context.Background(), "udp4", up)
 			if err != nil {
@@ -89,7 +115,8 @@ func (r *DNSRelay) serveUDP(pc net.PacketConn) {
 			if _, err := c.Write(q); err != nil {
 				return
 			}
-			resp := make([]byte, 65535)
+			// The query is sent: read the answer into the same buffer.
+			resp := (*bp)[:cap(*bp)]
 			m, err := c.Read(resp)
 			if err != nil {
 				return
@@ -99,16 +126,21 @@ func (r *DNSRelay) serveUDP(pc net.PacketConn) {
 	}
 }
 
-func (r *DNSRelay) serveTCP(ln net.Listener) {
+func (r *DNSRelay) serveTCP(ln net.Listener, sem chan struct{}) {
 	n := 0
 	for {
 		c, err := ln.Accept()
 		if err != nil {
 			return
 		}
+		if !acquire(sem) {
+			_ = c.Close() // too many connections
+			continue
+		}
 		up := r.upstream(n)
 		n++
 		go func() {
+			defer func() { <-sem }()
 			defer c.Close()
 			d := net.Dialer{Timeout: r.Timeout}
 			u, err := d.DialContext(context.Background(), "tcp4", up)

@@ -41,8 +41,9 @@ export class WorkDO extends BaseDO implements WorkRpc {
 | `migrations()` | Ordered list of the DO's own migrations (scope `do`). Applied once each, in `blockConcurrencyWhile`, each in its own `transactionSync`. Base tables (scope `lib`): `meta`, `outbox`, `inbox_dedupe`, `timers`, `schema_migrations`. |
 | `init()` | Optional hook after migrations, before the first event. |
 | `tx(fn)` | One `transactionSync`, then re-arms the alarm. No `await` inside. |
+| `onCommit(fn)` | Runs `fn` after the current step (`tx`, a received message, a sync timer) commits. A rollback drops it. A nested `tx` is a savepoint: its callbacks join the outer step. |
 | `enqueue({dest, kind, payload, msgId?, lane?, delayMs?})` | Outbox row. Call inside `tx` with the state change. Same `msgId` twice is ignored. |
-| `setTimer(name, kind, dueMs, payload?)`, `clearTimer(name)`, `this.timers` | Named timers on the one alarm (`setEarliest`, `clearPrefix`, `get`). |
+| `setTimer(name, kind, dueMs, payload?)`, `clearTimer(name)`, `this.timers` | Named timers on the one alarm (`setEarliest`, `clearPrefix`, `get`). Each `set` gives the row a new `seq`; the alarm deletes or backs off only the row version it ran, so a handler can set its own timer again, also to the same `dueMs`. |
 | `onTimer(kind, fn)` / `onTimerAsync(kind, fn)` | Timer handler in a transaction / outside (reschedule from the handler to repeat). A throwing handler is retried with backoff (1 s, doubling, cap 5 min). |
 | `onMessage(kind, fn)` | Outbox kind this DO receives. `receive(msg)` (the `OutboxReceiver` RPC) dedupes on `msgId` and runs `fn` in one transaction with the dedupe row. Return `{retry: true, afterMs}` to roll back and keep the sender's row pending. |
 | `seen(msgId)`, `markSeen(msgId)` | Dedupe helpers for custom receive flows. Rows are purged after 7 days. |

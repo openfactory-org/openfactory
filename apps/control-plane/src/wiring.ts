@@ -80,7 +80,7 @@ import { SlackClient } from "./integrations/slack/client";
 import type { InboxItemRef, WorkSide } from "./integrations/types";
 import { integrationSecret } from "./integrations/util";
 import { integrationDeps, rpcSecrets, rpcStore } from "./integrations/worker";
-import { setMcpBackends } from "./mcp/index";
+import { setMcpBackendResolver } from "./mcp/index";
 import type { IntegrationBackend, IntegrationRecord } from "./mcp/registry/builtin";
 import { registerResponders } from "./notify/index";
 
@@ -283,14 +283,24 @@ export function integrationBackend(env: Env): IntegrationBackend {
 
 const backends = new WeakMap<Env, IntegrationBackend>();
 
-/** Points the MCP surface at the integration clients of env (called per request; cached per env). */
-export function bindMcpBackends(env: Env): void {
+function integrationBackendFor(env: Env): IntegrationBackend {
   let b = backends.get(env);
   if (!b) {
     b = integrationBackend(env);
     backends.set(env, b);
   }
-  setMcpBackends({ integrations: b });
+  return b;
+}
+
+// Each MCP request resolves the integration clients of its own env.
+setMcpBackendResolver((env) => ({ integrations: integrationBackendFor(env) }));
+
+/**
+ * Builds the integration clients of env ahead of the first MCP request. The
+ * MCP surface resolves its backends per request, so this sets no shared state.
+ */
+export function bindMcpBackends(env: Env): void {
+  integrationBackendFor(env);
 }
 
 // ---------- sandbox providers ----------

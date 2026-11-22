@@ -35,7 +35,8 @@ export const streamEvents: Handler = async (req, env, ctx) => {
   if (Number.isInteger(lei) && lei > after) after = lei;
 
   const work = runId ? env.WORK.getByName(doName.work(team, partitionOf(runId))) : undefined;
-  let run = work ? ((await work.getRun(runId)) as Run) : undefined; // 404 before the stream starts
+  // 403 or 404 before the stream starts; WorkDO.api checks the caller's role for the run's factory.
+  let run = work ? ((await work.api(metaOf(ctx), "getRun", { runId }, null)) as Run) : undefined;
 
   const qs = new URLSearchParams();
   if (runId) qs.set("run", runId);

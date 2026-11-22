@@ -4,7 +4,14 @@ import { describe, expect, it } from "vitest";
 import type { OutboxEnvelope } from "../contracts/do-messages";
 import { insertMany } from "./sql/chunk";
 import { applyMigrations, schemaSnapshot } from "./sql/migrate";
-import { Outbox, OUTBOX_MAX_ATTEMPTS, outboxBackoff, type OutboxRow } from "./outbox/outbox";
+import {
+  Outbox,
+  OUTBOX_LEASE_MS,
+  OUTBOX_MAX_ATTEMPTS,
+  OUTBOX_PARALLEL,
+  outboxBackoff,
+  type OutboxRow,
+} from "./outbox/outbox";
 import { Timers } from "./timers/timers";
 import { parseDest, dest, teamOfDoName } from "./outbox/dest";
 
@@ -170,6 +177,24 @@ describe("outbox", () => {
     });
   });
 
+  it("leases each batch when its delivery starts, so slow batches do not expire later leases", async () => {
+    await runInDurableObject(fresh(), async (_i, state) => {
+      const leaseLeft: number[] = [];
+      const t = mk(state, async (e) => {
+        leaseLeft.push(t.ob.get(e.msgId)!.next_ms - t.at());
+        await null;
+        t.advance(OUTBOX_LEASE_MS + 1000);
+      });
+      for (let k = 0; k <= OUTBOX_PARALLEL; k++) {
+        t.ob.enqueue({ dest: "custom:x", kind: "k", msgId: `m${k}`, payload: {} });
+      }
+      await t.ob.drain();
+      expect(leaseLeft).toHaveLength(OUTBOX_PARALLEL + 1);
+      expect(leaseLeft.every((ms) => ms === OUTBOX_LEASE_MS)).toBe(true);
+      expect(t.ob.pendingCount()).toBe(0);
+    });
+  });
+
   it("backoff doubles from 1 s and caps at 5 min with jitter", () => {
     expect(outboxBackoff(1, () => 0.5)).toBe(1000);
     expect(outboxBackoff(2, () => 0.5)).toBe(2000);
@@ -236,6 +261,31 @@ describe("timers and BaseDO", () => {
         expect(await state.storage.getAlarm()).not.toBeNull();
       }),
     );
+  });
+
+  it("forgets the armed time when setAlarm fails", async () => {
+    const stub = env.INGRESS.getByName(`team:libtest${++n}|ingress:alarm`);
+    await runInDurableObject(stub, async (instance, state) => {
+      const i = instance as unknown as {
+        tx<T>(fn: () => T): T;
+        setTimer(n: string, k: string, d: number): void;
+      };
+      expect(await state.storage.getAlarm()).toBeNull();
+      const storage = state.storage as unknown as { setAlarm: (ms: number) => Promise<void> };
+      const setAlarm = storage.setAlarm;
+      const due = Date.now() + 3_600_000;
+      storage.setAlarm = () => Promise.reject(new Error("storage busy"));
+      try {
+        i.tx(() => i.setTimer("x1", "test.none", due));
+        await new Promise((r) => setTimeout(r, 0));
+      } finally {
+        storage.setAlarm = setAlarm;
+      }
+      // A later timer re-arms: the failed time no longer counts as armed.
+      i.tx(() => i.setTimer("x2", "test.none", due + 1000));
+      expect(await state.storage.getAlarm()).toBe(due);
+      await state.storage.deleteAlarm();
+    });
   });
 
   it("delivers to another DO through receive() with dedupe", async () => {

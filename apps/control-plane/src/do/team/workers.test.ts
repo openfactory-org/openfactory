@@ -5,7 +5,8 @@ import { env } from "cloudflare:workers";
 import { doName } from "@openfactory/core";
 import { describe, expect, it } from "vitest";
 import type { CallMeta, Principal, TeamRpc } from "../../contracts/do-messages";
-import { RESERVED_WORKER_IDS, validateWorkerId } from "./workers";
+import type { Env } from "../../contracts/env";
+import { RESERVED_WORKER_IDS, devAllowed, validateWorkerId } from "./workers";
 
 const ADMIN: Principal = { kind: "user", id: "usr_admin", teamId: "default", role: "admin", factoryRoles: {} };
 const meta: CallMeta = { requestId: "req_test", principal: ADMIN };
@@ -53,5 +54,26 @@ describe("reserved worker IDs", () => {
     }
     const ok = await op("createWorkerEnrollment", {}, { name: "server-01" });
     expect(ok.$status, JSON.stringify(ok)).toBe(201);
+  });
+});
+
+describe("development process workers", () => {
+  it("reads OF_DEV_PROCESS_WORKERS like the other boolean vars", () => {
+    const cases: [string | undefined, boolean][] = [
+      ["true", true],
+      ["TRUE", true],
+      [" 1 ", true],
+      ["yes", true],
+      ["on", true],
+      ["t", true],
+      ["false", false],
+      ["0", false],
+      ["", false],
+      [undefined, false],
+    ];
+    for (const [v, want] of cases) {
+      const e = { OF_DEV_PROCESS_WORKERS: v } as unknown as Env;
+      expect(devAllowed({ env: e }), String(v)).toBe(want);
+    }
   });
 });

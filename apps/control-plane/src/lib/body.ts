@@ -1,5 +1,6 @@
-// Request body helpers for ops (port of decodeJSON's type errors).
-import { OfError } from "@openfactory/core";
+// Request body helpers for ops (port of decodeJSON's type errors) and
+// byte-capped reads of request and response bodies.
+import { OfError, type ErrorCode } from "@openfactory/core";
 
 export type JsonObject = Record<string, unknown>;
 
@@ -68,4 +69,82 @@ export function optNullableStringMap(o: JsonObject, k: string): Record<string, s
 
 export function now(): string {
   return new Date().toISOString();
+}
+
+/** What readUpTo read: at most max bytes, and whether the body had more. */
+interface Capped {
+  bytes: Uint8Array<ArrayBuffer>;
+  overflow: boolean;
+}
+
+/** Reads at most max bytes of a body stream, then cancels the stream if more bytes remain. */
+async function readUpTo(r: Request | Response, max: number): Promise<Capped> {
+  if (!r.body) return { bytes: new Uint8Array(0), overflow: false };
+  const reader = r.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  let overflow = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const room = max - total;
+      if (value.length > room) {
+        if (room > 0) chunks.push(value.subarray(0, room));
+        total += Math.max(room, 0);
+        overflow = true;
+        break;
+      }
+      chunks.push(value);
+      total += value.length;
+    }
+  } finally {
+    if (overflow) await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) {
+    bytes.set(c, off);
+    off += c.length;
+  }
+  return { bytes, overflow };
+}
+
+/**
+ * Reads a request or response body as bytes. It rejects a body longer than
+ * max bytes with an OfError (code `code`, default invalid_request) and does
+ * not buffer more than max bytes. A Content-Length above max fails before
+ * the read.
+ */
+export async function readBytesCapped(
+  r: Request | Response,
+  max: number,
+  what = "body",
+  code: ErrorCode = "invalid_request",
+): Promise<Uint8Array<ArrayBuffer>> {
+  const fail = (): OfError => new OfError(code, `${what} too large: more than ${max} bytes`);
+  const len = Number(r.headers.get("content-length") ?? "");
+  if (Number.isFinite(len) && len > max) {
+    await r.body?.cancel().catch(() => {});
+    throw fail();
+  }
+  const { bytes, overflow } = await readUpTo(r, max);
+  if (overflow) throw fail();
+  return bytes;
+}
+
+/** readBytesCapped decoded as UTF-8 text. */
+export async function readTextCapped(
+  r: Request | Response,
+  max: number,
+  what = "body",
+  code: ErrorCode = "invalid_request",
+): Promise<string> {
+  return new TextDecoder().decode(await readBytesCapped(r, max, what, code));
+}
+
+/** The first max bytes of a body as text; the rest is dropped. For error bodies quoted in messages. */
+export async function readTextPrefix(r: Request | Response, max: number): Promise<string> {
+  return new TextDecoder().decode((await readUpTo(r, max)).bytes);
 }

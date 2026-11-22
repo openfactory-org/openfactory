@@ -21,6 +21,7 @@ import {
   integrationSecret,
   readBody,
   equalFold,
+  setCapped,
 } from "../util";
 import { SlackClient, respondUrl, textOfBlocks, type UserInfo } from "./client";
 import { ACTION_PREFIX, type ActionValue } from "./responder";
@@ -205,7 +206,7 @@ export class SlackHandler {
     if (cu && this.now().getTime() < cu.expires) return cu.u;
     try {
       const u = await c.userInfo(id);
-      this.users.set(id, { u, expires: this.now().getTime() + CACHE_MS });
+      setCapped(this.users, id, { u, expires: this.now().getTime() + CACHE_MS });
       return u;
     } catch (e) {
       this.log.debug("users.info", { user: id, err: errMessage(e) });
@@ -219,7 +220,7 @@ export class SlackHandler {
     if (cn && this.now().getTime() < cn.expires) return cn.name;
     try {
       const name = await c.channelName(id);
-      this.channels.set(id, { name, expires: this.now().getTime() + CACHE_MS });
+      setCapped(this.channels, id, { name, expires: this.now().getTime() + CACHE_MS });
       return name;
     } catch (e) {
       this.log.debug("conversations.info", { channel: id, err: errMessage(e) });

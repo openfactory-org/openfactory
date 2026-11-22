@@ -283,10 +283,22 @@ func TestEnsureConvertsAndCaches(t *testing.T) {
 	if _, err := s.Ensure(context.Background(), strings.Replace(ref, "sandbox:1", "none:1", 1), "amd64", nil); err == nil || !strings.Contains(err.Error(), ErrPull.Error()) {
 		t.Fatalf("missing image: %v", err)
 	}
+	if list, err := s.List(); err != nil || len(list) != 1 || list[0].Digest != digest.String() {
+		t.Fatalf("list %+v %v", list, err)
+	}
+	if s.locks.Len() != 0 {
+		t.Fatalf("%d locks kept after Ensure", s.locks.Len())
+	}
 	// Prune keeps an image in use and removes it when it is free.
 	if freed, _ := s.Prune(0, func(string) bool { return true }); freed != 0 {
 		t.Fatal("pruned an image in use")
 	}
+	// Prune skips a digest that Ensure holds.
+	unlock := s.lock(digest.String())
+	if freed, _ := s.Prune(0, nil); freed != 0 {
+		t.Fatal("pruned an image that Ensure holds")
+	}
+	unlock()
 	if _, err := s.Prune(0, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -328,5 +340,33 @@ func TestToolsAndScratch(t *testing.T) {
 	}
 	if free, total, err := FreeBytes(s.Dir); err != nil || free <= 0 || total < free {
 		t.Fatalf("free %d total %d %v", free, total, err)
+	}
+}
+
+func TestKeyedMutex(t *testing.T) {
+	var k KeyedMutex
+	unlock := k.Lock("a")
+	if _, ok := k.TryLock("a"); ok {
+		t.Fatal("TryLock got a held key")
+	}
+	u2, ok := k.TryLock("b")
+	if !ok {
+		t.Fatal("TryLock of a free key")
+	}
+	got := make(chan struct{})
+	go func() {
+		defer close(got)
+		k.Lock("a")()
+	}()
+	select {
+	case <-got:
+		t.Fatal("Lock got a held key")
+	case <-time.After(20 * time.Millisecond):
+	}
+	unlock()
+	<-got
+	u2()
+	if k.Len() != 0 {
+		t.Fatalf("%d keys kept after unlock", k.Len())
 	}
 }

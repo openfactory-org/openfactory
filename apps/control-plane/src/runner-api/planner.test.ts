@@ -20,6 +20,7 @@ import {
 } from "./planner";
 import { objectPrefix, ownsKey, parseUploadId, uploadId, validateUpload } from "./transfer";
 import { deriveRunnerKey } from "./token";
+import { defaultStartConfig, deniedWithoutRequired } from "./startconfig";
 
 const run = (extra: Partial<Run> = {}, cfg: Record<string, unknown> = {}): Run =>
   ({
@@ -221,6 +222,29 @@ describe("planner", () => {
     const c = await pl.gitCredential(run(), "github.com", "/acme/api.git");
     expect(c).toEqual({ username: "x-access-token", password: "ghs_tok", expiresAt: "2026-01-01T00:50:00.000Z" });
     await expect(pl.gitCredential(run(), "github.com", "acme/other")).rejects.toMatchObject({ code: "not_authorized" });
+  });
+});
+
+describe("denied hosts", () => {
+  // Host names compare without case: a required host denied in another case stays allowed.
+  it.each([
+    { denied: null, required: ["cp"], want: [] },
+    { denied: ["evil.example"], required: ["cp"], want: ["evil.example"] },
+    { denied: ["CP", "Evil.Example"], required: ["cp"], want: ["Evil.Example"] },
+    { denied: [" GitHub.com "], required: ["github.com"], want: [] },
+  ])("deniedWithoutRequired($denied, $required)", ({ denied, required, want }) => {
+    expect(deniedWithoutRequired(denied, required)).toEqual(want);
+  });
+
+  it("the start configurations drop a required host denied in another case", async () => {
+    const env = { OF_PUBLIC_URL: "http://cp", OF_R2_ACCOUNT_ID: "acct" } as unknown as Env;
+    const policy = { restricted: true, allowed_hosts: null, denied_hosts: ["CP", "evil.example"] };
+    const r = run({}, { network_policy: policy });
+    const planned = startConfigOf(env, r, { session: 1 } as RunSession, await new Planner(deps()).plan(r));
+    expect(planned.network_policy?.denied_hosts).toEqual(["evil.example"]);
+    expect(planned.network_policy?.always_allow).toContain("cp");
+    const minimal = await defaultStartConfig(env, r, { session: 1 } as RunSession);
+    expect(minimal.network_policy?.denied_hosts).toEqual(["evil.example"]);
   });
 });
 

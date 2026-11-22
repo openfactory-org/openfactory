@@ -1,8 +1,12 @@
 // A small JSON REST client for provider APIs. Port of
 // internal/forge/forgeutil/http.go with fetch in place of net/http.
+import { readTextCapped, readTextPrefix } from "../../lib/body";
 
-/** Largest provider response that is read. */
+/** Largest provider response body that is read. A larger 2xx body fails the request. */
 export const MAX_RESPONSE_BYTES = 32 << 20;
+
+/** Most bytes of a non-2xx response body that are kept for the error message. */
+export const MAX_ERROR_BODY_BYTES = 64 << 10;
 
 /** Default timeout of one provider request. */
 export const DEFAULT_TIMEOUT_MS = 30_000;
@@ -118,9 +122,15 @@ export class HttpClient {
     const f = this.opts.fetch ?? ((i: Request | string | URL, init?: RequestInit) => fetch(i, init));
     const signal = AbortSignal.timeout(this.opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     const resp = await f(u, { method, headers, ...(payload !== undefined ? { body: payload } : {}), signal });
-    let text = await resp.text();
-    if (text.length > MAX_RESPONSE_BYTES) text = text.slice(0, MAX_RESPONSE_BYTES);
-    if (resp.status < 200 || resp.status > 299) throw new ApiError(method, redactURL(u), resp.status, text);
+    if (resp.status < 200 || resp.status > 299) {
+      throw new ApiError(method, redactURL(u), resp.status, await readTextPrefix(resp, MAX_ERROR_BODY_BYTES));
+    }
+    const text = await readTextCapped(
+      resp,
+      MAX_RESPONSE_BYTES,
+      `${method} ${redactURL(u)} response body`,
+      "resource_unavailable",
+    );
     return { status: resp.status, headers: resp.headers, text };
   }
 }

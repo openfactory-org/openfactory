@@ -634,6 +634,51 @@ describe("ForgeResponder", () => {
       r.setIssueState("t", { provider: "github", kind: "issue", repo: "a/b", number: 1 }, "done"),
     ).rejects.toMatchObject({ code: "operation_not_supported" });
   });
+  it("falls back to a comment when a plugin's not-supported error arrives as a plain Error", async () => {
+    const fr = new FakeResolver();
+    const r = new ForgeResponder(fr, "gitlab");
+    const f = fr.forgeFor("GITLAB");
+    // Workers RPC drops the OfError class: the caller gets a plain Error with "<code>: <detail>".
+    f.failures["replyInThread"] = new Error("operation_not_supported: no threads");
+    await r.reply("t", msg("update", { kind: "pull_request", repo: "acme/platform/api", number: 3, thread_ref: "9" }));
+    expect(f.callsOf("comment").map((c) => c.args.slice(0, 3))).toEqual([["acme/platform", "api", 3]]);
+    f.failures["replyInThread"] = new Error("resource_unavailable: down");
+    await expect(
+      r.reply("t", msg("update", { kind: "pull_request", repo: "acme/api", number: 3, thread_ref: "9" })),
+    ).rejects.toThrow(/resource_unavailable/);
+  });
+});
+
+describe("Resolver.requestReview", () => {
+  const calls: unknown[][] = [];
+  const plugin = (login: () => Promise<string>) =>
+    ({
+      login,
+      requestReviewers: async (_t: unknown, ...args: unknown[]) => void calls.push(args),
+    }) as never;
+  const resolver = (login: () => Promise<string>) =>
+    new Resolver({
+      integrations: { list: async () => [rec("gl", { provider: "gitlab", secret_ref: "PAT" })] },
+      secrets: { get: async () => "glpat_fake" },
+      plugins: { gitlab: plugin(login) },
+    });
+  beforeEach(() => void (calls.length = 0));
+  it("splits a repository with subgroups at the last slash", async () => {
+    await resolver(async () => "dana").requestReview(
+      "team_1",
+      { forge: "GITLAB", repo: "acme/platform/api", number: 5, url: "", branch: "", state: "" },
+      "u1",
+    );
+    expect(calls).toEqual([["acme/platform", "api", 5, ["dana"]]]);
+  });
+  it("keeps operation_not_supported from a plugin login", async () => {
+    const e = (await resolver(async () => {
+      throw new Error("operation_not_supported: no user API");
+    })
+      .requestReview("team_1", { forge: "GITLAB", repo: "acme/api", number: 5, url: "", branch: "", state: "" }, "u1")
+      .catch((x: unknown) => x)) as Error;
+    expect(e.message).toBe("operation_not_supported: no user API");
+  });
 });
 
 describe("Resolver", () => {
