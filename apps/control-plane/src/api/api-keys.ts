@@ -1,12 +1,13 @@
-// REST handlers: api-keys. C0 stubs that answer 501. Owner: WS4.
-// Keep the exported names: src/http/routes.ts maps each openapi operation to one of them.
-import { notImplementedHandler, type Handler } from "../http/handler";
+// REST handlers: api-keys (WS4). Forwarded to TeamDO.api with the route's operationId.
+import { invalidateKeyCache } from "../auth/authenticate";
+import { teamApi, type Handler } from "../http/handler";
 
-/** GET /api/v1/api-keys: List API keys (own keys; admins see all) (owner DO: TeamDO). */
-export const listAPIKeys: Handler = notImplementedHandler;
+export const listAPIKeys: Handler = teamApi();
+export const createAPIKey: Handler = teamApi();
 
-/** POST /api/v1/api-keys: Create an API key (owner DO: TeamDO). */
-export const createAPIKey: Handler = notImplementedHandler;
-
-/** DELETE /api/v1/api-keys/{id}: Revoke an API key (owner DO: TeamDO). */
-export const deleteAPIKey: Handler = notImplementedHandler;
+/** DELETE /api-keys/{id}: also drops this isolate's key cache, so the key stops working at once here. */
+export const deleteAPIKey: Handler = async (request, env, ctx) => {
+  const res = await teamApi()(request, env, ctx);
+  if (res.ok) invalidateKeyCache();
+  return res;
+};

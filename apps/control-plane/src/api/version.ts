@@ -1,6 +1,10 @@
-// REST handlers: version. C0 stubs that answer 501. Owner: WS4.
-// Keep the exported names: src/http/routes.ts maps each openapi operation to one of them.
-import { notImplementedHandler, type Handler } from "../http/handler";
+// REST handler: GET /version (public, WS4).
+import { BUILD } from "../config";
+import { json, type Handler } from "../http/handler";
 
-/** GET /api/v1/version: Server build version (owner DO: Worker (static)). */
-export const getVersion: Handler = notImplementedHandler;
+export const getVersion: Handler = async () => {
+  const v: Record<string, string> = { version: BUILD.version || "dev" };
+  if (BUILD.commit) v["commit"] = BUILD.commit;
+  if (BUILD.date) v["date"] = BUILD.date;
+  return json(v);
+};

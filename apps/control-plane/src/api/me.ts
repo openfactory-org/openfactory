@@ -1,6 +1,9 @@
-// REST handlers: me. C0 stubs that answer 501. Owner: WS4.
-// Keep the exported names: src/http/routes.ts maps each openapi operation to one of them.
-import { notImplementedHandler, type Handler } from "../http/handler";
+// REST handler: GET /me (WS4).
+import { loginProviders } from "../auth/routes";
+import { callTeam, json, type Handler } from "../http/handler";
 
-/** GET /api/v1/me: Current principal (owner DO: TeamDO). */
-export const getMe: Handler = notImplementedHandler;
+export const getMe: Handler = async (_request, env, ctx) => {
+  const res = await callTeam(env, ctx, "getMe", undefined, ctx.principal?.keyId ? { "?auth": "api_key" } : {});
+  const body = (await res.json()) as Record<string, unknown>;
+  return json({ ...body, login_providers: loginProviders(env) });
+};

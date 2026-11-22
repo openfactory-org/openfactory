@@ -129,6 +129,8 @@
     "OF_OIDC_ISSUER_URL": "",
     "OF_OIDC_CLIENT_ID": "",
     "OF_LOG_LEVEL": "info",
+    "OF_MAX_ORCHESTRATION_DEPTH": "1",
+    "OF_MAX_SANDBOXES": "0",
   },
 
   // Secrets are set with `wrangler secret put` or `wrangler deploy --secrets-file`.

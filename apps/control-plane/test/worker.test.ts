@@ -2,24 +2,26 @@ import { env, exports } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { TeamDO } from "../src/index";
+import { Router } from "../src/http/router";
+import { ROUTES } from "../src/http/routes";
 
 describe("control-plane Worker (C0 skeleton)", () => {
-  it("answers 501 problem+json for a stubbed /api/v1 route", async () => {
+  it("answers 401 problem+json without credentials", async () => {
     const res = await exports.default.fetch("http://localhost/api/v1/runs/run_x", {
       headers: { "x-request-id": "req-test-1" },
     });
-    expect(res.status).toBe(501);
+    expect(res.status).toBe(401);
     expect(res.headers.get("content-type")).toBe("application/problem+json");
     expect(res.headers.get("x-request-id")).toBe("req-test-1");
-    const body = (await res.json()) as { code: string; instance: string };
-    expect(body.code).toBe("feature_not_available");
+    const body = (await res.json()) as { code: string; instance: string; login_providers: unknown[] };
+    expect(body.code).toBe("authentication_required");
     expect(body.instance).toBe("/api/v1/runs/run_x");
+    expect(Array.isArray(body.login_providers)).toBe(true);
   });
 
-  it("prefers a literal segment over a parameter", async () => {
-    const res = await exports.default.fetch("http://localhost/api/v1/secrets/rewrap", { method: "POST" });
-    const body = (await res.json()) as { detail: string };
-    expect(body.detail).toContain("rewrapSecrets");
+  it("prefers a literal segment over a parameter", () => {
+    const m = new Router(ROUTES).match("POST", "/secrets/rewrap");
+    expect(m.kind === "match" && m.route.operationId).toBe("rewrapSecrets");
   });
 
   it("answers 404 and 405 like the Go mux", async () => {

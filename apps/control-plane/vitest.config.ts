@@ -24,8 +24,9 @@ export default defineProject({
         ],
         // Clearly fake test values.
         bindings: {
-          OF_SECRET_KEY: "test-only-not-a-real-key",
-          OF_SIGNING_KEY: "test-only-not-a-real-signing-key",
+          // base64 of "test-only-fake-secret-key-32byte" and "test-only-fake-signing-key-32byt".
+          OF_SECRET_KEY: "dGVzdC1vbmx5LWZha2Utc2VjcmV0LWtleS0zMmJ5dGU=",
+          OF_SIGNING_KEY: "dGVzdC1vbmx5LWZha2Utc2lnbmluZy1rZXktMzJieXQ=",
           OF_R2_ACCESS_KEY_ID: "test-only-access-key-id",
           OF_R2_SECRET_ACCESS_KEY: "test-only-secret-access-key",
           OF_PUBLIC_URL: "http://localhost",
