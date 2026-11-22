@@ -1,112 +1,62 @@
 package runner_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"log/slog"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
-	"github.com/openfactory-org/openfactory/internal/core"
 	"github.com/openfactory-org/openfactory/internal/runner"
-	"github.com/openfactory-org/openfactory/internal/runnerapi"
+	"github.com/openfactory-org/openfactory/internal/runner/runnertest"
 	"github.com/openfactory-org/openfactory/internal/runnerproto"
-	"github.com/openfactory-org/openfactory/internal/runnertoken"
-	"github.com/openfactory-org/openfactory/internal/store/sqlstore"
-	"github.com/openfactory-org/openfactory/internal/store/testdb"
 )
 
-// fakeConfigurer returns a start response that a test can set.
-type fakeConfigurer struct {
-	mu   sync.Mutex
-	resp runnerproto.StartResponse
-}
-
-func (f *fakeConfigurer) StartConfig(context.Context, *core.Run, *core.RunSession) (runnerproto.StartResponse, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.resp, nil
-}
-
-type fakeSecrets struct{ resp runnerproto.SecretsResponse }
-
-func (f fakeSecrets) Secrets(context.Context, *core.Run, *core.RunSession) (runnerproto.SecretsResponse, error) {
-	return f.resp, nil
-}
+// testRun names the run of a test environment.
+type testRun struct{ ID string }
 
 type testEnv struct {
 	t     *testing.T
-	mem   *sqlstore.Store
-	svc   *runnerapi.Service
-	srv   *httptest.Server
-	run   *core.Run
+	cp    *runnertest.Server
+	run   testRun
 	boot  string
 	work  string
 	state string
 }
 
 // newEnv makes a control plane with one run and one session that waits for a runner.
-func newEnv(t *testing.T, resp runnerproto.StartResponse, secrets runnerapi.SecretsProvider) *testEnv {
+func newEnv(t *testing.T, resp runnerproto.StartResponse, secrets *runnerproto.SecretsResponse) *testEnv {
 	t.Helper()
 	return newEnvWith(t, resp, secrets, nil)
 }
 
-// newEnvWith is newEnv with a change of the service configuration.
-func newEnvWith(t *testing.T, resp runnerproto.StartResponse, secrets runnerapi.SecretsProvider, mod func(*runnerapi.Config)) *testEnv {
+// newEnvWith is newEnv with a change of the fake control plane.
+func newEnvWith(t *testing.T, resp runnerproto.StartResponse, secrets *runnerproto.SecretsResponse, mod func(*runnertest.Server)) *testEnv {
 	t.Helper()
-	keys, err := runnertoken.NewStaticKeys("k1", map[string][]byte{"k1": bytes.Repeat([]byte{7}, 32)})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if resp.Harness.Type == "" {
 		resp.Harness.Type = "exec"
 	}
-	e := &testEnv{t: t, mem: testdb.New(t), work: filepath.Join(t.TempDir(), "work"), state: t.TempDir()}
-	cfg := runnerapi.Config{
-		Store:        e.mem,
-		Runner:       e.mem,
-		Keys:         keys,
-		Session:      &fakeConfigurer{resp: resp},
-		Secrets:      secrets,
-		PollInterval: 50 * time.Millisecond,
+	cp := runnertest.New(t, runnertest.Options{})
+	if secrets != nil {
+		cp.SetSecrets(*secrets)
 	}
 	if mod != nil {
-		mod(&cfg)
+		mod(cp)
 	}
-	e.svc, err = runnerapi.New(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	e.srv = httptest.NewServer(e.svc.Handler())
-	t.Cleanup(e.srv.Close)
-	e.run = &core.Run{TeamID: "team_1", FactoryID: "fac_test"}
-	ctx := context.Background()
-	if err := e.mem.CreateRun(ctx, e.run); err != nil {
-		t.Fatal(err)
-	}
-	tok, hash, err := runnerapi.IssueBootstrap()
-	if err != nil {
-		t.Fatal(err)
-	}
-	e.boot = tok
-	s := &core.RunSession{
-		RunID: e.run.ID, Session: 1, TaskID: "task", State: core.SessionAssigned,
-		BootstrapHash: hash, BootstrapExpiresAt: time.Now().Add(time.Hour),
-	}
-	if err := e.mem.CreateRunSession(ctx, s); err != nil {
-		t.Fatal(err)
-	}
+	e := &testEnv{t: t, cp: cp, run: testRun{ID: cp.RunID()}, work: filepath.Join(t.TempDir(), "work"), state: t.TempDir()}
+	e.boot = cp.AddSession(1, resp)
 	return e
+}
+
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 }
 
 func (e *testEnv) config(h runner.Harness) runner.Config {
 	return runner.Config{
-		ControlURL:     e.srv.URL,
+		ControlURL:     e.cp.URL(),
 		RunID:          e.run.ID,
 		Session:        1,
 		BootstrapToken: e.boot,
@@ -115,7 +65,7 @@ func (e *testEnv) config(h runner.Harness) runner.Config {
 		Harnesses:      map[string]runner.Harness{"exec": h},
 		Version:        "1.0.0",
 		SandboxID:      "test",
-		Logger:         slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
+		Logger:         testLogger(),
 		PollWait:       1,
 	}
 }
@@ -127,31 +77,17 @@ func (e *testEnv) start(ctx context.Context, cfg runner.Config) <-chan error {
 	return ch
 }
 
-func (e *testEnv) session() *core.RunSession {
-	e.t.Helper()
-	s, err := e.mem.GetRunSession(context.Background(), e.run.ID, 1)
-	if err != nil {
-		e.t.Fatal(err)
-	}
-	return s
-}
+func (e *testEnv) session() runnertest.Session { return e.cp.Session(1) }
 
-func (e *testEnv) events() []core.RunnerEvent {
-	e.t.Helper()
-	ev, err := e.mem.ListRunnerEvents(context.Background(), e.run.ID, 1, 0, 10000)
-	if err != nil {
-		e.t.Fatal(err)
-	}
-	return ev
-}
+func (e *testEnv) events() []runnertest.Event { return e.cp.Events(1) }
 
-func (e *testEnv) find(typ runnerproto.EventType, pred func(core.RunnerEvent) bool) (core.RunnerEvent, bool) {
+func (e *testEnv) find(typ runnerproto.EventType, pred func(runnertest.Event) bool) (runnertest.Event, bool) {
 	for _, ev := range e.events() {
 		if ev.Type == string(typ) && (pred == nil || pred(ev)) {
 			return ev, true
 		}
 	}
-	return core.RunnerEvent{}, false
+	return runnertest.Event{}, false
 }
 
 func (e *testEnv) hasEvent(typ runnerproto.EventType) bool {
@@ -163,9 +99,7 @@ func (e *testEnv) ready() bool { return e.session().ReadyAt != nil }
 
 func (e *testEnv) command(typ runnerproto.CommandType, data any) {
 	e.t.Helper()
-	if _, err := e.svc.EnqueueCommand(context.Background(), e.run.ID, 1, typ, data); err != nil {
-		e.t.Fatal(err)
-	}
+	e.cp.Enqueue(1, typ, data)
 }
 
 func (e *testEnv) startTurn(id, content string) {
@@ -203,7 +137,7 @@ func waitResult(t *testing.T, ch <-chan error, d time.Duration) error {
 	}
 }
 
-func decode[T any](t *testing.T, ev core.RunnerEvent) T {
+func decode[T any](t *testing.T, ev runnertest.Event) T {
 	t.Helper()
 	var v T
 	if err := json.Unmarshal(ev.Data, &v); err != nil {
@@ -224,13 +158,11 @@ func (e *testEnv) turnEnded() (runnerproto.TurnEndedData, bool) {
 	return decode[runnerproto.TurnEndedData](e.t, ev), true
 }
 
-func (e *testEnv) wantEnded(reason string) *core.RunSession {
+func (e *testEnv) wantEnded(reason string) runnertest.Session {
 	e.t.Helper()
 	s := e.session()
-	if s.State != core.SessionEnded || s.EndReason != reason {
+	if s.State != runnertest.SessionEnded || s.EndReason != reason {
 		e.t.Fatalf("session state %q reason %q, want ended %q", s.State, s.EndReason, reason)
 	}
 	return s
 }
-
-func runnerAPIBootstrap() (string, string, error) { return runnerapi.IssueBootstrap() }

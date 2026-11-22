@@ -2,10 +2,10 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
-	"github.com/openfactory-org/openfactory/internal/cloudid"
 	"github.com/openfactory-org/openfactory/internal/runnerclient"
 )
 
@@ -29,14 +29,8 @@ func CloudToken(ctx context.Context, stateDir, audience string, ttlSeconds int, 
 // CloudTokenAs is CloudToken with an output format: CloudTokenFormatToken
 // or CloudTokenFormatGCP.
 func CloudTokenAs(ctx context.Context, stateDir, audience string, ttlSeconds int, format string, out io.Writer) error {
-	if audience == "" {
-		return fmt.Errorf("cloud token: audience is required")
-	}
-	if format == "" {
-		format = CloudTokenFormatToken
-	}
-	if format != CloudTokenFormatToken && format != CloudTokenFormatGCP {
-		return fmt.Errorf("cloud token: unknown format %q", format)
+	if err := checkCloudTokenArgs(audience, format); err != nil {
+		return err
 	}
 	sf, err := loadSession(stateDir)
 	if err != nil {
@@ -47,18 +41,16 @@ func CloudTokenAs(ctx context.Context, stateDir, audience string, ttlSeconds int
 		return err
 	}
 	c.SetToken(sf.SessionToken)
-	resp, err := c.CloudToken(ctx, audience, ttlSeconds)
-	if err != nil {
-		return fmt.Errorf("cloud token: %w", err)
+	return writeCloudToken(ctx, c, audience, ttlSeconds, format, out)
+}
+
+// checkCloudTokenArgs checks the audience and the output format.
+func checkCloudTokenArgs(audience, format string) error {
+	if audience == "" {
+		return errors.New("cloud token: audience is required")
 	}
-	if format == CloudTokenFormatGCP {
-		b, err := cloudid.GCPExecutableResponse(resp.Token, resp.ExpiresAt)
-		if err != nil {
-			return err
-		}
-		_, err = out.Write(b)
-		return err
+	if format != "" && format != CloudTokenFormatToken && format != CloudTokenFormatGCP {
+		return fmt.Errorf("cloud token: unknown format %q", format)
 	}
-	_, err = fmt.Fprint(out, resp.Token)
-	return err
+	return nil
 }

@@ -39,7 +39,7 @@ func parse(t *testing.T, stdout string) []core.HarnessEvent {
 		return harnesstest.NewProcess(stdout, "", 0), nil
 	}
 	ch, err := claude.New(claude.Options{}).Run(context.Background(), sb, core.HarnessRequest{
-		Run: &core.Run{ID: "run_1", Config: core.AgentConfig{Harness: core.HarnessConfig{Type: core.HarnessClaude}}}, Prompt: "x",
+		RunID: "run_1", Harness: core.HarnessConfig{Type: core.HarnessClaude}, Prompt: "x",
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -3,10 +3,7 @@ package runner_test
 import (
 	"bytes"
 	"context"
-	"io"
-	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,94 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openfactory-org/openfactory/internal/core"
-	"github.com/openfactory-org/openfactory/internal/objectstore"
 	"github.com/openfactory-org/openfactory/internal/runner"
-	"github.com/openfactory-org/openfactory/internal/runnerapi"
+	"github.com/openfactory-org/openfactory/internal/runner/runnertest"
 	"github.com/openfactory-org/openfactory/internal/runnerproto"
-	"github.com/openfactory-org/openfactory/internal/runnertoken"
-	"github.com/openfactory-org/openfactory/internal/store/sqlstore"
-	"github.com/openfactory-org/openfactory/internal/store/testdb"
 )
-
-// fakeFiles is a FileStore on an HTTP test server.
-type fakeFiles struct {
-	mu        sync.Mutex
-	objs      map[string][]byte
-	srv       *httptest.Server
-	putStatus int // if not 0, each PUT answers with this status
-	puts      int
-}
-
-func newFakeFiles(t *testing.T) *fakeFiles {
-	f := &fakeFiles{objs: map[string][]byte{}}
-	f.srv = httptest.NewServer(http.HandlerFunc(f.serve))
-	t.Cleanup(f.srv.Close)
-	return f
-}
-
-func (f *fakeFiles) serve(w http.ResponseWriter, r *http.Request) {
-	key := strings.TrimPrefix(r.URL.Path, "/obj/")
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	switch r.Method {
-	case http.MethodPut:
-		f.puts++
-		if f.putStatus != 0 {
-			http.Error(w, "no", f.putStatus)
-			return
-		}
-		b, _ := io.ReadAll(r.Body)
-		f.objs[key] = b
-	case http.MethodGet:
-		b, ok := f.objs[key]
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		_, _ = w.Write(b)
-	}
-}
-
-func (f *fakeFiles) PresignPut(_ context.Context, key string, _ time.Duration, _ string) (string, error) {
-	return f.srv.URL + "/obj/" + key, nil
-}
-
-func (f *fakeFiles) PresignGet(_ context.Context, key string, _ time.Duration) (string, error) {
-	return f.srv.URL + "/obj/" + key, nil
-}
-
-func (f *fakeFiles) Stat(_ context.Context, key string) (objectstore.ObjectInfo, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	b, ok := f.objs[key]
-	if !ok {
-		return objectstore.ObjectInfo{}, objectstore.ErrNotFound
-	}
-	return objectstore.ObjectInfo{Key: key, Size: int64(len(b))}, nil
-}
-
-func (f *fakeFiles) count() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return len(f.objs)
-}
-
-// bySession returns the start response of each session.
-type bySession struct {
-	mu   sync.Mutex
-	resp map[int]runnerproto.StartResponse
-}
-
-func (b *bySession) StartConfig(_ context.Context, _ *core.Run, s *core.RunSession) (runnerproto.StartResponse, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	r := b.resp[s.Session]
-	if r.Harness.Type == "" {
-		r.Harness.Type = "exec"
-	}
-	return r, nil
-}
 
 type fakeGitCreds struct {
 	forbid atomic.Bool
@@ -112,65 +25,35 @@ type fakeGitCreds struct {
 	got    runnerproto.GitCredentialRequest
 }
 
-func (f *fakeGitCreds) GitCredential(_ context.Context, _ *core.Run, _ *core.RunSession, req runnerproto.GitCredentialRequest) (runnerproto.GitCredentialResponse, error) {
+func (f *fakeGitCreds) answer(req runnerproto.GitCredentialRequest) (runnerproto.GitCredentialResponse, int) {
 	f.mu.Lock()
 	f.got = req
 	f.mu.Unlock()
 	if f.forbid.Load() {
-		return runnerproto.GitCredentialResponse{}, core.ErrForbidden
+		return runnerproto.GitCredentialResponse{}, http.StatusForbidden
 	}
-	return runnerproto.GitCredentialResponse{Username: "x-access-token", Password: "tok-123"}, nil
+	return runnerproto.GitCredentialResponse{Username: "x-access-token", Password: "tok-123"}, 0
 }
 
 // snapEnv is a control plane for runs with more than one session.
 type snapEnv struct {
 	t     *testing.T
-	mem   *sqlstore.Store
-	svc   *runnerapi.Service
-	srv   *httptest.Server
-	run   *core.Run
-	files *fakeFiles
-	resp  *bySession
+	cp    *runnertest.Server
+	run   testRun
 	creds *fakeGitCreds
-	// secrets answers the secrets call. A test sets resp before a session starts.
-	secrets *settableSecrets
-}
-
-type settableSecrets struct {
-	mu   sync.Mutex
-	resp runnerproto.SecretsResponse
-}
-
-func (s *settableSecrets) Secrets(context.Context, *core.Run, *core.RunSession) (runnerproto.SecretsResponse, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.resp, nil
 }
 
 func newSnapEnv(t *testing.T) *snapEnv {
 	t.Helper()
 	gitIdentity(t)
-	keys, err := runnertoken.NewStaticKeys("k1", map[string][]byte{"k1": bytes.Repeat([]byte{7}, 32)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	e := &snapEnv{t: t, mem: testdb.New(t), files: newFakeFiles(t), resp: &bySession{resp: map[int]runnerproto.StartResponse{}}, creds: &fakeGitCreds{}, secrets: &settableSecrets{}}
-	svc, err := runnerapi.New(runnerapi.Config{
-		Store: e.mem, Runner: e.mem, Keys: keys, Session: e.resp,
-		Files: e.files, GitCredentials: e.creds, Secrets: e.secrets, PollInterval: 50 * time.Millisecond,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	e.svc = svc
-	e.srv = httptest.NewServer(svc.Handler())
-	t.Cleanup(e.srv.Close)
-	e.run = &core.Run{TeamID: "team_1", FactoryID: "fac_test"}
-	if err := e.mem.CreateRun(context.Background(), e.run); err != nil {
-		t.Fatal(err)
-	}
+	e := &snapEnv{t: t, cp: runnertest.New(t, runnertest.Options{}), creds: &fakeGitCreds{}}
+	e.cp.GitCredential = e.creds.answer
+	e.run = testRun{ID: e.cp.RunID()}
 	return e
 }
+
+// objectCount returns the number of stored objects.
+func (e *snapEnv) objectCount() int { return len(e.cp.Objects()) }
 
 func gitIdentity(t *testing.T) {
 	for _, k := range []string{"GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"} {
@@ -194,26 +77,16 @@ type session struct {
 // newSession adds session n with the start response resp and returns its runner configuration.
 func (e *snapEnv) newSession(n int, resp runnerproto.StartResponse, h runner.Harness) *session {
 	e.t.Helper()
-	e.resp.mu.Lock()
-	e.resp.resp[n] = resp
-	e.resp.mu.Unlock()
-	tok, hash, err := runnerapi.IssueBootstrap()
-	if err != nil {
-		e.t.Fatal(err)
+	if resp.Harness.Type == "" {
+		resp.Harness.Type = "exec"
 	}
-	s := &core.RunSession{
-		RunID: e.run.ID, Session: n, TaskID: "task", State: core.SessionAssigned,
-		BootstrapHash: hash, BootstrapExpiresAt: time.Now().Add(time.Hour),
-	}
-	if err := e.mem.CreateRunSession(context.Background(), s); err != nil {
-		e.t.Fatal(err)
-	}
+	tok := e.cp.AddSession(n, resp)
 	se := &session{e: e, n: n, work: filepath.Join(e.t.TempDir(), "work"), state: e.t.TempDir()}
 	se.cfg = runner.Config{
-		ControlURL: e.srv.URL, RunID: e.run.ID, Session: n, BootstrapToken: tok,
+		ControlURL: e.cp.URL(), RunID: e.run.ID, Session: n, BootstrapToken: tok,
 		WorkDir: se.work, StateDir: se.state,
 		Harnesses: map[string]runner.Harness{"exec": h}, Version: "1.0.0", SandboxID: "test",
-		Logger:   slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
+		Logger:   testLogger(),
 		PollWait: 1,
 	}
 	return se
@@ -225,22 +98,15 @@ func (s *session) run() {
 	s.done = ch
 }
 
-func (s *session) events() []core.RunnerEvent {
-	s.e.t.Helper()
-	ev, err := s.e.mem.ListRunnerEvents(context.Background(), s.e.run.ID, s.n, 0, 10000)
-	if err != nil {
-		s.e.t.Fatal(err)
-	}
-	return ev
-}
+func (s *session) events() []runnertest.Event { return s.e.cp.Events(s.n) }
 
-func (s *session) find(typ runnerproto.EventType, pred func(core.RunnerEvent) bool) (core.RunnerEvent, bool) {
+func (s *session) find(typ runnerproto.EventType, pred func(runnertest.Event) bool) (runnertest.Event, bool) {
 	for _, ev := range s.events() {
 		if ev.Type == string(typ) && (pred == nil || pred(ev)) {
 			return ev, true
 		}
 	}
-	return core.RunnerEvent{}, false
+	return runnertest.Event{}, false
 }
 
 func (s *session) has(typ runnerproto.EventType) bool {
@@ -255,9 +121,7 @@ func (s *session) waitReady() {
 
 func (s *session) command(typ runnerproto.CommandType, data any) {
 	s.e.t.Helper()
-	if _, err := s.e.svc.EnqueueCommand(context.Background(), s.e.run.ID, s.n, typ, data); err != nil {
-		s.e.t.Fatal(err)
-	}
+	s.e.cp.Enqueue(s.n, typ, data)
 }
 
 func (s *session) startTurn(id, content string) {
@@ -289,11 +153,8 @@ func (s *session) stop() {
 
 func (s *session) wantEnded(reason string) {
 	s.e.t.Helper()
-	got, err := s.e.mem.GetRunSession(context.Background(), s.e.run.ID, s.n)
-	if err != nil {
-		s.e.t.Fatal(err)
-	}
-	if got.State != core.SessionEnded || got.EndReason != reason {
+	got := s.e.cp.Session(s.n)
+	if got.State != runnertest.SessionEnded || got.EndReason != reason {
 		s.e.t.Fatalf("session state %q reason %q, want ended %q", got.State, got.EndReason, reason)
 	}
 }
@@ -308,7 +169,7 @@ func (s *session) message() string {
 }
 
 func (s *session) diagnostic(code string) bool {
-	_, ok := s.find(runnerproto.EventDiagnostic, func(ev core.RunnerEvent) bool {
+	_, ok := s.find(runnerproto.EventDiagnostic, func(ev runnertest.Event) bool {
 		return decode[runnerproto.DiagnosticData](s.e.t, ev).Code == code
 	})
 	return ok
@@ -449,27 +310,27 @@ func TestSnapshotSkippedAfterSetupFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	s1.wantEnded("setup_failed")
-	if s1.has(runnerproto.EventSnapshotSaved) || e.files.count() != 0 {
+	if s1.has(runnerproto.EventSnapshotSaved) || e.objectCount() != 0 {
 		t.Fatal("a snapshot was taken after a setup failure")
 	}
 }
 
 func TestSnapshotUploadError(t *testing.T) {
 	e := newSnapEnv(t)
-	e.files.putStatus = http.StatusInternalServerError
+	e.cp.SetPutStatus(http.StatusInternalServerError)
 	s1 := e.newSession(1, repoStart(makeRepo(t), runnerproto.SnapshotConfig{Enabled: true}, nil), execHarness(changeRepo))
 	s1.run()
 	s1.waitReady()
 	s1.runTurn("t1", "go")
 	s1.stop()
 	s1.wantEnded("stopped")
-	ev, ok := s1.find(runnerproto.EventDiagnostic, func(ev core.RunnerEvent) bool {
+	ev, ok := s1.find(runnerproto.EventDiagnostic, func(ev runnertest.Event) bool {
 		return decode[runnerproto.DiagnosticData](t, ev).Code == "snapshot_failed"
 	})
 	if !ok {
 		t.Fatal("no snapshot_failed diagnostic")
 	}
-	if strings.Contains(string(ev.Data), e.files.srv.URL) {
+	if strings.Contains(string(ev.Data), e.cp.URL()) {
 		t.Fatalf("the diagnostic has the upload URL: %s", ev.Data)
 	}
 	if s1.has(runnerproto.EventSnapshotSaved) {

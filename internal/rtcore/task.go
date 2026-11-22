@@ -1,4 +1,4 @@
-package core
+package rtcore
 
 import (
 	"context"
@@ -68,6 +68,10 @@ const (
 )
 
 // TaskImage is an image that holds a harness CLI.
+//
+// Deprecated: the sandbox image carries the harness CLIs. TaskImage,
+// Task.RunnerImage and Task.ToolImages stay only until the Go control plane
+// is deleted; the runtime ignores them.
 type TaskImage struct {
 	Name  string `json:"name"`
 	Image string `json:"image"`

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 	"github.com/openfactory-org/openfactory/internal/runnerproto"
 )
 
@@ -78,7 +78,7 @@ func (r *runner) artifactCandidates() []artifactCandidate {
 		}
 		byName[name] = artifactCandidate{name: name, path: p, stamp: fileStamp{size: info.Size(), mtime: info.ModTime().UnixNano()}}
 	}
-	dir := filepath.Join(r.turnDir, filepath.FromSlash(core.ArtifactsDir))
+	dir := filepath.Join(r.turnDir, filepath.FromSlash(rtcore.ArtifactsDir))
 	if info, err := os.Lstat(dir); err == nil && info.IsDir() {
 		_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 			if err != nil || !d.Type().IsRegular() {

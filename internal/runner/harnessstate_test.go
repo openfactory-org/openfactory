@@ -13,15 +13,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 	"github.com/openfactory-org/openfactory/internal/runner"
 	"github.com/openfactory-org/openfactory/internal/runnerproto"
 )
 
-type typedHarness struct{ typ core.HarnessType }
+type typedHarness struct{ typ rtcore.HarnessType }
 
-func (h typedHarness) Type() core.HarnessType { return h.typ }
-func (h typedHarness) Run(context.Context, core.Sandbox, core.HarnessRequest) (<-chan core.HarnessEvent, error) {
+func (h typedHarness) Type() rtcore.HarnessType { return h.typ }
+func (h typedHarness) Run(context.Context, rtcore.Sandbox, rtcore.HarnessRequest) (<-chan rtcore.HarnessEvent, error) {
 	return nil, fmt.Errorf("not used")
 }
 
@@ -39,8 +39,8 @@ func TestStateFiles(t *testing.T) {
 	home := t.TempDir()
 	work := filepath.Join(t.TempDir(), "my work.dir")
 	enc := regexp.MustCompile(`[^A-Za-z0-9]`).ReplaceAllString(work, "-")
-	claude := &runner.CoreHarness{H: typedHarness{core.HarnessClaude}}
-	codex := &runner.CoreHarness{H: typedHarness{core.HarnessCodex}}
+	claude := &runner.CoreHarness{H: typedHarness{rtcore.HarnessClaude}}
+	codex := &runner.CoreHarness{H: typedHarness{rtcore.HarnessCodex}}
 	other := &runner.CoreHarness{H: typedHarness{"open"}}
 
 	for _, h := range []*runner.CoreHarness{claude, codex, other} {
@@ -113,11 +113,11 @@ func TestHarnessStateSavedAfterTurn(t *testing.T) {
 		t.Fatalf("snapshot.saved %+v", saved)
 	}
 	found := false
-	for k := range e.files.objs {
+	for k := range e.cp.Objects() {
 		found = found || strings.HasSuffix(k, "/harness_state/harness/state.tar.zst")
 	}
 	if !found {
-		t.Fatalf("no state object in %v", e.files.objs)
+		t.Fatalf("no state object in %v", e.cp.Objects())
 	}
 	s1.stop()
 }
@@ -175,8 +175,8 @@ func TestMaxPartBytes(t *testing.T) {
 	if got := s1.savedParts(); len(got) != 0 {
 		t.Fatalf("saved parts %v", got)
 	}
-	if e.files.count() != 0 {
-		t.Fatalf("%d objects uploaded", e.files.count())
+	if e.objectCount() != 0 {
+		t.Fatalf("%d objects uploaded", e.objectCount())
 	}
 	if !s1.diagnostic("snapshot/too_large") {
 		t.Fatal("no diagnostic")
@@ -199,7 +199,7 @@ func TestSkipWorkspace(t *testing.T) {
 	if got := s1.savedParts(); !reflect.DeepEqual(got, []string{"harness_state"}) {
 		t.Fatalf("saved parts %v", got)
 	}
-	for k := range e.files.objs {
+	for k := range e.cp.Objects() {
 		if strings.Contains(k, "/workspace/") {
 			t.Fatalf("workspace object %s", k)
 		}
@@ -240,7 +240,7 @@ func TestDeclarations(t *testing.T) {
 				t.Fatal("no bad_declaration diagnostic")
 			}
 			var saved []byte
-			for k, v := range e.files.objs {
+			for k, v := range e.cp.Objects() {
 				if strings.HasSuffix(k, "/workspace/files/0") {
 					saved = v
 				}

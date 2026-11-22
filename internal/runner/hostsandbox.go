@@ -10,21 +10,25 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
+	"github.com/openfactory-org/openfactory/internal/sandbox/netlock"
 )
 
 // maxCapturedOutput is the size limit of each output stream of Exec.
 const maxCapturedOutput = 4 << 20
 
-// hostSandbox is a core.Sandbox that runs processes on the local machine,
+// hostSandbox is a rtcore.Sandbox that runs processes on the local machine,
 // in the workspace. Inside the runner, the sandbox is the machine itself.
 type hostSandbox struct {
 	id  string
 	dir string   // the workspace, an absolute path
 	env []string // base environment, KEY=VALUE
+	// agent is the user of the processes and the files; nil means the user
+	// of the runner.
+	agent *netlock.Credential
 }
 
-var _ core.Sandbox = (*hostSandbox)(nil)
+var _ rtcore.Sandbox = (*hostSandbox)(nil)
 
 // newHostSandbox makes a sandbox for a workspace. An empty id means "local".
 func newHostSandbox(id, dir string, env []string) *hostSandbox {
@@ -53,7 +57,7 @@ func (s *hostSandbox) abs(p string) string {
 
 // command makes the command of a request. The environment is the base
 // environment and then the variables of the request.
-func (s *hostSandbox) command(ctx context.Context, req core.ExecRequest) (*exec.Cmd, error) {
+func (s *hostSandbox) command(ctx context.Context, req rtcore.ExecRequest) (*exec.Cmd, error) {
 	if len(req.Cmd) == 0 {
 		return nil, errors.New("hostsandbox: empty command")
 	}
@@ -70,13 +74,16 @@ func (s *hostSandbox) command(ctx context.Context, req core.ExecRequest) (*exec.
 	}
 	cmd.Env = env
 	setProcessGroup(cmd)
+	if s.agent != nil {
+		s.agent.Apply(cmd)
+	}
 	cmd.Cancel = func() error { return killProcessGroup(cmd) }
 	cmd.WaitDelay = killWaitDelay
 	return cmd, nil
 }
 
 // Exec runs a command and waits for it. A non-zero exit is not an error.
-func (s *hostSandbox) Exec(ctx context.Context, req core.ExecRequest) (*core.ExecResult, error) {
+func (s *hostSandbox) Exec(ctx context.Context, req rtcore.ExecRequest) (*rtcore.ExecResult, error) {
 	if req.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, req.Timeout)
@@ -93,7 +100,7 @@ func (s *hostSandbox) Exec(ctx context.Context, req core.ExecRequest) (*core.Exe
 		cmd.Stdin = req.Stdin
 	}
 	err = cmd.Run()
-	res := &core.ExecResult{Stdout: stdout.String(), Stderr: stderr.String()}
+	res := &rtcore.ExecResult{Stdout: stdout.String(), Stderr: stderr.String()}
 	if cmd.ProcessState != nil {
 		res.ExitCode = cmd.ProcessState.ExitCode()
 	}
@@ -110,7 +117,7 @@ func (s *hostSandbox) Exec(ctx context.Context, req core.ExecRequest) (*core.Exe
 
 // Start launches a process. Its output streams are pipes. The process is the
 // leader of its own process group. Kill ends the whole group.
-func (s *hostSandbox) Start(ctx context.Context, req core.ExecRequest) (core.Process, error) {
+func (s *hostSandbox) Start(ctx context.Context, req rtcore.ExecRequest) (rtcore.Process, error) {
 	cmd, err := s.command(ctx, req)
 	if err != nil {
 		return nil, err
@@ -164,7 +171,14 @@ func (s *hostSandbox) WriteFile(_ context.Context, path string, data []byte, mod
 		return err
 	}
 	// The umask can remove bits at creation, and an old file keeps its mode.
-	return os.Chmod(p, perm)
+	if err := os.Chmod(p, perm); err != nil {
+		return err
+	}
+	if s.agent != nil {
+		// The harness process runs as the agent and must read its files.
+		return os.Lchown(p, s.agent.UID, s.agent.GID)
+	}
+	return nil
 }
 
 // ReadFile reads a file. A relative path is relative to the workspace.

@@ -1,0 +1,229 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openfactory.dev/schemas/runner/v1/commands.json",
+  "title": "Open Factory runner protocol v1: commands and command data",
+  "description": "Generated from internal/runnerproto and kept in step by internal/runnerproto/schema_test.go. A change to a field name is a breaking change of the protocol.",
+  "$defs": {
+    "Attachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bytes": {
+          "type": "integer"
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "content_type",
+        "bytes"
+      ]
+    },
+    "Command": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": [
+            "turn.start",
+            "message.deliver",
+            "turn.interrupt",
+            "session.stop",
+            "session.cancel"
+          ]
+        },
+        "data": {},
+        "seq": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "seq",
+        "type"
+      ]
+    },
+    "CommandsResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "commands": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/Command"
+          }
+        }
+      },
+      "required": [
+        "commands"
+      ]
+    },
+    "InputFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "type": "string",
+          "contentEncoding": "base64"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "data"
+      ]
+    },
+    "InputItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "attachments": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/Attachment"
+          }
+        },
+        "content": {
+          "type": "string"
+        },
+        "data": {},
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InputFile"
+          }
+        },
+        "kind": {
+          "enum": [
+            "user",
+            "agent",
+            "lifecycle",
+            "event",
+            "system"
+          ]
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "sender": {
+          "$ref": "#/$defs/Sender"
+        },
+        "untrusted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "message_id",
+        "kind",
+        "sender",
+        "content",
+        "attachments"
+      ]
+    },
+    "MessageDeliverData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/InputItem"
+          }
+        }
+      },
+      "required": [
+        "input"
+      ]
+    },
+    "Sender": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ]
+    },
+    "SessionStopData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "snapshot": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "reason",
+        "snapshot"
+      ]
+    },
+    "TurnInterruptData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "turn_id"
+      ]
+    },
+    "TurnStartData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/InputItem"
+          }
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "turn_id",
+        "input"
+      ]
+    }
+  }
+}

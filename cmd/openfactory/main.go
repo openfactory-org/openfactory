@@ -88,7 +88,7 @@ OF_SERVER and OF_API_KEY environment variables.`,
 	add("local", newValidateCmd(), newSchemaCmd(), newInitCmd())
 	add("client", newBootstrapCmd(g), newFactoryCmd(g), newRunCmd(g), newWorkItemCmd(g),
 		newInboxCmd(g), newSecretCmd(g), newMCPRegistryCmd(g), newWebhookCmd(g), newBenchmarkCmd(g))
-	root.AddCommand(newVersionCmd(), newNetprobeCmd())
+	root.AddCommand(newVersionCmd(), newNetlockCmd())
 	return root
 }
 
@@ -147,23 +147,4 @@ func trunc(s string, n int) string {
 		return s
 	}
 	return string([]rune(s)[:n-1]) + "…"
-}
-
-func newVersionCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "version",
-		Short: "Print the version",
-		Args:  cobra.NoArgs,
-		Run: func(cmd *cobra.Command, _ []string) {
-			s := "openfactory " + version
-			if commit != "" {
-				s += " (" + commit
-				if date != "" {
-					s += ", " + date
-				}
-				s += ")"
-			}
-			fmt.Fprintln(cmd.OutOrStdout(), s)
-		},
-	}
 }

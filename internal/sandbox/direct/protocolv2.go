@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 )
 
 // Worker protocol version 2. It is
@@ -23,6 +23,17 @@ import (
 //	hub → worker  {"type":"request","id":"…","method":"task.cancel","params":{"task_id":"…","grace_seconds":n}}
 //	hub → worker  {"type":"request","id":"…","method":"task.status"|"task.destroy","params":{"task_id":"…"}}
 //	worker → hub  {"type":"event","method":"task.state","params":{"status":TaskStatus}}
+//
+// Extensions for enrolled workers (schemas/worker/v2/protocol.json):
+//
+//	hub → worker  {"type":"auth.challenge","params":AuthChallenge}   (first frame, before hello)
+//	worker → hub  {"type":"auth.response","params":AuthResponse}     (Ed25519 signature)
+//	hub → worker  {"type":"request","id":"…","method":"task.list","params":{}}
+//	worker → hub  {"type":"response","id":"…","result":{"tasks":[HelloTask]}}
+//	hub → worker  {"type":"request","id":"…","method":"drain","params":{"draining":bool}}
+//	hello         facts, slots and slot size of the worker
+//
+// A worker in drain refuses task.assign with the error at_capacity.
 const SubprotocolV2 = "openfactory.worker.v2"
 
 // Methods and events of version 2.
@@ -31,6 +42,8 @@ const (
 	methodTaskCancel  = "task.cancel"
 	methodTaskStatus  = "task.status"
 	methodTaskDestroy = "task.destroy"
+	methodTaskList    = "task.list"
+	methodDrain       = "drain"
 
 	eventTaskState = "task.state"
 )
@@ -38,7 +51,8 @@ const (
 // Error codes of the protocol. The codes "not_found", "at_capacity" and
 // "internal" are in protocol.go.
 const (
-	codeInvalidSpec = "invalid_spec"
+	codeInvalidSpec   = "invalid_spec"
+	codeUnknownMethod = "unknown_method"
 )
 
 // WorkerBackendPrefix is the prefix of the name of a worker backend.
@@ -60,16 +74,85 @@ type HelloV2 struct {
 	OneShot bool `json:"one_shot,omitempty"`
 	// Tasks lists all tasks that the worker holds.
 	Tasks []HelloTask `json:"tasks"`
+	// ProtocolMinor is the minor version of the protocol that the worker
+	// speaks. Additive features are gated on it and on Features.
+	ProtocolMinor int `json:"protocol_minor,omitempty"`
+	// Features lists optional features, for example "git_cache".
+	Features []string `json:"features,omitempty"`
+	// Facts describes the host of the worker.
+	Facts *WorkerFacts `json:"facts,omitempty"`
+	// Slots is the number of sessions that the worker runs at once. 0 means
+	// that Capacity is the limit.
+	Slots int `json:"slots,omitempty"`
+	// Slot is the size of one slot.
+	Slot *SlotSize `json:"slot,omitempty"`
+	// Draining says that the worker takes no new task.
+	Draining bool `json:"draining,omitempty"`
+}
+
+// ProtocolMinorV2 is the minor version of protocol v2 of this worker: 1 adds
+// the challenge, facts, slots, task.list and drain.
+const ProtocolMinorV2 = 1
+
+// WorkerFacts describes the host of a worker.
+type WorkerFacts struct {
+	Arch               string   `json:"arch"`
+	OS                 string   `json:"os,omitempty"`
+	Kernel             string   `json:"kernel,omitempty"`
+	VCPUs              int      `json:"vcpus"`
+	MemoryMiB          int64    `json:"memory_mib,omitempty"`
+	DiskTotalBytes     int64    `json:"disk_total_bytes,omitempty"`
+	DiskFreeBytes      int64    `json:"disk_free_bytes,omitempty"`
+	FirecrackerVersion string   `json:"firecracker_version,omitempty"`
+	GuestKernel        string   `json:"guest_kernel,omitempty"`
+	RuntimeVersion     string   `json:"runtime_version,omitempty"`
+	KVM                bool     `json:"kvm,omitempty"`
+	Warnings           []string `json:"warnings,omitempty"`
+}
+
+// SlotSize is the size of one slot of a worker.
+type SlotSize struct {
+	VCPUs      int `json:"vcpus"`
+	MemoryMiB  int `json:"memory_mib"`
+	ScratchGiB int `json:"scratch_gib,omitempty"`
+}
+
+// AuthChallenge is the first frame of the hub to an enrolled worker.
+type AuthChallenge struct {
+	// Nonce is 32 random bytes in base64url without padding.
+	Nonce        string `json:"nonce"`
+	ConnectionID string `json:"connection_id"`
+	// Protocols lists the minor versions that the hub accepts.
+	Protocols []int `json:"protocols,omitempty"`
+}
+
+// AuthResponse is the answer of the worker to an AuthChallenge.
+type AuthResponse struct {
+	WorkerID string `json:"worker_id"`
+	// Alg is always "ed25519".
+	Alg string `json:"alg"`
+	// Sig is the Ed25519 signature of AuthMessage in base64url without padding.
+	Sig string `json:"sig"`
+}
+
+// TaskListResult is the result of task.list.
+type TaskListResult struct {
+	Tasks []HelloTask `json:"tasks"`
+}
+
+// DrainParams are the params of drain.
+type DrainParams struct {
+	Draining bool `json:"draining"`
 }
 
 // HelloTask is one task of a hello message.
 type HelloTask struct {
-	TaskID string          `json:"task_id"`
-	Status core.TaskStatus `json:"status"`
+	TaskID string            `json:"task_id"`
+	Status rtcore.TaskStatus `json:"status"`
 }
 
 type assignParams struct {
-	Task core.Task `json:"task"`
+	Task rtcore.Task `json:"task"`
 }
 
 type taskRef struct {
@@ -82,18 +165,18 @@ type cancelParams struct {
 }
 
 type statusBody struct {
-	Status core.TaskStatus `json:"status"`
+	Status rtcore.TaskStatus `json:"status"`
 }
 
 // toErrorV2 maps a wire error of version 2 onto sentinel errors.
 func (e *rpcError) toErrorV2() error {
 	switch e.Code {
 	case codeNotFound:
-		return fmt.Errorf("%s: %w", e.Message, core.ErrNotFound)
+		return fmt.Errorf("%s: %w", e.Message, rtcore.ErrNotFound)
 	case codeInvalidSpec:
-		return fmt.Errorf("%s: %w", e.Message, core.ErrInvalid)
+		return fmt.Errorf("%s: %w", e.Message, rtcore.ErrInvalid)
 	case codeAtCapacity:
-		return fmt.Errorf("%s: %w", e.Message, core.ErrAtCapacity)
+		return fmt.Errorf("%s: %w", e.Message, rtcore.ErrAtCapacity)
 	default:
 		return errors.New(e.Message)
 	}
@@ -103,20 +186,22 @@ func (e *rpcError) toErrorV2() error {
 func errorForV2(err error) *rpcError {
 	code := codeInternal
 	switch {
-	case errors.Is(err, core.ErrNotFound):
+	case errors.Is(err, rtcore.ErrNotFound):
 		code = codeNotFound
-	case errors.Is(err, core.ErrInvalid):
+	case errors.Is(err, rtcore.ErrInvalid):
 		code = codeInvalidSpec
-	case errors.Is(err, core.ErrAtCapacity), errors.Is(err, ErrAtCapacity):
+	case errors.Is(err, rtcore.ErrAtCapacity), errors.Is(err, ErrAtCapacity):
 		code = codeAtCapacity
+	case errors.Is(err, errUnknownMethod):
+		code = codeUnknownMethod
 	}
 	return &rpcError{Code: code, Message: err.Error()}
 }
 
 // OneShotExitCode returns the process exit code of a one-shot worker for the
 // final status of its task. The code is 0 only for the reason "completed".
-func OneShotExitCode(st core.TaskStatus) int {
-	if st.State == core.TaskExited && st.Reason == core.SandboxCompleted {
+func OneShotExitCode(st rtcore.TaskStatus) int {
+	if st.State == rtcore.TaskExited && st.Reason == rtcore.SandboxCompleted {
 		return 0
 	}
 	return 1
@@ -125,7 +210,7 @@ func OneShotExitCode(st core.TaskStatus) int {
 // OneShotError is returned by RunWorkerV2 in one-shot mode when the task did
 // not end with the reason "completed".
 type OneShotError struct {
-	Status core.TaskStatus
+	Status rtcore.TaskStatus
 }
 
 func (e *OneShotError) Error() string {
@@ -133,15 +218,15 @@ func (e *OneShotError) Error() string {
 }
 
 // stateRank orders the states of a task. An older state never replaces a newer one.
-func stateRank(s core.TaskState) int {
+func stateRank(s rtcore.TaskState) int {
 	switch s {
-	case core.TaskAccepted:
+	case rtcore.TaskAccepted:
 		return 1
-	case core.TaskStarting:
+	case rtcore.TaskStarting:
 		return 2
-	case core.TaskRunning:
+	case rtcore.TaskRunning:
 		return 3
-	case core.TaskExited:
+	case rtcore.TaskExited:
 		return 4
 	}
 	return 0

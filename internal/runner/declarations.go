@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 	"github.com/openfactory-org/openfactory/internal/snapshot"
 )
 
@@ -77,13 +77,14 @@ func (r *runner) declarationData(ctx context.Context, path string) ([]byte, erro
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path)
 	cmd.Dir = r.cfg.WorkDir
-	skip := core.TaskEnvBootstrapToken + "="
+	skip := rtcore.TaskEnvBootstrapToken + "="
 	for _, e := range os.Environ() {
 		if !strings.HasPrefix(e, skip) {
 			cmd.Env = append(cmd.Env, e)
 		}
 	}
 	cmd.WaitDelay = time.Second
+	r.asAgent(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("run %s: %w", path, err)
@@ -124,7 +125,7 @@ func (r *runner) captureDeclaredRepos(ctx context.Context, dir string, decl []st
 		}
 		seen[abs] = true
 		mp := r.manifestPath(abs)
-		e, skipped, err := snapshot.CaptureRepo(ctx, snapshot.CaptureOptions{
+		e, skipped, err := snapshot.CaptureRepo(r.withGitHook(ctx), snapshot.CaptureOptions{
 			RepoDir: abs, Path: mp, OutDir: dir, Index: idx,
 		})
 		idx++
@@ -235,7 +236,7 @@ func (r *runner) restoreDeclaredRepo(ctx context.Context, e snapshot.RepoEntry, 
 		r.diagnostic("snapshot_restore_failed", "repository "+e.Path+": "+err.Error())
 		return false
 	}
-	if err := snapshot.RestoreRepo(ctx, dir, e, partDir); err != nil {
+	if err := snapshot.RestoreRepo(r.withGitHook(ctx), dir, e, partDir); err != nil {
 		r.diagnostic("snapshot_restore_failed", "repository "+e.Path+": "+err.Error())
 		return false
 	}

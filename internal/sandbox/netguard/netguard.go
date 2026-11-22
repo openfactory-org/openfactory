@@ -1,5 +1,5 @@
 // Package netguard is an HTTP forward proxy (plain HTTP and CONNECT tunnels)
-// that enforces a core.EffectiveNetworkPolicy for a sandbox.
+// that enforces a rtcore.EffectiveNetworkPolicy for a sandbox.
 //
 // Policy semantics (matching the factory networkPolicy reference):
 //   - Hosts required by the platform (alwaysAllow: repository forges, MCP
@@ -32,7 +32,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 )
 
 // DiagnosticCode is the diagnostic code reported for blocked egress.
@@ -68,6 +68,8 @@ type Proxy struct {
 	allow      map[string]bool
 	deny       map[string]bool
 	always     []string
+	// private lists the hosts that may resolve to a reserved address.
+	private map[string]bool
 
 	bmu     sync.Mutex
 	blocked map[string]*BlockedHost
@@ -81,7 +83,7 @@ type Proxy struct {
 
 // New creates a proxy for policy. alwaysAllow lists platform hosts that are
 // reachable regardless of the policy.
-func New(policy core.EffectiveNetworkPolicy, alwaysAllow []string) *Proxy {
+func New(policy rtcore.EffectiveNetworkPolicy, alwaysAllow []string) *Proxy {
 	p := &Proxy{blocked: map[string]*BlockedHost{}}
 	p.SetPolicy(policy, alwaysAllow)
 	p.transport = &http.Transport{
@@ -97,7 +99,7 @@ func New(policy core.EffectiveNetworkPolicy, alwaysAllow []string) *Proxy {
 }
 
 // SetPolicy replaces the enforced policy.
-func (p *Proxy) SetPolicy(policy core.EffectiveNetworkPolicy, alwaysAllow []string) {
+func (p *Proxy) SetPolicy(policy rtcore.EffectiveNetworkPolicy, alwaysAllow []string) {
 	allow := map[string]bool{}
 	for _, h := range policy.AllowedHosts {
 		if n := NormalizeHost(h); n != "" {
@@ -127,6 +129,30 @@ func (p *Proxy) SetPolicy(policy core.EffectiveNetworkPolicy, alwaysAllow []stri
 	p.mu.Lock()
 	p.restricted, p.allow, p.deny, p.always = policy.Restricted, allow, deny, always
 	p.mu.Unlock()
+}
+
+// AllowPrivateHosts sets the hosts (exact names or IP literals) that may
+// resolve to a reserved address: a private network, loopback, link-local and
+// the other ranges of ReservedAddr. Every other host is refused at dial time
+// when its address is reserved, even when the policy allows its name. Use it
+// for platform hosts on a private network, for example a control plane on
+// localhost during development or a self-managed forge.
+func (p *Proxy) AllowPrivateHosts(hosts []string) {
+	m := map[string]bool{}
+	for _, h := range hosts {
+		if n := NormalizeHost(h); n != "" {
+			m[n] = true
+		}
+	}
+	p.mu.Lock()
+	p.private = m
+	p.mu.Unlock()
+}
+
+func (p *Proxy) privateAllowed(host string) bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.private[NormalizeHost(host)]
 }
 
 // NormalizeHost lowercases a host, strips ports, IPv6 brackets and trailing dots.
@@ -250,12 +276,32 @@ func (p *Proxy) dialContext(ctx context.Context, network, addr string) (net.Conn
 		timeout = 30 * time.Second
 	}
 	d := net.Dialer{Timeout: timeout, KeepAlive: 30 * time.Second}
-	return d.DialContext(ctx, network, addr)
+	if !p.privateAllowed(host) {
+		// Check the address that is really dialed, after name resolution.
+		d.Control = dialControl(NormalizeHost(host))
+	}
+	conn, err := d.DialContext(ctx, network, addr)
+	if err != nil {
+		if re, ok := isReservedAddrError(err); ok {
+			p.recordBlocked(host)
+			return nil, &blockedError{host: host, reason: re.Error()}
+		}
+		return nil, err
+	}
+	return conn, nil
 }
 
-type blockedError struct{ host string }
+type blockedError struct {
+	host   string
+	reason string
+}
 
-func (e *blockedError) Error() string { return "egress to " + e.host + " blocked by network policy" }
+func (e *blockedError) Error() string {
+	if e.reason != "" {
+		return e.reason
+	}
+	return "egress to " + e.host + " blocked by network policy"
+}
 
 func blockedMessage(host string) string {
 	return fmt.Sprintf("Open Factory network policy blocked access to %s\n", NormalizeHost(host))
@@ -347,6 +393,11 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	upstream, err := p.dialContext(r.Context(), "tcp", target)
 	if err != nil {
+		var be *blockedError
+		if errors.As(err, &be) {
+			http.Error(w, blockedMessage(be.host), http.StatusForbidden)
+			return
+		}
 		http.Error(w, "netguard: dial "+target+": "+err.Error(), http.StatusBadGateway)
 		return
 	}

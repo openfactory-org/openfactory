@@ -2,6 +2,7 @@ package direct
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,11 +10,12 @@ import (
 	"maps"
 	"math/rand/v2"
 	"net/http"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 	"github.com/openfactory-org/openfactory/internal/sandbox/internal/ws"
 	"github.com/openfactory-org/openfactory/internal/worker"
 )
@@ -31,7 +33,7 @@ type WorkerV2Options struct {
 	// Capacity limits tasks that are not exited (0 means no limit).
 	Capacity int
 	// Backend runs the tasks: tasklocal, or k8stask.
-	Backend core.TaskBackend
+	Backend rtcore.TaskBackend
 	Version string
 	// OneShot makes the worker take exactly one task and return when it exited.
 	OneShot bool
@@ -52,6 +54,18 @@ type WorkerV2Options struct {
 	// HeartbeatInterval overrides the interval that the server announces.
 	HeartbeatInterval time.Duration
 	Logger            *slog.Logger
+	// KeyFile is the Ed25519 private key file of an enrolled worker (see
+	// LoadWorkerKey). With a key, the worker waits for the auth.challenge
+	// of the hub and answers it before the hello.
+	KeyFile string
+	// Key is the private key itself; it wins over KeyFile.
+	Key ed25519.PrivateKey
+	// Facts describes the host. Nil means the facts that the Go runtime
+	// knows: arch, OS, CPUs and the version.
+	Facts *WorkerFacts
+	// Slots and Slot describe the slots of a microVM worker.
+	Slots int
+	Slot  *SlotSize
 }
 
 var (
@@ -63,6 +77,12 @@ var (
 	// ErrProtocolUnsupported is returned by RunWorkerV2 when the server does
 	// not speak worker protocol version 2.
 	ErrProtocolUnsupported = errors.New("server does not speak worker protocol version 2")
+	// ErrKeyRequired is returned by RunWorkerV2 when the hub sends a
+	// challenge and the worker has no key.
+	ErrKeyRequired = errors.New("the control plane asks for the key of an enrolled worker; set the key file")
+
+	// errUnknownMethod is the error of a request with an unknown method.
+	errUnknownMethod = errors.New("unknown method")
 )
 
 // oneShotFlushWait is the longest time that a one-shot worker waits to report
@@ -76,12 +96,13 @@ type workerV2 struct {
 	ctx    context.Context    // lives as long as RunWorkerV2, not as long as one connection
 
 	mu       sync.Mutex
-	status   map[string]core.TaskStatus
+	status   map[string]rtcore.TaskStatus
 	watching map[string]bool
 	cur      *v2Client
 	accepted int    // one-shot: tasks accepted
 	oneTask  string // one-shot: the task
-	result   *core.TaskStatus
+	result   *rtcore.TaskStatus
+	draining bool // the hub asked the worker to take no new task
 }
 
 // v2Client is one live connection of the worker.
@@ -107,13 +128,13 @@ func (c *v2Client) send(m *message) error {
 // any other end.
 func RunWorkerV2(parent context.Context, opts WorkerV2Options) error {
 	if opts.ServerURL == "" {
-		return fmt.Errorf("%w: server URL required", core.ErrInvalid)
+		return fmt.Errorf("%w: server URL required", rtcore.ErrInvalid)
 	}
 	if opts.APIKey == "" {
-		return fmt.Errorf("%w: worker API key required", core.ErrInvalid)
+		return fmt.Errorf("%w: worker API key required", rtcore.ErrInvalid)
 	}
 	if opts.Backend == nil {
-		return fmt.Errorf("%w: worker backend required", core.ErrInvalid)
+		return fmt.Errorf("%w: worker backend required", rtcore.ErrInvalid)
 	}
 	if err := ValidateWorkerID(opts.WorkerID); err != nil {
 		return err
@@ -127,6 +148,16 @@ func RunWorkerV2(parent context.Context, opts WorkerV2Options) error {
 	if opts.MaxBackoff <= 0 {
 		opts.MaxBackoff = time.Minute
 	}
+	if opts.Key == nil && opts.KeyFile != "" {
+		k, err := LoadWorkerKey(opts.KeyFile)
+		if err != nil {
+			return err
+		}
+		opts.Key = k
+	}
+	if opts.Facts == nil {
+		opts.Facts = &WorkerFacts{Arch: runtime.GOARCH, OS: runtime.GOOS, VCPUs: runtime.NumCPU(), RuntimeVersion: opts.Version}
+	}
 	log := opts.Logger
 	if log == nil {
 		log = slog.Default()
@@ -136,7 +167,7 @@ func RunWorkerV2(parent context.Context, opts WorkerV2Options) error {
 	w := &workerV2{
 		opts: opts, ctx: ctx, cancel: cancel,
 		log:      log.With("worker", opts.WorkerID, "backend", opts.Backend.Name(), "protocol", "v2"),
-		status:   map[string]core.TaskStatus{},
+		status:   map[string]rtcore.TaskStatus{},
 		watching: map[string]bool{},
 	}
 	w.adopt()
@@ -153,7 +184,7 @@ func RunWorkerV2(parent context.Context, opts WorkerV2Options) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if errors.Is(err, ErrUnauthorized) || errors.Is(err, ErrRefused) || errors.Is(err, ErrProtocolUnsupported) {
+		if errors.Is(err, ErrUnauthorized) || errors.Is(err, ErrRefused) || errors.Is(err, ErrProtocolUnsupported) || errors.Is(err, ErrKeyRequired) {
 			return err
 		}
 		reason := "remote_close"
@@ -176,7 +207,7 @@ func RunWorkerV2(parent context.Context, opts WorkerV2Options) error {
 	}
 }
 
-func (w *workerV2) finished() *core.TaskStatus {
+func (w *workerV2) finished() *rtcore.TaskStatus {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.result
@@ -196,10 +227,10 @@ func (w *workerV2) adopt() {
 	}
 }
 
-func (w *workerV2) setStatus(st core.TaskStatus) {
+func (w *workerV2) setStatus(st rtcore.TaskStatus) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if old, ok := w.status[st.TaskID]; ok && (old.State == core.TaskExited || stateRank(st.State) < stateRank(old.State)) {
+	if old, ok := w.status[st.TaskID]; ok && (old.State == rtcore.TaskExited || stateRank(st.State) < stateRank(old.State)) {
 		return
 	}
 	w.status[st.TaskID] = st
@@ -208,7 +239,7 @@ func (w *workerV2) setStatus(st core.TaskStatus) {
 func (w *workerV2) activeLocked() int {
 	n := 0
 	for _, st := range w.status {
-		if st.State != core.TaskExited {
+		if st.State != rtcore.TaskExited {
 			n++
 		}
 	}
@@ -233,7 +264,7 @@ func (w *workerV2) snapshot(ctx context.Context) []HelloTask {
 		// reserved and the backend has not stored yet stays.
 		w.mu.Lock()
 		for id, st := range w.status {
-			if !held[id] && st.State != core.TaskAccepted {
+			if !held[id] && st.State != rtcore.TaskAccepted {
 				delete(w.status, id)
 			}
 		}
@@ -251,7 +282,7 @@ func (w *workerV2) snapshot(ctx context.Context) []HelloTask {
 }
 
 // emit sends task.state on the current connection. It reports whether a connection took it.
-func (w *workerV2) emit(st core.TaskStatus) bool {
+func (w *workerV2) emit(st rtcore.TaskStatus) bool {
 	w.mu.Lock()
 	c := w.cur
 	w.mu.Unlock()
@@ -279,7 +310,7 @@ func (w *workerV2) watch(taskID string) {
 		}()
 		ch, err := w.opts.Backend.Watch(w.ctx, taskID)
 		if err != nil {
-			if errors.Is(err, core.ErrNotFound) {
+			if errors.Is(err, rtcore.ErrNotFound) {
 				w.mu.Lock()
 				delete(w.status, taskID)
 				w.mu.Unlock()
@@ -297,7 +328,7 @@ func (w *workerV2) watch(taskID string) {
 			}
 			w.setStatus(st)
 			w.emit(st)
-			if st.State != core.TaskExited {
+			if st.State != rtcore.TaskExited {
 				continue
 			}
 			if m := w.opts.Metrics; m != nil {
@@ -319,7 +350,7 @@ func (w *workerV2) watch(taskID string) {
 
 // finishOneShot reports the end of the task of a one-shot worker, removes the
 // sandbox of a task that needs no retention and ends the worker.
-func (w *workerV2) finishOneShot(st core.TaskStatus) {
+func (w *workerV2) finishOneShot(st rtcore.TaskStatus) {
 	deadline := time.Now().Add(oneShotFlushWait)
 	for !w.emit(st) && time.Now().Before(deadline) {
 		select {
@@ -328,7 +359,7 @@ func (w *workerV2) finishOneShot(st core.TaskStatus) {
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
-	if st.Reason == core.SandboxCompleted || st.Reason == core.SandboxCancelled {
+	if st.Reason == rtcore.SandboxCompleted || st.Reason == rtcore.SandboxCancelled {
 		dctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		if err := w.opts.Backend.Destroy(dctx, st.TaskID); err != nil {
 			w.log.Warn("destroy the one-shot task", "task", st.TaskID, "err", err)
@@ -361,42 +392,77 @@ func (w *workerV2) session(ctx context.Context) (connected bool, err error) {
 	if wsc.Subprotocol != SubprotocolV2 {
 		return false, ErrProtocolUnsupported
 	}
-	hello := HelloV2{
-		WorkerID: w.opts.WorkerID, Name: w.opts.Name, Backend: w.opts.Backend.Name(), Labels: w.opts.Labels,
-		Capacity: w.opts.Capacity, Version: w.opts.Version, OneShot: w.opts.OneShot, Tasks: w.snapshot(ctx),
+	type readRes struct {
+		data []byte
+		err  error
 	}
+	frames := make(chan readRes, 1)
+	readNext := func() {
+		go func() {
+			_, d, err := wsc.ReadMessage()
+			frames <- readRes{d, err}
+		}()
+	}
+	// wait reads the next frame of the handshake.
+	wait := func(what string) (message, error) {
+		select {
+		case r := <-frames:
+			if r.err != nil {
+				var ce *ws.CloseError
+				if errors.As(r.err, &ce) && ce.Code == closePolicy {
+					return message{}, fmt.Errorf("%w: %s", ErrRefused, ce.Reason)
+				}
+				return message{}, fmt.Errorf("waiting for %s: %w", what, r.err)
+			}
+			var m message
+			if json.Unmarshal(r.data, &m) != nil {
+				return message{}, fmt.Errorf("invalid %s from server", what)
+			}
+			return m, nil
+		case <-time.After(15 * time.Second):
+			return message{}, fmt.Errorf("timed out waiting for %s", what)
+		case <-ctx.Done():
+			return message{}, ctx.Err()
+		}
+	}
+	if w.opts.Key != nil {
+		// An enrolled worker: the hub speaks first.
+		readNext()
+		m, err := wait("challenge")
+		if err != nil {
+			return false, err
+		}
+		var ch AuthChallenge
+		if m.Type != typeAuthChallenge || json.Unmarshal(m.Params, &ch) != nil {
+			return false, fmt.Errorf("%w: expected %s, got %q", ErrRefused, typeAuthChallenge, m.Type)
+		}
+		resp, err := SignChallenge(w.opts.Key, w.opts.WorkerID, ch)
+		if err != nil {
+			return false, fmt.Errorf("%w: %w", ErrRefused, err)
+		}
+		rp, _ := json.Marshal(resp)
+		ad, _ := json.Marshal(&message{Type: typeAuthResponse, Params: rp})
+		if err := wsc.WriteMessage(ws.OpText, ad); err != nil {
+			return false, err
+		}
+	}
+	hello := w.hello(ctx)
 	hp, _ := json.Marshal(hello)
 	data, _ := json.Marshal(&message{Type: typeHello, Params: hp})
 	if err := wsc.WriteMessage(ws.OpText, data); err != nil {
 		return false, err
 	}
-	type readRes struct {
-		data []byte
-		err  error
-	}
-	first := make(chan readRes, 1)
-	go func() {
-		_, d, err := wsc.ReadMessage()
-		first <- readRes{d, err}
-	}()
+	readNext()
 	var welcome Welcome
-	select {
-	case r := <-first:
-		if r.err != nil {
-			var ce *ws.CloseError
-			if errors.As(r.err, &ce) && ce.Code == closePolicy {
-				return false, fmt.Errorf("%w: %s", ErrRefused, ce.Reason)
-			}
-			return false, fmt.Errorf("waiting for welcome: %w", r.err)
-		}
-		var m message
-		if json.Unmarshal(r.data, &m) != nil || m.Type != typeWelcome || json.Unmarshal(m.Result, &welcome) != nil {
-			return false, errors.New("invalid welcome from server")
-		}
-	case <-time.After(15 * time.Second):
-		return false, errors.New("timed out waiting for welcome")
-	case <-ctx.Done():
-		return false, ctx.Err()
+	m, err := wait("welcome")
+	if err != nil {
+		return false, err
+	}
+	if m.Type == typeAuthChallenge {
+		return false, ErrKeyRequired
+	}
+	if m.Type != typeWelcome || json.Unmarshal(m.Result, &welcome) != nil {
+		return false, errors.New("invalid welcome from server")
 	}
 	w.log.Info("connected to server", "connection", welcome.ConnectionID, "tasks", len(hello.Tasks))
 	if w.opts.Metrics != nil {
@@ -473,13 +539,27 @@ func (w *workerV2) heartbeats(ctx context.Context, c *v2Client, interval time.Du
 	}
 }
 
+// hello returns the hello of a new connection.
+func (w *workerV2) hello(ctx context.Context) HelloV2 {
+	tasks := w.snapshot(ctx)
+	w.mu.Lock()
+	draining := w.draining
+	w.mu.Unlock()
+	return HelloV2{
+		WorkerID: w.opts.WorkerID, Name: w.opts.Name, Backend: w.opts.Backend.Name(), Labels: w.opts.Labels,
+		Capacity: w.opts.Capacity, Version: w.opts.Version, OneShot: w.opts.OneShot, Tasks: tasks,
+		ProtocolMinor: ProtocolMinorV2, Facts: w.opts.Facts, Slots: w.opts.Slots, Slot: w.opts.Slot,
+		Draining: draining,
+	}
+}
+
 // handle serves one request of the hub.
 func (w *workerV2) handle(ctx context.Context, m *message) (any, error) {
 	switch m.Method {
 	case methodTaskAssign:
 		var p assignParams
 		if err := json.Unmarshal(m.Params, &p); err != nil {
-			return nil, fmt.Errorf("%w: bad task.assign params: %w", core.ErrInvalid, err)
+			return nil, fmt.Errorf("%w: bad task.assign params: %w", rtcore.ErrInvalid, err)
 		}
 		st, err := w.assign(ctx, p.Task)
 		if err != nil {
@@ -489,7 +569,7 @@ func (w *workerV2) handle(ctx context.Context, m *message) (any, error) {
 	case methodTaskStatus:
 		var p taskRef
 		if err := json.Unmarshal(m.Params, &p); err != nil || p.TaskID == "" {
-			return nil, fmt.Errorf("%w: bad task.status params", core.ErrInvalid)
+			return nil, fmt.Errorf("%w: bad task.status params", rtcore.ErrInvalid)
 		}
 		st, err := w.opts.Backend.Status(ctx, p.TaskID)
 		if err != nil {
@@ -500,13 +580,13 @@ func (w *workerV2) handle(ctx context.Context, m *message) (any, error) {
 	case methodTaskCancel:
 		var p cancelParams
 		if err := json.Unmarshal(m.Params, &p); err != nil || p.TaskID == "" {
-			return nil, fmt.Errorf("%w: bad task.cancel params", core.ErrInvalid)
+			return nil, fmt.Errorf("%w: bad task.cancel params", rtcore.ErrInvalid)
 		}
 		return nil, w.opts.Backend.Cancel(ctx, p.TaskID, p.GraceSeconds)
 	case methodTaskDestroy:
 		var p taskRef
 		if err := json.Unmarshal(m.Params, &p); err != nil || p.TaskID == "" {
-			return nil, fmt.Errorf("%w: bad task.destroy params", core.ErrInvalid)
+			return nil, fmt.Errorf("%w: bad task.destroy params", rtcore.ErrInvalid)
 		}
 		if err := w.opts.Backend.Destroy(ctx, p.TaskID); err != nil {
 			return nil, err
@@ -515,31 +595,48 @@ func (w *workerV2) handle(ctx context.Context, m *message) (any, error) {
 		delete(w.status, p.TaskID)
 		w.mu.Unlock()
 		return nil, nil
+	case methodTaskList:
+		return TaskListResult{Tasks: w.snapshot(ctx)}, nil
+	case methodDrain:
+		var p DrainParams
+		if err := json.Unmarshal(m.Params, &p); err != nil {
+			return nil, fmt.Errorf("%w: bad drain params", rtcore.ErrInvalid)
+		}
+		w.mu.Lock()
+		w.draining = p.Draining
+		w.mu.Unlock()
+		w.log.Info("drain changed", "draining", p.Draining)
+		return struct{}{}, nil
 	}
-	return nil, fmt.Errorf("unknown method %q", m.Method)
+	return nil, fmt.Errorf("%w %q", errUnknownMethod, m.Method)
 }
 
 // assign starts a task on the backend. It reserves its slot first.
-func (w *workerV2) assign(ctx context.Context, task core.Task) (core.TaskStatus, error) {
+func (w *workerV2) assign(ctx context.Context, task rtcore.Task) (rtcore.TaskStatus, error) {
 	if err := task.Validate(); err != nil {
-		return core.TaskStatus{}, fmt.Errorf("%w: %w", core.ErrInvalid, err)
+		return rtcore.TaskStatus{}, fmt.Errorf("%w: %w", rtcore.ErrInvalid, err)
 	}
 	w.mu.Lock()
 	if st, ok := w.status[task.TaskID]; ok {
 		w.mu.Unlock()
 		return st, nil
 	}
+	if w.draining {
+		w.mu.Unlock()
+		w.rejected("draining")
+		return rtcore.TaskStatus{}, fmt.Errorf("worker is draining: %w", rtcore.ErrAtCapacity)
+	}
 	if w.opts.OneShot && w.accepted >= 1 {
 		w.mu.Unlock()
 		w.rejected("one_shot")
-		return core.TaskStatus{}, fmt.Errorf("one-shot worker has its task: %w", core.ErrAtCapacity)
+		return rtcore.TaskStatus{}, fmt.Errorf("one-shot worker has its task: %w", rtcore.ErrAtCapacity)
 	}
 	if w.opts.Capacity > 0 && w.activeLocked() >= w.opts.Capacity {
 		w.mu.Unlock()
 		w.rejected("at_capacity")
-		return core.TaskStatus{}, fmt.Errorf("worker has %d tasks: %w", w.opts.Capacity, core.ErrAtCapacity)
+		return rtcore.TaskStatus{}, fmt.Errorf("worker has %d tasks: %w", w.opts.Capacity, rtcore.ErrAtCapacity)
 	}
-	w.status[task.TaskID] = core.TaskStatus{TaskID: task.TaskID, State: core.TaskAccepted}
+	w.status[task.TaskID] = rtcore.TaskStatus{TaskID: task.TaskID, State: rtcore.TaskAccepted}
 	w.accepted++
 	if w.opts.OneShot {
 		w.oneTask = task.TaskID
@@ -564,7 +661,7 @@ func (w *workerV2) assign(ctx context.Context, task core.Task) (core.TaskStatus,
 			w.oneTask = ""
 		}
 		w.mu.Unlock()
-		return core.TaskStatus{}, err
+		return rtcore.TaskStatus{}, err
 	}
 	st.TaskID = task.TaskID
 	w.setStatus(st)
@@ -583,11 +680,11 @@ func (w *workerV2) rejected(reason string) {
 
 // taskResult maps a sandbox end reason to the result label of the completed
 // and duration metrics: succeeded, failed or cancelled.
-func taskResult(reason core.SandboxReason) string {
+func taskResult(reason rtcore.SandboxReason) string {
 	switch reason {
-	case core.SandboxCompleted:
+	case rtcore.SandboxCompleted:
 		return worker.ResultSucceeded
-	case core.SandboxCancelled:
+	case rtcore.SandboxCancelled:
 		return worker.ResultCancelled
 	default:
 		return worker.ResultFailed
@@ -601,11 +698,11 @@ func taskResult(reason core.SandboxReason) string {
 // "setup". Each other reason means that the sandbox started and then ended
 // (an exit code, a memory limit, an eviction, a lost node, a deadline): phase
 // "run".
-func failurePhase(reason core.SandboxReason) (string, bool) {
+func failurePhase(reason rtcore.SandboxReason) (string, bool) {
 	switch reason {
-	case core.SandboxCompleted, core.SandboxCancelled, "":
+	case rtcore.SandboxCompleted, rtcore.SandboxCancelled, "":
 		return "", false
-	case core.SandboxImagePull, core.SandboxUnschedulable, core.SandboxNetworkPolicyTimeout, core.SandboxInvalidSpec:
+	case rtcore.SandboxImagePull, rtcore.SandboxUnschedulable, rtcore.SandboxNetworkPolicyTimeout, rtcore.SandboxInvalidSpec:
 		return "setup", true
 	default:
 		return "run", true

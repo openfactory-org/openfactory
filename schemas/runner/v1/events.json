@@ -1,0 +1,420 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openfactory.dev/schemas/runner/v1/events.json",
+  "title": "Open Factory runner protocol v1: event batches and event data",
+  "description": "Generated from internal/runnerproto and kept in step by internal/runnerproto/schema_test.go. A change to a field name is a breaking change of the protocol.",
+  "$defs": {
+    "ArtifactData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "upload_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "upload_id"
+      ]
+    },
+    "DiagnosticData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "data": {},
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ]
+    },
+    "Event": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": [
+            "setup.step",
+            "snapshot.restored",
+            "session.ready",
+            "turn.started",
+            "input.accepted",
+            "message",
+            "tool_call",
+            "tool_result",
+            "harness.session",
+            "usage",
+            "artifact",
+            "transcript.saved",
+            "diagnostic",
+            "turn.ended",
+            "idle",
+            "snapshot.saved"
+          ]
+        },
+        "at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "data": {},
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seq",
+        "type",
+        "at"
+      ]
+    },
+    "EventAck": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ack": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ack"
+      ]
+    },
+    "EventBatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "events": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/Event"
+          }
+        }
+      },
+      "required": [
+        "events"
+      ]
+    },
+    "HarnessSessionData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ]
+    },
+    "IdleData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "deadline": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "deadline"
+      ]
+    },
+    "InputAcceptedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "message_ids": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "message_ids"
+      ]
+    },
+    "MessageData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "role",
+        "content"
+      ]
+    },
+    "RepositoryCommit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "commit": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "commit"
+      ]
+    },
+    "SessionReadyData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "capabilities": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "enum": [
+              "resume",
+              "mid_turn_input",
+              "interrupt",
+              "needs_input_signal"
+            ]
+          }
+        },
+        "repositories": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RepositoryCommit"
+          }
+        }
+      },
+      "required": [
+        "capabilities"
+      ]
+    },
+    "SetupStepData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "duration_ms": {
+          "type": "integer"
+        },
+        "output": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "step": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "step",
+        "status",
+        "duration_ms"
+      ]
+    },
+    "SnapshotRestoredData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "failed_paths": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "parts": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "parts",
+        "failed_paths"
+      ]
+    },
+    "SnapshotSavedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bytes": {
+          "type": "integer"
+        },
+        "part": {
+          "type": "string"
+        },
+        "upload_ids": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "part",
+        "upload_ids",
+        "bytes"
+      ]
+    },
+    "ToolCallData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "arguments": {},
+        "call_id": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "call_id",
+        "name",
+        "arguments",
+        "category"
+      ]
+    },
+    "ToolResultData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "call_id": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        },
+        "is_error": {
+          "type": "boolean"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "call_id",
+        "content",
+        "is_error"
+      ]
+    },
+    "TranscriptSavedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "upload_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "upload_id"
+      ]
+    },
+    "TurnEndedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "failure_code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "done",
+            "error",
+            "interrupted",
+            "needs_input"
+          ]
+        },
+        "result": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome"
+      ]
+    },
+    "UsageData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cache_read_tokens": {
+          "type": "integer"
+        },
+        "cache_write_tokens": {
+          "type": "integer"
+        },
+        "cost_usd": {
+          "type": "number"
+        },
+        "coverage": {
+          "type": "string"
+        },
+        "cumulative": {
+          "type": "boolean"
+        },
+        "duration_ms": {
+          "type": "integer"
+        },
+        "input_tokens": {
+          "type": "integer"
+        },
+        "output_tokens": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "input_tokens",
+        "output_tokens",
+        "cumulative"
+      ]
+    }
+  }
+}

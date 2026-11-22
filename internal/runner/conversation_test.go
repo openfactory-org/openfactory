@@ -1,21 +1,17 @@
 package runner_test
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/openfactory-org/openfactory/internal/core"
 	"github.com/openfactory-org/openfactory/internal/runnerproto"
 )
 
 func (e *snapEnv) addMessage(role, content string) {
 	e.t.Helper()
-	if err := e.mem.AppendRunMessage(context.Background(), &core.RunMessage{RunID: e.run.ID, Role: role, Content: content}); err != nil {
-		e.t.Fatal(err)
-	}
+	e.cp.AddMessage(role, content)
 }
 
 func TestConversationForSessionTwo(t *testing.T) {
@@ -68,7 +64,7 @@ func TestConversationUnavailable(t *testing.T) {
 	s1.stop()
 
 	s2 := e.newSession(2, runnerproto.StartResponse{}, execHarness("cat"))
-	inner := e.srv.Config.Handler
+	inner := e.cp.Handler()
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == runnerproto.PathConversation {
 			http.Error(w, "boom", http.StatusInternalServerError)

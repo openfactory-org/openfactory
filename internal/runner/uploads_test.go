@@ -6,13 +6,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 	"github.com/openfactory-org/openfactory/internal/runner"
+	"github.com/openfactory-org/openfactory/internal/runner/runnertest"
 	"github.com/openfactory-org/openfactory/internal/runnerproto"
 )
 
-func (s *session) events2(typ runnerproto.EventType) []core.RunnerEvent {
-	var out []core.RunnerEvent
+func (s *session) events2(typ runnerproto.EventType) []runnertest.Event {
+	var out []runnertest.Event
 	for _, ev := range s.events() {
 		if ev.Type == string(typ) {
 			out = append(out, ev)
@@ -22,9 +23,7 @@ func (s *session) events2(typ runnerproto.EventType) []core.RunnerEvent {
 }
 
 func (e *snapEnv) object(key string) (string, bool) {
-	e.files.mu.Lock()
-	defer e.files.mu.Unlock()
-	b, ok := e.files.objs[key]
+	b, ok := e.cp.Object(key)
 	return string(b), ok
 }
 
@@ -44,7 +43,7 @@ func TestArtifactUploadAtTurnEnd(t *testing.T) {
 	if d.Name != "out/report.txt" || d.Type != "FILE" || d.UploadID == "" {
 		t.Fatalf("artifact event = %+v", d)
 	}
-	key, ok := e.svc.ObjectKey(d.UploadID)
+	key, ok := e.cp.ObjectKey(d.UploadID)
 	if !ok {
 		t.Fatal("the upload ID does not resolve")
 	}
@@ -110,7 +109,7 @@ func (h transcriptHarness) TranscriptPath(_, _ string) string { return h.path }
 func TestTranscriptUploadIsRedacted(t *testing.T) {
 	const secret = "s3cr3t-value-123"
 	e := newSnapEnv(t)
-	e.secrets.resp = runnerproto.SecretsResponse{Redact: []string{secret}}
+	e.cp.SetSecrets(runnerproto.SecretsResponse{Redact: []string{secret}})
 	home := t.TempDir()
 	tpath := filepath.Join(home, "session.jsonl")
 	h := transcriptHarness{ExecHarness: execHarness("cat >/dev/null"), path: tpath}
@@ -127,7 +126,7 @@ func TestTranscriptUploadIsRedacted(t *testing.T) {
 		t.Fatalf("transcript.saved events = %d", len(evs))
 	}
 	d := decode[runnerproto.TranscriptSavedData](t, evs[0])
-	key, ok := e.svc.ObjectKey(d.UploadID)
+	key, ok := e.cp.ObjectKey(d.UploadID)
 	if !ok {
 		t.Fatal("the upload ID does not resolve")
 	}
@@ -156,14 +155,14 @@ func TestCoreHarnessTranscriptPath(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "sess-1.jsonl"), []byte("{}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	h := &runner.CoreHarness{H: typedHarness{core.HarnessClaude}}
+	h := &runner.CoreHarness{H: typedHarness{rtcore.HarnessClaude}}
 	if got := h.TranscriptPath(home, work); got != filepath.Join(dir, "sess-1.jsonl") {
 		t.Errorf("claude: got %q", got)
 	}
-	if got := (&runner.CoreHarness{H: typedHarness{core.HarnessCodex}}).TranscriptPath(home, work); got != "" {
+	if got := (&runner.CoreHarness{H: typedHarness{rtcore.HarnessCodex}}).TranscriptPath(home, work); got != "" {
 		t.Errorf("codex without files: got %q", got)
 	}
-	if got := (&runner.CoreHarness{H: typedHarness{core.HarnessType("open")}}).TranscriptPath(home, work); got != "" {
+	if got := (&runner.CoreHarness{H: typedHarness{rtcore.HarnessType("open")}}).TranscriptPath(home, work); got != "" {
 		t.Errorf("open: got %q", got)
 	}
 }

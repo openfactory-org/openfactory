@@ -10,23 +10,23 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 )
 
 func TestAllowed(t *testing.T) {
-	restricted := core.EffectiveNetworkPolicy{
+	restricted := rtcore.EffectiveNetworkPolicy{
 		Restricted:   true,
 		AllowedHosts: []string{"API.example.com", "registry.npmjs.org", "blocked.example.com", "10.0.0.5"},
 		DeniedHosts:  []string{"blocked.example.com", "github.com"},
 	}
 	always := []string{"github.com", ".openfactory.internal", "*.forge.example"}
 	tests := []struct {
-		policy core.EffectiveNetworkPolicy
+		policy rtcore.EffectiveNetworkPolicy
 		host   string
 		want   bool
 	}{
-		{core.EffectiveNetworkPolicy{}, "anything.example", true},
-		{core.EffectiveNetworkPolicy{DeniedHosts: []string{"bad.example"}}, "bad.example", false},
+		{rtcore.EffectiveNetworkPolicy{}, "anything.example", true},
+		{rtcore.EffectiveNetworkPolicy{DeniedHosts: []string{"bad.example"}}, "bad.example", false},
 		{restricted, "api.example.com", true},
 		{restricted, "api.example.com:443", true},
 		{restricted, "API.EXAMPLE.COM.", true},
@@ -41,7 +41,7 @@ func TestAllowed(t *testing.T) {
 		{restricted, "10.0.0.6", false},
 		{restricted, "[::1]:80", false},
 		{restricted, "", false},
-		{core.EffectiveNetworkPolicy{Restricted: true}, "example.com", false}, // empty policy denies all
+		{rtcore.EffectiveNetworkPolicy{Restricted: true}, "example.com", false}, // empty policy denies all
 	}
 	for _, tt := range tests {
 		p := New(tt.policy, always)
@@ -62,7 +62,8 @@ func TestHTTPForwardAndBlocked(t *testing.T) {
 	defer upstream.Close()
 	u, _ := url.Parse(upstream.URL)
 
-	p := New(core.EffectiveNetworkPolicy{Restricted: true, AllowedHosts: []string{"127.0.0.1"}}, nil)
+	p := New(rtcore.EffectiveNetworkPolicy{Restricted: true, AllowedHosts: []string{"127.0.0.1"}}, nil)
+	p.AllowPrivateHosts([]string{"127.0.0.1"})
 	var mu sync.Mutex
 	var seen []string
 	p.OnBlocked = func(h string) { mu.Lock(); seen = append(seen, h); mu.Unlock() }
@@ -128,7 +129,8 @@ func TestConnectTunnel(t *testing.T) {
 	defer upstream.Close()
 	u, _ := url.Parse(upstream.URL)
 
-	p := New(core.EffectiveNetworkPolicy{Restricted: true, AllowedHosts: []string{"127.0.0.1"}}, nil)
+	p := New(rtcore.EffectiveNetworkPolicy{Restricted: true, AllowedHosts: []string{"127.0.0.1"}}, nil)
+	p.AllowPrivateHosts([]string{"127.0.0.1"})
 	addr, err := p.Start("127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -148,7 +150,7 @@ func TestConnectTunnel(t *testing.T) {
 		t.Fatalf("tunnel body %q", body)
 	}
 	// Policy updates apply to new connections.
-	p.SetPolicy(core.EffectiveNetworkPolicy{Restricted: true}, nil)
+	p.SetPolicy(rtcore.EffectiveNetworkPolicy{Restricted: true}, nil)
 	tr.CloseIdleConnections()
 	if _, err := client.Get("https://localhost:" + u.Port()); err == nil {
 		t.Fatal("CONNECT to blocked host succeeded")
@@ -159,7 +161,7 @@ func TestConnectTunnel(t *testing.T) {
 }
 
 func TestReportHandlerServesBlockedHosts(t *testing.T) {
-	p := New(core.EffectiveNetworkPolicy{Restricted: true}, nil)
+	p := New(rtcore.EffectiveNetworkPolicy{Restricted: true}, nil)
 	p.recordBlocked("Evil.Example:443")
 	p.recordBlocked("evil.example")
 	rec := httptest.NewRecorder()

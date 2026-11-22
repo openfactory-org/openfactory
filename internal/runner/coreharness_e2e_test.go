@@ -9,30 +9,30 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 	"github.com/openfactory-org/openfactory/internal/runner"
 	"github.com/openfactory-org/openfactory/internal/runnerproto"
 )
 
-// scriptedHarness is a core.Harness that runs one command in its sandbox and
+// scriptedHarness is a rtcore.Harness that runs one command in its sandbox and
 // then plays fixed events.
 type scriptedHarness struct {
-	seen chan core.HarnessRequest
+	seen chan rtcore.HarnessRequest
 }
 
-func (scriptedHarness) Type() core.HarnessType { return core.HarnessClaude }
+func (scriptedHarness) Type() rtcore.HarnessType { return rtcore.HarnessClaude }
 
-func (h scriptedHarness) Run(ctx context.Context, sb core.Sandbox, req core.HarnessRequest) (<-chan core.HarnessEvent, error) {
+func (h scriptedHarness) Run(ctx context.Context, sb rtcore.Sandbox, req rtcore.HarnessRequest) (<-chan rtcore.HarnessEvent, error) {
 	h.seen <- req
 	// The sandbox runs in the workspace and sees the secret file.
-	res, err := sb.Exec(ctx, core.ExecRequest{Cmd: []string{"cat", "secrets/token.txt"}})
+	res, err := sb.Exec(ctx, rtcore.ExecRequest{Cmd: []string{"cat", "secrets/token.txt"}})
 	if err != nil {
 		return nil, err
 	}
-	ch := make(chan core.HarnessEvent, 8)
-	ch <- core.HarnessEvent{Kind: "message", Role: "assistant", Content: "token file: " + res.Stdout, SessionID: "sess_1"}
-	ch <- core.HarnessEvent{Kind: "usage", Usage: &core.Usage{InputTokens: 100, OutputTokens: 20}}
-	ch <- core.HarnessEvent{Kind: "done", Content: "all done", SessionID: "sess_1", Usage: &core.Usage{InputTokens: 100, OutputTokens: 20}}
+	ch := make(chan rtcore.HarnessEvent, 8)
+	ch <- rtcore.HarnessEvent{Kind: "message", Role: "assistant", Content: "token file: " + res.Stdout, SessionID: "sess_1"}
+	ch <- rtcore.HarnessEvent{Kind: "usage", Usage: &rtcore.Usage{InputTokens: 100, OutputTokens: 20}}
+	ch <- rtcore.HarnessEvent{Kind: "done", Content: "all done", SessionID: "sess_1", Usage: &rtcore.Usage{InputTokens: 100, OutputTokens: 20}}
 	close(ch)
 	return ch, nil
 }
@@ -41,14 +41,14 @@ func TestCoreHarnessEndToEnd(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("needs cat")
 	}
-	secrets := fakeSecrets{runnerproto.SecretsResponse{
+	secrets := &runnerproto.SecretsResponse{
 		Files: []runnerproto.SecretFile{{
 			Path: "secrets/token.txt", Mode: "0600",
 			ContentBase64: base64.StdEncoding.EncodeToString([]byte("s3cret-file")),
 		}},
 		HarnessAuth: map[string]string{"EXAMPLE_API_KEY": "key-1"},
 		MCPHeaders:  map[string]map[string]string{"srv": {"X-Token": "h1"}},
-	}}
+	}
 	e := newEnv(t, runnerproto.StartResponse{
 		Harness: runnerproto.Harness{
 			Type: "claude", Model: "m", SystemPrompt: "sys",
@@ -58,7 +58,7 @@ func TestCoreHarnessEndToEnd(t *testing.T) {
 			Skills: []runnerproto.Skill{{Name: "review", Files: map[string]string{"SKILL.md": "be kind"}}},
 		},
 	}, secrets)
-	h := scriptedHarness{seen: make(chan core.HarnessRequest, 1)}
+	h := scriptedHarness{seen: make(chan rtcore.HarnessRequest, 1)}
 	cfg := e.config(execHarness("cat"))
 	cfg.Harnesses = map[string]runner.Harness{"claude": &runner.CoreHarness{H: h}}
 	done := e.start(context.Background(), cfg)
@@ -109,7 +109,7 @@ func TestCoreHarnessEndToEnd(t *testing.T) {
 	case r := <-h.seen:
 		if r.Auth["EXAMPLE_API_KEY"] != "key-1" || r.MCPServers["srv"].Headers["X-Token"] != "h1" ||
 			len(r.Skills) != 1 || r.Skills[0].Content != "be kind" || r.SystemPrompt != "sys" ||
-			r.Run.Config.Harness.Model != "m" || r.Run.ID != e.run.ID || r.Resume {
+			r.Harness.Model != "m" || r.RunID != e.run.ID || r.Resume {
 			t.Fatalf("request %+v", r)
 		}
 	default:
@@ -125,15 +125,15 @@ func TestCoreHarnessEndToEnd(t *testing.T) {
 
 func TestSecretFileRejected(t *testing.T) {
 	for _, path := range []string{"/etc/x", "../x", "a/../../x"} {
-		e := newEnv(t, runnerproto.StartResponse{}, fakeSecrets{runnerproto.SecretsResponse{
+		e := newEnv(t, runnerproto.StartResponse{}, &runnerproto.SecretsResponse{
 			Files: []runnerproto.SecretFile{{Path: path, ContentBase64: "eA=="}},
-		}})
+		})
 		done := e.start(context.Background(), e.config(execHarness("cat")))
 		if err := waitResult(t, done, 10*time.Second); err != nil {
 			t.Fatal(err)
 		}
 		s := e.wantEnded("setup_failed")
-		if s.FailureCode != core.FailureEnvironmentSetupFailed {
+		if s.FailureCode != string(rtcore.FailureEnvironmentSetupFailed) {
 			t.Fatalf("%s: failure code %q", path, s.FailureCode)
 		}
 	}

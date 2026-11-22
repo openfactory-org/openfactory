@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -85,8 +86,22 @@ func TestCommandTree(t *testing.T) {
 	var out bytes.Buffer
 	root.SetOut(&out)
 	root.SetArgs([]string{"version"})
-	if err := root.Execute(); err != nil || !strings.HasPrefix(out.String(), "openfactory ") {
+	if err := root.Execute(); err != nil || !strings.HasPrefix(out.String(), RuntimeName+" ") {
 		t.Fatalf("version: %v %q", err, out.String())
+	}
+	out.Reset()
+	root.SetArgs([]string{"version", "--short"})
+	if err := root.Execute(); err != nil || out.String() != version+"\n" {
+		t.Fatalf("version --short: %v %q", err, out.String())
+	}
+	// netprobe is gone: the runner probes the lock in process.
+	if c, _, err := root.Find([]string{"netprobe"}); err == nil && c.Name() == "netprobe" {
+		t.Error("the netprobe command must not exist")
+	}
+	for _, path := range [][]string{{"netlock", "probe"}, {"netlock", "rules"}, {"runner", "git-credential"}, {"runner", "cloud-token"}} {
+		if c, _, err := root.Find(path); err != nil || c.Name() != path[len(path)-1] {
+			t.Errorf("command %v not found: %v", path, err)
+		}
 	}
 }
 
@@ -116,5 +131,43 @@ func TestBenchmarkRunValidatesRepetitions(t *testing.T) {
 		if err := validateRepetitions(n); err != nil {
 			t.Errorf("validateRepetitions(%d) = %v", n, err)
 		}
+	}
+}
+
+// TestNetlockRules prints the rules of the lock.
+func TestNetlockRules(t *testing.T) {
+	t.Setenv("OF_LOOPBACK_DAEMON_PORTS", "8911")
+	root := newRootCmd()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetArgs([]string{"netlock", "rules"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"iptables -w 5 -N OF_LOCK", "--dport 8911", "ip6tables -w 5 -I OUTPUT 1 -j OF_LOCK"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("rules lack %q:\n%s", want, out.String())
+		}
+	}
+}
+
+// TestNetlockProbe runs the probe command with a specification that has no
+// network target: only the loopback check runs.
+func TestNetlockProbe(t *testing.T) {
+	root := newRootCmd()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetArgs([]string{"netlock", "probe"})
+	old := os.Stdin
+	r, w, _ := os.Pipe()
+	_, _ = w.WriteString(`{"proxy_url":"http://127.0.0.1:1","direct_targets":[],"restricted":false}`)
+	w.Close()
+	os.Stdin = r
+	defer func() { os.Stdin = old }()
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"name":"loopback","ok":true`) {
+		t.Errorf("probe output: %s", out.String())
 	}
 }

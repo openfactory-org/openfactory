@@ -600,9 +600,6 @@ func runnerCloud(s *cloudid.Setup, runID string) *runnerproto.CloudIdentity {
 		return nil
 	}
 	out := &runnerproto.CloudIdentity{}
-	if s.AWS != nil {
-		out.AWS = &runnerproto.CloudAWS{RoleARN: s.AWS.RoleARN, Audience: s.AWS.Audience, SessionName: cloudid.SessionName(runID)}
-	}
 	if s.GCP != nil {
 		out.GCP = &runnerproto.CloudGCP{Audience: s.GCP.Audience, ProjectNumber: s.GCP.ProjectNumber, ServiceAccountEmail: s.GCP.ServiceAccountEmail}
 	}

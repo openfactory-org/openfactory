@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 )
 
 // Credential map keys accepted in HarnessRequest.Auth (in addition to env-var names).
@@ -16,7 +16,7 @@ import (
 //  1. Env-var shaped: {"ANTHROPIC_API_KEY": "..."}, {"AWS_BEARER_TOKEN_BEDROCK": "...", "AWS_REGION": "..."},
 //     {"AWS_ACCESS_KEY_ID": ..., "AWS_SECRET_ACCESS_KEY": ..., "AWS_SESSION_TOKEN": ..., "AWS_REGION": ...},
 //     {"OPENAI_API_KEY": "..."}.
-//  2. Typed secret: {"type": "<core.SecretType>", "value": "<secret value>"} where value is either the raw key
+//  2. Typed secret: {"type": "<rtcore.SecretType>", "value": "<secret value>"} where value is either the raw key
 //     or a JSON object. Bedrock JSON fields: apiKey|api_key|token, accessKeyId|access_key_id,
 //     secretAccessKey|secret_access_key, sessionToken|session_token, region. "region" may also be a
 //     sibling key of "type"/"value".
@@ -24,6 +24,13 @@ const (
 	AuthKeyType   = "type"
 	AuthKeyValue  = "value"
 	AuthKeyRegion = "region"
+)
+
+// The Bedrock secret types. The runtime still maps them while the Go control
+// plane accepts them; they go away with it.
+const (
+	SecretBedrockKey    rtcore.SecretType = "anthropic_bedrock_api_key"    //nolint:gosec // G101: a secret type name, not a credential
+	SecretBedrockAccess rtcore.SecretType = "anthropic_bedrock_access_key" //nolint:gosec // G101: a secret type name, not a credential
 )
 
 // ErrAuthMismatch is returned when the credential type is not usable by the harness.
@@ -48,25 +55,25 @@ func ClaudeAuthEnv(auth map[string]string) (map[string]string, error) {
 		if r := pick(fields, "region", "aws_region", "awsRegion"); r != "" {
 			region = r
 		}
-		switch core.SecretType(typ) {
-		case core.SecretAnthropicKey:
+		switch rtcore.SecretType(typ) {
+		case rtcore.SecretAnthropicKey:
 			key := firstNonEmpty(pick(fields, "apiKey", "api_key", "key"), rawIfNotJSON(val, fields))
 			if key == "" {
 				return nil, errors.New("anthropic_api_key secret is empty")
 			}
 			env["ANTHROPIC_API_KEY"] = key
 			return env, nil
-		case core.SecretAnthropicOAuth:
+		case rtcore.SecretAnthropicOAuth:
 			tok := strings.TrimSpace(rawIfNotJSON(val, fields))
 			if tok == "" {
 				return nil, errors.New("anthropic_oauth_token secret is empty")
 			}
 			env["CLAUDE_CODE_OAUTH_TOKEN"] = tok
 			return env, nil
-		case core.SecretBedrockKey:
+		case SecretBedrockKey:
 			tok := firstNonEmpty(pick(fields, "apiKey", "api_key", "token", "bearerToken"), rawIfNotJSON(val, fields))
 			return bedrockEnv(env, map[string]string{"AWS_BEARER_TOKEN_BEDROCK": tok}, region)
-		case core.SecretBedrockAccess:
+		case SecretBedrockAccess:
 			return bedrockEnv(env, map[string]string{
 				"AWS_ACCESS_KEY_ID":     pick(fields, "accessKeyId", "access_key_id", "aws_access_key_id"),
 				"AWS_SECRET_ACCESS_KEY": pick(fields, "secretAccessKey", "secret_access_key", "aws_secret_access_key"),
@@ -131,7 +138,7 @@ func CodexAuthEnv(auth map[string]string) (map[string]string, error) {
 	copyIf(env, auth, "OPENAI_BASE_URL", "OPENAI_ORG_ID", "OPENAI_PROJECT_ID")
 	key := ""
 	if typ := auth[AuthKeyType]; typ != "" {
-		if core.SecretType(typ) != core.SecretOpenAIKey {
+		if rtcore.SecretType(typ) != rtcore.SecretOpenAIKey {
 			return nil, fmt.Errorf("%w: codex accepts openai_api_key, got %q", ErrAuthMismatch, typ)
 		}
 		fields := parseSecretJSON(auth[AuthKeyValue])
@@ -208,8 +215,8 @@ func copyIf(dst, src map[string]string, keys ...string) {
 // credential: harness.auth, or the default credential (the one factory or
 // team secret whose type the harness accepts). Without one the CLI uses only
 // the credentials that the sandbox already has.
-func CredentialHint(req core.HarnessRequest) string {
-	if len(req.Auth) > 0 || (req.Run != nil && req.Run.Config.Harness.Auth != nil) {
+func CredentialHint(req rtcore.HarnessRequest) string {
+	if len(req.Auth) > 0 || req.Harness.Auth != nil {
 		return ""
 	}
 	return " (the agent has no harness credential: add one secret of a model credential type, for example anthropic_api_key, anthropic_oauth_token or openai_api_key, or set harness.auth in the definition)"

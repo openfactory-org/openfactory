@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/openfactory-org/openfactory/internal/core"
-	"github.com/openfactory-org/openfactory/internal/sandbox/egress"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
+	"github.com/openfactory-org/openfactory/internal/sandbox/netlock"
 )
 
-var _ core.TaskBackend = (*Backend)(nil)
+var _ rtcore.TaskBackend = (*Backend)(nil)
 
 const (
 	defaultKillGrace = 2 * time.Minute
@@ -47,13 +47,13 @@ type Backend struct {
 }
 
 type watcher struct {
-	ch       chan core.TaskStatus
+	ch       chan rtcore.TaskStatus
 	closed   bool
 	finished chan struct{} // closed when the backend closes ch
 }
 
 type entry struct {
-	status      core.TaskStatus
+	status      rtcore.TaskStatus
 	dir         string
 	cmd         *exec.Cmd
 	done        chan struct{} // closed after the wait goroutine saw the exit
@@ -97,7 +97,7 @@ func dirName(taskID string) string {
 	return string(out)
 }
 
-func snapshot(s core.TaskStatus) core.TaskStatus {
+func snapshot(s rtcore.TaskStatus) rtcore.TaskStatus {
 	if s.ExitCode != nil {
 		v := *s.ExitCode
 		s.ExitCode = &v
@@ -133,11 +133,11 @@ func (e *entry) notify() {
 			}
 			break
 		}
-		if st.State == core.TaskExited {
+		if st.State == rtcore.TaskExited {
 			closeWatcher(w)
 		}
 	}
-	if st.State == core.TaskExited {
+	if st.State == rtcore.TaskExited {
 		e.watchers = map[*watcher]struct{}{}
 	}
 }
@@ -160,9 +160,9 @@ func (e *entry) closeWatchers() {
 
 // Start starts one process for the task. A second call with the same task ID
 // returns the existing status.
-func (b *Backend) Start(ctx context.Context, task core.Task) (core.TaskStatus, error) {
+func (b *Backend) Start(ctx context.Context, task rtcore.Task) (rtcore.TaskStatus, error) {
 	if err := task.Validate(); err != nil {
-		return core.TaskStatus{}, fmt.Errorf("tasklocal: invalid task: %w", err)
+		return rtcore.TaskStatus{}, fmt.Errorf("tasklocal: invalid task: %w", err)
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -173,16 +173,16 @@ func (b *Backend) Start(ctx context.Context, task core.Task) (core.TaskStatus, e
 	if b.opts.MaxTasks > 0 {
 		active := 0
 		for _, e := range b.tasks {
-			if e.status.State != core.TaskExited {
+			if e.status.State != rtcore.TaskExited {
 				active++
 			}
 		}
 		if active >= b.opts.MaxTasks {
-			return core.TaskStatus{}, core.ErrAtCapacity
+			return rtcore.TaskStatus{}, rtcore.ErrAtCapacity
 		}
 	}
 
-	if egress.Restricted(task.NetworkPolicy) {
+	if netlock.Restricted(task.NetworkPolicy) {
 		// The process shares the network of the host. Say so, so that a
 		// worker with this backend does not look restricted.
 		slog.WarnContext(ctx, "tasklocal: the local backend does not enforce network policies; this restricted task has full network access",
@@ -191,12 +191,12 @@ func (b *Backend) Start(ctx context.Context, task core.Task) (core.TaskStatus, e
 	dir := b.opts.Root + string(os.PathSeparator) + dirName(task.TaskID)
 	workspace := dir + string(os.PathSeparator) + "workspace"
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
-		return core.TaskStatus{}, fmt.Errorf("tasklocal: create task directory: %w", err)
+		return rtcore.TaskStatus{}, fmt.Errorf("tasklocal: create task directory: %w", err)
 	}
 	logFile, err := os.OpenFile(dir+string(os.PathSeparator)+"runner.log", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		_ = os.RemoveAll(dir)
-		return core.TaskStatus{}, fmt.Errorf("tasklocal: create log file: %w", err)
+		return rtcore.TaskStatus{}, fmt.Errorf("tasklocal: create log file: %w", err)
 	}
 	defer logFile.Close()
 
@@ -225,10 +225,10 @@ func (b *Backend) Start(ctx context.Context, task core.Task) (core.TaskStatus, e
 	if err := cmd.Start(); err != nil {
 		now := time.Now()
 		e.cmd = nil
-		e.status = core.TaskStatus{
+		e.status = rtcore.TaskStatus{
 			TaskID:  task.TaskID,
-			State:   core.TaskExited,
-			Reason:  core.SandboxInvalidSpec,
+			State:   rtcore.TaskExited,
+			Reason:  rtcore.SandboxInvalidSpec,
 			Message: err.Error(),
 			EndedAt: &now,
 		}
@@ -237,9 +237,9 @@ func (b *Backend) Start(ctx context.Context, task core.Task) (core.TaskStatus, e
 	}
 
 	now := time.Now()
-	e.status = core.TaskStatus{
+	e.status = rtcore.TaskStatus{
 		TaskID:    task.TaskID,
-		State:     core.TaskRunning,
+		State:     rtcore.TaskRunning,
 		SandboxID: "pid-" + strconv.Itoa(cmd.Process.Pid),
 		StartedAt: &now,
 	}
@@ -247,7 +247,7 @@ func (b *Backend) Start(ctx context.Context, task core.Task) (core.TaskStatus, e
 	e.timer = time.AfterFunc(d, func() {
 		b.mu.Lock()
 		defer b.mu.Unlock()
-		if e.status.State == core.TaskExited {
+		if e.status.State == rtcore.TaskExited {
 			return
 		}
 		e.deadlineHit = true
@@ -271,18 +271,18 @@ func (b *Backend) wait(e *entry) {
 		code = e.cmd.ProcessState.ExitCode()
 	}
 	now := time.Now()
-	e.status.State = core.TaskExited
+	e.status.State = rtcore.TaskExited
 	e.status.EndedAt = &now
 	e.status.ExitCode = &code
 	switch {
 	case e.cancelled:
-		e.status.Reason = core.SandboxCancelled
+		e.status.Reason = rtcore.SandboxCancelled
 	case e.deadlineHit:
-		e.status.Reason = core.SandboxDeadlineExceeded
+		e.status.Reason = rtcore.SandboxDeadlineExceeded
 	case code == 0:
-		e.status.Reason = core.SandboxCompleted
+		e.status.Reason = rtcore.SandboxCompleted
 	default:
-		e.status.Reason = core.SandboxProcessFailed
+		e.status.Reason = rtcore.SandboxProcessFailed
 	}
 	if err != nil && code != 0 {
 		e.status.Message = err.Error()
@@ -291,28 +291,28 @@ func (b *Backend) wait(e *entry) {
 }
 
 // Status returns the current status of the task.
-func (b *Backend) Status(ctx context.Context, taskID string) (core.TaskStatus, error) {
+func (b *Backend) Status(ctx context.Context, taskID string) (rtcore.TaskStatus, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	e, ok := b.tasks[taskID]
 	if !ok {
-		return core.TaskStatus{}, fmt.Errorf("tasklocal: task %q: %w", taskID, core.ErrNotFound)
+		return rtcore.TaskStatus{}, fmt.Errorf("tasklocal: task %q: %w", taskID, rtcore.ErrNotFound)
 	}
 	return snapshot(e.status), nil
 }
 
 // Watch returns a channel that gets the current status and each later change.
 // The channel closes after the exited status or when ctx ends.
-func (b *Backend) Watch(ctx context.Context, taskID string) (<-chan core.TaskStatus, error) {
+func (b *Backend) Watch(ctx context.Context, taskID string) (<-chan rtcore.TaskStatus, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	e, ok := b.tasks[taskID]
 	if !ok {
-		return nil, fmt.Errorf("tasklocal: task %q: %w", taskID, core.ErrNotFound)
+		return nil, fmt.Errorf("tasklocal: task %q: %w", taskID, rtcore.ErrNotFound)
 	}
-	w := &watcher{ch: make(chan core.TaskStatus, watchBuffer), finished: make(chan struct{})}
+	w := &watcher{ch: make(chan rtcore.TaskStatus, watchBuffer), finished: make(chan struct{})}
 	w.ch <- snapshot(e.status)
-	if e.status.State == core.TaskExited {
+	if e.status.State == rtcore.TaskExited {
 		closeWatcher(w)
 		return w.ch, nil
 	}
@@ -337,9 +337,9 @@ func (b *Backend) Cancel(ctx context.Context, taskID string, graceSeconds int) e
 	defer b.mu.Unlock()
 	e, ok := b.tasks[taskID]
 	if !ok {
-		return fmt.Errorf("tasklocal: task %q: %w", taskID, core.ErrNotFound)
+		return fmt.Errorf("tasklocal: task %q: %w", taskID, rtcore.ErrNotFound)
 	}
-	if e.status.State == core.TaskExited {
+	if e.status.State == rtcore.TaskExited {
 		return nil
 	}
 	e.cancelled = true
@@ -359,7 +359,7 @@ func (b *Backend) Cancel(ctx context.Context, taskID string, graceSeconds int) e
 		case <-t.C:
 			b.mu.Lock()
 			defer b.mu.Unlock()
-			if e.status.State != core.TaskExited {
+			if e.status.State != rtcore.TaskExited {
 				_ = killGroup(e.cmd)
 			}
 		}
@@ -376,7 +376,7 @@ func (b *Backend) Destroy(ctx context.Context, taskID string) error {
 		b.mu.Unlock()
 		return nil
 	}
-	if e.status.State != core.TaskExited {
+	if e.status.State != rtcore.TaskExited {
 		e.cancelled = true
 		_ = killGroup(e.cmd)
 	}
@@ -407,10 +407,10 @@ func (b *Backend) Destroy(ctx context.Context, taskID string) error {
 }
 
 // List returns the status of each known task, sorted by task ID.
-func (b *Backend) List(ctx context.Context) ([]core.TaskStatus, error) {
+func (b *Backend) List(ctx context.Context) ([]rtcore.TaskStatus, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	out := make([]core.TaskStatus, 0, len(b.tasks))
+	out := make([]rtcore.TaskStatus, 0, len(b.tasks))
 	for _, e := range b.tasks {
 		out = append(out, snapshot(e.status))
 	}

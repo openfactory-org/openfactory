@@ -249,6 +249,13 @@ func Sidecar(p SidecarParams) map[string]any {
 			command = append(command, "--always-allow", h)
 		}
 	}
+	// Platform hosts, such as an in-cluster control plane, may resolve to a
+	// private address. netguard refuses that for every other host.
+	for _, h := range p.AlwaysAllow {
+		if h != "" && !strings.HasPrefix(h, ".") && !strings.HasPrefix(h, "*.") {
+			command = append(command, "--allow-private-host", h)
+		}
+	}
 	return map[string]any{
 		"name":            ProxySidecarName,
 		"image":           p.Image,

@@ -174,38 +174,6 @@ const (
 	AgentCustom    AgentType = "CUSTOM"
 )
 
-type HarnessType string
-
-const (
-	HarnessClaude HarnessType = "claude"
-	HarnessCodex  HarnessType = "codex"
-)
-
-type HarnessAuth struct {
-	Source     string `json:"source" yaml:"source"` // managedSecret | workerEnvironment
-	SecretName string `json:"secretName,omitempty" yaml:"secretName,omitempty"`
-}
-
-type HarnessConfig struct {
-	Type           HarnessType  `json:"type"`
-	Model          string       `json:"model"`
-	ReasoningLevel string       `json:"reasoningLevel,omitempty"`
-	Auth           *HarnessAuth `json:"auth,omitempty"`
-}
-
-// MCPServer is one MCP server transport. Exactly one of ManagedID/Command/URL is set.
-type MCPServer struct {
-	ManagedID string            `json:"managedId,omitempty" yaml:"managedId,omitempty"`
-	Command   string            `json:"command,omitempty" yaml:"command,omitempty"`
-	Args      []string          `json:"args,omitempty" yaml:"args,omitempty"`
-	Env       map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
-	URL       string            `json:"url,omitempty" yaml:"url,omitempty"`
-	Headers   map[string]string `json:"headers,omitempty" yaml:"headers,omitempty"`
-	// AllowWrite enables the write tools of a built-in integration server
-	// (managedId "builtin/<provider>"). Valid only with such a managedId.
-	AllowWrite bool `json:"allowWrite,omitempty" yaml:"allowWrite,omitempty"`
-}
-
 // BuiltinMCPPrefix is the managedId namespace of the MCP servers that the
 // control plane serves itself (integration tools such as builtin/linear).
 const BuiltinMCPPrefix = "builtin/"
@@ -320,22 +288,6 @@ type NetworkPolicy struct {
 	Extends      []string `json:"extends,omitempty"`
 	AllowedHosts []string `json:"allowedHosts,omitempty"`
 	DeniedHosts  []string `json:"deniedHosts,omitempty"`
-}
-
-// EffectiveNetworkPolicy is the merged result. Restricted=false means unrestricted.
-type EffectiveNetworkPolicy struct {
-	Restricted   bool     `json:"restricted"`
-	AllowedHosts []string `json:"allowed_hosts"`
-	DeniedHosts  []string `json:"denied_hosts"`
-}
-
-type Skill struct {
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
-	Path        string            `json:"path"`            // path inside the definition tree
-	Content     string            `json:"content"`         // full SKILL.md
-	Files       map[string]string `json:"files,omitempty"` // supporting files, relative to skill dir
-	Scope       string            `json:"scope"`           // "factory" or agent name
 }
 
 type MachineSpec struct {
@@ -690,34 +642,6 @@ type Run struct {
 	QueuedAt *time.Time `json:"queued_at,omitempty"`
 }
 
-// Usage is the token, cost and time accounting of a run, a session or one
-// harness turn. DurationMS is agent time: the sum of the turn durations.
-type Usage struct {
-	InputTokens  int64   `json:"input_tokens"`
-	OutputTokens int64   `json:"output_tokens"`
-	CostUSD      float64 `json:"cost_usd"`
-	DurationMS   int64   `json:"duration_ms"`
-	// Coverage is empty when the counts are complete, or UsagePartial when
-	// at least one turn ended before its harness reported totals (for
-	// example a cancelled turn). Partial counts are estimates.
-	Coverage string `json:"coverage,omitempty"`
-}
-
-// Usage coverage values.
-const (
-	UsageKnown   = "known"
-	UsagePartial = "partial"
-)
-
-// CoverageLabel returns the coverage for the API: UsageKnown when Coverage
-// is empty.
-func (u Usage) CoverageLabel() string {
-	if u.Coverage == "" {
-		return UsageKnown
-	}
-	return u.Coverage
-}
-
 // RunMessage is one entry in a run's transcript/conversation.
 type RunMessage struct {
 	ID        string          `json:"id"`
@@ -828,17 +752,10 @@ func (i *InboxItem) IsReadBy(userID string) bool {
 
 // ---------- Secrets ----------
 
-type SecretType string
-
 const (
-	SecretGeneric      SecretType = "generic"
-	SecretAnthropicKey SecretType = "anthropic_api_key" //nolint:gosec // G101: a secret type name, not a credential
-	// SecretAnthropicOAuth is a long-lived Claude Code OAuth token, made with
-	// `claude setup-token`. Only the claude harness uses it.
-	SecretAnthropicOAuth SecretType = "anthropic_oauth_token"        //nolint:gosec // G101: a secret type name, not a credential
+	SecretGeneric        SecretType = "generic"
 	SecretBedrockKey     SecretType = "anthropic_bedrock_api_key"    //nolint:gosec // G101: a secret type name, not a credential
 	SecretBedrockAccess  SecretType = "anthropic_bedrock_access_key" //nolint:gosec // G101: a secret type name, not a credential
-	SecretOpenAIKey      SecretType = "openai_api_key"               //nolint:gosec // G101: a secret type name, not a credential
 	SecretDockerRegistry SecretType = "docker_registry"
 	SecretAWSECR         SecretType = "aws_ecr_credential" //nolint:gosec // G101: a secret type name, not a credential
 )

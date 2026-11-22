@@ -5,11 +5,11 @@
 //
 // Server side, Hub accepts worker connections at GET /api/v1/workers/connect
 // (authenticated with a team API key as a bearer token), records workers and
-// their heartbeats through core.Store.UpsertWorker, and gives the dispatcher
-// one core.TaskBackend for each worker ID (HubBackend). Worker side,
+// their heartbeats through rtcore.Store.UpsertWorker, and gives the dispatcher
+// one rtcore.TaskBackend for each worker ID (HubBackend). Worker side,
 // RunWorkerV2 connects (reconnecting with exponential backoff), registers its
 // id/name/labels/capacity/backend and runs tasks with a local
-// core.TaskBackend (kubernetes, or local for development).
+// rtcore.TaskBackend (kubernetes, or local for development).
 //
 // There is one wire protocol, version 2 (WebSocket subprotocol
 // "openfactory.worker.v2"). protocolv2.go describes it. Version 1, which
@@ -24,7 +24,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 )
 
 const (
@@ -40,6 +40,9 @@ const (
 	typeRequest   = "request"
 	typeResponse  = "response"
 	typeEvent     = "event"
+
+	typeAuthChallenge = "auth.challenge"
+	typeAuthResponse  = "auth.response"
 )
 
 // Error codes.
@@ -106,15 +109,15 @@ var ReservedWorkerIDs = []string{"server", "local", "kubernetes", "direct", "man
 // worker hosts or start with "openfactory" are reserved.
 func ValidateWorkerID(id string) error {
 	if !workerIDRe.MatchString(id) {
-		return fmt.Errorf("%w: worker id %q must be 1-64 characters of letters, digits, '.', '_' or '-'", core.ErrInvalid, id)
+		return fmt.Errorf("%w: worker id %q must be 1-64 characters of letters, digits, '.', '_' or '-'", rtcore.ErrInvalid, id)
 	}
 	lower := strings.ToLower(id)
 	if strings.HasPrefix(lower, "openfactory") {
-		return fmt.Errorf("%w: worker ids starting with \"openfactory\" are reserved", core.ErrInvalid)
+		return fmt.Errorf("%w: worker ids starting with \"openfactory\" are reserved", rtcore.ErrInvalid)
 	}
 	for _, r := range ReservedWorkerIDs {
 		if lower == r {
-			return fmt.Errorf("%w: worker id %q is reserved", core.ErrInvalid, id)
+			return fmt.Errorf("%w: worker id %q is reserved", rtcore.ErrInvalid, id)
 		}
 	}
 	return nil

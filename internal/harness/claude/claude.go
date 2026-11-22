@@ -1,5 +1,5 @@
 // Package claude implements the Claude Code harness: it runs the `claude` CLI in print
-// mode inside the run's sandbox and translates its stream-json output into core.HarnessEvents.
+// mode inside the run's sandbox and translates its stream-json output into rtcore.HarnessEvents.
 //
 // Invocation (one process per turn):
 //
@@ -26,8 +26,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openfactory-org/openfactory/internal/core"
 	"github.com/openfactory-org/openfactory/internal/harness"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 )
 
 // Files written into the sandbox (relative to the work dir).
@@ -78,8 +78,8 @@ func New(opts Options) *Harness {
 	return &Harness{opts: opts}
 }
 
-// Type implements core.Harness.
-func (h *Harness) Type() core.HarnessType { return core.HarnessClaude }
+// Type implements rtcore.Harness.
+func (h *Harness) Type() rtcore.HarnessType { return rtcore.HarnessClaude }
 
 // ResolveModel maps a configured model to a CLI model name. "" and
 // "default" select the CLI default. Other names pass through unchanged.
@@ -105,15 +105,12 @@ func thinkingTokens(level string) string {
 }
 
 // BuildArgs returns the argv for one turn (exported for tests and diagnostics).
-func (h *Harness) BuildArgs(req core.HarnessRequest, systemPromptFile string, mcpConfigFile string) ([]string, map[string]string) {
+func (h *Harness) BuildArgs(req rtcore.HarnessRequest, systemPromptFile string, mcpConfigFile string) ([]string, map[string]string) {
 	args := []string{h.opts.Binary, "-p", "--output-format", "stream-json", "--verbose", "--input-format", "text"}
 	env := map[string]string{}
-	var cfg core.HarnessConfig
-	if req.Run != nil {
-		cfg = req.Run.Config.Harness
-	}
-	if req.Resume && req.Run != nil && req.Run.SessionID != "" {
-		args = append(args, "--resume", req.Run.SessionID)
+	cfg := req.Harness
+	if req.Resume && req.SessionID != "" {
+		args = append(args, "--resume", req.SessionID)
 	}
 	if model := ResolveModel(cfg.Model); model != "" {
 		args = append(args, "--model", model)
@@ -145,8 +142,8 @@ func (h *Harness) BuildArgs(req core.HarnessRequest, systemPromptFile string, mc
 	return args, env
 }
 
-// Run implements core.Harness.
-func (h *Harness) Run(ctx context.Context, sb core.Sandbox, req core.HarnessRequest) (<-chan core.HarnessEvent, error) {
+// Run implements rtcore.Harness.
+func (h *Harness) Run(ctx context.Context, sb rtcore.Sandbox, req rtcore.HarnessRequest) (<-chan rtcore.HarnessEvent, error) {
 	workDir := harness.WorkDir(sb, req)
 	authEnv, err := harness.ClaudeAuthEnv(req.Auth)
 	if err != nil {
@@ -160,7 +157,7 @@ func (h *Harness) Run(ctx context.Context, sb core.Sandbox, req core.HarnessRequ
 	// repositories are added here, so each harness gets the same
 	// instructions.
 	repo := harness.DiscoverRepo(ctx, sb, workDir)
-	var repoSkills []core.Skill
+	var repoSkills []rtcore.Skill
 	for _, s := range repo.Skills {
 		if !strings.HasPrefix(s.Path, harness.ClaudeSkillsDir+"/") {
 			repoSkills = append(repoSkills, s)
@@ -228,7 +225,7 @@ func (h *Harness) Run(ctx context.Context, sb core.Sandbox, req core.HarnessRequ
 		p := newParser()
 		p.hint = harness.CredentialHint(req)
 		start := time.Now()
-		res, err := harness.StreamLines(runCtx, sb, core.ExecRequest{Cmd: args, Dir: workDir, Env: env}, req.Prompt, func(line []byte) {
+		res, err := harness.StreamLines(runCtx, sb, rtcore.ExecRequest{Cmd: args, Dir: workDir, Env: env}, req.Prompt, func(line []byte) {
 			for _, ev := range p.handle(line) {
 				em.Emit(ev)
 			}
@@ -239,7 +236,7 @@ func (h *Harness) Run(ctx context.Context, sb core.Sandbox, req core.HarnessRequ
 		// The turn ended without a result message (cancelled, crashed or
 		// timed out). Report the tokens of the assistant messages so far.
 		if u := p.partialUsage(); u != nil {
-			em.Emit(core.HarnessEvent{Kind: harness.EventUsage, Usage: u, SessionID: p.sessionID})
+			em.Emit(rtcore.HarnessEvent{Kind: harness.EventUsage, Usage: u, SessionID: p.sessionID})
 		}
 		msg := ""
 		switch {
@@ -255,7 +252,7 @@ func (h *Harness) Run(ctx context.Context, sb core.Sandbox, req core.HarnessRequ
 		}
 		msg += harness.CredentialHint(req)
 		h.opts.Logger.Warn("claude harness failed", "sandbox", sb.ID(), "error", msg, "elapsed", time.Since(start))
-		em.Emit(core.HarnessEvent{Kind: harness.EventError, Content: msg, SessionID: p.sessionID})
+		em.Emit(rtcore.HarnessEvent{Kind: harness.EventError, Content: msg, SessionID: p.sessionID})
 	}()
 	return ch, nil
 }
@@ -296,8 +293,8 @@ func (p *parser) noteUsage(m *streamInner) {
 // partialUsage returns the sum of the usage of the assistant messages, marked
 // partial, or nil without tokens. The stream has no cost for single messages,
 // so the cost is 0. The duration is 0: the runner measures the turn.
-func (p *parser) partialUsage() *core.Usage {
-	var u core.Usage
+func (p *parser) partialUsage() *rtcore.Usage {
+	var u rtcore.Usage
 	for _, id := range p.msgOrder {
 		m := p.msgUsage[id]
 		u.InputTokens += m.InputTokens + m.CacheCreationInputTokens + m.CacheReadInputTokens
@@ -306,7 +303,7 @@ func (p *parser) partialUsage() *core.Usage {
 	if u.InputTokens == 0 && u.OutputTokens == 0 {
 		return nil
 	}
-	u.Coverage = core.UsagePartial
+	u.Coverage = rtcore.UsagePartial
 	return &u
 }
 
@@ -358,10 +355,10 @@ type block struct {
 	IsError   bool            `json:"is_error"`
 }
 
-func (p *parser) handle(line []byte) []core.HarnessEvent {
+func (p *parser) handle(line []byte) []rtcore.HarnessEvent {
 	var m streamMsg
 	if err := json.Unmarshal(line, &m); err != nil {
-		return []core.HarnessEvent{{Kind: harness.EventLog, Role: "log", Content: harness.Truncate(string(line), 4000)}}
+		return []rtcore.HarnessEvent{{Kind: harness.EventLog, Role: "log", Content: harness.Truncate(string(line), 4000)}}
 	}
 	if m.SessionID != "" {
 		p.sessionID = m.SessionID
@@ -379,21 +376,21 @@ func (p *parser) handle(line []byte) []core.HarnessEvent {
 	return nil // stream_event, rate_limit_event and future types are ignored
 }
 
-func (p *parser) system(m streamMsg) []core.HarnessEvent {
+func (p *parser) system(m streamMsg) []rtcore.HarnessEvent {
 	if m.Subtype != "init" {
 		if m.Subtype == "" {
 			return nil
 		}
-		return []core.HarnessEvent{{Kind: harness.EventLog, Role: "log", Content: "claude: " + m.Subtype, Data: map[string]any{"subtype": m.Subtype}}}
+		return []rtcore.HarnessEvent{{Kind: harness.EventLog, Role: "log", Content: "claude: " + m.Subtype, Data: map[string]any{"subtype": m.Subtype}}}
 	}
-	evs := []core.HarnessEvent{{
+	evs := []rtcore.HarnessEvent{{
 		Kind:      harness.EventSession,
 		SessionID: m.SessionID,
 		Data:      map[string]any{"model": m.Model, "tools": m.Tools},
 	}}
 	for _, s := range m.MCPServers {
 		if s.Status != "" && s.Status != "connected" {
-			evs = append(evs, core.HarnessEvent{Kind: harness.EventLog, Role: "log", Content: fmt.Sprintf("mcp server %q status: %s", s.Name, s.Status)})
+			evs = append(evs, rtcore.HarnessEvent{Kind: harness.EventLog, Role: "log", Content: fmt.Sprintf("mcp server %q status: %s", s.Name, s.Status)})
 		}
 	}
 	return evs
@@ -420,12 +417,12 @@ func (p *parser) baseData(m streamMsg) map[string]any {
 	return d
 }
 
-func (p *parser) assistant(m streamMsg) []core.HarnessEvent {
+func (p *parser) assistant(m streamMsg) []rtcore.HarnessEvent {
 	if m.Message == nil {
 		return nil
 	}
 	p.noteUsage(m.Message)
-	var evs []core.HarnessEvent
+	var evs []rtcore.HarnessEvent
 	for _, b := range parseBlocks(m.Message.Content) {
 		switch b.Type {
 		case "text":
@@ -435,7 +432,7 @@ func (p *parser) assistant(m streamMsg) []core.HarnessEvent {
 			if m.ParentToolUseID == "" {
 				p.lastText = b.Text
 			}
-			evs = append(evs, core.HarnessEvent{Kind: harness.EventMessage, Role: "assistant", Content: b.Text, SessionID: p.sessionID, Data: p.baseData(m)})
+			evs = append(evs, rtcore.HarnessEvent{Kind: harness.EventMessage, Role: "assistant", Content: b.Text, SessionID: p.sessionID, Data: p.baseData(m)})
 		case "tool_use":
 			p.toolNames[b.ID] = b.Name
 			d := p.baseData(m)
@@ -443,7 +440,7 @@ func (p *parser) assistant(m streamMsg) []core.HarnessEvent {
 			var input any
 			_ = json.Unmarshal(b.Input, &input)
 			d["input"] = input
-			evs = append(evs, core.HarnessEvent{Kind: harness.EventToolCall, Role: "tool_call", Content: toolCallSummary(b.Name, b.Input), SessionID: p.sessionID, Data: d})
+			evs = append(evs, rtcore.HarnessEvent{Kind: harness.EventToolCall, Role: "tool_call", Content: toolCallSummary(b.Name, b.Input), SessionID: p.sessionID, Data: d})
 		}
 	}
 	return evs
@@ -457,18 +454,18 @@ func toolCallSummary(name string, input json.RawMessage) string {
 	return name + " " + harness.Truncate(in, 2000)
 }
 
-func (p *parser) user(m streamMsg) []core.HarnessEvent {
+func (p *parser) user(m streamMsg) []rtcore.HarnessEvent {
 	if m.Message == nil {
 		return nil
 	}
-	var evs []core.HarnessEvent
+	var evs []rtcore.HarnessEvent
 	for _, b := range parseBlocks(m.Message.Content) {
 		if b.Type != "tool_result" {
 			continue
 		}
 		d := p.baseData(m)
 		d["tool_use_id"], d["name"], d["is_error"] = b.ToolUseID, p.toolNames[b.ToolUseID], b.IsError
-		evs = append(evs, core.HarnessEvent{Kind: harness.EventToolResult, Role: "tool_result", Content: harness.Truncate(resultText(b.Content), 16000), SessionID: p.sessionID, Data: d})
+		evs = append(evs, rtcore.HarnessEvent{Kind: harness.EventToolResult, Role: "tool_result", Content: harness.Truncate(resultText(b.Content), 16000), SessionID: p.sessionID, Data: d})
 	}
 	return evs
 }
@@ -488,14 +485,14 @@ func resultText(raw json.RawMessage) string {
 
 // result reports the totals of the result message. They replace the usage
 // of the assistant messages, so nothing counts twice.
-func (p *parser) result(m streamMsg) []core.HarnessEvent {
+func (p *parser) result(m streamMsg) []rtcore.HarnessEvent {
 	p.finished = true
-	u := &core.Usage{CostUSD: m.TotalCostUSD, DurationMS: m.DurationMS}
+	u := &rtcore.Usage{CostUSD: m.TotalCostUSD, DurationMS: m.DurationMS}
 	if m.Usage != nil {
 		u.InputTokens = m.Usage.InputTokens + m.Usage.CacheCreationInputTokens + m.Usage.CacheReadInputTokens
 		u.OutputTokens = m.Usage.OutputTokens
 	}
-	evs := []core.HarnessEvent{{Kind: harness.EventUsage, Usage: u, SessionID: p.sessionID, Data: map[string]any{"num_turns": m.NumTurns}}}
+	evs := []rtcore.HarnessEvent{{Kind: harness.EventUsage, Usage: u, SessionID: p.sessionID, Data: map[string]any{"num_turns": m.NumTurns}}}
 	result := m.Result
 	if result == "" {
 		result = p.lastText
@@ -508,10 +505,10 @@ func (p *parser) result(m streamMsg) []core.HarnessEvent {
 				msg += ": " + string(m.Errors)
 			}
 		}
-		evs = append(evs, core.HarnessEvent{Kind: harness.EventError, Content: msg + p.hint, SessionID: p.sessionID, Usage: u, Data: map[string]any{"subtype": m.Subtype, "num_turns": m.NumTurns}})
+		evs = append(evs, rtcore.HarnessEvent{Kind: harness.EventError, Content: msg + p.hint, SessionID: p.sessionID, Usage: u, Data: map[string]any{"subtype": m.Subtype, "num_turns": m.NumTurns}})
 		return evs
 	}
-	evs = append(evs, core.HarnessEvent{Kind: harness.EventDone, Role: "assistant", Content: result, SessionID: p.sessionID, Usage: u, Data: map[string]any{"num_turns": m.NumTurns}})
+	evs = append(evs, rtcore.HarnessEvent{Kind: harness.EventDone, Role: "assistant", Content: result, SessionID: p.sessionID, Usage: u, Data: map[string]any{"num_turns": m.NumTurns}})
 	return evs
 }
 

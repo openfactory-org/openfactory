@@ -12,7 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 	"github.com/openfactory-org/openfactory/internal/sandbox/netguard"
 )
 
@@ -24,6 +24,7 @@ func newNetguardCmd() *cobra.Command {
 		reportListen string
 		allow, deny  []string
 		alwaysAllow  []string
+		privateHosts []string
 		unrestricted bool
 	)
 	cmd := &cobra.Command{
@@ -34,12 +35,18 @@ one network policy. A request to a host that the policy does not allow gets a
 403 answer. The Kubernetes backend runs one proxy as a sidecar of each
 restricted sandbox Pod, with the policy of that sandbox.
 
+The proxy never dials a private, loopback, link-local, carrier-grade NAT,
+cloud metadata or other reserved address, even when the policy allows the host
+name that resolves to it. --allow-private-host names the exact hosts that may
+resolve to such an address, for example a control plane on a private network.
+
 --report-listen serves the blocked hosts at GET /blocked. The report has no
 secret, so it must stay on a loopback address.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			policy := core.EffectiveNetworkPolicy{Restricted: !unrestricted, AllowedHosts: allow, DeniedHosts: deny}
+			policy := rtcore.EffectiveNetworkPolicy{Restricted: !unrestricted, AllowedHosts: allow, DeniedHosts: deny}
 			p := netguard.New(policy, alwaysAllow)
+			p.AllowPrivateHosts(privateHosts)
 			p.Logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGTERM, syscall.SIGINT)
 			defer stop()
@@ -71,6 +78,7 @@ secret, so it must stay on a loopback address.`,
 	cmd.Flags().StringSliceVar(&allow, "allow", nil, "allowed host (repeat the flag or separate values with commas)")
 	cmd.Flags().StringSliceVar(&deny, "deny", nil, "denied host (repeat the flag or separate values with commas)")
 	cmd.Flags().StringSliceVar(&alwaysAllow, "always-allow", nil, "host that is always reachable; a leading \".\" matches subdomains")
+	cmd.Flags().StringSliceVar(&privateHosts, "allow-private-host", nil, "exact host that may resolve to a private or other reserved address (repeat the flag or separate values with commas)")
 	cmd.Flags().BoolVar(&unrestricted, "unrestricted", false, "allow every host that is not denied")
 	return cmd
 }

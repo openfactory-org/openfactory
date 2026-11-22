@@ -9,6 +9,16 @@ import (
 	"strings"
 )
 
+type commandHookKey struct{}
+
+// WithCommandHook returns a context whose git commands pass through hook
+// before they start. The runner uses it to run git as the agent user when
+// the egress lock is on: the agent controls .git/config, so git must never
+// run as root in the workspace.
+func WithCommandHook(ctx context.Context, hook func(*exec.Cmd)) context.Context {
+	return context.WithValue(ctx, commandHookKey{}, hook)
+}
+
 // git runs "git -C dir args..." and returns the standard output without the
 // trailing newline.
 func git(ctx context.Context, dir string, args ...string) (string, error) {
@@ -33,6 +43,9 @@ func gitRaw(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "git", full...)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
 	cmd.Env = append(cmd.Env, identityEnv()...)
+	if hook, ok := ctx.Value(commandHookKey{}).(func(*exec.Cmd)); ok && hook != nil {
+		hook(cmd)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

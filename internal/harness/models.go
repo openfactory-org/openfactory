@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 )
 
 // Model is one entry of a harness model catalog.
@@ -63,18 +63,18 @@ func codexCatalog() []Model {
 // Models returns the model catalog for a harness type (aliases accepted).
 // The catalogs are advisory: harnesses pass any non-empty model through to the
 // underlying CLI.
-func Models(t core.HarnessType) []Model {
+func Models(t rtcore.HarnessType) []Model {
 	switch NormalizeType(string(t)) {
-	case core.HarnessClaude:
+	case rtcore.HarnessClaude:
 		return claudeCatalog()
-	case core.HarnessCodex:
+	case rtcore.HarnessCodex:
 		return codexCatalog()
 	}
 	return nil
 }
 
 // DefaultModel returns the catalog default for t.
-func DefaultModel(t core.HarnessType) string {
+func DefaultModel(t rtcore.HarnessType) string {
 	for _, m := range Models(t) {
 		if m.Default {
 			return m.ID
@@ -85,11 +85,11 @@ func DefaultModel(t core.HarnessType) string {
 
 // ReasoningLevels returns the accepted reasoningLevel values for t (nil for
 // an unknown harness).
-func ReasoningLevels(t core.HarnessType) []string {
+func ReasoningLevels(t rtcore.HarnessType) []string {
 	switch NormalizeType(string(t)) {
-	case core.HarnessClaude:
+	case rtcore.HarnessClaude:
 		return append([]string(nil), claudeReasoningLevels...)
-	case core.HarnessCodex:
+	case rtcore.HarnessCodex:
 		return append([]string(nil), codexReasoningLevels...)
 	}
 	return nil
@@ -97,7 +97,7 @@ func ReasoningLevels(t core.HarnessType) []string {
 
 // ValidateReasoningLevel checks a reasoningLevel against the harness. An
 // unknown harness rejects any value.
-func ValidateReasoningLevel(t core.HarnessType, level string) error {
+func ValidateReasoningLevel(t rtcore.HarnessType, level string) error {
 	if level == "" {
 		return nil
 	}
@@ -116,17 +116,17 @@ func ValidateReasoningLevel(t core.HarnessType, level string) error {
 // HarnessForModel selects the harness of a model name, for the shorthand
 // `model: X` of a definition. A Claude model name selects claude. An OpenAI
 // model name selects codex. The result is "" for any other name.
-func HarnessForModel(model string) core.HarnessType {
+func HarnessForModel(model string) rtcore.HarnessType {
 	m := strings.ToLower(strings.TrimSpace(model))
 	m = strings.TrimPrefix(m, "anthropic.")
 	switch {
 	case strings.HasPrefix(m, "claude-"), m == "opus", m == "sonnet", m == "haiku":
-		return core.HarnessClaude
+		return rtcore.HarnessClaude
 	case strings.HasPrefix(m, "gpt-"), strings.HasPrefix(m, "codex-"), strings.HasPrefix(m, "chatgpt-"):
-		return core.HarnessCodex
+		return rtcore.HarnessCodex
 	case len(m) >= 2 && m[0] == 'o' && m[1] >= '0' && m[1] <= '9':
 		// o-series reasoning models: o3, o4-mini, ...
-		return core.HarnessCodex
+		return rtcore.HarnessCodex
 	}
 	return ""
 }

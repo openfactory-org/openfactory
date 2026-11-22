@@ -12,8 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 	"github.com/openfactory-org/openfactory/internal/runnerproto"
+	"github.com/openfactory-org/openfactory/internal/sandbox/netlock"
 )
 
 const (
@@ -28,6 +29,28 @@ const (
 type setupError struct{ msg string }
 
 func (e *setupError) Error() string { return e.msg }
+
+// noSymlinks returns an error when a part of rel below base is a symbolic link.
+func noSymlinks(base, rel string) error {
+	cur := base
+	for _, part := range strings.Split(filepath.ToSlash(rel), "/") {
+		if part == "" {
+			continue
+		}
+		cur = filepath.Join(cur, part)
+		fi, err := os.Lstat(cur)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%s is a symbolic link", cur)
+		}
+	}
+	return nil
+}
 
 // checkRelPath returns an error if p is empty, absolute or has a ".." part.
 func checkRelPath(p string) error {
@@ -64,6 +87,11 @@ func (r *runner) setup(ctx context.Context) error {
 			return err
 		}
 	}
+	// With the lock on, the files that root wrote go to the agent before the
+	// agent runs git or a command in the workspace.
+	if err := r.giveToAgent(r.cfg.WorkDir); err != nil {
+		return &setupError{"give the workspace to the agent: " + err.Error()}
+	}
 	for _, repo := range ws.Repositories {
 		repo := repo
 		if err := r.step(ctx, "clone:"+repo.Path, func() (string, error) { return r.clone(ctx, repo) }); err != nil {
@@ -79,6 +107,9 @@ func (r *runner) setup(ctx context.Context) error {
 		if err := r.step(ctx, "secret_files", func() (string, error) { return "", r.writeSecretFiles(r.secretFiles) }); err != nil {
 			return err
 		}
+	}
+	if err := r.giveToAgent(r.cfg.WorkDir); err != nil {
+		return &setupError{"give the workspace to the agent: " + err.Error()}
 	}
 	if ci := r.start.Cloud; ci != nil {
 		if err := r.step(ctx, "cloud_identity", func() (string, error) { return r.setupCloud(ctx, ci) }); err != nil {
@@ -177,6 +208,11 @@ func (r *runner) writeSecretFiles(files []runnerproto.SecretFile) error {
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 			return err
 		}
+		// A cloned repository can hold symbolic links. The runner may run as
+		// root, so it never writes through one.
+		if err := noSymlinks(r.cfg.WorkDir, f.Path); err != nil {
+			return fmt.Errorf("secret file %s: %w", f.Path, err)
+		}
 		if err := os.WriteFile(p, data, mode); err != nil {
 			return err
 		}
@@ -200,7 +236,7 @@ func (r *runner) clone(ctx context.Context, repo runnerproto.Repository) (string
 		return "", errors.New("ref is not valid")
 	}
 	dest := filepath.Join(r.cfg.WorkDir, filepath.FromSlash(repo.Path))
-	out, err := r.git(ctx, r.cfg.WorkDir, cloneArgs(r.cfg.GitCredentialHelper, repo.CloneURL, dest)...)
+	out, err := r.git(ctx, r.cfg.WorkDir, cloneArgs(r.gitCredentialHelper(), repo.CloneURL, dest, r.gitMirror(repo.CloneURL))...)
 	if err != nil {
 		return out, err
 	}
@@ -224,20 +260,48 @@ func (r *runner) clone(ctx context.Context, repo runnerproto.Repository) (string
 }
 
 // cloneArgs makes the arguments of git for a clone. With a helper, git gets
-// the helper for the clone itself.
-func cloneArgs(helper, url, dest string) []string {
+// the helper for the clone itself. With a mirror, git borrows its objects
+// and then copies them (--dissociate), so the clone does not depend on the
+// mirror after the clone.
+func cloneArgs(helper, url, dest, mirror string) []string {
 	var args []string
 	if helper != "" {
 		args = append(args, "-c", "credential.helper="+helper, "-c", "credential.useHttpPath=true")
 	}
-	return append(args, "clone", "--", url, dest)
+	if mirror != "" {
+		// The mirror belongs to another user; git refuses it without this.
+		args = append(args, "-c", "safe.directory="+mirror)
+	}
+	args = append(args, "clone")
+	if mirror != "" {
+		args = append(args, "--reference", mirror, "--dissociate")
+	}
+	return append(args, "--", url, dest)
+}
+
+// gitMirror returns the read-only mirror of a clone URL, or "" when there is
+// none.
+func (r *runner) gitMirror(cloneURL string) string {
+	dir := r.cfg.GitMirrorDir
+	if dir == "" {
+		dir = DefaultGitMirrorDir
+	}
+	key := GitCacheKey(cloneURL)
+	if key == "" {
+		return ""
+	}
+	p := filepath.Join(dir, key+".git")
+	if fi, err := os.Stat(p); err != nil || !fi.IsDir() {
+		return ""
+	}
+	return p
 }
 
 // configureCredentials sets the credential helper in the config of a clone.
 // The helper gets its credential from the control plane, so the config has
 // no credential value.
 func (r *runner) configureCredentials(ctx context.Context, dir string) error {
-	h := r.cfg.GitCredentialHelper
+	h := r.gitCredentialHelper()
 	if h == "" {
 		return nil
 	}
@@ -277,16 +341,21 @@ func (r *runner) excludeOpenfactory(repoDir string) {
 	_, _ = f.WriteString("\n.openfactory/\n")
 }
 
+// git runs git in dir. With the egress lock on, git runs as the agent: the
+// agent controls .git/config, so git never runs as root in the workspace.
 func (r *runner) git(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Env = append(r.env(), "GIT_TERMINAL_PROMPT=0")
+	r.asAgent(cmd)
 	return runCommand(cmd, dir)
 }
 
-// shell runs one setup command in a new shell in the workspace.
+// shell runs one setup command in a new shell in the workspace, as the
+// agent when the lock is on.
 func (r *runner) shell(ctx context.Context, command string) (string, error) {
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.Env = r.env()
+	r.asAgent(cmd)
 	return runCommand(cmd, r.cfg.WorkDir)
 }
 
@@ -314,7 +383,7 @@ func tail(s string) string {
 // environment without the bootstrap token, then the values of the control
 // plane, then the secrets.
 func (r *runner) env() []string {
-	skip := core.TaskEnvBootstrapToken + "="
+	skip := rtcore.TaskEnvBootstrapToken + "="
 	var out []string
 	for _, e := range os.Environ() {
 		if !strings.HasPrefix(e, skip) {
@@ -322,7 +391,7 @@ func (r *runner) env() []string {
 		}
 	}
 	for k, v := range r.start.Env {
-		if k != core.TaskEnvBootstrapToken {
+		if k != rtcore.TaskEnvBootstrapToken {
 			out = append(out, k+"="+v)
 		}
 	}
@@ -331,6 +400,14 @@ func (r *runner) env() []string {
 	}
 	for k, v := range r.secretEnv {
 		out = append(out, k+"="+v)
+	}
+	if r.agent != nil {
+		// The agent reaches the network only through netguard. These come
+		// last, so they win over the values above.
+		for k, v := range r.lock.Env() {
+			out = append(out, k+"="+v)
+		}
+		out = append(out, "HOME="+r.agent.Home, "USER="+netlock.AgentUser, "LOGNAME="+netlock.AgentUser)
 	}
 	// The agent commits too. Without an identity, git refuses to commit.
 	have := map[string]bool{}

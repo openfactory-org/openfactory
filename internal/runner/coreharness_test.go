@@ -9,22 +9,22 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 	"github.com/openfactory-org/openfactory/internal/runnerproto"
 )
 
-// fakeCoreHarness is a core.Harness that plays a list of events.
+// fakeCoreHarness is a rtcore.Harness that plays a list of events.
 type fakeCoreHarness struct {
 	mu     sync.Mutex
-	script func(n int, req core.HarnessRequest) []core.HarnessEvent // n counts calls from 1
+	script func(n int, req rtcore.HarnessRequest) []rtcore.HarnessEvent // n counts calls from 1
 	err    error
-	reqs   []core.HarnessRequest
-	sbs    []core.Sandbox
+	reqs   []rtcore.HarnessRequest
+	sbs    []rtcore.Sandbox
 }
 
-func (f *fakeCoreHarness) Type() core.HarnessType { return core.HarnessClaude }
+func (f *fakeCoreHarness) Type() rtcore.HarnessType { return rtcore.HarnessClaude }
 
-func (f *fakeCoreHarness) Run(_ context.Context, sb core.Sandbox, req core.HarnessRequest) (<-chan core.HarnessEvent, error) {
+func (f *fakeCoreHarness) Run(_ context.Context, sb rtcore.Sandbox, req rtcore.HarnessRequest) (<-chan rtcore.HarnessEvent, error) {
 	f.mu.Lock()
 	f.reqs = append(f.reqs, req)
 	f.sbs = append(f.sbs, sb)
@@ -34,7 +34,7 @@ func (f *fakeCoreHarness) Run(_ context.Context, sb core.Sandbox, req core.Harne
 		return nil, f.err
 	}
 	evs := f.script(n, req)
-	ch := make(chan core.HarnessEvent, len(evs))
+	ch := make(chan rtcore.HarnessEvent, len(evs))
 	for _, ev := range evs {
 		ch <- ev
 	}
@@ -104,25 +104,25 @@ func TestCoreHarnessCapabilities(t *testing.T) {
 }
 
 func TestCoreHarnessEventsAndResume(t *testing.T) {
-	f := &fakeCoreHarness{script: func(n int, req core.HarnessRequest) []core.HarnessEvent {
+	f := &fakeCoreHarness{script: func(n int, req rtcore.HarnessRequest) []rtcore.HarnessEvent {
 		if n == 1 {
-			return []core.HarnessEvent{
+			return []rtcore.HarnessEvent{
 				{Kind: "message", Role: "assistant", Content: "thinking", SessionID: "s1"},
 				{Kind: "message", Role: "tool_result", Content: "odd role"},
 				{Kind: "tool_call", Content: "ls {}", Data: map[string]any{"id": "c1", "name": "ls", "input": map[string]any{"path": "."}}},
 				{Kind: "tool_result", Content: "a.txt", Data: map[string]any{"tool_use_id": "c1", "is_error": true}},
 				{Kind: "tool_call", Content: "fallback name", Data: map[string]any{"call_id": "c2", "arguments": "x", "category": "shell"}},
-				{Kind: "usage", Usage: &core.Usage{InputTokens: 10, OutputTokens: 2, CostUSD: 0.5}},
+				{Kind: "usage", Usage: &rtcore.Usage{InputTokens: 10, OutputTokens: 2, CostUSD: 0.5}},
 				{Kind: "log", Content: "a log line"},
 				{Kind: "artifact", Content: "ignored"},
-				{Kind: "usage", Usage: &core.Usage{InputTokens: 5, OutputTokens: 1, CostUSD: 0.25}, SessionID: "s1"},
+				{Kind: "usage", Usage: &rtcore.Usage{InputTokens: 5, OutputTokens: 1, CostUSD: 0.25}, SessionID: "s1"},
 				{Kind: "message", Content: "final words"},
-				{Kind: "done", Content: "", SessionID: "s1", Usage: &core.Usage{InputTokens: 15, OutputTokens: 3}},
+				{Kind: "done", Content: "", SessionID: "s1", Usage: &rtcore.Usage{InputTokens: 15, OutputTokens: 3}},
 			}
 		}
-		return []core.HarnessEvent{
-			{Kind: "usage", Usage: &core.Usage{InputTokens: 1, OutputTokens: 1}},
-			{Kind: "done", Content: "second", SessionID: "s2", Usage: &core.Usage{InputTokens: 1, OutputTokens: 1}},
+		return []rtcore.HarnessEvent{
+			{Kind: "usage", Usage: &rtcore.Usage{InputTokens: 1, OutputTokens: 1}},
+			{Kind: "done", Content: "second", SessionID: "s2", Usage: &rtcore.Usage{InputTokens: 1, OutputTokens: 1}},
 		}
 	}}
 	c := &CoreHarness{H: f, now: frozenClock}
@@ -177,10 +177,10 @@ func TestCoreHarnessEventsAndResume(t *testing.T) {
 
 	// The request of the first turn.
 	r := f.reqs[0]
-	if r.Run.ID != "run_1" || r.Run.SessionID != "" || r.Resume || r.Prompt != "do it" || r.SystemPrompt != "be brief" || r.WorkDir != "/work" {
-		t.Fatalf("request %+v run %+v", r, r.Run)
+	if r.RunID != "run_1" || r.SessionID != "" || r.Resume || r.Prompt != "do it" || r.SystemPrompt != "be brief" || r.WorkDir != "/work" {
+		t.Fatalf("request %+v harness %+v", r, r.Harness)
 	}
-	if h := r.Run.Config.Harness; h.Type != core.HarnessClaude || h.Model != "m1" || h.ReasoningLevel != "high" {
+	if h := r.Harness; h.Type != rtcore.HarnessClaude || h.Model != "m1" || h.ReasoningLevel != "high" {
 		t.Fatalf("harness config %+v", h)
 	}
 	if !reflect.DeepEqual(r.Env, map[string]string{"A": "1", "B": "x=y"}) {
@@ -197,8 +197,8 @@ func TestCoreHarnessEventsAndResume(t *testing.T) {
 		t.Fatalf("result 2 %+v", res)
 	}
 	r = f.reqs[1]
-	if !r.Resume || r.Run.SessionID != "s1" {
-		t.Fatalf("second request resume %v session %q", r.Resume, r.Run.SessionID)
+	if !r.Resume || r.SessionID != "s1" {
+		t.Fatalf("second request resume %v session %q", r.Resume, r.SessionID)
 	}
 	if got := cap2.types(); !reflect.DeepEqual(got, []string{"usage", "harness.session"}) {
 		t.Fatalf("types of turn 2: %v", got)
@@ -212,8 +212,8 @@ func TestCoreHarnessEventsAndResume(t *testing.T) {
 }
 
 func TestCoreHarnessDoneUsageWithoutUsageEvent(t *testing.T) {
-	f := &fakeCoreHarness{script: func(int, core.HarnessRequest) []core.HarnessEvent {
-		return []core.HarnessEvent{{Kind: "done", Content: "ok", Usage: &core.Usage{InputTokens: 7, OutputTokens: 1}}}
+	f := &fakeCoreHarness{script: func(int, rtcore.HarnessRequest) []rtcore.HarnessEvent {
+		return []rtcore.HarnessEvent{{Kind: "done", Content: "ok", Usage: &rtcore.Usage{InputTokens: 7, OutputTokens: 1}}}
 	}}
 	var cp capture
 	res := (&CoreHarness{H: f, now: frozenClock}).Turn(context.Background(), baseTurnRequest(), cp.emit)
@@ -227,15 +227,15 @@ func TestCoreHarnessDoneUsageWithoutUsageEvent(t *testing.T) {
 }
 
 func TestCoreHarnessResumeFromStartResponse(t *testing.T) {
-	f := &fakeCoreHarness{script: func(int, core.HarnessRequest) []core.HarnessEvent {
-		return []core.HarnessEvent{{Kind: "done", Content: "ok", SessionID: "old"}}
+	f := &fakeCoreHarness{script: func(int, rtcore.HarnessRequest) []rtcore.HarnessEvent {
+		return []rtcore.HarnessEvent{{Kind: "done", Content: "ok", SessionID: "old"}}
 	}}
 	req := baseTurnRequest()
 	req.ResumeSessionID = "old"
 	var cp capture
 	(&CoreHarness{H: f, now: frozenClock}).Turn(context.Background(), req, cp.emit)
-	if r := f.reqs[0]; !r.Resume || r.Run.SessionID != "old" {
-		t.Fatalf("resume %v %q", r.Resume, r.Run.SessionID)
+	if r := f.reqs[0]; !r.Resume || r.SessionID != "old" {
+		t.Fatalf("resume %v %q", r.Resume, r.SessionID)
 	}
 	if len(cp.all(runnerproto.EventHarnessSession)) != 0 {
 		t.Fatal("harness.session for the session that was resumed")
@@ -245,23 +245,23 @@ func TestCoreHarnessResumeFromStartResponse(t *testing.T) {
 func TestCoreHarnessErrors(t *testing.T) {
 	cases := []struct {
 		name     string
-		events   []core.HarnessEvent
+		events   []rtcore.HarnessEvent
 		startErr error
 		code     string
 		msg      string
 	}{
-		{"error event", []core.HarnessEvent{{Kind: "error", Content: "boom"}}, nil, "agent_failed", "boom"},
-		{"auth error", []core.HarnessEvent{{Kind: "error", Content: "Invalid API key. Please check it"}}, nil, "harness_auth_failed", "Invalid API key. Please check it"},
-		{"login error", []core.HarnessEvent{{Kind: "error", Content: "Not logged in - Please run /login"}}, nil, "harness_auth_failed", "Not logged in - Please run /login"},
-		{"empty error", []core.HarnessEvent{{Kind: "error"}}, nil, "agent_failed", "harness reported an error"},
-		{"no end", []core.HarnessEvent{{Kind: "message", Content: "hi"}}, nil, "agent_failed", "harness exited without completing the turn"},
+		{"error event", []rtcore.HarnessEvent{{Kind: "error", Content: "boom"}}, nil, "agent_failed", "boom"},
+		{"auth error", []rtcore.HarnessEvent{{Kind: "error", Content: "Invalid API key. Please check it"}}, nil, "harness_auth_failed", "Invalid API key. Please check it"},
+		{"login error", []rtcore.HarnessEvent{{Kind: "error", Content: "Not logged in - Please run /login"}}, nil, "harness_auth_failed", "Not logged in - Please run /login"},
+		{"empty error", []rtcore.HarnessEvent{{Kind: "error"}}, nil, "agent_failed", "harness reported an error"},
+		{"no end", []rtcore.HarnessEvent{{Kind: "message", Content: "hi"}}, nil, "agent_failed", "harness exited without completing the turn"},
 		{"nothing", nil, nil, "agent_failed", "harness exited without completing the turn"},
 		{"start error", nil, errors.New("prepare sandbox: disk full"), "agent_failed", "prepare sandbox: disk full"},
 		{"start auth error", nil, errors.New("harness auth: cloud credentials require an AWS region"), "harness_auth_failed", "harness auth: cloud credentials require an AWS region"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			f := &fakeCoreHarness{err: tc.startErr, script: func(int, core.HarnessRequest) []core.HarnessEvent { return tc.events }}
+			f := &fakeCoreHarness{err: tc.startErr, script: func(int, rtcore.HarnessRequest) []rtcore.HarnessEvent { return tc.events }}
 			var cp capture
 			res := (&CoreHarness{H: f, now: frozenClock}).Turn(context.Background(), baseTurnRequest(), cp.emit)
 			if res.Outcome != runnerproto.OutcomeError || res.FailureCode != tc.code || res.Message != tc.msg {
@@ -273,9 +273,9 @@ func TestCoreHarnessErrors(t *testing.T) {
 
 func TestCoreHarnessInterrupted(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	f := &fakeCoreHarness{script: func(int, core.HarnessRequest) []core.HarnessEvent {
+	f := &fakeCoreHarness{script: func(int, rtcore.HarnessRequest) []rtcore.HarnessEvent {
 		cancel()
-		return []core.HarnessEvent{{Kind: "message", Content: "late"}, {Kind: "error", Content: "context canceled"}}
+		return []rtcore.HarnessEvent{{Kind: "message", Content: "late"}, {Kind: "error", Content: "context canceled"}}
 	}}
 	var cp capture
 	res := (&CoreHarness{H: f, now: frozenClock}).Turn(ctx, baseTurnRequest(), cp.emit)
@@ -285,8 +285,8 @@ func TestCoreHarnessInterrupted(t *testing.T) {
 }
 
 func TestCoreHarnessPassesInputs(t *testing.T) {
-	f := &fakeCoreHarness{script: func(int, core.HarnessRequest) []core.HarnessEvent {
-		return []core.HarnessEvent{{Kind: "done", Content: "ok"}}
+	f := &fakeCoreHarness{script: func(int, rtcore.HarnessRequest) []rtcore.HarnessEvent {
+		return []rtcore.HarnessEvent{{Kind: "done", Content: "ok"}}
 	}}
 	req := baseTurnRequest()
 	req.Auth = map[string]string{"EXAMPLE_API_KEY": "k"}
@@ -303,14 +303,14 @@ func TestCoreHarnessPassesInputs(t *testing.T) {
 	if !reflect.DeepEqual(r.Auth, req.Auth) {
 		t.Fatalf("auth %v", r.Auth)
 	}
-	wantMCP := map[string]core.MCPServer{
+	wantMCP := map[string]rtcore.MCPServer{
 		"srv":   {URL: "https://mcp.example/x", Headers: map[string]string{"Authorization": "Bearer t"}},
 		"local": {Command: "tool", Args: []string{"-v"}, Env: map[string]string{"K": "V"}},
 	}
 	if !reflect.DeepEqual(r.MCPServers, wantMCP) {
 		t.Fatalf("mcp servers %+v", r.MCPServers)
 	}
-	wantSkills := []core.Skill{{Name: "review", Content: "be kind", Files: map[string]string{"notes/a.md": "more"}, Path: ".openfactory/skills/review"}}
+	wantSkills := []rtcore.Skill{{Name: "review", Content: "be kind", Files: map[string]string{"notes/a.md": "more"}, Path: ".openfactory/skills/review"}}
 	if !reflect.DeepEqual(r.Skills, wantSkills) {
 		t.Fatalf("skills %+v", r.Skills)
 	}
@@ -320,8 +320,8 @@ func TestCoreHarnessPassesInputs(t *testing.T) {
 }
 
 func TestCoreHarnessCutsLongDiagnostic(t *testing.T) {
-	f := &fakeCoreHarness{script: func(int, core.HarnessRequest) []core.HarnessEvent {
-		return []core.HarnessEvent{
+	f := &fakeCoreHarness{script: func(int, rtcore.HarnessRequest) []rtcore.HarnessEvent {
+		return []rtcore.HarnessEvent{
 			{Kind: "mystery", Content: strings.Repeat("x", 20<<10)},
 			{Kind: "done", Content: "ok"},
 		}
@@ -335,8 +335,8 @@ func TestCoreHarnessCutsLongDiagnostic(t *testing.T) {
 }
 
 func TestCoreHarnessDeclaredArtifacts(t *testing.T) {
-	f := &fakeCoreHarness{script: func(int, core.HarnessRequest) []core.HarnessEvent {
-		return []core.HarnessEvent{
+	f := &fakeCoreHarness{script: func(int, rtcore.HarnessRequest) []rtcore.HarnessEvent {
+		return []rtcore.HarnessEvent{
 			{Kind: "artifact", Data: map[string]any{"path": "out/a.txt"}},
 			{Kind: "artifact", Data: map[string]any{"paths": []any{"b.txt", "c.txt"}}},
 			{Kind: "artifact", Content: " d.txt "},

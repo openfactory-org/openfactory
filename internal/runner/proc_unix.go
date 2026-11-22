@@ -10,7 +10,10 @@ import (
 // setProcessGroup makes the command the leader of a new process group, so
 // that the whole tree can be killed at once.
 func setProcessGroup(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.Setpgid = true
 }
 
 // killProcessGroup kills the process group of the command.

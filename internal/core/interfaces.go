@@ -4,16 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"time"
+
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 )
 
 var (
-	ErrNotFound     = errors.New("not found")
+	ErrNotFound     = rtcore.ErrNotFound
 	ErrConflict     = errors.New("conflict")
-	ErrInvalid      = errors.New("invalid")
-	ErrUnauthorized = errors.New("unauthorized")
-	ErrForbidden    = errors.New("forbidden")
+	ErrInvalid      = rtcore.ErrInvalid
+	ErrUnauthorized = rtcore.ErrUnauthorized
+	ErrForbidden    = rtcore.ErrForbidden
 
 	// ErrStale wraps ErrConflict. A versioned update (UpdateRun,
 	// UpdateWorkItem, UpdateInboxItem) returns it when the stored row changed
@@ -246,19 +247,6 @@ type OutboundMessage struct {
 
 // ---------- Harness ----------
 
-// HarnessRequest is everything a harness needs to run one turn of an agent session.
-type HarnessRequest struct {
-	Run          *Run
-	Prompt       string               // user message for this turn (initial prompt or follow-up)
-	SystemPrompt string               // composed instructions (agent instructions + role preamble + skills index)
-	Resume       bool                 // continue Run.SessionID
-	WorkDir      string               // path inside the sandbox
-	Env          map[string]string    // includes OF_METADATA_*, secrets materialized as env when requested
-	MCPServers   map[string]MCPServer // already includes the orchestration MCP server
-	Skills       []Skill
-	Auth         map[string]string // resolved credentials (e.g. ANTHROPIC_API_KEY)
-}
-
 // Outcomes of a message to a run: where it went.
 const (
 	// MessageLiveSession means that a live session got the message.
@@ -276,23 +264,6 @@ const (
 type MessageReceipt struct {
 	MessageID string `json:"message_id"`
 	Outcome   string `json:"outcome"`
-}
-
-// HarnessEvent is streamed while the harness runs.
-type HarnessEvent struct {
-	Kind      string // message, tool_call, tool_result, log, usage, session, done, error
-	Role      string
-	Content   string
-	SessionID string
-	Usage     *Usage
-	Data      map[string]any
-}
-
-// Harness runs agent turns inside a sandbox.
-type Harness interface {
-	Type() HarnessType
-	// Run executes a single turn and streams events; it must emit a final "done" or "error" event and close the channel.
-	Run(ctx context.Context, sb Sandbox, req HarnessRequest) (<-chan HarnessEvent, error)
 }
 
 // ---------- Sandboxes ----------
@@ -313,41 +284,6 @@ type RepoCheckout struct {
 	CloneURL string // with credentials embedded or via Env
 	Ref      string // branch or commit; empty = default branch
 	Path     string // relative destination inside the workspace
-}
-
-type ExecRequest struct {
-	Cmd     []string
-	Dir     string
-	Env     map[string]string
-	Stdin   io.Reader
-	Timeout time.Duration
-}
-
-type ExecResult struct {
-	ExitCode int
-	Stdout   string
-	Stderr   string
-}
-
-// Sandbox is a workspace that a harness uses: it runs processes and reads and
-// writes files. The runner implements it on the host of the task.
-type Sandbox interface {
-	ID() string
-	WorkDir() string
-	Exec(ctx context.Context, req ExecRequest) (*ExecResult, error)
-	// Start launches a long-running process and returns its stdout/stderr streams.
-	Start(ctx context.Context, req ExecRequest) (Process, error)
-	WriteFile(ctx context.Context, path string, data []byte, mode uint32) error
-	ReadFile(ctx context.Context, path string) ([]byte, error)
-	Destroy(ctx context.Context) error
-}
-
-type Process interface {
-	Stdout() io.Reader
-	Stderr() io.Reader
-	Stdin() io.WriteCloser
-	Wait() (int, error)
-	Kill() error
 }
 
 // ---------- Forges ----------

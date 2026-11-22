@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openfactory.dev/schemas/runner/v1/conversation.json",
+  "title": "Open Factory runner protocol v1: conversation",
+  "description": "Generated from internal/runnerproto and kept in step by internal/runnerproto/schema_test.go. A change to a field name is a breaking change of the protocol.",
+  "$defs": {
+    "Block": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "call_id": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "input": {},
+        "is_error": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ]
+    },
+    "Conversation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "conversation_id": {
+          "type": "string"
+        },
+        "steps": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ConversationStep"
+          }
+        }
+      },
+      "required": [
+        "conversation_id",
+        "steps"
+      ]
+    },
+    "ConversationMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "blocks": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/Block"
+          }
+        },
+        "kind": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "sender": {
+          "$ref": "#/$defs/Sender"
+        }
+      },
+      "required": [
+        "role",
+        "blocks"
+      ]
+    },
+    "ConversationStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "messages": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ConversationMessage"
+          }
+        },
+        "session": {
+          "type": "integer"
+        },
+        "step_id": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "step_id",
+        "session",
+        "messages"
+      ]
+    },
+    "Sender": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ]
+    }
+  }
+}

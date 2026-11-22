@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 )
 
 // RuleFileNames are the project rule files that a run reads from the root of
@@ -44,7 +44,7 @@ type RepoContext struct {
 	Rules []RuleFile
 	// Skills have the scope "repository". Path is the SKILL.md path relative
 	// to the work directory.
-	Skills []core.Skill
+	Skills []rtcore.Skill
 }
 
 // repoScanScript lists the repository roots (the work directory and each
@@ -77,12 +77,12 @@ func repoScanScript() string {
 // DiscoverRepo finds the rule files and the skills of the repositories in the
 // work directory. A failure to read a file leaves that file out; discovery
 // never fails a turn.
-func DiscoverRepo(ctx context.Context, sb core.Sandbox, workDir string) RepoContext {
+func DiscoverRepo(ctx context.Context, sb rtcore.Sandbox, workDir string) RepoContext {
 	var rc RepoContext
 	var rules, skillFiles []string
 	scanned := false
 	cctx, cancel := context.WithTimeout(ctx, repoDiscoveryLimit)
-	res, err := sb.Exec(cctx, core.ExecRequest{Cmd: []string{"sh", "-c", repoScanScript()}, Dir: workDir, Timeout: repoDiscoveryLimit})
+	res, err := sb.Exec(cctx, rtcore.ExecRequest{Cmd: []string{"sh", "-c", repoScanScript()}, Dir: workDir, Timeout: repoDiscoveryLimit})
 	cancel()
 	if err == nil && res != nil && res.ExitCode == 0 && strings.Contains(res.Stdout, discoveryMarker) {
 		scanned = true
@@ -135,7 +135,7 @@ func DiscoverRepo(ctx context.Context, sb core.Sandbox, workDir string) RepoCont
 			continue // the first repository and the first directory win
 		}
 		seen[SkillDirName(name)] = true
-		rc.Skills = append(rc.Skills, core.Skill{Name: name, Description: desc, Path: p, Content: string(b), Scope: "repository"})
+		rc.Skills = append(rc.Skills, rtcore.Skill{Name: name, Description: desc, Path: p, Content: string(b), Scope: "repository"})
 	}
 	return rc
 }
@@ -144,8 +144,8 @@ func DiscoverRepo(ctx context.Context, sb core.Sandbox, workDir string) RepoCont
 // this order: agent and factory skills first, then repository skills,
 // then built-in skills (scope "builtin"). A skill with a name that an earlier
 // source has is left out.
-func MergeRepoSkills(req, repo []core.Skill) []core.Skill {
-	var first, builtin []core.Skill
+func MergeRepoSkills(req, repo []rtcore.Skill) []rtcore.Skill {
+	var first, builtin []rtcore.Skill
 	for _, s := range req {
 		if s.Scope == "builtin" {
 			builtin = append(builtin, s)
@@ -153,9 +153,9 @@ func MergeRepoSkills(req, repo []core.Skill) []core.Skill {
 			first = append(first, s)
 		}
 	}
-	out := make([]core.Skill, 0, len(req)+len(repo))
+	out := make([]rtcore.Skill, 0, len(req)+len(repo))
 	seen := map[string]bool{}
-	for _, list := range [][]core.Skill{first, repo, builtin} {
+	for _, list := range [][]rtcore.Skill{first, repo, builtin} {
 		for _, s := range list {
 			k := SkillDirName(s.Name)
 			if seen[k] {

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 	"github.com/openfactory-org/openfactory/internal/runnerproto"
 )
 
@@ -46,6 +46,9 @@ func (h ExecHarness) Turn(ctx context.Context, req TurnRequest, emit Emitter) Tu
 	cmd.WaitDelay = killWaitDelay
 	cmd.Dir = req.WorkDir
 	cmd.Env = req.Env
+	if req.Agent != nil {
+		req.Agent.Apply(cmd)
+	}
 	cmd.Stdin = strings.NewReader(RenderInput(req.Input))
 	cmd.Stdout = &stdout
 	cmd.Stderr = stderr
@@ -71,7 +74,7 @@ func (h ExecHarness) Turn(ctx context.Context, req TurnRequest, emit Emitter) Tu
 func agentError(msg string) TurnResult {
 	return TurnResult{
 		Outcome:     runnerproto.OutcomeError,
-		FailureCode: string(core.FailureAgentFailed),
+		FailureCode: string(rtcore.FailureAgentFailed),
 		Message:     msg,
 	}
 }

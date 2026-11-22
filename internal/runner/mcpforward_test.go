@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 	"github.com/openfactory-org/openfactory/internal/runnerclient"
 	"github.com/openfactory-org/openfactory/internal/runnerproto"
 )
@@ -158,8 +158,8 @@ func TestTurnHarnessRewritesSessionTokenServers(t *testing.T) {
 		t.Fatal("no forwarder")
 	}
 
-	fake := &fakeCoreHarness{script: func(int, core.HarnessRequest) []core.HarnessEvent {
-		return []core.HarnessEvent{{Kind: "done"}}
+	fake := &fakeCoreHarness{script: func(int, rtcore.HarnessRequest) []rtcore.HarnessEvent {
+		return []rtcore.HarnessEvent{{Kind: "done"}}
 	}}
 	c := &CoreHarness{H: fake}
 	req := baseTurnRequest()
