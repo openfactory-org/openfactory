@@ -3513,7 +3513,7 @@ export interface components {
             run_id: string;
             session: number;
             /** @enum {string} */
-            type: "run.created" | "session.started" | "setup.step" | "snapshot.restored" | "session.ready" | "turn.started" | "turn.ended" | "snapshot.saved" | "session.ended" | "run.succeeded" | "run.failed" | "run.error" | "run.cancelled";
+            type: "run.created" | "run.queued" | "sandbox.assigned" | "secrets.delivered" | "session.started" | "setup.step" | "snapshot.restored" | "session.ready" | "turn.started" | "turn.ended" | "snapshot.saved" | "session.ended" | "run.succeeded" | "run.failed" | "run.error" | "run.cancelled";
             /** Format: date-time */
             at: string;
             data: {

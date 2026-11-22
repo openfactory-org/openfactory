@@ -11558,6 +11558,9 @@
             "type": "string",
             "enum": [
               "run.created",
+              "run.queued",
+              "sandbox.assigned",
+              "secrets.delivered",
               "session.started",
               "setup.step",
               "snapshot.restored",

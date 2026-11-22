@@ -48,6 +48,29 @@ export interface Vars {
   OF_MAX_ORCHESTRATION_DEPTH?: string;
   /** Maximum sandboxes open at once for the team. */
   OF_MAX_SANDBOXES?: string;
+  /** Run data retention in R2, a duration such as 720h ("0" or empty keeps forever). */
+  OF_OBJECT_STORE_RETENTION?: string;
+  /** Model of the built-in correctness judge (scoring). Empty: the default. */
+  OF_CORRECTNESS_MODEL?: string;
+  /** Model of the self-improvement failure analysis. Empty: the default. */
+  OF_ANALYSIS_MODEL?: string;
+  /** Agent that runs self-improvement. Empty: the default. */
+  OF_IMPROVEMENT_AGENT?: string;
+  /** Issuer URL of the run OIDC tokens (cloud identity). Empty: OF_PUBLIC_URL. */
+  OF_CLOUD_ID_ISSUER_URL?: string;
+  /** Optional OIDC sign-in settings (src/auth/oidc.ts). */
+  OF_OIDC_REDIRECT_URL?: string;
+  OF_OIDC_SCOPES?: string;
+  OF_OIDC_ALLOWED_DOMAINS?: string;
+  OF_OIDC_GROUPS_CLAIM?: string;
+  OF_OIDC_ADMIN_GROUPS?: string;
+  OF_OIDC_EDITOR_GROUPS?: string;
+  OF_OIDC_DEFAULT_ROLE?: string;
+  OF_OIDC_DISPLAY_NAME?: string;
+  /** Daytona organization tier (1-4; tiers 1 and 2 are refused). Default 3. */
+  OF_DAYTONA_TIER?: string;
+  /** Daytona shared region: "eu" or "us". Empty: the account default. */
+  OF_DAYTONA_TARGET?: string;
 }
 
 /** Secrets (`wrangler secret put`). Required ones are listed in wrangler.jsonc. */
@@ -65,6 +88,10 @@ export interface Secrets {
   OF_OIDC_CLIENT_SECRET?: string;
   /** P-256 private scalar of the run OIDC issuer (cloud identity). */
   OF_CLOUD_ID_KEY?: string;
+  /** API key of the daytona sandbox provider. Unset: daytona is not available. */
+  OF_DAYTONA_API_KEY?: string;
+  /** API key (boat_...) of the boatdev sandbox provider. Unset: boatdev is not available. */
+  OF_BOATDEV_API_KEY?: string;
 }
 
 export interface Bindings {
@@ -110,6 +137,21 @@ export const VAR_NAMES = [
   "OF_LOG_LEVEL",
   "OF_MAX_ORCHESTRATION_DEPTH",
   "OF_MAX_SANDBOXES",
+  "OF_OBJECT_STORE_RETENTION",
+  "OF_CORRECTNESS_MODEL",
+  "OF_ANALYSIS_MODEL",
+  "OF_IMPROVEMENT_AGENT",
+  "OF_CLOUD_ID_ISSUER_URL",
+  "OF_OIDC_REDIRECT_URL",
+  "OF_OIDC_SCOPES",
+  "OF_OIDC_ALLOWED_DOMAINS",
+  "OF_OIDC_GROUPS_CLAIM",
+  "OF_OIDC_ADMIN_GROUPS",
+  "OF_OIDC_EDITOR_GROUPS",
+  "OF_OIDC_DEFAULT_ROLE",
+  "OF_OIDC_DISPLAY_NAME",
+  "OF_DAYTONA_TIER",
+  "OF_DAYTONA_TARGET",
 ] as const satisfies readonly (keyof Vars)[];
 
 /** Required secrets (wrangler.jsonc secrets.required). */

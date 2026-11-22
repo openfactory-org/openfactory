@@ -176,6 +176,8 @@ export interface OutboxPayloads {
     completedMs: number | null;
     version: number;
     keys: string[];
+    /** The work item's source key, stored as kind 'source' (not 'thread'). */
+    sourceKey?: string;
   };
 
   // TeamDO / router / Worker -> IngressDO(partition); key = dedupe key (event.id)
