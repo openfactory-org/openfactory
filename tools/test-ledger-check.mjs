@@ -1,6 +1,9 @@
 #!/usr/bin/env node
-// Fails when a Go test file that existed at tag go-final is gone from the tree
-// and has no entry in tools/test-ledger.json, or when an entry is still "pending".
+// Fails when a Go test file that existed at the last Go control-plane commit
+// (GO_FINAL, tagged go-final) is gone from the tree and has no entry in
+// tools/test-ledger.json, or when an entry is still "pending". The base is a
+// commit SHA, not the tag, so the check works in a clone without tags; it needs
+// the full history (actions/checkout with fetch-depth: 0).
 // Usage: node tools/test-ledger-check.mjs [--base <ref>] [--allow-pending]
 // An entry is the replacing TS test path, "kept", or "dropped: <reason>".
 import { execFileSync } from "node:child_process";
@@ -11,7 +14,8 @@ const opt = (name, fallback) => {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : fallback;
 };
-const base = opt("--base", "go-final");
+const GO_FINAL = "7e64cc5d4cb8cded6d7c5f60e62bfd82f52c28f8";
+const base = opt("--base", GO_FINAL);
 const allowPending = args.includes("--allow-pending");
 
 const git = (...a) => execFileSync("git", a, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
