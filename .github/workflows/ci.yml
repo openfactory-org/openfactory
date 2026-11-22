@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    # Nightly: the Firecracker job.
+    - cron: "17 3 * * *"
 
 permissions:
   contents: read
@@ -14,65 +17,72 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  test:
-    name: Vet, test and build
+  node:
+    name: TypeScript checks
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: of_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      # Runs the PostgreSQL store conformance and upgrade suites.
-      OF_TEST_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/of_test?sslmode=disable
+    if: github.event_name != 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - name: Format
+        run: npm run format:check
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Generated files are up to date
+        run: npm run gen:check
+      - name: Test
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Validate example definitions
+        run: npm run validate-examples
+
+  contract:
+    name: Contract suite
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-      - name: gofmt
-        run: make fmt-check
-      - name: go vet
-        run: go vet ./...
-      - name: go test -race
-        run: go test -race -count=1 -coverprofile=coverage.out ./...
-      - name: Build binary and bundled plugins
-        run: make build plugins
-      - name: Build the Go example modules
-        run: make examples-go
-      - name: Validate example definitions
-        run: |
-          set -e
-          for d in examples/*/; do
-            [ -f "$d/factory.yaml" ] || continue
-            echo "::group::validate $d"
-            ./bin/openfactory validate "$d"
-            echo "::endgroup::"
-          done
-      - name: Definition schemas are up to date
-        run: make schemas-check
-      - name: Definition reference tables are up to date
-        run: make docs-check
-      - uses: actions/upload-artifact@v4
+      - uses: actions/setup-node@v4
         with:
-          name: openfactory-linux-amd64
-          path: |
-            bin/openfactory
-            bin/plugins/
-          retention-days: 7
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Build the runtime
+        run: make build
+      - run: npm ci
+      # wrangler dev, the local provider, a fake runner and one real Go runner run.
+      - name: Contract suite
+        run: npm run contract
 
-  lint:
+  go:
+    name: Go runtime
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Format, vet, race tests, linux builds, naming, package list
+        run: make fmt-check vet test-race build-linux naming go-allowlist
+
+  golangci-lint:
     name: golangci-lint
     runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -87,6 +97,7 @@ jobs:
   govulncheck:
     name: govulncheck
     runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -98,9 +109,23 @@ jobs:
       - name: govulncheck
         run: make vuln
 
+  npm-audit:
+    name: npm audit (report only)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: npm audit
+        continue-on-error: true
+        run: npm audit --omit=dev
+
   shellcheck:
     name: shellcheck
     runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
     steps:
       - uses: actions/checkout@v4
       # The ubuntu runner image includes shellcheck.
@@ -117,6 +142,7 @@ jobs:
   openapi:
     name: OpenAPI diff (report only until v1.0.0)
     runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
     env:
       OPENAPI_ENFORCE: "0"
     steps:
@@ -140,115 +166,61 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
 
-  # pkg/ is experimental in v1. The Go API diff reports changes in the
-  # job summary and never fails the build.
-  go-apidiff:
-    name: Go API diff (report only)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: apidiff pkg/
-        env:
-          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD~1' }}
-        run: |
-          sh scripts/go-apidiff.sh "$BASE" | tee apidiff.txt
-          {
-            echo '### Go API diff (pkg/, report only)'
-            echo '```'
-            cat apidiff.txt
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  web:
-    name: Dashboard build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - name: Typed API client matches the OpenAPI spec
-        run: |
-          cd web && npm ci
-          npm run check:api
-      - name: npm ci, build, and check internal/webui/dist is committed
-        run: make web-check
-      - name: Dashboard tests
-        working-directory: web
-        run: npm test
-
-  # Upgrade tests migrate databases from each earlier release and
-  # check that a database made before the single baseline migration is
-  # refused. The store conformance suites run in the main test job.
-  upgrade-test:
-    name: Database upgrade tests
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: of_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      # Runs the PostgreSQL upgrade tests too (only tests matched by -run Upgrade).
-      OF_TEST_POSTGRES_DSN: postgres://postgres:postgres@localhost:5432/of_test?sslmode=disable
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: go test -run Upgrade
-        run: make upgrade-test
-
-  deploy:
-    name: Helm chart
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-      # The chart test renders with the real helm command. Without Helm it
-      # skips, so install Helm first: here the test must run.
-      - uses: azure/setup-helm@v4
-      - name: helm lint and the chart test (every mode)
-        run: make helm-test
-
   images:
-    name: Container images build
+    name: Sandbox images build
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
       - uses: docker/setup-buildx-action@v3
-      - name: Server image
+      # The image bakes in the runtime binary when deploy/sandbox/runner has it.
+      - name: Build the runtime for linux/amd64
+        run: |
+          make build-linux LINUX_ARCHES=amd64
+          mkdir -p deploy/sandbox/runner
+          cp bin/linux-amd64/openfactory-runtime deploy/sandbox/runner/openfactory-runtime-linux-amd64
+      - name: Sandbox image
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: deploy/docker/Dockerfile
-          push: false
+          context: deploy/sandbox
+          file: deploy/sandbox/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: openfactory-sandbox:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - name: Tool example image
+      - name: Cloudflare sandbox image
         uses: docker/build-push-action@v6
         with:
-          context: images/tool-example
-          file: images/tool-example/Dockerfile
+          context: deploy/sandbox
+          file: deploy/sandbox/Dockerfile.cloudflare
+          build-args: SANDBOX_IMAGE=openfactory-sandbox:ci
+          platforms: linux/amd64
           push: false
+      - name: Smoke checks
+        run: IMAGE_TAG=ci SANDBOX_IMAGE=openfactory-sandbox sh scripts/images/build.sh smoke sandbox
+
+  # Runs nightly and on pull requests with the label e2e-firecracker.
+  # The runner needs /dev/kvm: check that the chosen runner offers it.
+  firecracker:
+    name: Firecracker end-to-end
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'e2e-firecracker'))
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Check for KVM
+        run: |
+          test -c /dev/kvm || { echo "::error::/dev/kvm is not available on this runner"; exit 1; }
+          sudo chmod 666 /dev/kvm
+      - name: Kernel and end-to-end tests
+        run: make kernel e2e-firecracker

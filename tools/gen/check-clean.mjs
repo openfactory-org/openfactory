@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 // Fails when generated paths differ from the committed tree (run after `npm run gen`).
+// Covers: api-client schema.d.ts, runner-proto and worker-proto generated types,
+// definition JSON Schemas and generated types, the generated tables of
+// docs/definition-reference.md, the built-in skills of packages/core, and the
+// `wrangler types` output of every Worker.
 import { execFileSync } from "node:child_process";
 
 const GENERATED = [
@@ -9,7 +13,8 @@ const GENERATED = [
   "packages/definition/src/generated",
   "schemas/definition/v1",
   "docs/definition-reference.md",
-  "apps/control-plane/worker-configuration.d.ts",
+  "packages/core/src/skills-builtin.generated.ts",
+  ":(glob)**/worker-configuration.d.ts",
 ];
 
 const out = execFileSync("git", ["status", "--porcelain", "--untracked-files=all", "--", ...GENERATED], {
