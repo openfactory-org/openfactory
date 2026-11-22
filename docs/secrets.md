@@ -12,7 +12,7 @@ You create a secret with a name, a type and a value; the API never shows the val
 | MCP server credentials | `{{NAME}}` in an MCP server's `env` or `headers` | Replaced with the value when the run starts. See [{{SECRET}} templating](definition-reference.md#secret-templating). |
 | Harness authentication | `harness.auth.secretName`, or no reference: the one secret of a model credential type is the default credential | Mapped to the harness's provider variables. See [Authentication](harnesses.md#authentication) and [Default credential](harnesses.md#default-credential). |
 | Webhook verification | `secretName` in `webhooks/<name>.yaml` | Verifies inbound deliveries. See [Webhooks](webhooks.md). |
-| Machine registry credential | `platform.linux.registryCredentialSecretName` | Ignored by the `kubernetes` backend, where the kubelet pulls images. Use `imagePullSecrets` in the pod template instead. See [Private registries](self-hosting/private-registries.md). |
+| Machine registry credential | `platform.linux.registryCredentialSecretName` | A microVM worker uses it to pull a private image. The hosted providers ignore it. See [Private registries](self-hosting/private-registries.md). |
 
 These uses are independent. For example, an empty `secrets` list does not remove harness authentication or MCP credentials.
 
@@ -40,11 +40,8 @@ A run looks in the factory scope first, then the team scope. A factory secret wi
 | `generic` (default) | Any UTF-8 text. | Agent environment, MCP credentials, webhooks. |
 | `anthropic_api_key` | One token without whitespace. | Claude Code. |
 | `anthropic_oauth_token` | One token without whitespace, made with `claude setup-token`. | Claude Code with a Claude subscription, for your own use only. A shared install should use `anthropic_api_key`. |
-| `anthropic_bedrock_api_key` | One token without whitespace. For Claude Code, JSON without whitespace: `{"api_key":"...","region":"us-east-1"}`. | Claude Code through Amazon Bedrock. |
-| `anthropic_bedrock_access_key` | JSON with only `access_key_id`, `secret_access_key`, `region` and optional `session_token`. | Claude Code through Amazon Bedrock. |
 | `openai_api_key` | One token without whitespace. | Codex. |
-| `docker_registry` | JSON with only `registry`, `username` and `password`. | A machine registry credential (ignored by the `kubernetes` backend). |
-| `aws_ecr_credential` | JSON. See [Private registries](self-hosting/private-registries.md). | A machine registry credential (ignored by the `kubernetes` backend). |
+| `docker_registry` | JSON with only `registry`, `username` and `password`. | A machine registry credential, used by microVM workers. |
 
 Every value is required, UTF-8 and without NUL bytes. `NAME=value` plus a terminating NUL byte must fit in 128 KiB (131072 bytes). For larger payloads, use an object store or an external secret manager and store only the access credential here.
 
@@ -120,7 +117,7 @@ curl -X PUT "$OF_PUBLIC_URL/api/v1/secrets/METABASE_API_KEY" \
 
 ## Protection
 
-- Each value is encrypted with its own data key under the master key `OF_SECRET_KEY`. See [Secrets at rest](security.md#secrets-at-rest).
+- Each value is encrypted with its own data key under the master key `OF_SECRET_KEY`, a Worker secret. See [Secrets at rest](security.md#secrets-at-rest).
 - If the master key changes without a rotation, stored secrets cannot be decrypted. Back up the key, and see [Key rotation](self-hosting/configuration.md#key-rotation).
 
 ## Troubleshooting

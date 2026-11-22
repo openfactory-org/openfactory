@@ -44,34 +44,26 @@ body:
     attributes:
       label: Install mode
       options:
-        - Helm chart
-        - Release binary
-        - Built from source (make build)
-        - Development server (OF_DEV=true)
-        - Local test stack (make local-up)
+        - Deployed to Cloudflare (wrangler deploy)
+        - Local development (wrangler dev)
+        - Custom control plane build
         - Other
     validations:
       required: true
   - type: dropdown
-    id: backend
+    id: provider
     attributes:
-      label: Sandbox backend
+      label: Sandbox provider
       options:
-        - kubernetes
-        - local
-        - Remote worker
-        - Plugin sandbox backend
+        - cloudflare-sandbox
+        - daytona
+        - boatdev
+        - MicroVM worker
+        - Development process worker (local)
+        - Plugin provider
         - Not applicable
     validations:
       required: true
-  - type: dropdown
-    id: database
-    attributes:
-      label: Database
-      options:
-        - SQLite
-        - PostgreSQL
-        - Not sure
   - type: dropdown
     id: harness
     attributes:
@@ -89,12 +81,12 @@ body:
     id: platform
     attributes:
       label: Platform
-      description: Operating system and architecture, or Kubernetes distribution and version.
+      description: Operating system and architecture of the host, for a bug on a worker or in the CLI. Include the Node.js version for a CLI bug.
   - type: textarea
     id: logs
     attributes:
       label: Logs
-      description: Server, worker or runner logs around the failure. Remove secrets.
+      description: Control plane (`wrangler tail`), worker or runner logs around the failure. Remove secrets.
       render: text
   - type: textarea
     id: context

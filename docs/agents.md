@@ -100,7 +100,7 @@ link related reference pages. Open a draft pull request. Never merge.
 
 `list_agents` shows a caller only the agents that it can start.
 
-The server setting `OF_MAX_ORCHESTRATION_DEPTH` limits how deep a tree of runs can grow. The default is `1`: only a root run can start agents, and a child run that calls `run_agents` gets an error, even if `spawnableBy` lists it. Set `2` or more to let child runs start their own child runs. See [Configuration](self-hosting/configuration.md).
+The team setting for the orchestration depth limits how deep a tree of runs can grow. The default is `1`: only a root run can start agents, and a child run that calls `run_agents` gets an error, even if `spawnableBy` lists it. Set `2` or more to let child runs start their own child runs. See [Configuration](self-hosting/configuration.md).
 
 ## Agent configuration
 
@@ -203,7 +203,7 @@ A reply goes where the person wrote. After a comment in a review thread of a pul
 
 ## Start child runs with run_agents
 
-The foreman, or an agent that `spawnableBy` allows, calls `run_agents` to start agents as child runs. The caller must be below `OF_MAX_ORCHESTRATION_DEPTH` (see [Control who can start an agent](#control-who-can-start-an-agent)).
+The foreman, or an agent that `spawnableBy` allows, calls `run_agents` to start agents as child runs. The caller must be below the orchestration depth limit (see [Control who can start an agent](#control-who-can-start-an-agent)).
 
 1. The caller calls `list_agents` to get the agent UIDs.
 2. The caller sends one `agent_run_configs` entry per child.
@@ -314,7 +314,7 @@ The agent's secrets and the environment's variables are also set. See [Secrets](
 When a run finishes a turn, its sandbox and harness session stay, so a follow-up message continues the same conversation. The run is `SUCCEEDED`, or `BLOCKED` while a request to a person is open. There is no `idle` state. See [Run states](troubleshooting.md#run-states).
 
 - A child's result and a person's reply in the source thread arrive as follow-up messages.
-- `idleTimeoutMinutes` (0–60) sets how long an idle run keeps its sandbox. The server default is `OF_IDLE_TIMEOUT_DEFAULT` (10 minutes). `OF_IDLE_TIMEOUT_MAX` (60 minutes) is the upper limit.
+- `idleTimeoutMinutes` (0–60) sets how long an idle run keeps its sandbox. The team default is 10 minutes. The upper limit is 60 minutes.
 - After the idle time, the runner saves a snapshot, the run finishes and the sandbox is released. A later follow-up starts a new sandbox from the snapshot.
 
 The new session continues the conversation:

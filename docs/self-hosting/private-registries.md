@@ -1,75 +1,41 @@
 # Private registries
 
-The kubelet pulls sandbox images, so registry credentials are Kubernetes image pull secrets in the sandbox namespace. The backend ignores the machine field `registryCredentialSecretName`; definitions still accept it.
+Private images matter for the sandbox image and for custom images that machines name in `platform.linux.image`. How a provider pulls an image differs.
 
-## Use an image pull secret
+## By provider
 
-1. Create the secret in the sandbox namespace.
+| Provider | How it gets the image |
+|---|---|
+| `cloudflare-sandbox` | The image is built into the provider Worker and pushed to the Cloudflare registry when you deploy. A machine image does not apply. |
+| `daytona` | A Daytona snapshot built from the sandbox image. Build the snapshot from your own registry image, with the registry credentials that Daytona holds for it. |
+| `boatdev` | A saved boat.dev snapshot. Build it with `make boat-snapshot`. |
+| microVM worker | The host pulls the image itself and converts it to a disk image. See [Registry credentials on a worker](#registry-credentials-on-a-worker). |
 
-   ```bash
-   kubectl -n openfactory-sandboxes create secret docker-registry internal-registry \
-     --docker-server=registry.example.com \
-     --docker-username=factory-bot \
-     --docker-password="$REGISTRY_TOKEN"
-   ```
+For the hosted providers, the image is prepared when you build the snapshot or deploy the Worker, so no pull secret reaches a run.
 
-2. Reference it in the pod template (`sandbox.podTemplate` in the Helm chart).
+## Registry credentials on a worker
 
-   ```yaml
-   imagePullSecrets:
-     - name: internal-registry
-   ```
+A microVM worker pulls the image of each session on the host. For a private image, name a team secret of the type `docker_registry` in the machine:
 
-3. Set the image on the machine (or the environment).
+```yaml
+# machines/linux-build.yaml
+platform:
+  os: linux
+  linux:
+    image: registry.example.com/factory/build:2026.11
+    registryCredentialSecretName: REGISTRY_PULL_CREDENTIAL
+```
 
-   ```yaml
-   # machines/linux-build.yaml
-   platform:
-     os: linux
-     linux:
-       image: registry.example.com/factory/build:2026.11
-   ```
+The control plane gives the worker a short-lived pull credential for that secret when it assigns the session. The credential stays in memory on the host.
 
-Instead of step 2, you can attach the pull secret to the service account of the sandbox pods (`serviceAccountName` in the [pod template](kubernetes.md#pod-template)).
+## Mirror the sandbox image
 
-## Amazon ECR, Google Artifact Registry and Azure Container Registry
+When a host or provider cannot pull from `ghcr.io`, copy the sandbox image to your registry with any OCI tool, for example `crane`:
 
-Prefer node or workload identity over static credentials:
+```bash
+crane copy ghcr.io/openfactory-org/sandbox:1.2.3 registry.example.com/mirror/sandbox:1.2.3
+```
 
-- **ECR.** Give the node role (or the kubelet credential provider) pull permission. ECR tokens in a static pull secret expire after 12 hours, so a static secret needs a controller that refreshes it.
-- **Artifact Registry.** Give the node service account `roles/artifactregistry.reader`.
-- **ACR.** Attach the registry to the cluster (`az aks update --attach-acr`), or grant the kubelet identity `AcrPull`.
+Then build the Daytona snapshot or the boat.dev snapshot from the mirror, or set the machine `platform.linux.image` for microVM workers. The sandbox image contains the runtime bootstrap, so a custom image must follow the [image contract](../sandbox-providers.md#build-the-sandbox-image).
 
-## Mirror the images
-
-When nodes cannot pull from `ghcr.io`, mirror the four images of a Kubernetes install:
-
-| Image | Use |
-| --- | --- |
-| `ghcr.io/openfactory-org/openfactory` | Server and worker. Also the runner image: the backend copies its `openfactory` binary into each sandbox. |
-| `ghcr.io/openfactory-org/sandbox` | The default sandbox image. It has no harness CLI. |
-| `ghcr.io/openfactory-org/tool-claude` | Tool image with the `claude` CLI. |
-| `ghcr.io/openfactory-org/tool-codex` | Tool image with the `codex` CLI. |
-
-Use the same tag for all four images.
-
-1. Copy the images with any OCI tool, for example `crane` or `skopeo`.
-
-   ```bash
-   for name in openfactory sandbox tool-claude tool-codex; do
-     crane copy "ghcr.io/openfactory-org/$name:1.2.3" "registry.example.com/mirror/$name:1.2.3"
-   done
-   ```
-
-2. Set the images. With Helm, set `image.repository` and `sandbox.image` (and the `sandbox` image in `sandbox.podTemplate`, if you set one). `runner.image` defaults to `image.repository` and `image.tag`. Without Helm, set `OF_RUNNER_IMAGE` too, because its default is the release image on `ghcr.io`:
-
-   ```bash
-   export OF_SANDBOX_IMAGE=registry.example.com/mirror/sandbox:1.2.3
-   export OF_RUNNER_IMAGE=registry.example.com/mirror/openfactory:1.2.3
-   ```
-
-3. If the repositories `openfactory`, `tool-claude` and `tool-codex` share one registry path, the server derives the tool image names from the runner image. Otherwise set `OF_CLAUDE_TOOL_IMAGE` and `OF_CODEX_TOOL_IMAGE`.
-
-A sandbox without a tool image must have its CLI on the `PATH` of its image, for example `claude` for the `claude` harness.
-
-There is no fallback image. A pull that fails for more than 5 minutes ends the sandbox with the reason `image_pull`. See [Startup timeouts](kubernetes.md#startup-timeouts), [Sandbox image](kubernetes.md#sandbox-image) and [Image pull failures](../troubleshooting.md#image-pull-failures).
+There is no fallback image. A pull that fails ends the session with `sandbox_create_failed`. See [Image pull failures](../troubleshooting.md#image-pull-failures).

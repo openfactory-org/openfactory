@@ -4,7 +4,7 @@ triggers:
   - provider: github
     event: pull_request_review_submitted
     filter:
-      repos: [acme/web-app, acme/ios-app]
+      repos: [acme/web-app, acme/api-service]
       review_states: [changes_requested]
       skip_bots: all
 ---

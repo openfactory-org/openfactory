@@ -11,8 +11,6 @@
 
 [![CI](https://github.com/openfactory-org/openfactory/actions/workflows/ci.yml/badge.svg)](https://github.com/openfactory-org/openfactory/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/openfactory-org/openfactory?include_prereleases&sort=semver)](https://github.com/openfactory-org/openfactory/releases)
-[![Go Reference](https://pkg.go.dev/badge/github.com/openfactory-org/openfactory.svg)](https://pkg.go.dev/github.com/openfactory-org/openfactory)
-[![Go version](https://img.shields.io/github/go-mod/go-version/openfactory-org/openfactory)](go.mod)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 <br>
 [![Stars](https://img.shields.io/github/stars/openfactory-org/openfactory?style=flat)](https://github.com/openfactory-org/openfactory/stargazers)
@@ -27,7 +25,7 @@
 
 ---
 
-Your backlog has small, well-understood tasks that wait weeks for someone to pick them up. Open Factory gives your team AI coding agents that take those tasks from an issue, a chat thread or a schedule, do the work, and open a pull request for your engineers to review. It runs on your Kubernetes cluster, and people approve the decisions that matter.
+Your backlog has small, well-understood tasks that wait weeks for someone to pick them up. Open Factory gives your team AI coding agents that take those tasks from an issue, a chat thread or a schedule, do the work, and open a pull request for your engineers to review. It runs in your Cloudflare account, and people approve the decisions that matter.
 
 <p align="center">
   <picture>
@@ -41,7 +39,7 @@ Your backlog has small, well-understood tasks that wait weeks for someone to pic
 - **Work starts where your team already works.** Label an issue, mention the factory in Slack or Teams, or call a webhook.
 - **Humans stay in control.** Agents stop and ask for approval or answers, in the dashboard inbox or in the original thread.
 - **Everything is code.** Agents, automations and rules are files that you version and review like any other change.
-- **Your infrastructure.** Each run gets its own sandbox in your cluster, with your secrets and your network rules.
+- **Your infrastructure.** The control plane runs in your Cloudflare account. Each run gets its own sandbox, on a hosted provider or on your own Linux hosts, with your secrets and your network rules.
 - **Choose your agent.** Each agent runs on Claude Code or Codex, and one factory can mix both.
 - **Measure the results.** Scorers grade runs, and benchmarks compare one configuration with another.
 
@@ -77,20 +75,24 @@ Read more in [How factories work](docs/how-factories-work.md).
 - [Incident resolution](docs/use-cases/incident-resolution.md): investigate a production failure and return an evidence report.
 - [End-to-end SDLC](docs/use-cases/end-to-end-sdlc.md): carry an issue from triage to a pull request that a person merges.
 
+## Architecture
+
+The control plane is one Cloudflare Worker with Durable Objects (SQLite storage), an R2 bucket for run data, and Static Assets for the dashboard. Agents run in sandboxes of a hosted provider (`cloudflare-sandbox`, `daytona`, `boatdev`) or in Firecracker microVMs on Linux hosts that you enroll as workers. Every sandbox runs `openfactory-runtime`, a small Go program, and the harness (`claude` or `codex`). The `openfactory` command is a TypeScript client from npm. See [Overview and concepts](docs/overview.md#architecture).
+
 ## Quickstart
 
-Run a development server on your workstation. You need Go, `git`, Claude Code (`claude` on your `PATH`), an Anthropic API key and a GitHub token.
+Run a development control plane on your workstation. You need Node.js 24 or later, Go, `git`, Claude Code (`claude` on your `PATH`), an Anthropic API key and a GitHub token.
 
 ```bash
 git clone https://github.com/openfactory-org/openfactory.git
 cd openfactory
-make build
-OF_DEV=true ./bin/openfactory serve
+npm ci && npm run build
+make dev           # wrangler dev on http://localhost:8787
 ```
 
-The server opens the dashboard at <http://localhost:8080> and prints an API key one time. [docs/quickstart.md](docs/quickstart.md) continues from there: connect GitHub, create a factory from an example, and send a first work item.
+[docs/quickstart.md](docs/quickstart.md) continues from there: set the development keys, create the first team, start a development worker, connect GitHub, create a factory from an example, and send a first work item.
 
-For a team install with the Helm chart, read [Kubernetes](docs/self-hosting/kubernetes.md).
+To deploy to your Cloudflare account, read [Deploy to Cloudflare](docs/self-hosting/cloudflare.md). To run agents on your own Linux hosts, read [Self-hosted workers](docs/self-hosted-machines.md).
 
 ## Integrations
 
@@ -115,7 +117,7 @@ The full index is in [docs/README.md](docs/README.md).
 
 ## Project status
 
-Open Factory is pre-1.0. No release has a version tag yet, and the first releases will be `v0.x`. Until `v1.0.0`, a release can change the definition format, the REST API and the Go packages, and the release notes list each change. Database upgrades from earlier releases are automatic and tested in CI. Pin the version that you run. [Upgrading](docs/self-hosting/upgrading.md#versions) lists the conditions for `v1.0.0`.
+Open Factory is pre-1.0. No release has a version tag yet, and the first releases will be `v0.x`. Until `v1.0.0`, a release can change the definition format, the REST API and the worker protocol, and the release notes list each change. Durable Object migrations from earlier releases are automatic and tested in CI. Pin the version that you run. [Upgrading](docs/self-hosting/upgrading.md#versions) lists the conditions for `v1.0.0`.
 
 ## Community and contributing
 

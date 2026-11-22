@@ -14,33 +14,38 @@ Create an OIDC client ("web application") in your identity provider:
 
 Note the issuer URL, client ID and client secret. A public client with PKCE needs no secret.
 
-## Configure the server
+## Configure the control plane
 
-With Helm:
+Set the variables in `wrangler.jsonc` and the secret with Wrangler:
 
-```yaml
-oidc:
-  enabled: true
-  issuer: https://login.example.com/realms/acme
-  clientID: openfactory
-  existingSecret: factory-oidc       # Secret with key "client-secret"
-  allowedDomains: example.com
-  groupsClaim: groups
-  adminGroups: platform-admins
-  editorGroups: developers
-  defaultRole: user
+```jsonc
+"vars": {
+  "OF_OIDC_ISSUER_URL": "https://login.example.com/realms/acme",
+  "OF_OIDC_CLIENT_ID": "openfactory",
+  "OF_OIDC_ADMIN_GROUPS": "platform-admins",
+  "OF_OIDC_EDITOR_GROUPS": "developers"
+}
 ```
-
-Without Helm, set the variables:
 
 ```bash
-export OF_OIDC_ISSUER=https://login.example.com/realms/acme
-export OF_OIDC_CLIENT_ID=openfactory
-export OF_OIDC_CLIENT_SECRET=...
-export OF_OIDC_ADMIN_GROUPS=platform-admins
+npx wrangler secret put OF_OIDC_CLIENT_SECRET -c apps/control-plane/wrangler.jsonc
 ```
 
-For every variable and Helm key, see [Configuration](configuration.md#oidc-login).
+Deploy again after the change. For every setting, see [Configuration](configuration.md#secrets).
+
+| Variable | Default | Description |
+|---|---|---|
+| `OF_OIDC_ISSUER_URL` | none | Issuer URL. Setting it turns single sign-on on. |
+| `OF_OIDC_CLIENT_ID` | none | Required with an issuer. |
+| `OF_OIDC_CLIENT_SECRET` (secret) | none | Optional for PKCE public clients. |
+| `OF_OIDC_REDIRECT_URL` | `${OF_PUBLIC_URL}/auth/oidc/callback` | Redirect URL registered with the identity provider. |
+| `OF_OIDC_SCOPES` | `openid,profile,email` | `openid` is always added. |
+| `OF_OIDC_ALLOWED_DOMAINS` | any | Comma-separated email domains that may sign in. |
+| `OF_OIDC_GROUPS_CLAIM` | `groups` | ID token claim with group names. |
+| `OF_OIDC_ADMIN_GROUPS`, `OF_OIDC_EDITOR_GROUPS` | none | Comma-separated groups mapped to admin and editor. |
+| `OF_OIDC_DEFAULT_ROLE` | `user` | Role for users in no mapped group: `admin`, `editor` or `user`. |
+| `OF_OIDC_DISPLAY_NAME` | `Single sign-on` | Login button label. |
+| `OF_OIDC_REQUIRE_VERIFIED_EMAIL` | `true` | Reject ID tokens with an unverified email. |
 
 ## Roles
 
@@ -54,8 +59,8 @@ The identity provider sets only the team-wide role. An admin can add a per-facto
 
 `OF_OIDC_ALLOWED_DOMAINS` limits sign-in to email domains. By default, ID tokens with an unverified email are rejected (`OF_OIDC_REQUIRE_VERIFIED_EMAIL`).
 
-Dashboard sessions are signed with a key derived from the signing key, so they survive restarts and work on every replica. See [Dashboard sign-in](../security.md#dashboard-sign-in).
+Dashboard sessions are signed with a key derived from the signing key, so they survive deploys. See [Dashboard sign-in](../security.md#dashboard-sign-in).
 
-API keys keep working next to OIDC login. Use them for the CLI, SDKs and workers.
+API keys keep working next to OIDC login. Use them for the CLI and for workers.
 
 See also [Security](../security.md) and [Dashboard](../dashboard.md).

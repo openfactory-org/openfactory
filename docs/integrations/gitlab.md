@@ -2,7 +2,7 @@
 
 A factory starts work from GitLab merge requests, pushes and bot mentions, and replies in merge request and issue threads. It works with GitLab.com and self-managed GitLab.
 
-GitLab support is the `openfactory-plugin-gitlab` plugin. The server image and the Helm chart load it; for other installs, see [Plugins](../self-hosting/plugins.md). You need the Owner or Maintainer role on the GitLab group or projects. For the shared setup steps and variables, see [Integrations](README.md#common-setup).
+GitLab support is a plugin Worker, bound to the control plane as `PLUGIN_GITLAB`. Deploy it with `npx wrangler deploy -c plugins/gitlab/wrangler.jsonc` (see [Plugins](../self-hosting/plugins.md)). You need the Owner or Maintainer role on the GitLab group or projects. For the shared setup steps and variables, see [Integrations](README.md#common-setup).
 
 ## Identities
 

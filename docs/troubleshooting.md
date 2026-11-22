@@ -4,8 +4,8 @@ Each section starts with the symptom or the exact error text.
 
 ## First steps
 
-1. Check that the server is ready: `curl -fsS ${OF_PUBLIC_URL}/readyz`. A `503` response names the cause.
-2. Set `OF_LOG_LEVEL=debug` and reproduce the problem.
+1. Check that the control plane is ready: `curl -fsS ${OF_PUBLIC_URL}/readyz`. A `503` response names the cause.
+2. Set `OF_LOG_LEVEL=debug`, deploy, and reproduce the problem. Stream the logs with `npx wrangler tail -c apps/control-plane/wrangler.jsonc`.
 3. Read the run transcript in the dashboard, or with `GET /api/v1/runs/{runId}/messages`. A failed run has an `error` field with the failure code and the cause. The requester gets the inbox item `Run failed: <work item title>`.
 4. Check the inbox for items of kind `failure`.
 
@@ -16,7 +16,7 @@ The API shows run states in upper case.
 | API state | Meaning |
 |---|---|
 | `QUEUED` | The run waits for capacity, or for a worker that serves its `workerHost`. |
-| `PENDING` | A backend prepares the sandbox. |
+| `PENDING` | A provider prepares the sandbox. |
 | `CLAIMED` | The sandbox exists and the runner does its setup. |
 | `RUNNING` | A turn is active. |
 | `BLOCKED` | The last turn ended with an open request to a person, or the harness asked for input. `blocked_reason` tells which. |
@@ -25,36 +25,27 @@ The API shows run states in upper case.
 | `ERROR` | A problem of the platform ended the run. `status_message` has the failure code. |
 | `CANCELLED` | A user or the foreman cancelled the run. |
 
-The idle timeout is the agent's `idleTimeoutMinutes` (0 to 60). If it is not set, the server default `OF_IDLE_TIMEOUT_DEFAULT` (10 minutes) applies, up to `OF_IDLE_TIMEOUT_MAX` (60 minutes). A message continues the run in the live session, or in a new session that restores the snapshot. See [Follow-ups and idle time](agents.md#follow-ups-and-idle-time).
+The idle timeout is the agent's `idleTimeoutMinutes` (0 to 60). If it is not set, the team default (10 minutes) applies, up to 60 minutes. A message continues the run in the live session, or in a new session that restores the snapshot. See [Follow-ups and idle time](agents.md#follow-ups-and-idle-time).
 
 After a run fails, its sandbox stays for the machine's `failureSessionRetentionMinutes`. Then the server removes it.
 
-## Server does not start
+## The control plane does not start
 
-The server validates its configuration at startup and prints all errors together.
+The control plane validates its configuration on the first request. A configuration error returns `internal_error` with the text `server configuration error`, and the log names the cause. Read it with `wrangler tail`.
 
-| Error | Fix |
+| Error in the log | Fix |
 |---|---|
-| `OF_SECRET_KEY is required (generate one with ...)` | Generate a key with `openssl rand -base64 32` and set `OF_SECRET_KEY`. See [Secret key](self-hosting/configuration.md#secret-key). |
-| `OF_SECRET_KEY: secrets: key is not valid base64` or `key must be 32 bytes, got N` | The key is malformed. Generate a new 32-byte key. |
-| `OF_DATABASE_URL "...": unsupported scheme (want sqlite:// or postgres://)` | Use one of these schemes. See [Database](self-hosting/configuration.md#database). |
-| `OF_PUBLIC_URL "..." must be an absolute http(s) URL` | Set a full URL, such as `https://factories.example.com`. |
-| `OF_SANDBOX_BACKEND "...": want kubernetes or local, or the name of a plugin that serves a sandbox backend` | Use `kubernetes` in production. `local` is for development and tests. A plugin name must name a plugin that serves the SandboxBackend service. |
-| Helm: `server.replicaCount is N but database.mode sqlite supports exactly one replica` | Set `server.replicaCount: 1`, or use `database.mode: postgres` to run more replicas. |
-| `OF_K8S_POD_TEMPLATE: ...` | The pod template file does not exist or is not readable. |
-| `config file ...: unknown key "..."` | Remove or correct the key in the YAML file. |
-
-### `acquire migration lock` or a migration error
-
-**Cause:** The database user cannot create tables, or another process holds the migration lock.
-
-**Fix:** Give the database user permission to create tables. Make sure that no other server instance is stuck in a migration.
+| `OF_SECRET_KEY is not set` | Set the secret: `openssl rand -base64 32 \| npx wrangler secret put OF_SECRET_KEY`. See [Secret key](self-hosting/configuration.md#secret-key). |
+| `OF_SECRET_KEY: key is not valid base64` or `key must be 32 bytes, got N` | The key is malformed. Generate a new 32-byte key. |
+| `OF_PUBLIC_URL ... must be an absolute http(s) URL` | Set a full URL, such as `https://factory.example.com`. |
+| `OF_OIDC_CLIENT_ID is required` | An OIDC issuer is set without a client ID. See [OIDC login](self-hosting/oidc.md). |
+| The deploy fails with a missing service binding | A Worker named in the `services` block does not exist. Deploy the provider or plugin Worker first, or remove its binding. See [Deploy to Cloudflare](self-hosting/cloudflare.md). |
 
 ## Stored secrets cannot be decrypted
 
 ### `secrets: ciphertext was encrypted with a different master key`
 
-**Cause:** The server runs with a different `OF_SECRET_KEY` than the key that encrypted the secrets. A common case: a development server created `~/.openfactory/secret.key`, and production runs with another key.
+**Cause:** The control plane runs with a different `OF_SECRET_KEY` than the key that encrypted the secrets. A common case: a development deployment and a production deployment use different keys.
 
 **Fix:** Restore the original key. During a rotation, put the old key in `OF_SECRET_KEY_PREVIOUS`. See [Key rotation](self-hosting/configuration.md#key-rotation). Without the key, there is no recovery: delete the affected secrets and create them again.
 
@@ -62,7 +53,7 @@ A message such as `(key version "1a2b3c4d" is not configured)` means that no con
 
 ### `secrets: cannot unwrap data key: keys: cannot unwrap the data key` or `secrets: cannot decrypt value (tampered ciphertext)`
 
-**Cause:** A secret record was changed or copied in the database.
+**Cause:** A secret record was changed or copied.
 
 **Fix:** Create the secret again through the API.
 
@@ -72,7 +63,7 @@ A message such as `(key version "1a2b3c4d" is not configured)` means that no con
 |---|---|
 | `invalid API key` | The key does not exist, or it is revoked or expired. Use an active key of your user. |
 | `missing X-OF-CSRF: 1 header` | The sign-in request had neither the header `X-OF-CSRF: 1` nor an `Origin` of the server. Reload `/login`. |
-| You are signed out after each restart. | Set a stable `OF_SECRET_KEY`. |
+| You are signed out after each deploy. | Keep `OF_SIGNING_KEY` (or `OF_SECRET_KEY`) the same. |
 | Sign-in works on HTTP but not behind a proxy. | Set `OF_PUBLIC_URL` to the external `https://` URL. |
 
 ## API errors
@@ -83,13 +74,19 @@ Every API error is an RFC 7807 problem document with a stable `code`. Read `deta
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| The worker exits with `--api-key (or OF_API_KEY) is required`. | No API key was given. | Pass `--api-key` or set `OF_API_KEY`. |
-| The worker exits with `invalid --label "..." (want key=value)`. | A label has no `=`. | Use `--label key=value`. |
-| The worker exits with `worker API key rejected by server`. | The key is invalid or revoked, or its owner does not have the team-wide `admin` role. | Create a key of an admin user or service account, and restart the worker. |
-| The worker logs `worker connection lost; reconnecting` repeatedly. | The worker cannot reach `--server`, or a proxy blocks WebSocket upgrades. | Allow outbound HTTPS and WebSocket traffic to the control plane. The reverse proxy must forward the `Upgrade` and `Connection` headers for `/api/v1/workers/connect`. |
-| The server logs `expected hello` or `unsupported worker protocol`. | A proxy changes the request, or the worker is too old. The server needs worker protocol v2. | Remove request rewriting for the connect path. Upgrade the worker to the release of the server. |
-| The worker exits with `worker id "..." is reserved` or `worker ids starting with "openfactory" are reserved`. | The id is reserved. | Choose another id. See [Worker id rules](self-hosting/configuration.md#worker-id-rules). |
-| The server logs `worker heartbeat timeout`. | The worker was silent for 45 seconds. | Check the network between worker and server, and the idle timeouts of load balancers. |
+| A new worker stays `pending`. | The service did not start, or the worker cannot reach the control plane. | Run `sudo openfactory-runtime worker status` and `sudo openfactory-runtime worker doctor` on the host. Read `journalctl -u openfactory-worker`. |
+| `enroll` fails with a token error. | The token expired (1 hour) or was used. | Create a new enrollment token. |
+| `enroll` fails because of KVM. | The host has no usable `/dev/kvm`. | Use a host with KVM. `doctor` prints the cause. |
+| The worker logs `auth_failed` or the control plane refuses the signature. | The worker was revoked, or its key does not match. | Revoke the worker record and enroll the host again. |
+| A development worker exits with `--api-key (or OF_API_KEY) or --key-file (or OF_WORKER_KEY_FILE) is required`. | No credential was given. | Pass `--api-key` or `--key-file`. |
+| A development worker exits with `invalid --label "..." (want key=value)`. | A label has no `=`. | Use `--label key=value`. |
+| A development worker exits with `worker API key rejected by server`. | The key is invalid or revoked, or its owner does not have the team-wide `admin` role. | Create a key of an admin user or service account, and restart the worker. |
+| A development worker is refused. | `OF_DEV_PROCESS_WORKERS` is not `true` on the control plane. | Set it for development. Never set it in production. |
+| The worker logs `worker connection lost; reconnecting` repeatedly. | The worker cannot reach the control plane, or a proxy blocks WebSocket upgrades. | Allow outbound HTTPS and WebSocket traffic to the control plane. |
+| The control plane logs `unsupported worker protocol`. | The worker is too old. The control plane needs worker protocol v2. | Update the runtime on the worker to the release of the control plane. |
+| The worker exits with `worker id "..." is reserved`. | The ID is reserved. | Choose another ID. See [Worker ID rules](self-hosting/configuration.md#development-process-worker). |
+| The control plane logs `worker heartbeat timeout`. | The worker was silent too long. | Check the network between the worker and the control plane. |
+| Traffic from VMs fails on a host with Docker, ufw or firewalld. | A host firewall drops VM traffic. | Run `worker doctor` and add the rule that it prints. |
 
 ## Runs stay queued
 
@@ -97,8 +94,8 @@ A run stays `queued` in these cases:
 
 | Cause | Fix |
 |---|---|
-| No connected worker has the id of the `workerHost`, or its slots are full. | Start the worker, or raise its `--capacity`. |
-| `OF_MAX_SANDBOXES` is reached. | Wait until a session ends, or raise the limit. |
+| No online worker has the ID of the `workerHost`, or its slots are full. The run shows the reason `waiting_for_worker`. | Start the worker, raise its slots, or drain less. |
+| The team limit of open sessions is reached. | Wait until a session ends, or raise the limit. |
 | The factory's `maxConcurrentRuns` is reached. | Wait, or raise it in `factory.yaml`. |
 | `queued_reason` is `spend_limit`. | The run starts when the next UTC day or month begins. The queue timeout does not apply. See [Spend limits](security.md#spend-limits). |
 
@@ -107,13 +104,13 @@ After the queue timeout `OF_QUEUE_TIMEOUT` (default 30 minutes), the run goes to
 To find the cause:
 
 1. Read the agent's effective `workerHost` with `GET /api/v1/factories/{uid}/agents/{name}`.
-2. If it names a remote worker, run `openfactory worker list` (or `GET /api/v1/workers`). A worker with exactly that id must be `online`. The match is case-sensitive. A worker started without `--id` uses the host name.
-3. If it is `kubernetes`, make sure that the server has that backend configured.
+2. If it names a worker, run `openfactory worker list` (or `GET /api/v1/workers`). A worker with exactly that ID or name must be `online` and not `draining`. The match is case-sensitive. For `pool:<label>`, a worker with that label must be online and allow the factory.
+3. If it is a provider ID (`cloudflare-sandbox`, `daytona`, `boatdev`), check that the provider is configured. A provider that hits its start rate limit queues runs.
 4. Make sure that the worker belongs to the team of the factory.
 
 ## `spend_limit_exceeded`
 
-**Cause:** At a turn end, the spend of the factory (`spendLimit` in `factory.yaml`) or of the team (`OF_TEAM_SPEND_LIMIT_DAILY`, `OF_TEAM_SPEND_LIMIT_MONTHLY`) was at or over its limit. The control plane stopped the run tree. The `error` field of each run gives the limit, the spend and the reset time.
+**Cause:** At a turn end, the spend of the factory (`spendLimit` in `factory.yaml`) or of the team (the team spend limits) was at or over its limit. The control plane stopped the run tree. The `error` field of each run gives the limit, the spend and the reset time.
 
 **Fix:** Wait for the next period, or raise the limit. Then send a message to the run to continue it. See [Spend limits](security.md#spend-limits).
 
@@ -146,35 +143,30 @@ The run is in `error` with the failure code `sandbox_create_failed`. The platfor
 | Cause | Fix |
 |---|---|
 | The image pull failed. | See [Image pull failures](#image-pull-failures). |
-| The Pod cannot be scheduled. | Check the cluster capacity, node selectors and taints. Run `kubectl describe pod` in the sandbox namespace. |
-| The runner did not start before `OF_SANDBOX_START_TIMEOUT` (default 30 minutes). | Find the reason in the Pod events. Raise the timeout only for a slow image pull. |
+| The provider refused the sandbox, for example for its size or its rate limit. | Use a smaller `instanceShape`, or wait. See [Sandbox providers](sandbox-providers.md#limits-and-notes). |
+| The runner did not start before `OF_SANDBOX_START_TIMEOUT` (default 10 minutes). | Read the provider logs. Raise the timeout only for a slow image pull. |
 
-## `network_policy_timeout`
+## `invalid_configuration` at start
 
-The run is in `error` with the failure code `network_policy_timeout`. The platform retries this code.
-
-**Meaning:** The init container `egress-wait` of a restricted sandbox Pod ended with exit code 75. A direct connection to the kubelet of the node (port 10250) still worked after the time limit (default 30 seconds), so the sandbox NetworkPolicy was not active, and the sandbox never started. See [The sandbox does not start before the policy is active](self-hosting/network-policy.md#the-sandbox-does-not-start-before-the-policy-is-active).
+The run is in `error` with the failure code `invalid_configuration` before a sandbox exists. The message names the cause:
 
 | Cause | Fix |
 |---|---|
-| The CNI does not enforce NetworkPolicy now, but the startup check saved `enforced`: the CNI changed or broke after the check, or the check had no answer. | Restart the server to run the check again. Install a CNI that enforces NetworkPolicy. Set `OF_K8S_NETWORK_POLICY_ENFORCEMENT=require` to get a clear error when the check has no answer. |
-| The CNI always allows traffic from a Pod to its node, so the kubelet is never blocked. | Set `OF_K8S_EGRESS_WAIT_ADDR` to a `host:port` that a Pod can reach without a policy and that the sandbox policy blocks. Do not use port 80 or 443. |
-| The CNI needs more than 30 seconds to apply the policy. | Set `OF_K8S_EGRESS_WAIT_TIMEOUT` to a longer time, for example `90s`. |
-| The cluster does not enforce NetworkPolicy, and another control limits sandbox egress. | Set `OF_ALLOW_UNENFORCED_NETWORK_POLICY=true`. The wait is then off, and a restricted sandbox can start without a policy. |
-
-Read the log of the init container: `kubectl -n <sandbox namespace> logs <pod> -c egress-wait`. To turn off only the wait, set `OF_K8S_EGRESS_WAIT_TIMEOUT=off`. The sandbox then starts at once, and the policy takes effect a few hundred milliseconds later.
+| The target has `egress: none` and the run has a restricted network policy. | Use a provider that enforces policies, or set `OF_ALLOW_UNENFORCED_NETWORK_POLICY=true`. See [Network policy](self-hosting/network-policy.md#the-capability-gate). |
+| The machine asks for more CPU or memory than the largest instance type. | Use a smaller `instanceShape`. See [Machine sizes](sandbox-providers.md#machine-sizes). |
+| The provider cannot run the architecture or the Daytona tier is below 3. | Use another provider. See [Sandbox providers](sandbox-providers.md). |
 
 ## `runner_lost`
 
-The run is in `error` with the failure code `runner_lost`: the runner stopped its requests, and the backend has no end reason. The platform retries this code.
+The run is in `error` with the failure code `runner_lost`: the runner stopped its requests, and the provider has no end reason. The platform retries this code.
 
-**Cause:** The sandbox was killed, the node was lost, or the network between the sandbox and the control plane failed. On a remote worker, the worker was disconnected for about three minutes.
+**Cause:** The sandbox was killed, the provider lost it, or the network between the sandbox and the control plane failed. On a worker, the worker was disconnected for about three minutes.
 
 **Fix:**
 
-1. Check that the sandbox can reach `OF_INTERNAL_URL`. A sandbox on a remote worker needs `OF_PUBLIC_URL`.
-2. Read the Pod events and logs. See [Kubernetes sandbox pods](#kubernetes-sandbox-pods).
-3. For a remote worker, check that the worker reconnects. See [Worker does not connect](#worker-does-not-connect).
+1. Check that the sandbox can reach `OF_PUBLIC_URL`.
+2. Read the provider logs. For `cloudflare-sandbox`, run `npx wrangler tail -c providers/cloudflare-sandbox/wrangler.jsonc`.
+3. For a worker, check that the worker reconnects. See [Worker does not connect](#worker-does-not-connect).
 
 ## Sandbox setup fails
 
@@ -204,34 +196,27 @@ When a turn fails, the run error has the failure code, then the text that the ha
 | `harness "...": not found` | The server does not have this harness. | Check the agent's `harness.type` (`claude` or `codex`). |
 | `start <command>: ...` with `not found` | The `claude` or `codex` command is not in the sandbox. | Add the CLI to the sandbox image, or install it in a setup command. |
 | `harness exited without completing the turn` | The CLI stopped early: missing credentials, a crash, or a killed container. | Check the harness authentication (see [Harnesses](harnesses.md)). Read the transcript for the CLI output. |
-| The foreman cannot call `run_agents` or `ask_human`. | The sandbox cannot reach the control plane, the session ended (`401`), or a newer session exists (`409`). | Set `OF_INTERNAL_URL` (or `OF_PUBLIC_URL`) to a URL that sandboxes can reach, not `localhost`. On Kubernetes, use the in-cluster Service URL or the ingress host. |
+| The foreman cannot call `run_agents` or `ask_human`. | The sandbox cannot reach the control plane, the session ended (`401`), or a newer session exists (`409`). | Set `OF_PUBLIC_URL` to a URL that sandboxes can reach, not `localhost`. The sandbox reaches the control plane at `OF_PUBLIC_URL`. |
 
 ## Image pull failures
 
-The sandbox ends with `image_pull` (`ImagePullBackOff` or `InvalidImageName`): the node cannot pull the image.
+The sandbox ends with `image_pull` or `sandbox_create_failed`: the provider or host cannot pull the image.
 
 - Check the image name and tag.
-- For a private image, add `imagePullSecrets` to the pod template, and create the secret in the sandbox namespace. The Kubernetes backend ignores the machine's `registryCredentialSecretName`.
-- If nodes cannot reach `ghcr.io`, mirror the default image and set `OF_SANDBOX_IMAGE` (Helm: `sandbox.image`).
+- On a microVM worker, a private image needs `registryCredentialSecretName` in the machine. See [Private registries](self-hosting/private-registries.md).
+- On Daytona and boat.dev, rebuild the snapshot. A Daytona snapshot goes inactive after 2 weeks without use, and preflight builds it again.
+- If a host cannot reach `ghcr.io`, mirror the sandbox image.
 
-See [Private registries](self-hosting/private-registries.md).
-
-## Kubernetes sandbox pods
-
-```bash
-kubectl -n <sandbox namespace> get pods -l app.kubernetes.io/managed-by=openfactory
-kubectl -n <sandbox namespace> describe pod <pod>
-```
+## Sandbox provider errors
 
 | Error | Cause | Fix |
 |---|---|---|
-| `unschedulable` (a sandbox end reason) | No node satisfies the Pod's requests, selectors or tolerations. | Use a smaller `instanceShape`, change the pod template, or add nodes. |
-| `CreateContainerConfigError` | A Secret, ConfigMap or service account of the pod template is missing. | Create it in the sandbox namespace. |
-| `container_oom` (OOMKilled, exit 137) | The container used more memory than its limit. | Raise `memoryGb` in the machine's instance shape. |
-| The Pod ends at once, and its log says that `openfactory` is not found. | The runner image has no binary at `/usr/local/bin/openfactory`, or the sandbox image is not Linux. | Set `OF_RUNNER_IMAGE` (Helm: `runner.image`) to the server image of your release. See [Runner images](self-hosting/kubernetes.md#runner-images). |
-| `network_policy_timeout` | The sandbox NetworkPolicy did not block the kubelet in time. | See [`network_policy_timeout`](#network_policy_timeout). |
-| `kubernetes API: HTTP 403: ...` | The service account lacks permissions. | Apply the Role in [Kubernetes RBAC](self-hosting/kubernetes.md#rbac). |
-| `kubernetes: user "..." uses an exec/auth-provider plugin, which is not supported` | The kubeconfig uses a cloud login plugin. | Use a service account token or a client certificate. |
+| `daytona: tier 1 and 2 ...` at preflight | The Daytona organization is on tier 1 or 2. | Use tier 3 or higher. |
+| `boatdev: the plan does not allow machine type ...` | The boat.dev plan has no such machine type. | Use a smaller machine or a larger plan. |
+| Runs wait without a sandbox on `boatdev` | The start limits (12 a minute, 60 an hour, 200 a day) are used up. | Wait, or reduce the number of runs. |
+| `sandbox_lost` on `cloudflare-sandbox` | The container host restarted, or the container slept too long. | The platform retries. See [Sandbox providers](sandbox-providers.md#cloudflare-sandbox). |
+| `out_of_memory` | The sandbox used more memory than its limit. | Raise `memoryGb` in the instance shape of the machine. |
+| Session start is refused because of the runner version | `OF_RUNNER_VERSION` differs from the runtime in the sandbox image. | Publish the runtime that matches `OF_RUNNER_VERSION`. |
 
 ## Network access is blocked
 
@@ -247,13 +232,13 @@ kubectl -n <sandbox namespace> describe pod <pod>
 
 See [Network policy](self-hosting/network-policy.md).
 
-**Symptom:** A restricted run on the `local` backend can reach every host.
+**Symptom:** A restricted run on a development process worker can reach every host.
 
-**Cause:** The `local` backend does not enforce network policies. Use the `kubernetes` backend. It creates a NetworkPolicy and an egress proxy sidecar for each restricted sandbox.
+**Cause:** The development process worker has `egress: none` and enforces nothing. Use a provider or a microVM worker that enforces policies.
 
-**Symptom:** A restricted run on the `kubernetes` backend cannot reach any host, not even an allowed one. The sandbox has no `HTTPS_PROXY` variable.
+**Symptom:** A restricted run fails before the agent starts, with an error from the in-sandbox lock.
 
-**Cause:** `OF_K8S_EGRESS_PROXY_SIDECAR_IMAGE` is empty, so the Pod has no proxy sidecar, and the NetworkPolicy allows only DNS and the control plane. Set the variable to the runner image. The Helm chart does this by default (`sandbox.k8s.egressProxy.sidecarImage`).
+**Cause:** A probe of the lock reached the network, so the runner failed closed. Check that the sandbox image is the current one and that the provider lets root run `iptables`. See [In-sandbox lock](self-hosting/network-policy.md#in-sandbox-lock).
 
 ## MCP server errors
 

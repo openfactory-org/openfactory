@@ -12,6 +12,6 @@ Before you ask:
 1. Read the [documentation](docs/README.md) and [Troubleshooting](docs/troubleshooting.md).
 2. Search the existing issues and discussions.
 
-When you ask, give the Open Factory version (`openfactory version` or the image tag), how you installed it, and the logs with secrets removed.
+When you ask, give the Open Factory version (`openfactory version` and the control plane version from `GET /api/v1/version`), the sandbox provider or worker that you use, and the logs with secrets removed.
 
 Support is from the community and the maintainers, on a best-effort basis. There is no guaranteed response time.

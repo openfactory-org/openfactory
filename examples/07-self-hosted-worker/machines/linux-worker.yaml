@@ -1,4 +1,4 @@
-description: Linux sandbox image for the self-hosted Kubernetes worker
+description: Linux sandbox image for the self-hosted microVM worker
 setupCommands:
   - make bootstrap
 instanceShape:

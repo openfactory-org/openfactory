@@ -30,14 +30,10 @@ Both harnesses get the same inputs (see [How configuration reaches a run](#how-c
 
 The harness CLI (`claude` or `codex`) must be on the `PATH` of the sandbox.
 
-On the `kubernetes` backend, a tool image delivers the CLI, so the sandbox image does not need it. An init container copies the tool image content into the Pod, and the backend puts the tool's `bin` directory in front of the sandbox `PATH`. So a run with the image `ubuntu:22.04` and the `claude` harness works.
+The sandbox image `ghcr.io/openfactory-org/sandbox` has both CLIs, `claude` and `codex`. The images that the hosted providers use (the Cloudflare image, the Daytona snapshot and the boat.dev snapshot) are built from it. See [Sandbox providers](sandbox-providers.md#build-the-sandbox-image).
 
-- Set the tool images with `OF_CLAUDE_TOOL_IMAGE` and `OF_CODEX_TOOL_IMAGE` on the control plane, also when remote workers start the sandboxes.
-- Default: the runner image name with `tool-claude` or `tool-codex` and the same tag. The default runner image is the server image, so the defaults are `ghcr.io/openfactory-org/tool-claude` and `ghcr.io/openfactory-org/tool-codex` of the same release. They are built from `images/tool-claude` and `images/tool-codex`.
-- Without a tool image, the sandbox image must hold the CLI. The default sandbox image has no harness CLI.
-- In development mode (`OF_DEV=true` with the `local` backend), the workstation must have the `claude` or `codex` program.
-
-See [Tool images](self-hosting/kubernetes.md#tool-images) for the rules of a tool image.
+- A machine or environment that names another image must provide the CLI on its `PATH`, and must follow the image contract.
+- On a development process worker, the host must have the `claude` or `codex` program.
 
 ## Select a harness
 
@@ -115,7 +111,7 @@ A run needs a model credential. Set it with `harness.auth`, or save one secret o
 | `auth.source` | Where the credential comes from | Rules |
 |---|---|---|
 | `managedSecret` | A secret in the Open Factory secret store, named by `secretName`. | `secretName` is required. |
-| `workerEnvironment` | The environment of a self-hosted worker. | `secretName` is not allowed. The effective `workerHost` must be a self-hosted worker. |
+| `workerEnvironment` | The environment of a development process worker. | `secretName` is not allowed. The effective `workerHost` must name a worker. |
 
 ### Default credential
 
@@ -128,7 +124,7 @@ When the effective harness of a run has no `auth` (after `agentDefaults`, the ag
 
 | Harness | Secret types of the default credential |
 |---|---|
-| `claude` | `anthropic_api_key`, `anthropic_oauth_token`, `anthropic_bedrock_api_key`, `anthropic_bedrock_access_key` |
+| `claude` | `anthropic_api_key`, `anthropic_oauth_token` |
 | `codex` | `openai_api_key` |
 
 A `generic` secret is never a default credential. Other harness types have no default credential.
@@ -175,8 +171,6 @@ Value formats are in [Secret types](secrets.md#types).
 |---|---|---|
 | `anthropic_api_key` | `ANTHROPIC_API_KEY` | `claude` |
 | `anthropic_oauth_token` (from `claude setup-token`) | `CLAUDE_CODE_OAUTH_TOKEN` | `claude` only. Other harnesses ignore it. |
-| `anthropic_bedrock_api_key` | `AWS_BEARER_TOKEN_BEDROCK`, `AWS_REGION`, `CLAUDE_CODE_USE_BEDROCK=1` | `claude` |
-| `anthropic_bedrock_access_key` | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_REGION`, `CLAUDE_CODE_USE_BEDROCK=1` | `claude` |
 | `openai_api_key` | `OPENAI_API_KEY`, `CODEX_API_KEY` | `codex` |
 | `generic` | `ANTHROPIC_API_KEY` for `claude`; `OPENAI_API_KEY` and `CODEX_API_KEY` for `codex` | both |
 
@@ -184,14 +178,15 @@ Run errors:
 
 | Cause | Error |
 |---|---|
-| Bedrock secret without `region` | `bedrock credentials require an AWS region` |
 | `claude` with an OpenAI key | `claude cannot use an OpenAI API key` |
-| `codex` with an Anthropic or Bedrock secret | `codex cannot use Anthropic or Bedrock credentials` |
+| `codex` with an Anthropic secret | `codex cannot use Anthropic credentials` |
 | The secret does not exist | `harness auth secret "<name>": ...` |
 
 ### Use the worker environment
 
-Use `workerEnvironment` when a self-hosted worker already has the credentials, for example in its environment variables or a signed-in CLI.
+Use `workerEnvironment` when a development process worker already has the credentials, for example in its environment variables or a signed-in CLI.
+
+> **Note:** `workerEnvironment` works only on development process workers (`openfactory-runtime worker --process`). A microVM worker gives the VM no host variables, and the host owner's credentials stay on the host. Use `managedSecret` for hosted providers and for microVM workers.
 
 ```yaml
 agentDefaults:
@@ -200,10 +195,10 @@ agentDefaults:
     model: claude-opus-5-5
     auth:
       source: workerEnvironment
-  workerHost: acme-prod-worker
+  workerHost: dev-box-1
 ```
 
-- Open Factory passes no credential. The worker must give the provider variables (for example `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`) to its sandboxes.
+- Open Factory passes no credential. The worker must give the provider variables (for example `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`) to its sessions.
 - The definition rejects `workerEnvironment` when the effective `workerHost` is empty, also when an agent or automation clears `workerHost` and inherits this auth.
 
 Example: [`../examples/07-self-hosted-worker`](../examples/07-self-hosted-worker). Worker setup: [Workers](self-hosting/workers.md).

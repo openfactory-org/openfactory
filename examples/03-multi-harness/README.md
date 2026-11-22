@@ -24,12 +24,14 @@ Rules:
 - Each harness needs a model credential (`auth`). The credential goes into the
   sandbox of the run, where the CLI uses it.
 - `auth.source: workerEnvironment` uses credentials from the environment of a
-  self-hosted worker and requires `workerHost` (see
-  [07-self-hosted-worker](../07-self-hosted-worker/)).
+  development process worker and requires `workerHost` (see
+  [Workers](../../docs/self-hosting/workers.md)).
 - The network policy extends the built-in Claude Code and Codex policies.
   Both CLIs can then reach their inference and authentication services.
 - `machines/linux-large.yaml` pulls a private image with the registry
-  credential `GHCR_PULL_CREDENTIAL`.
+  credential `GHCR_PULL_CREDENTIAL`. Only microVM workers pull images at run
+  time and use the credential. Hosted providers use the image that you built
+  into them (see [Private registries](../../docs/self-hosting/private-registries.md)).
 
 ## Prerequisites
 

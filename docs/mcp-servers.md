@@ -109,7 +109,7 @@ Open Factory follows the MCP authorization specification:
 - It uses the authorization code flow with PKCE (`S256`) and sends the server URL as `resource`.
 - It requests the scopes you set, or else the scopes the server advertises.
 
-The redirect URI is `${OF_PUBLIC_URL}/api/v1/mcp-servers/oauth/callback`. Most providers accept `http` only for loopback addresses, so `OF_PUBLIC_URL` must use `https`. The [quick install](self-hosting/kubernetes.md#quick-install) serves plain `http`: add TLS before you connect OAuth servers.
+The redirect URI is `${OF_PUBLIC_URL}/api/v1/mcp-servers/oauth/callback`. Most providers accept `http` only for loopback addresses, so `OF_PUBLIC_URL` must use `https`.
 
 If the provider has no dynamic client registration, register a client there with this redirect URI. Then set **Client ID** and, for a confidential client, **Client secret (secret name)**.
 
@@ -182,7 +182,7 @@ List results return at most 50 items. The server log records each tool call with
 | `POST /api/v1/mcp-servers/{id}/oauth/disconnect` | editor | Delete the token. |
 | `GET /api/v1/mcp-servers/oauth/callback` | editor | The provider's redirect target. Needs the browser session of the user who started the flow. |
 
-The Go SDK has the same operations in `client.MCPServers`. See [REST API and Go SDK](api.md).
+The TypeScript client has the same operations. See [REST API](api.md).
 
 ## Security notes
 

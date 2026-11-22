@@ -1,13 +1,13 @@
 # Open Factory documentation
 
-Open Factory is an open-source, self-hosted system that turns issues, chat messages, webhooks and schedules into reviewed pull requests. Read the sections in order the first time.
+Open Factory is an open-source system that turns issues, chat messages, webhooks and schedules into reviewed pull requests. You deploy it to your own Cloudflare account. Read the sections in order the first time.
 
 ## Get started
 
 | Page | What it covers |
 |---|---|
 | [Overview and concepts](overview.md) | Architecture, concepts, glossary and run states. |
-| [Quickstart](quickstart.md) | A local server in development mode, a first factory and a first work item. |
+| [Quickstart](quickstart.md) | A local control plane with `wrangler dev`, a first factory and a first work item. Then deploy. |
 
 ## Concepts
 
@@ -19,6 +19,7 @@ Open Factory is an open-source, self-hosted system that turns issues, chat messa
 | [Harnesses](harnesses.md) | The `claude` and `codex` harnesses, models and authentication. |
 | [Skills](skills.md) | Factory, agent, repository and built-in skills (`SKILL.md`). |
 | [Machines and environments](machines-and-environments.md) | Worker hosts, images, setup commands and instance shapes. |
+| [Sandbox providers](sandbox-providers.md) | `cloudflare-sandbox`, `daytona`, `boatdev` and workers: capabilities, limits and selection. |
 | [Secrets](secrets.md) | Encrypted secrets, secret types and `{{SECRET}}` templates. |
 | [MCP servers](mcp-servers.md) | The team MCP server registry, the control-plane proxy, OAuth connections and built-in integration tools. |
 | [Measure and improve](measure-and-improve.md) | Scorers, benchmarks, self-improvement and dashboard metrics. |
@@ -28,7 +29,8 @@ Open Factory is an open-source, self-hosted system that turns issues, chat messa
 | Page | What it covers |
 |---|---|
 | [Definition reference](definition-reference.md) | Every file and field of the definition tree, with its validation rules. |
-| [REST API and Go SDK](api.md) | Authentication, endpoints, run streaming, the CLI client and the Go SDK. The OpenAPI document is served at `GET /api/v1/openapi.json` (source: [internal/api/openapi.json](../internal/api/openapi.json)). |
+| [REST API](api.md) | Authentication, endpoints and run streaming. The OpenAPI document is served at `GET /api/v1/openapi.json` (source: [api/openapi.json](../api/openapi.json)). |
+| [Command-line client](cli.md) | Install the `openfactory` command, connect, and its relation to `openfactory-runtime`. |
 | [Factory MCP](factory-mcp.md) | Connect Claude Code, Codex or another MCP client to your factories. |
 | [Webhooks](webhooks.md) | Custom webhook ingress, authentication modes, signatures and payload filters. |
 | [Dashboard and inbox](dashboard.md) | The dashboard pages and the human inbox. |
@@ -38,20 +40,21 @@ Open Factory is an open-source, self-hosted system that turns issues, chat messa
 
 | Page | What it covers |
 |---|---|
-| [Self-hosting overview](self-hosting/README.md) | Install paths, topology, database modes and sandbox backends. |
-| [Kubernetes](self-hosting/kubernetes.md) | The Helm chart (SQLite and PostgreSQL modes) and the `kubernetes` sandbox backend. [Quick install](self-hosting/kubernetes.md#quick-install) is one `helm install` with no values file, for small teams (for example k3s on one VM). Until the first release publishes the OCI chart, install the in-repo chart `deploy/helm/openfactory`. |
-| [Configuration](self-hosting/configuration.md) | Every setting of `openfactory serve` and `openfactory worker`. |
-| [Object storage](self-hosting/object-storage.md) | Snapshots, artifacts and attachments in S3, GCS, Azure Blob or local disk. |
+| [Self-hosting overview](self-hosting/README.md) | Topology and install paths. |
+| [Deploy to Cloudflare](self-hosting/cloudflare.md) | Account setup, the R2 bucket, secrets and `wrangler deploy`. |
+| [Configuration](self-hosting/configuration.md) | Variables, secrets, bindings and key rotation. |
+| [Self-hosted workers](self-hosted-machines.md) | Run sessions in Firecracker microVMs on your own Linux hosts. |
+| [Object storage](self-hosting/object-storage.md) | Snapshots, artifacts and attachments in R2. |
 | [OIDC login](self-hosting/oidc.md) | Single sign-on and role mapping. |
-| [Plugins](self-hosting/plugins.md) | gRPC plugins, including GitLab and Azure DevOps. |
-| [Remote workers](self-hosting/workers.md) | Workers that run sandboxes in another cluster or network. |
-| [Network policy](self-hosting/network-policy.md) | `networkPolicy`, built-in policies and the egress proxy. |
-| [Private registries](self-hosting/private-registries.md) | Image pull secrets and mirroring the sandbox image. |
-| [Upgrading](self-hosting/upgrading.md) | Versions, releases and upgrades. |
+| [Plugins](self-hosting/plugins.md) | Plugin Workers, including GitLab and Azure DevOps. |
+| [Workers](self-hosting/workers.md) | The development process worker and the worker protocol. |
+| [Network policy](self-hosting/network-policy.md) | `networkPolicy`, built-in policies, the egress proxy and the in-sandbox lock. |
+| [Private registries](self-hosting/private-registries.md) | Private images for each provider. |
+| [Upgrading](self-hosting/upgrading.md) | Versions, deploys and Durable Object migrations. |
 | [Security](security.md) | Security model, roles and permissions. |
-| [Monitoring](monitoring.md) | Health endpoints, Prometheus metrics and logs. |
+| [Monitoring](monitoring.md) | Health endpoints, logs and metrics. |
 | [Troubleshooting](troubleshooting.md) | Common errors and their fixes. |
-| [Local testing](self-hosting/local-testing.md) | Test the whole flow on a workstation with the AWS emulator and a local cluster. Test only. |
+| [Local testing](self-hosting/local-testing.md) | `wrangler dev`, the contract suite and live checks. |
 
 ## Integrations
 
@@ -73,4 +76,4 @@ Open Factory is an open-source, self-hosted system that turns issues, chat messa
 
 - [Contributing](../CONTRIBUTING.md): development setup, checks and the [project layout](../CONTRIBUTING.md#project-layout).
 - [Security policy](../SECURITY.md): how to report a vulnerability.
-- [Deployment files](../deploy/): the Helm chart, Dockerfiles, a pod template and the local test stack.
+- [Deployment files](../deploy/): the sandbox image and bootstrap files.

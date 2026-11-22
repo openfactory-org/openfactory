@@ -13,7 +13,7 @@ Integrations connect a factory to code forges, chat tools and issue trackers, wh
 | Linear | [linear.md](linear.md) | Issues, comments, agent sessions | Issue comments, agent activities |
 | Jira | [jira.md](jira.md) | Issues, status changes, agent sessions | Issue comments |
 
-GitLab and Azure DevOps are gRPC plugins that the server image and the Helm chart load (see [Plugins](../self-hosting/plugins.md)). The others are built in. Work can also start from [custom webhooks](../webhooks.md), [schedules](../automations.md#schedules-schedule), the [REST API](../api.md) and [Factory MCP](../factory-mcp.md).
+GitLab and Azure DevOps are plugin Workers that the control plane calls over service bindings (see [Plugins](../self-hosting/plugins.md)). The others are built in. Work can also start from [custom webhooks](../webhooks.md), [schedules](../automations.md#schedules-schedule), the [REST API](../api.md) and [Factory MCP](../factory-mcp.md).
 
 ## Common setup
 

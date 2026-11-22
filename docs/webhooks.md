@@ -175,8 +175,8 @@ The work item of a delivery gets its title from the first non-empty top-level st
 | Method | `POST` only. |
 | Body | Valid JSON (object, array or scalar). `Content-Type` is not checked. |
 | Size | At most 256 KiB. |
-| Rate limit | 60 deliveries per minute per webhook, counted after authentication. The database keeps the count, so the limit holds across replicas. If the database cannot count, each replica counts on its own. |
-| Failed authentication | A separate budget of 60 failed attempts per minute per webhook. When it is used up, all requests get `429` until the window resets. Each replica counts this budget on its own. |
+| Rate limit | 60 deliveries per minute per webhook, counted after authentication. The control plane keeps the count in one place, so the limit is exact. |
+| Failed authentication | A separate budget of 60 failed attempts per minute per webhook. When it is used up, all requests get `429` until the window resets. |
 | Webhooks per factory | 20. |
 
 Responses:
@@ -244,9 +244,13 @@ Each delivery is recorded, also when it starts nothing. A record has `id`, `deli
 
 Rejection reasons are `auth`, `invalid_json`, `too_large`, `rate_limited` and `secret_unavailable`.
 
+### Ordering and retries
+
+The control plane hands each accepted delivery to an ingress Durable Object that deduplicates it and delivers it to the work item in order. A failed delivery is retried with a growing delay. After the last attempt it is dead-lettered. Admins see dead-lettered deliveries on the dashboard Workers page and can redeliver them.
+
 ### Delivery retention
 
-A sweep runs every hour on the leader replica. For each webhook:
+A sweep runs every hour. For each webhook:
 
 - The newest 50 deliveries stay whole.
 - Older deliveries lose their headers and body, but keep the identity, status and run IDs, so a retry is still a duplicate.

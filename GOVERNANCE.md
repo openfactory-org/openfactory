@@ -12,8 +12,9 @@ These are the public contracts:
 
 - The definition schema `v1`.
 - The REST API under `/api/v1`.
-- The Helm chart values.
-- The database upgrade path between releases.
+- The runner protocol and the worker protocol (version 2).
+- The plugin API (`@openfactory/plugin-api`).
+- The Durable Object migrations between releases.
 
 Open an issue to discuss a breaking change to a contract before you send a pull request. Record the change and its migration steps in [CHANGELOG.md](CHANGELOG.md).
 

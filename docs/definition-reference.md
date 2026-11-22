@@ -30,8 +30,8 @@ The compiler checks the files; the preflight checks them against the team. Apply
 |---|---|
 | Each secret exists in the team or the factory: `secrets` lists, `harness.auth.secretName`, and webhook `secretName`. | error |
 | Each `environment` exists in the team. | error |
-| A machine sets `registryCredentialSecretName` (the `kubernetes` backend ignores it), or sets `os` to `macos` or `windows` (only Linux sandboxes exist). | warning |
-| Each `workerHost` is a built-in host (`server`, `kubernetes`, `direct`, `managed`), a sandbox backend of the server, or the ID or name of a registered worker. | error |
+| A machine sets `registryCredentialSecretName` (only microVM workers pull images at run time and use it). | warning |
+| Each `workerHost` is `server`, a sandbox provider ID (`cloudflare-sandbox`, `daytona`, `boatdev` or a plugin provider), the ID or name of a registered worker, or `pool:<label>`. | error |
 | Each `managedId` of an MCP server names a registered MCP server of the team. | error |
 | A webhook keeps `authMode` and `signatureScheme` after its first apply. To change them, remove the webhook, apply, then add a new one. | error |
 | The secret of a `url_token` webhook is safe for a URL: letters, digits, `-`, `.`, `_` and `~`. | error |
@@ -201,7 +201,7 @@ Each error has a `file`, an optional `line`, an optional `field` path (for examp
 
 ### Field tables
 
-The field tables on this page are generated from the [JSON Schemas](#json-schemas). To change a table, change the schema in `internal/definition/schemagen_test.go`, then run `make schemas` and `make docs-gen`. `make docs-check` fails when a table is out of date.
+The field tables on this page are generated from the [JSON Schemas](#json-schemas). To change a table, change the schema source in `packages/definition`, then run `npm run gen:schemas` and `npm run gen:docs`. `npm run gen:check` fails when a table is out of date.
 
 - **Required**: `yes` means the key must be set; for a nested field (for example `gcp.projectNumber`), when its parent is set. Conditional requirements are in the description.
 - **Default**: the value when the key is absent. A default that depends on other values is in the description.
@@ -353,28 +353,24 @@ Cloud identity federation.
 | `gcp.workloadIdentityFederationPoolId` | string | yes |  | non-empty | ID of the workload identity pool. |
 | `gcp.workloadIdentityFederationProviderId` | string | yes |  | non-empty | ID of the provider in the workload identity pool. |
 | `gcp.serviceAccountEmail` | string |  |  |  | Service account that the credentials impersonate. Must be an email address. |
-| `aws` | object |  |  |  | AWS web identity federation. |
-| `aws.roleArn` | string | yes |  | matches `^arn:` | ARN of the IAM role that the runs assume. It must start with arn: and contain at least 5 : characters. |
 | `audiences` | list of strings |  |  | no duplicates; each entry: non-empty | More audiences for which a run can get a token, for other services that accept OIDC tokens. |
 <!-- END GENERATED: factory.cloudProviders -->
 
 Every run gets short-lived credentials for the declared clouds. The control plane is an OpenID Connect issuer:
 
-- The issuer URL is `OF_OIDC_ISSUER_URL`, else `OF_PUBLIC_URL`. The discovery document (`<issuer URL>/.well-known/openid-configuration`) and the signing keys (`<issuer URL>/.well-known/jwks.json`) need no authentication and must be reachable over HTTPS from the cloud provider.
-- Tokens are ES256 JWTs, valid for at most 1 hour. The signing key derives from `OF_SECRET_KEY`, so all replicas publish the same key, and rotating `OF_SECRET_KEY` rotates it.
+- The issuer URL is `OF_PUBLIC_URL`. The discovery document (`<issuer URL>/.well-known/openid-configuration`) and the signing keys (`<issuer URL>/.well-known/jwks.json`) need no authentication and must be reachable over HTTPS from the cloud provider.
+- Tokens are ES256 JWTs, valid for at most 1 hour. The Worker secret `OF_CLOUD_ID_KEY` is the P-256 signing key, so the control plane publishes one key set.
 - The `sub` claim is `team/<team id>/factory/<factory id>/agent/<agent name>`. Other claims: `team_id`, `factory_id`, `agent`, `agent_type`, `run_id`, `work_item_id`, `run_as`, `creator` (the user who created the work item, if any) and `worker_host`.
-- Tokens refresh while the run runs, so a turn over 1 hour keeps access. The GCP credentials file calls the runner's token helper on each SDK request; the runner rewrites the AWS token file every 20 minutes. Both files are in the runner's state directory, outside the workspace.
-- For another service, the agent runs `$OF_CLOUD_TOKEN_COMMAND --audience <audience>`. The audience must be in `audiences`, or be the factory's AWS or Google Cloud audience.
+- Tokens refresh while the run runs, so a turn over 1 hour keeps access. The GCP credentials file calls the runner's token helper on each SDK request. The file is in the runner's state directory, outside the workspace.
+- For another service, the agent runs `$OF_CLOUD_TOKEN_COMMAND --audience <audience>`. The audience must be in `audiences`, or be the factory's Google Cloud audience.
 
 | Cloud | Audience | Run environment |
 |---|---|---|
-| AWS | `sts.amazonaws.com` | `AWS_ROLE_ARN` (from `aws.roleArn`), `AWS_WEB_IDENTITY_TOKEN_FILE` and `AWS_ROLE_SESSION_NAME` (`openfactory-<run id>`). AWS SDKs and the AWS CLI call `sts:AssumeRoleWithWebIdentity` with them. |
 | Google Cloud | `//iam.googleapis.com/projects/<projectNumber>/locations/global/workloadIdentityPools/<poolId>/providers/<providerId>` | `GOOGLE_APPLICATION_CREDENTIALS` and `CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE` point to an `external_account` credentials file. With `serviceAccountEmail`, the credentials impersonate that service account. `GOOGLE_CLOUD_PROJECT_NUMBER` is also set. |
 
 To trust the issuer:
 
-- **AWS:** create an IAM OIDC identity provider with the issuer URL and the audience `sts.amazonaws.com`. In the role trust policy, allow `sts:AssumeRoleWithWebIdentity` and match `<issuer host>:sub` and `<issuer host>:aud`.
-- **Google Cloud:** create an OIDC workload identity pool provider with the issuer URL and map `google.subject` to `assertion.sub`.
+Create an OIDC workload identity pool provider with the issuer URL and map `google.subject` to `assertion.sub`.
 
 The credentials go to the harness environment, not to setup commands. In a restricted network policy, the token exchange hosts are [required hosts](self-hosting/network-policy.md#required-hosts).
 
@@ -514,7 +510,7 @@ See [Measure and improve](measure-and-improve.md).
 | `environmentId` | string |  |  |  | ID of the default environment. |
 | `secrets` | list of strings |  |  | [secret names](#secret-names), no duplicates | Default secret names for agents without their own secrets. |
 | `mcpServers` | map of objects |  |  | [MCP server objects](#mcp-server-object) by name; the name `factory` is reserved | Default MCP servers for agents without their own mcpServers. A name must not also be in the factory-wide mcpServers. |
-| `workerHost` | string or null |  |  |  | Default worker host. An empty value means the server default (server). |
+| `workerHost` | string or null |  |  |  | Default worker host. An empty value means server. Where the agent sessions execute. server: the team's default sandbox provider. A sandbox provider ID (for example cloudflare-sandbox, daytona, boatdev): that provider. A worker ID or name: that enrolled worker. pool:&lt;label&gt;: the least-loaded online worker with that label. |
 <!-- END GENERATED: factory.agentDefaults -->
 
 See [Harness and model](#harness-and-model), [environments](machines-and-environments.md#environments) and [worker hosts](machines-and-environments.md#worker-hosts). `idleTimeoutMinutes` is not accepted here; set it per agent or automation.
@@ -698,7 +694,7 @@ Investigate the incident that the foreman describes...
 | `environmentId` | string or null |  |  |  | ID of the environment of the runs. null clears the inherited value. |
 | `secrets` | list of strings or null |  |  | [secret names](#secret-names), no duplicates | Secret names of the runs. They replace the secrets of agentDefaults. [] removes those defaults. The factory-wide secrets always stay. |
 | `mcpServers` | map of objects or null |  |  | [MCP server objects](#mcp-server-object) by name; the name `factory` is reserved | MCP servers of the runs. They replace the mcpServers of agentDefaults. {} removes those defaults. The factory-wide servers always stay. |
-| `workerHost` | string or null |  |  |  | Worker that runs the agent. The value is trimmed. null or empty clears an inherited host. |
+| `workerHost` | string or null |  |  |  | Worker that runs the agent. The value is trimmed. null or empty clears an inherited host. Where the agent sessions execute. server: the team's default sandbox provider. A sandbox provider ID (for example cloudflare-sandbox, daytona, boatdev): that provider. A worker ID or name: that enrolled worker. pool:&lt;label&gt;: the least-loaded online worker with that label. |
 | `idleTimeoutMinutes` | integer or null |  |  | 0–60 | Minutes that a finished run keeps its sandbox and session for follow-ups. 0 ends the session after each turn. Without a value, the server default OF_IDLE_TIMEOUT_DEFAULT applies (10 minutes) to every run. OF_IDLE_TIMEOUT_MAX (60 minutes) is the upper limit. |
 <!-- END GENERATED: agent -->
 
@@ -715,7 +711,7 @@ Rules:
   - `[]`: no agent. Automations and the API can still start it.
   - A list: exactly the named agents. Each name must be an agent in the definition.
   - The foreman can never be started as a child run.
-- `idleTimeoutMinutes` is how long a finished run keeps its sandbox and session for follow-ups. Unset, the server default `OF_IDLE_TIMEOUT_DEFAULT` (10 minutes) applies to root and child runs alike. `OF_IDLE_TIMEOUT_MAX` (60 minutes) caps it.
+- `idleTimeoutMinutes` is how long a finished run keeps its sandbox and session for follow-ups. Unset, the team default (10 minutes) applies to root and child runs alike. The upper limit is 60 minutes.
 - The agent name is its identity. Renaming the directory creates a new agent with a new ID.
 - Agent skills live in `agents/<name>/skills/` (see [Skills](#skills)).
 
@@ -759,7 +755,7 @@ Audit dependencies in every repository...
 | `environmentId` | string or null |  |  |  | ID of the environment of the runs. null clears the inherited value. |
 | `secrets` | list of strings or null |  |  | [secret names](#secret-names), no duplicates | Secret names that add to the secrets of the agent for the runs of this automation. |
 | `mcpServers` | map of objects or null |  |  | [MCP server objects](#mcp-server-object) by name; the name `factory` is reserved | MCP servers that add to the servers of the agent for the runs of this automation. A server with the same name replaces the server of the agent. |
-| `workerHost` | string or null |  |  |  | Worker that runs the agent. The value is trimmed. null or empty clears an inherited host. |
+| `workerHost` | string or null |  |  |  | Worker that runs the agent. The value is trimmed. null or empty clears an inherited host. Where the agent sessions execute. server: the team's default sandbox provider. A sandbox provider ID (for example cloudflare-sandbox, daytona, boatdev): that provider. A worker ID or name: that enrolled worker. pool:&lt;label&gt;: the least-loaded online worker with that label. |
 | `idleTimeoutMinutes` | integer or null |  |  | 0–60 | Minutes that a finished run keeps its sandbox and session for follow-ups. 0 ends the session after each turn. Without a value, the server default OF_IDLE_TIMEOUT_DEFAULT applies (10 minutes) to every run. OF_IDLE_TIMEOUT_MAX (60 minutes) is the upper limit. |
 <!-- END GENERATED: automation -->
 
@@ -837,26 +833,20 @@ platform:
 | `description` | string |  |  |  | Short description of the machine. |
 | `setupCommands` | list of strings |  |  | each entry: non-empty | Commands that run in order after the repositories are checked out. |
 | `failureSessionRetentionMinutes` | integer |  |  | 1–60 | Minutes that the sandbox of a failed run is kept. Without a value, the sandbox is released at once. |
-| `instanceShape` | object |  |  |  | CPU and memory of the sandbox. For linux and windows, both values must be powers of two. For macos, the shape must be 4/7, 6/14, 8/14, 12/28 or 12/56 (vCPUs/GB). |
+| `instanceShape` | object |  |  |  | CPU and memory of the sandbox. Both values must be powers of two. |
 | `instanceShape.vcpus` | integer | yes |  | 1 or more | Number of virtual CPUs. |
 | `instanceShape.memoryGb` | integer | yes |  | 1 or more | Memory in GB. |
 | `platform` | object | yes |  |  | Operating system, architecture and image of the sandbox. |
-| `platform.os` | string |  | `linux` | `linux`, `macos`, `windows` | Operating system of the sandbox. |
-| `platform.arch` | string |  |  | `x86_64`, `aarch64` | CPU architecture. macos allows only aarch64. windows allows only x86_64. Default: x86_64, or aarch64 for macos. |
-| `platform.linux` | object |  |  |  | Linux settings. Required when os is linux, and allowed only then. |
+| `platform.os` | string |  | `linux` | `linux` | Operating system of the sandbox. Machines run Linux only. |
+| `platform.arch` | string |  | `x86_64` | `x86_64`, `aarch64` | CPU architecture. |
+| `platform.linux` | object | yes |  |  | Linux settings. |
 | `platform.linux.image` | string | yes |  | non-empty | Container image of the sandbox. No spaces or tabs. |
-| `platform.linux.registryCredentialSecretName` | string |  |  | a [secret name](#secret-names) | Secret with the credential to pull a private image. The kubernetes backend ignores it and pulls with the imagePullSecrets of the pod template. |
-| `platform.linux.user` | integer or string |  | `1000` | 1 or more; or `image` | User of the sandbox on the kubernetes backend. A number sets runAsUser, runAsGroup and fsGroup. image keeps the user of the image. Root (0) is not allowed. |
-| `platform.mac` | object |  |  |  | macOS settings. Allowed only when os is macos. |
-| `platform.mac.version` | string |  | `"26"` | `"14"`, `"15"`, `"26"`, `"27"` | macOS version. Quote the value. |
+| `platform.linux.registryCredentialSecretName` | string |  |  | a [secret name](#secret-names) | Secret with the credential to pull a private image. |
+| `platform.linux.user` | integer or string |  | `1000` | 1 or more; or `image` | User of the sandbox. A number sets the user and group IDs. image keeps the user of the image. Root (0) is not allowed. |
 <!-- END GENERATED: machine -->
 
-For `platform.linux.user`, see [Sandbox user](self-hosting/kubernetes.md#sandbox-user).
-
-- `platform.linux` is valid only when `os` is `linux`. `platform.mac` is valid only when `os` is `macos`.
-- For `linux` and `windows`, `vcpus` and `memoryGb` must both be positive powers of two.
-- For `macos`, the shape must be one of 4/7, 6/14, 8/14, 12/28 or 12/56 (vCPUs/GB).
-- `agentDefaults.machine` must be a Linux machine.
+- Machines run Linux only. `platform.os` is `linux`.
+- `vcpus` and `memoryGb` must both be positive powers of two. The control plane maps the shape to the smallest instance type of the provider that is at least as large (see [Machine sizes](sandbox-providers.md#machine-sizes)).
 
 See [Machines and environments](machines-and-environments.md).
 
