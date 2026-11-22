@@ -77,7 +77,12 @@ export const enrollWorker: Handler = async (request, env) => {
   const facts = o.facts;
   if (typeof facts !== "object" || facts === null || Array.isArray(facts)) throw invalid("facts is required");
   const labels = o.labels ?? {};
-  if (typeof labels !== "object" || labels === null || Array.isArray(labels) || !Object.values(labels).every((v) => typeof v === "string")) {
+  if (
+    typeof labels !== "object" ||
+    labels === null ||
+    Array.isArray(labels) ||
+    !Object.values(labels).every((v) => typeof v === "string")
+  ) {
     throw invalid('field "labels" must be of type map[string]string');
   }
   const out = await env.TEAM.getByName(doName.team(DEFAULT_TEAM)).workersEnroll({
@@ -147,7 +152,8 @@ export async function connectWorker(request: Request, env: Env, ctx: RouteContex
       return new Response("expected a WebSocket upgrade\n", { status: 426, headers: { upgrade: "websocket" } });
     }
     const protocols = (request.headers.get("sec-websocket-protocol") ?? "").split(",").map((s) => s.trim());
-    if (!protocols.includes(WORKER_SUBPROTOCOL)) throw invalid("unsupported worker protocol: offer the subprotocol openfactory.worker.v2");
+    if (!protocols.includes(WORKER_SUBPROTOCOL))
+      throw invalid("unsupported worker protocol: offer the subprotocol openfactory.worker.v2");
     const workerId = (request.headers.get("of-worker-id") ?? "").trim();
     if (!WORKER_ID_RE.test(workerId)) throw invalid("the OF-Worker-ID header is missing or invalid");
     const token = bearerToken(request);

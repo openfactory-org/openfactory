@@ -30,19 +30,31 @@ export const listInbox: Handler = async (_req, env, ctx) => {
   return json(200, await index(env, ctx).list(metaOf(ctx), "inbox", q));
 };
 
+/** InboxItemView defaults: recipients and is_read are always present. */
+function itemView(it: unknown): unknown {
+  if (typeof it !== "object" || it === null || "$error" in it) return it;
+  const o = it as Record<string, unknown>;
+  return { ...o, recipients: Array.isArray(o.recipients) ? o.recipients : [], is_read: o.is_read === true };
+}
+
 /** GET /api/v1/inbox/{id} */
 export const getInboxItem: Handler = async (_req, env, ctx) => {
   const id = ctx.params.id ?? "";
-  if (ownerIsWork(id)) return json(200, await workFor(env, ctx, id).api(metaOf(ctx), "getInbox", { id }, null));
-  return json(200, await index(env, ctx).getInboxItem(metaOf(ctx), id));
+  if (ownerIsWork(id))
+    return json(200, itemView(await workFor(env, ctx, id).api(metaOf(ctx), "getInbox", { id }, null)));
+  return json(200, itemView(await index(env, ctx).getInboxItem(metaOf(ctx), id)));
 };
 
 /** POST /api/v1/inbox/{id}/resolve */
 export const resolveInboxItem: Handler = async (req, env, ctx) => {
   const id = ctx.params.id ?? "";
-  if (!ownerIsWork(id)) throw new OfError("feature_not_available", "team-level inbox items are resolved by their owner");
+  if (!ownerIsWork(id))
+    throw new OfError("feature_not_available", "team-level inbox items are resolved by their owner");
   const t = await req.text();
-  return json(200, await workFor(env, ctx, id).api(metaOf(ctx), "resolveInbox", { id }, t.trim() ? JSON.parse(t) : {}));
+  return json(
+    200,
+    itemView(await workFor(env, ctx, id).api(metaOf(ctx), "resolveInbox", { id }, t.trim() ? JSON.parse(t) : {})),
+  );
 };
 
 /** POST /api/v1/inbox/{id}/read */
@@ -55,5 +67,5 @@ export const readInboxItem: Handler = async (_req, env, ctx) => {
 export const unresolveInboxItem: Handler = async (_req, env, ctx) => {
   const id = ctx.params.id ?? "";
   if (!ownerIsWork(id)) throw new OfError("feature_not_available", "team-level inbox items cannot be unresolved");
-  return json(200, await workFor(env, ctx, id).api(metaOf(ctx), "unresolveInbox", { id }, null));
+  return json(200, itemView(await workFor(env, ctx, id).api(metaOf(ctx), "unresolveInbox", { id }, null)));
 };

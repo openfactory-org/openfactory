@@ -248,7 +248,10 @@ export class Repo {
    * Seq must increase by 1 from >= 1 (invalid). Events at or below the ack are
    * ignored. A gap throws SeqGapError with the stored ack.
    */
-  appendEvents(s: RunSession, events: readonly Omit<RunnerEvent, "run_id" | "session">[]): { ack: number; fresh: RunnerEvent[] } {
+  appendEvents(
+    s: RunSession,
+    events: readonly Omit<RunnerEvent, "run_id" | "session">[],
+  ): { ack: number; fresh: RunnerEvent[] } {
     for (let i = 0; i < events.length; i++) {
       const e = events[i]!;
       if (!Number.isInteger(e.seq) || e.seq < 1) throw invalid(`event seq ${e.seq} must be 1 or more`);
@@ -302,7 +305,13 @@ export class Repo {
   appendCommand(s: RunSession, type: string, data: unknown): RunnerCommand {
     if (s.state === "ended") throw conflict("session ended");
     s.command_seq += 1;
-    const c: RunnerCommand = { run_id: s.run_id, session: s.session, seq: s.command_seq, type, created_at: iso(this.now()) };
+    const c: RunnerCommand = {
+      run_id: s.run_id,
+      session: s.session,
+      seq: s.command_seq,
+      type,
+      created_at: iso(this.now()),
+    };
     if (data !== undefined && data !== null) c.data = data;
     this.sql.exec(
       "INSERT INTO runner_commands (run_id, session, seq, type, created_ms, data) VALUES (?, ?, ?, ?, ?, ?)",
@@ -355,7 +364,10 @@ export class Repo {
   }
 
   /** AppendRunInput: returns created=false and the existing message for a known dedupe key. */
-  appendInput(m: Omit<RunInput, "seq" | "state" | "created_at"> & { created_at?: string }): { created: boolean; input: RunInput } {
+  appendInput(m: Omit<RunInput, "seq" | "state" | "created_at"> & { created_at?: string }): {
+    created: boolean;
+    input: RunInput;
+  } {
     const run = first<{ s: number }>(this.sql, "SELECT input_seq + 1 AS s FROM runs WHERE id = ?", m.run_id);
     if (!run) throw notFound(`run ${m.run_id}`);
     if (m.dedupe_key) {
@@ -640,7 +652,12 @@ export class Repo {
   // ---------- dispatch ledger ----------
 
   hasDispatch(actionKey: string, target: string): string | undefined {
-    const r = first<{ ref: string }>(this.sql, "SELECT ref FROM dispatches WHERE action_key = ? AND target = ?", actionKey, target);
+    const r = first<{ ref: string }>(
+      this.sql,
+      "SELECT ref FROM dispatches WHERE action_key = ? AND target = ?",
+      actionKey,
+      target,
+    );
     return r?.ref;
   }
 

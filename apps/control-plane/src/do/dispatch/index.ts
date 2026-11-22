@@ -5,7 +5,15 @@
 import { doName, parseTaskId, partitionOf } from "@openfactory/core";
 import type { DispatchTarget, OutboxPayloads } from "../../contracts/do-messages";
 import type { Env } from "../../contracts/env";
-import { admit, refill, START_RATES, type Bucket, type LeaseRow, type WaitingRow, type WorkerRow } from "../../engine/admission";
+import {
+  admit,
+  refill,
+  START_RATES,
+  type Bucket,
+  type LeaseRow,
+  type WaitingRow,
+  type WorkerRow,
+} from "../../engine/admission";
 import { parseDuration } from "../../engine/sessions";
 import { BaseDO, type Migration } from "../../lib/base";
 import { dest } from "../../lib/outbox/dest";
@@ -50,7 +58,12 @@ export class DispatchDO extends BaseDO {
       this.admission();
     });
     this.onMessage("dispatch.taskStarted", (p) => {
-      this.sql.exec("UPDATE leases SET started_ms = ? WHERE run_id = ? AND session = ?", p.startedMs, p.runId, p.session);
+      this.sql.exec(
+        "UPDATE leases SET started_ms = ? WHERE run_id = ? AND session = ?",
+        p.startedMs,
+        p.runId,
+        p.session,
+      );
     });
     this.onMessage("dispatch.limits", (p) => {
       const sl = parseSpendLimit(p.spendLimit);
@@ -67,7 +80,11 @@ export class DispatchDO extends BaseDO {
       this.admission();
     });
     this.onMessage("capacity.report", (p) => {
-      const cur = first<{ generation: number }>(this.sql, "SELECT generation FROM workers WHERE worker_id = ?", p.workerId);
+      const cur = first<{ generation: number }>(
+        this.sql,
+        "SELECT generation FROM workers WHERE worker_id = ?",
+        p.workerId,
+      );
       if (cur && cur.generation > p.generation) return;
       this.sql.exec(
         `INSERT INTO workers (worker_id, kind, online, draining, slots, used, labels, factories, generation, seen_ms)
@@ -92,7 +109,12 @@ export class DispatchDO extends BaseDO {
       this.onUsage(p as UsagePayload);
     });
     this.onTimer<{ runId: string; session: number; workDO: string }>("queue_timeout", (t) => {
-      const w = first(this.sql, "SELECT hold FROM waiting WHERE run_id = ? AND session = ?", t.payload.runId, t.payload.session);
+      const w = first(
+        this.sql,
+        "SELECT hold FROM waiting WHERE run_id = ? AND session = ?",
+        t.payload.runId,
+        t.payload.session,
+      );
       if (!w) return;
       this.sql.exec("DELETE FROM waiting WHERE run_id = ? AND session = ?", t.payload.runId, t.payload.session);
       this.enqueue({
@@ -171,14 +193,20 @@ export class DispatchDO extends BaseDO {
       target_key: string;
       work_do: string;
       hold: string;
-    }>(this.sql, "SELECT run_id, session, factory_id, target, target_key, work_do, hold FROM waiting ORDER BY enqueued_ms, seq");
+    }>(
+      this.sql,
+      "SELECT run_id, session, factory_id, target, target_key, work_do, hold FROM waiting ORDER BY enqueued_ms, seq",
+    );
     if (waiting.length === 0) return;
     const leases = all<LeaseRow & Record<string, SqlStorageValue>>(
       this.sql,
       "SELECT run_id, session, factory_id, target_key, provider, worker_id FROM leases",
     );
     const limits = new Map<string, number>();
-    for (const r of all<{ factory_id: string; max_concurrent: number }>(this.sql, "SELECT factory_id, max_concurrent FROM factory_limits")) {
+    for (const r of all<{ factory_id: string; max_concurrent: number }>(
+      this.sql,
+      "SELECT factory_id, max_concurrent FROM factory_limits",
+    )) {
       limits.set(r.factory_id, r.max_concurrent);
     }
     const workers: WorkerRow[] = all<{
@@ -204,11 +232,30 @@ export class DispatchDO extends BaseDO {
       if (w.target.kind !== "provider" || buckets.has(w.target.providerId)) continue;
       const rates = START_RATES[w.target.providerId];
       if (!rates) continue;
-      buckets.set(w.target.providerId, rates.map((r) => refill(this.bucket(w.target.kind === "provider" ? w.target.providerId : "", r.windowSeconds, r.limit, now), now)));
+      buckets.set(
+        w.target.providerId,
+        rates.map((r) =>
+          refill(
+            this.bucket(w.target.kind === "provider" ? w.target.providerId : "", r.windowSeconds, r.limit, now),
+            now,
+          ),
+        ),
+      );
     }
     const spendBlocked = new Set<string>();
     for (const f of new Set(rows.map((r) => r.factory_id))) if (this.factoryOverLimit(f, now)) spendBlocked.add(f);
-    const res = admit({ waiting: rows, leases, factoryLimits: limits, workers, buckets, spendBlocked, maxSandboxes: this.maxSandboxes() }, now);
+    const res = admit(
+      {
+        waiting: rows,
+        leases,
+        factoryLimits: limits,
+        workers,
+        buckets,
+        spendBlocked,
+        maxSandboxes: this.maxSandboxes(),
+      },
+      now,
+    );
     for (const [provider, bs] of res.buckets) {
       for (const b of bs) {
         this.sql.exec(
@@ -297,7 +344,9 @@ export class DispatchDO extends BaseDO {
       provider,
       windowS,
     );
-    return r ? { provider, window_s: windowS, tokens: r.tokens, cap, updated_ms: r.updated_ms } : { provider, window_s: windowS, tokens: cap, cap, updated_ms: now };
+    return r
+      ? { provider, window_s: windowS, tokens: r.tokens, cap, updated_ms: r.updated_ms }
+      : { provider, window_s: windowS, tokens: cap, cap, updated_ms: now };
   }
 
   // ---------- spend (C5) ----------
@@ -317,7 +366,13 @@ export class DispatchDO extends BaseDO {
         period,
         start,
       )?.c ?? 0;
-    return buildLimits("factory", { daily: fl.daily_usd, monthly: fl.monthly_usd }, total("daily", dayKey(now)), total("monthly", monthKey(now)), now);
+    return buildLimits(
+      "factory",
+      { daily: fl.daily_usd, monthly: fl.monthly_usd },
+      total("daily", dayKey(now)),
+      total("monthly", monthKey(now)),
+      now,
+    );
   }
 
   private factoryOverLimit(factoryId: string, now: number): boolean {
@@ -389,7 +444,9 @@ export class DispatchDO extends BaseDO {
         dest: dest.index(this.teamId()),
         kind: "index.inboxCreate",
         msgId: key,
-        payload: { item: { kind: "spend_limit", factory_id: p.factoryId, title: noticeText(w), body: noticeText(w), limit: w } },
+        payload: {
+          item: { kind: "spend_limit", factory_id: p.factoryId, title: noticeText(w), body: noticeText(w), limit: w },
+        },
       });
     }
     this.admission();
@@ -408,7 +465,14 @@ export class DispatchDO extends BaseDO {
     return this.rpc(() => {
       const now = Date.now();
       const total = (scope: string, id: string, period: string, start: string) =>
-        first<{ c: number }>(this.sql, "SELECT cost_usd AS c FROM spend_totals WHERE scope = ? AND id = ? AND period = ? AND start = ?", scope, id, period, start)?.c ?? 0;
+        first<{ c: number }>(
+          this.sql,
+          "SELECT cost_usd AS c FROM spend_totals WHERE scope = ? AND id = ? AND period = ? AND start = ?",
+          scope,
+          id,
+          period,
+          start,
+        )?.c ?? 0;
       return {
         team_id: this.teamId(),
         factory_id: factoryId,
@@ -420,10 +484,19 @@ export class DispatchDO extends BaseDO {
   }
 
   /** Read model for tests and the API: waiting and leases. */
-  async state(): Promise<{ waiting: { run_id: string; session: number; hold: string }[]; leases: { run_id: string; session: number; factory_id: string }[] }> {
+  async state(): Promise<{
+    waiting: { run_id: string; session: number; hold: string }[];
+    leases: { run_id: string; session: number; factory_id: string }[];
+  }> {
     return this.rpc(() => ({
-      waiting: all<{ run_id: string; session: number; hold: string }>(this.sql, "SELECT run_id, session, hold FROM waiting ORDER BY enqueued_ms, seq"),
-      leases: all<{ run_id: string; session: number; factory_id: string }>(this.sql, "SELECT run_id, session, factory_id FROM leases ORDER BY granted_ms, run_id"),
+      waiting: all<{ run_id: string; session: number; hold: string }>(
+        this.sql,
+        "SELECT run_id, session, hold FROM waiting ORDER BY enqueued_ms, seq",
+      ),
+      leases: all<{ run_id: string; session: number; factory_id: string }>(
+        this.sql,
+        "SELECT run_id, session, factory_id FROM leases ORDER BY granted_ms, run_id",
+      ),
     }));
   }
 
@@ -438,7 +511,9 @@ export class DispatchDO extends BaseDO {
     const team = this.teamId();
     const leased = new Set(all<{ task_id: string }>(this.sql, "SELECT task_id FROM leases").map((r) => r.task_id));
     const providers = new Set([
-      ...all<{ provider: string }>(this.sql, "SELECT DISTINCT provider FROM leases WHERE provider <> ''").map((r) => r.provider),
+      ...all<{ provider: string }>(this.sql, "SELECT DISTINCT provider FROM leases WHERE provider <> ''").map(
+        (r) => r.provider,
+      ),
       ...registeredProviders(),
     ]);
     const now = Date.now();
@@ -486,7 +561,8 @@ export class DispatchDO extends BaseDO {
         console.warn("dispatch: reconcile", l.run_id, e instanceof Error ? e.message : String(e));
       }
     }
-    if (first(this.sql, "SELECT 1 FROM leases LIMIT 1")) this.setTimer("reconcile", "reconcile", now + RECONCILE_EVERY_MS);
+    if (first(this.sql, "SELECT 1 FROM leases LIMIT 1"))
+      this.setTimer("reconcile", "reconcile", now + RECONCILE_EVERY_MS);
   }
 }
 

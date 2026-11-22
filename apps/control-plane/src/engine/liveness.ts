@@ -22,10 +22,19 @@ export interface LivenessOptions {
  * The start-timeout part: an assigned session past its bootstrap expiry loses
  * its task with sandbox_create_failed.
  */
-export function decideStartTimeout(s: Pick<RunSession, "state" | "bootstrap_expires_at">, nowMs: number): LivenessAction | undefined {
+export function decideStartTimeout(
+  s: Pick<RunSession, "state" | "bootstrap_expires_at">,
+  nowMs: number,
+): LivenessAction | undefined {
   const exp = ms(s.bootstrap_expires_at);
   if (s.state === "assigned" && exp !== undefined && nowMs > exp) {
-    return { kind: "lose", reason: "deadline_exceeded", code: "sandbox_create_failed", cancel: true, useReasonMap: false };
+    return {
+      kind: "lose",
+      reason: "deadline_exceeded",
+      code: "sandbox_create_failed",
+      cancel: true,
+      useReasonMap: false,
+    };
   }
   return undefined;
 }
@@ -51,7 +60,8 @@ export function decideSilent(
   if (status === "not_found") {
     return { kind: "lose", reason: "unknown", code: "sandbox_lost", cancel: false, useReasonMap: false };
   }
-  const st: TaskStatus | undefined = status === "unavailable" ? { taskId: "", state: "running" } : "state" in status ? status : undefined;
+  const st: TaskStatus | undefined =
+    status === "unavailable" ? { taskId: "", state: "running" } : "state" in status ? status : undefined;
   if (st && st.state === "exited") {
     return { kind: "lose", reason: st.reason ?? "unknown", code: "", cancel: false, useReasonMap: true };
   }

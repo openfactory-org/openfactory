@@ -6,9 +6,19 @@ import type { StartRequest } from "@openfactory/runner-proto";
 import type { Env } from "../contracts/env";
 import type { Run, RunSession } from "../engine/types";
 import { longPoll, MAX_WAIT_S, subscribe } from "../stream/index";
+import { loadBundle } from "../eventctx/index";
+import { b64 } from "../lib/bytes";
+import { EVENT_FILES_REF } from "../do/work/engine";
 import { plannedSecrets, plannedStartConfig, plannerFor } from "./planner";
 import { buildSecrets, buildStartConfig, setSecretsBuilder, setStartConfigBuilder } from "./startconfig";
-import { attachmentDownload, CLOUD_TOKEN_TTL, getAttachment, presignUpload, snapshotDownloads, type UploadRequest } from "./transfer";
+import {
+  attachmentDownload,
+  CLOUD_TOKEN_TTL,
+  getAttachment,
+  presignUpload,
+  snapshotDownloads,
+  type UploadRequest,
+} from "./transfer";
 import { issuerFor } from "../cloudid/issuer";
 
 setStartConfigBuilder(plannedStartConfig);
@@ -23,7 +33,10 @@ const MAJOR = "1";
 type RunnerErr = { error: { status: number; code: string; message: string; ack?: number } };
 
 function json(status: number, body: unknown, headers: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(body) + "\n", { status, headers: { "content-type": "application/json", ...headers } });
+  return new Response(JSON.stringify(body) + "\n", {
+    status,
+    headers: { "content-type": "application/json", ...headers },
+  });
 }
 
 function errorBody(status: number, code: string, message: string, ack?: number): Response {
@@ -41,7 +54,11 @@ export function checkVersion(v: string | null): Response | undefined {
   if (!v) return undefined;
   const major = v.replace(/^v/, "").split(".")[0] ?? "";
   if (major === MAJOR || !/^\d+$/.test(major)) return undefined;
-  return errorBody(426, "unsupported_runner_version", `runner version ${JSON.stringify(v)} is not supported, need major version ${MAJOR}`);
+  return errorBody(
+    426,
+    "unsupported_runner_version",
+    `runner version ${JSON.stringify(v)} is not supported, need major version ${MAJOR}`,
+  );
 }
 
 function bearer(req: Request): string | undefined {
@@ -82,7 +99,8 @@ async function issue(env: Env, run: Run, session: number) {
 export async function handleRunnerApi(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
-  if (request.method === "GET" && path.startsWith(RUNNER_PREFIX + "/bin/")) return serveBinary(env, path.slice(RUNNER_PREFIX.length + 5));
+  if (request.method === "GET" && path.startsWith(RUNNER_PREFIX + "/bin/"))
+    return serveBinary(env, path.slice(RUNNER_PREFIX.length + 5));
   const bad = checkVersion(request.headers.get(HEADER_RUNNER_VERSION));
   if (bad) return bad;
   try {
@@ -151,10 +169,22 @@ async function start(request: Request, env: Env): Promise<Response> {
     throw e;
   }
   const { token, expiresAt } = await issue(env, res.run, res.session.session);
-  return json(200, { ...cfg, run_id: res.run.id, session: res.session.session, session_token: token, session_token_expires_at: expiresAt });
+  return json(200, {
+    ...cfg,
+    run_id: res.run.id,
+    session: res.session.session,
+    session_token: token,
+    session_token_expires_at: expiresAt,
+  });
 }
 
-async function sessionRoute(route: string, request: Request, env: Env, url: URL, ctx?: ExecutionContext): Promise<Response> {
+async function sessionRoute(
+  route: string,
+  request: Request,
+  env: Env,
+  url: URL,
+  ctx?: ExecutionContext,
+): Promise<Response> {
   const tok = bearer(request);
   if (!tok) return errorBody(401, "unauthorized", "missing session token");
   const claims = await verifySessionToken(await runnerKeys(env), tok);
@@ -165,7 +195,13 @@ async function sessionRoute(route: string, request: Request, env: Env, url: URL,
       const a = (await stub.runnerAuth(claims.run, claims.ses)) as { run: Run; session: RunSession } | RunnerErr;
       if (isErr(a)) return fromErr(a);
       const sec = await buildSecrets(env, a.run, a.session);
-      const names = [...new Set([...Object.keys(sec.env ?? {}), ...Object.keys(sec.harness_auth ?? {}), ...(sec.files ?? []).map((f) => f.path)])].sort();
+      const names = [
+        ...new Set([
+          ...Object.keys(sec.env ?? {}),
+          ...Object.keys(sec.harness_auth ?? {}),
+          ...(sec.files ?? []).map((f) => f.path),
+        ]),
+      ].sort();
       try {
         await stub.runnerSecretsDelivered(a.run.id, a.session.session, { names, harness_credential: null });
       } catch (e) {
@@ -180,7 +216,8 @@ async function sessionRoute(route: string, request: Request, env: Env, url: URL,
       if (body instanceof Response) return body;
       if (!env.OF_R2_ACCOUNT_ID) return errorBody(501, "not_implemented", "not implemented");
       const out = await presignUpload(env, await runnerKeys(env), a.run, a.session, body ?? ({} as UploadRequest));
-      if ("status" in out && "code" in out) return errorBody(out.status as number, out.code as string, out.message as string);
+      if ("status" in out && "code" in out)
+        return errorBody(out.status as number, out.code as string, out.message as string);
       return json(200, out);
     }
     case "GET /runner/v1/session/downloads": {
@@ -192,7 +229,9 @@ async function sessionRoute(route: string, request: Request, env: Env, url: URL,
         const id = url.searchParams.get("id") ?? "";
         if (!id) return errorBody(400, "bad_request", "id is required");
         const named = await stub.inputsNameAttachment(a.run.id, id);
-        const files = named ? await attachmentDownload(env, a.run, await getAttachment(env, a.run.team_id || "default", id)) : undefined;
+        const files = named
+          ? await attachmentDownload(env, a.run, await getAttachment(env, a.run.team_id || "default", id))
+          : undefined;
         if (!files) return errorBody(404, "not_found", "attachment not found");
         return json(200, { files });
       }
@@ -224,12 +263,28 @@ async function sessionRoute(route: string, request: Request, env: Env, url: URL,
       if (!body?.audience) return errorBody(400, "bad_request", "audience is required");
       const ttl = body.ttl_seconds || CLOUD_TOKEN_TTL.def;
       if (ttl < CLOUD_TOKEN_TTL.min || ttl > CLOUD_TOKEN_TTL.max) {
-        return errorBody(400, "bad_request", `ttl_seconds must be from ${CLOUD_TOKEN_TTL.min} to ${CLOUD_TOKEN_TTL.max}`);
+        return errorBody(
+          400,
+          "bad_request",
+          `ttl_seconds must be from ${CLOUD_TOKEN_TTL.min} to ${CLOUD_TOKEN_TTL.max}`,
+        );
       }
-      const snap = (await env.TEAM.getByName(doName.team(a.run.team_id || "default")).configSnapshot(a.run.factory_id)) as {
-        runtime?: { cloud_providers?: { gcp?: { projectNumber?: string; workloadIdentityFederationPoolId?: string; workloadIdentityFederationProviderId?: string }; audiences?: string[] } };
+      const snap = (await env.TEAM.getByName(doName.team(a.run.team_id || "default")).configSnapshot(
+        a.run.factory_id,
+      )) as {
+        runtime?: {
+          cloud_providers?: {
+            gcp?: {
+              projectNumber?: string;
+              workloadIdentityFederationPoolId?: string;
+              workloadIdentityFederationProviderId?: string;
+            };
+            audiences?: string[];
+          };
+        };
       };
-      if (!allowedAudience(snap?.runtime?.cloud_providers, body.audience)) return errorBody(403, "forbidden", "no cloud token for this audience");
+      if (!allowedAudience(snap?.runtime?.cloud_providers, body.audience))
+        return errorBody(403, "forbidden", "no cloud token for this audience");
       let issuer;
       try {
         issuer = await issuerFor(env);
@@ -261,7 +316,11 @@ async function sessionRoute(route: string, request: Request, env: Env, url: URL,
       return isErr(res) ? fromErr(res) : json(200, {});
     }
     case "GET /runner/v1/session/conversation": {
-      const res = await stub.runnerConversation(claims.run, claims.ses, Number(url.searchParams.get("after") ?? "0") || 0);
+      const res = await stub.runnerConversation(
+        claims.run,
+        claims.ses,
+        Number(url.searchParams.get("after") ?? "0") || 0,
+      );
       return isErr(res) ? fromErr(res) : json(200, res);
     }
     case "GET /runner/v1/session/commands":
@@ -272,7 +331,7 @@ async function sessionRoute(route: string, request: Request, env: Env, url: URL,
 }
 
 async function commands(
-  _env: Env,
+  env: Env,
   stub: ReturnType<typeof workStub>,
   c: SessionClaims,
   url: URL,
@@ -282,7 +341,8 @@ async function commands(
   const waitRaw = url.searchParams.get("wait") ?? "0";
   const after = Number(afterRaw);
   const wait = Number(waitRaw);
-  if (!Number.isInteger(after) || after < 0) return errorBody(400, "bad_request", `invalid after ${JSON.stringify(afterRaw)}`);
+  if (!Number.isInteger(after) || after < 0)
+    return errorBody(400, "bad_request", `invalid after ${JSON.stringify(afterRaw)}`);
   if (!Number.isInteger(wait)) return errorBody(400, "bad_request", `invalid wait ${JSON.stringify(waitRaw)}`);
   let failure: RunnerErr | undefined;
   const result = await longPoll<{ commands: unknown[] }>({
@@ -294,18 +354,54 @@ async function commands(
       }
       return r.commands.length ? r : undefined;
     },
-    subscribe: () => subscribe(stub, `/subscribe/commands?run=${encodeURIComponent(c.run)}&session=${c.ses}&after=${after}`),
+    subscribe: () =>
+      subscribe(stub, `/subscribe/commands?run=${encodeURIComponent(c.run)}&session=${c.ses}&after=${after}`),
     empty: { commands: [] },
     waitS: Math.max(0, Math.min(wait, MAX_WAIT_S)),
     signal,
   });
   if (failure) return fromErr(failure);
-  return json(200, { commands: result.commands.map((x) => toProtoCommand(x)) });
+  const out = result.commands.map((x) => toProtoCommand(x));
+  await expandEventFiles(env.DATA, out);
+  return json(200, { commands: out });
 }
 
-function toProtoCommand(x: unknown): unknown {
+function toProtoCommand(x: unknown): { seq: number; type: string; data?: unknown } {
   const c = x as { seq: number; type: string; data?: unknown };
   return { seq: c.seq, type: c.type, ...(c.data !== undefined ? { data: c.data } : {}) };
+}
+
+/**
+ * addEventFiles (dispatch/eventfiles.go): replaces the event context reference
+ * of each input item with its files (path and base64 data). A bundle that is
+ * gone or cannot be read gives no files.
+ */
+export async function expandEventFiles(bucket: R2Bucket, cmds: { data?: unknown }[]): Promise<void> {
+  const cache = new Map<string, Promise<{ path: string; data: string }[]>>();
+  const filesOf = (ref: string) => {
+    let p = cache.get(ref);
+    if (!p) {
+      p = loadBundle(bucket, ref)
+        .then((b) => (b ? b.files.map((f) => ({ path: f.path, data: b64(f.data) })) : []))
+        .catch((e: unknown) => {
+          console.warn("runner: read event context", ref, e instanceof Error ? e.message : String(e));
+          return [];
+        });
+      cache.set(ref, p);
+    }
+    return p;
+  };
+  for (const c of cmds) {
+    const input = (c.data as { input?: Record<string, unknown>[] } | undefined)?.input;
+    if (!Array.isArray(input)) continue;
+    for (const item of input) {
+      const ref = item[EVENT_FILES_REF];
+      if (typeof ref !== "string") continue;
+      delete item[EVENT_FILES_REF];
+      const files = await filesOf(ref);
+      if (files.length > 0) item.files = [...((item.files as unknown[]) ?? []), ...files];
+    }
+  }
 }
 
 /** GET /runner/v1/bin/linux-{arch}[.sha256]: the published runner binary from R2. */
@@ -331,9 +427,18 @@ async function serveBinary(env: Env, name: string): Promise<Response> {
 
 export { OfError };
 
-/** cloudid.AllowedAudience without AWS: the GCP audience of the factory, or one of its audiences. */
+/** cloudid.AllowedAudience: the GCP audience of the factory, or one of its audiences. */
 export function allowedAudience(
-  cp: { gcp?: { projectNumber?: string; workloadIdentityFederationPoolId?: string; workloadIdentityFederationProviderId?: string }; audiences?: string[] } | undefined,
+  cp:
+    | {
+        gcp?: {
+          projectNumber?: string;
+          workloadIdentityFederationPoolId?: string;
+          workloadIdentityFederationProviderId?: string;
+        };
+        audiences?: string[];
+      }
+    | undefined,
   aud: string,
 ): boolean {
   const a = aud.trim();

@@ -93,18 +93,21 @@ const bad = (message: string): TransferError => ({ status: 400, code: "bad_reque
 
 /** UploadRequest.Validate (runnerproto). */
 export function validateUpload(req: UploadRequest): TransferError | undefined {
-  if (!["artifact", "snapshot", "transcript"].includes(req.kind)) return bad(`invalid kind ${JSON.stringify(req.kind)}`);
+  if (!["artifact", "snapshot", "transcript"].includes(req.kind))
+    return bad(`invalid kind ${JSON.stringify(req.kind)}`);
   if (!req.name) return bad("name is empty");
   if (req.name.startsWith("/")) return bad("name starts with /");
   if (req.name.split("/").includes("..")) return bad("name has a .. path element");
   if (typeof req.bytes !== "number" || req.bytes < 0) return bad("bytes is negative");
   if (!/^[0-9a-f]{64}$/.test(req.sha256 ?? "")) return bad("sha256 is not 64 lower-case hex characters");
   if (req.kind === "snapshot") {
-    if (req.part !== PART_WORKSPACE && req.part !== PART_HARNESS_STATE) return bad(`invalid part ${JSON.stringify(req.part ?? "")} for a snapshot`);
+    if (req.part !== PART_WORKSPACE && req.part !== PART_HARNESS_STATE)
+      return bad(`invalid part ${JSON.stringify(req.part ?? "")} for a snapshot`);
   } else if (req.part) return bad(`part must be empty for kind ${JSON.stringify(req.kind)}`);
   if (req.bytes <= 0) return bad("bytes must be more than 0");
   const max = MAX_UPLOAD_BYTES[req.kind] ?? MAX_UPLOAD_BYTES.artifact!;
-  if (req.bytes > max) return { status: 413, code: "too_large", message: `a ${req.kind} upload is limited to ${max} bytes` };
+  if (req.bytes > max)
+    return { status: 413, code: "too_large", message: `a ${req.kind} upload is limited to ${max} bytes` };
   return undefined;
 }
 
@@ -195,7 +198,11 @@ export const attachmentPrefix = (teamId: string, id: string) => `attachments/${t
 /** The attachment metadata of an ID in a team, from the R2 object under attachments/<team>/<id>/. */
 export async function getAttachment(env: Env, teamId: string, id: string): Promise<Attachment | undefined> {
   if (!/^att_[a-z0-9]+$/.test(id)) return undefined;
-  const list = await env.DATA.list({ prefix: attachmentPrefix(teamId, id), limit: 1, include: ["customMetadata", "httpMetadata"] });
+  const list = await env.DATA.list({
+    prefix: attachmentPrefix(teamId, id),
+    limit: 1,
+    include: ["customMetadata", "httpMetadata"],
+  });
   const obj = list.objects[0];
   if (!obj) return undefined;
   const m = obj.customMetadata ?? {};
@@ -212,7 +219,12 @@ export async function getAttachment(env: Env, teamId: string, id: string): Promi
 }
 
 /** GET /session/downloads?kind=attachment&id=: the attachment of an input of the run. */
-export async function attachmentDownload(env: Env, run: Run, att: Attachment | undefined, nowMs = Date.now()): Promise<Record<string, unknown>[] | undefined> {
+export async function attachmentDownload(
+  env: Env,
+  run: Run,
+  att: Attachment | undefined,
+  nowMs = Date.now(),
+): Promise<Record<string, unknown>[] | undefined> {
   if (!att || att.team_id !== teamOf(run) || !att.key) return undefined;
   return [
     {

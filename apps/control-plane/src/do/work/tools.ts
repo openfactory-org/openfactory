@@ -3,7 +3,15 @@
 // effect (C8, plan rule 3). Errors are not stored, so the model can retry.
 import { conflict, forbidden, invalid, isOfError, newRoutedId, notFound } from "@openfactory/core";
 import { iso } from "../../engine/sessions";
-import { isTerminal, STAGES, stageTerminal, type InboxItem, type Run, type Stage, type WorkItemRef } from "../../engine/types";
+import {
+  isTerminal,
+  STAGES,
+  stageTerminal,
+  type InboxItem,
+  type Run,
+  type Stage,
+  type WorkItemRef,
+} from "../../engine/types";
 import { recipientsOf, truncate } from "../../engine/text";
 import {
   notify,
@@ -34,7 +42,9 @@ export interface ToolResult {
   _meta?: Record<string, unknown>;
 }
 
-const text = (v: unknown): ToolResult => ({ content: [{ type: "text", text: typeof v === "string" ? v : JSON.stringify(v) }] });
+const text = (v: unknown): ToolResult => ({
+  content: [{ type: "text", text: typeof v === "string" ? v : JSON.stringify(v) }],
+});
 const errorResult = (msg: string): ToolResult => ({ content: [{ type: "text", text: msg }], isError: true });
 
 /** Tools without side effects run without an idempotency row. */
@@ -48,7 +58,10 @@ export function runTool(fx: Fx, call: ToolCall): ToolResult {
     if (stored !== undefined) {
       const texts = JSON.parse(stored) as string[];
       return {
-        content: [...texts.map((t) => ({ type: "text" as const, text: t })), { type: "text", text: `{"duplicate": true}` }],
+        content: [
+          ...texts.map((t) => ({ type: "text" as const, text: t })),
+          { type: "text", text: `{"duplicate": true}` },
+        ],
         _meta: { duplicate: true },
       };
     }
@@ -80,7 +93,8 @@ function dispatchTool(fx: Fx, caller: Run, call: ToolCall): ToolResult {
     }
     case "follow_up_agent": {
       const target = fx.repo.getRun(s(input.run_id));
-      if (!target || target.parent_run_id !== caller.id) throw invalid(`run ${s(input.run_id)} is not a child of this run`);
+      if (!target || target.parent_run_id !== caller.id)
+        throw invalid(`run ${s(input.run_id)} is not a child of this run`);
       const rec = sendMessage(fx, target.id, s(input.message), actor);
       return text({ message_id: rec.message_id, outcome: rec.outcome });
     }
@@ -111,7 +125,14 @@ function dispatchTool(fx: Fx, caller: Run, call: ToolCall): ToolResult {
         title: truncate(title, 500),
         body: s(input.details) || s(input.body),
         ...(options ? { options } : {}),
-        questions: [{ question_id: "q1", text: title, type: options?.length ? "single_select" : "text", ...(options ? { options } : {}) }],
+        questions: [
+          {
+            question_id: "q1",
+            text: title,
+            type: options?.length ? "single_select" : "text",
+            ...(options ? { options } : {}),
+          },
+        ],
         ...(recipientsOf(wi) ? { recipients: recipientsOf(wi) } : {}),
         resolved: false,
         created_at: iso(fx.now()),
@@ -120,7 +141,10 @@ function dispatchTool(fx: Fx, caller: Run, call: ToolCall): ToolResult {
       fx.repo.createInbox(it);
       projectInbox(fx, it);
       if (wi) {
-        workItemEvent(fx, wi.id, kind === "question" ? "question" : "approval_requested", caller.id, actor, { inbox_id: it.id, title });
+        workItemEvent(fx, wi.id, kind === "question" ? "question" : "approval_requested", caller.id, actor, {
+          inbox_id: it.id,
+          title,
+        });
         notify(fx, wi, kind, title, it.id);
         if (kind === "approval" && !stageTerminal(wi.stage)) setStage(fx, wi.id, "awaiting_approval", actor);
       }
@@ -171,7 +195,14 @@ function dispatchTool(fx: Fx, caller: Run, call: ToolCall): ToolResult {
         if (kind === "pull_request" && typeof input.number === "number") {
           wi.pull_requests = [
             ...(wi.pull_requests ?? []),
-            { forge: s(input.forge), repo: s(input.repo), number: input.number, url: s(input.url), branch: s(input.branch), state: "open" },
+            {
+              forge: s(input.forge),
+              repo: s(input.repo),
+              number: input.number,
+              url: s(input.url),
+              branch: s(input.branch),
+              state: "open",
+            },
           ];
         }
         wi.updated_at = iso(fx.now());
@@ -201,7 +232,17 @@ function dispatchTool(fx: Fx, caller: Run, call: ToolCall): ToolResult {
         error: truncate(r.error ?? "", 500),
       }));
       const open = fx.repo.listInbox({ resolved: false }).map((i) => ({ id: i.id, kind: i.kind, title: i.title }));
-      return text({ work_item: { id: wi.id, title: wi.title, stage: wi.stage, source: wi.source, pull_requests: wi.pull_requests ?? [] }, runs: children, open_requests: open });
+      return text({
+        work_item: {
+          id: wi.id,
+          title: wi.title,
+          stage: wi.stage,
+          source: wi.source,
+          pull_requests: wi.pull_requests ?? [],
+        },
+        runs: children,
+        open_requests: open,
+      });
     }
   }
   return errorResult(`unknown tool ${call.tool}`);

@@ -130,9 +130,19 @@ class FakeRunner {
     let s = seqFrom ?? this.seq;
     const batch = evs.map((e) => ({ seq: ++s, at: new Date().toISOString(), ...e }));
     if (seqFrom === undefined) this.seq = s;
-    return runner("/runner/v1/session/events", { method: "POST", token: this.token, body: JSON.stringify({ events: batch }) });
+    return runner("/runner/v1/session/events", {
+      method: "POST",
+      token: this.token,
+      body: JSON.stringify({ events: batch }),
+    });
   }
-  async commands(): Promise<{ seq: number; type: string; data?: { turn_id?: string; input?: { kind: string; content: string; data?: unknown }[] } }[]> {
+  async commands(): Promise<
+    {
+      seq: number;
+      type: string;
+      data?: { turn_id?: string; input?: { kind: string; content: string; data?: unknown }[] };
+    }[]
+  > {
     const res = await runner(`/runner/v1/session/commands?after=${this.cmdAck}&wait=0`, { token: this.token });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { commands: { seq: number; type: string; data?: never }[] };
@@ -260,7 +270,9 @@ describe("run loop (C2)", () => {
     const dup = await workStub(token).toolCall(call);
     expect(dup._meta?.duplicate).toBe(true);
     expect(dup.content[0]!.text).toBe(first.content[0]!.text);
-    const children = (await workStub(token).api({ requestId: "r" }, "listRunChildren", { runId: root.id }, null)) as { runs: Run[] };
+    const children = (await workStub(token).api({ requestId: "r" }, "listRunChildren", { runId: root.id }, null)) as {
+      runs: Run[];
+    };
     expect(children.runs).toHaveLength(1);
     // No second turn.start.
     expect(await fr.commands()).toHaveLength(0);

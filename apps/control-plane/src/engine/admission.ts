@@ -8,7 +8,8 @@ export interface WaitingRow {
   run_id: string;
   session: number;
   factory_id: string;
-  target: { kind: "provider"; providerId: string } | { kind: "worker"; workerId: string } | { kind: "pool"; label: string };
+  target:
+    { kind: "provider"; providerId: string } | { kind: "worker"; workerId: string } | { kind: "pool"; label: string };
   target_key: string;
   hold: string;
 }
@@ -106,7 +107,11 @@ export function admit(input: AdmissionInput, nowMs: number): AdmissionResult {
     else builtin++;
   }
   const buckets = new Map<string, Bucket[]>();
-  for (const [k, v] of input.buckets) buckets.set(k, v.map((b) => ({ ...b })));
+  for (const [k, v] of input.buckets)
+    buckets.set(
+      k,
+      v.map((b) => ({ ...b })),
+    );
   const out: AdmissionResult = { grants: [], spendHolds: [], spendReleases: [], buckets };
   const blockedTargets = new Set<string>();
 

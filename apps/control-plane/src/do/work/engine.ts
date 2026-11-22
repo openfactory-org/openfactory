@@ -15,7 +15,12 @@ import type { EnqueueInput } from "../../lib/outbox/outbox";
 import { dest } from "../../lib/outbox/dest";
 import { decideDelivery, messageStartsTurn, outcomeFor, toItem } from "../../engine/deliver";
 import { lifecycleDedupeKey, lifecycleEvent, lifecycleParts, runUrl, turnMarker } from "../../engine/lifecycle";
-import { InvalidTransitionError, nextRunState as next, type RunStateInput as StateInput, type RunStateResult as RunResult } from "@openfactory/core";
+import {
+  InvalidTransitionError,
+  nextRunState as next,
+  type RunStateInput as StateInput,
+  type RunStateResult as RunResult,
+} from "@openfactory/core";
 import { applyResult, computeSeconds, iso, ms, priorRetries } from "../../engine/sessions";
 import { recipientsOf, runInputSender, stageForAgent, truncate, firstLine } from "../../engine/text";
 import { sessionEndedRow, taskIdOf, transitionRows, type TimelineRow } from "../../engine/timeline";
@@ -36,6 +41,7 @@ import {
 } from "../../engine/types";
 import type { Repo } from "./repo";
 import { runView } from "../../engine/view";
+import { compactionDueMs } from "../../compaction/compact";
 import { checkMergeCompletion } from "./intake";
 
 /** The root of a run tree (walks local parents). */
@@ -61,7 +67,14 @@ export interface EngineConfig {
   maxDepth: number;
   runnerVersion: string;
   allowUnenforced: string;
+  /** Default task image (OF_SANDBOX_IMAGE); a machine image wins. */
+  sandboxImage: string;
+  /** OF_OBJECT_STORE_RETENTION: run data in R2 older than this is pruned; 0 keeps it. */
+  retentionMs?: number;
 }
+
+/** sandbox.DefaultImage of the Go server. */
+export const DEFAULT_SANDBOX_IMAGE = "ghcr.io/openfactory-org/sandbox:latest";
 
 export interface Fx {
   repo: Repo;
@@ -74,6 +87,8 @@ export interface Fx {
   target(workerHost: string | undefined): DispatchTarget;
   enqueue(input: EnqueueInput): string;
   setTimer(name: string, kind: string, dueMs: number, payload?: unknown): void;
+  /** Sets the timer unless it is already due earlier. */
+  setEarliestTimer?(name: string, kind: string, dueMs: number, payload?: unknown): void;
   clearTimer(name: string): void;
   wakeCommands(runId: string, session: number): void;
   wakeRun(runId: string): void;
@@ -87,6 +102,8 @@ export const timerName = {
   live: (task: string) => `live:${task}`,
   deadline: (task: string) => `deadline:${task}`,
   requeue: (runId: string) => `requeue:${runId}`,
+  compact: (runId: string) => `compact:${runId}`,
+  retention: "retention",
 };
 
 // ---------- helpers ----------
@@ -108,7 +125,15 @@ function writeTimeline(fx: Fx, runId: string, rows: TimelineRow[]): void {
   }
 }
 
-export function timeline(fx: Fx, runId: string, session: number, type: string, eventId: string, data?: Record<string, unknown>, atMs?: number): void {
+export function timeline(
+  fx: Fx,
+  runId: string,
+  session: number,
+  type: string,
+  eventId: string,
+  data?: Record<string, unknown>,
+  atMs?: number,
+): void {
   writeTimeline(fx, runId, [{ eventId, type, session, atMs: atMs ?? fx.now(), ...(data ? { data } : {}) }]);
 }
 
@@ -246,6 +271,21 @@ export function transition(fx: Fx, runId: string, input: StateInput, mutate?: (r
   return { run: r, changed: res.changed, result: res };
 }
 
+/**
+ * After a run finished: compaction of its messages to R2 (compactionDueMs) and
+ * the retention sweep of this WorkDO (both run as queue jobs).
+ */
+export function scheduleDataUpkeep(fx: Fx, r: Run): void {
+  const finished = ms(r.finished_at) ?? fx.now();
+  fx.setTimer(timerName.compact(r.id), "compact", compactionDueMs(finished), { runId: r.id });
+  const keep = fx.cfg.retentionMs ?? 0;
+  if (keep > 0) {
+    const due = finished + keep + 60_000;
+    if (fx.setEarliestTimer) fx.setEarliestTimer(timerName.retention, "retention", due);
+    else fx.setTimer(timerName.retention, "retention", due);
+  }
+}
+
 /** Fields of a run without a state event (Dispatcher.update). */
 export function updateRun(fx: Fx, runId: string, mutate: (r: Run) => void): Run {
   const r = fx.repo.mustRun(runId);
@@ -266,6 +306,8 @@ function afterRunWrite(fx: Fx, r: Run, prev: string, changed: boolean): void {
   if (waitsForInput(r.state) || isTerminal(r.state)) reportTurnEnd(fx, r);
   if (isTerminal(r.state)) {
     fx.repo.sql.exec("DELETE FROM event_context WHERE run_id = ?", r.id);
+    fx.repo.sql.exec("DELETE FROM meta WHERE k = ?", `slot_after:${r.id}`);
+    scheduleDataUpkeep(fx, r);
     fx.clearTimer(timerName.requeue(r.id));
   }
 }
@@ -276,6 +318,13 @@ function afterRunWrite(fx: Fx, r: Run, prev: string, changed: boolean): void {
 export function requestSlot(fx: Fx, r: Run): void {
   const latest = fx.repo.latestSession(r.id);
   if (latest && latest.state !== "ended") return;
+  // After a start that failed for capacity, wait before the next request
+  // (the Go dispatcher retried on its next poll, not at once).
+  const after = Number(fx.repo.getMeta(`slot_after:${r.id}`) ?? "0");
+  if (after > fx.now()) {
+    fx.setTimer(timerName.requeue(r.id), "requeue", after, { runId: r.id });
+    return;
+  }
   const n = latest ? latest.session + 1 : 1;
   const queuedMs = ms(r.queued_at) ?? ms(r.created_at) ?? fx.now();
   fx.enqueue({
@@ -328,7 +377,13 @@ export function enqueueProvider(
       payload: { ...base, graceSeconds },
     });
   } else {
-    fx.enqueue({ dest: providerDest(s), kind, lane: `task:${s.task_id}`, msgId: `pdestroy:${s.task_id}`, payload: base });
+    fx.enqueue({
+      dest: providerDest(s),
+      kind,
+      lane: `task:${s.task_id}`,
+      msgId: `pdestroy:${s.task_id}`,
+      payload: base,
+    });
   }
 }
 
@@ -352,7 +407,8 @@ export function endSession(
   s.active_turn_id = "";
   fx.repo.putSession(s);
   writeTimeline(fx, s.run_id, [sessionEndedRow(s.run_id, s.session, reason, sandboxReason, now)]);
-  for (const t of [timerName.start(s.task_id), timerName.live(s.task_id), timerName.deadline(s.task_id)]) fx.clearTimer(t);
+  for (const t of [timerName.start(s.task_id), timerName.live(s.task_id), timerName.deadline(s.task_id)])
+    fx.clearTimer(t);
   fx.enqueue({
     dest: dest.dispatch(fx.teamId),
     kind: "dispatch.release",
@@ -387,7 +443,13 @@ export function loseCode(
 }
 
 /** Dispatcher.loseSession: the failure code of a sandbox reason. */
-export function loseSession(fx: Fx, s: RunSession, reason: string, applyEvent: boolean, opts: { cancel?: boolean } = {}): void {
+export function loseSession(
+  fx: Fx,
+  s: RunSession,
+  reason: string,
+  applyEvent: boolean,
+  opts: { cancel?: boolean } = {},
+): void {
   loseCode(fx, s, reason, failureForSandboxReason(reason) ?? "", applyEvent, opts);
 }
 
@@ -411,13 +473,33 @@ export function stopSession(fx: Fx, runId: string): void {
 
 // ---------- delivery ----------
 
+/** The internal field of an input item that names its event context in R2; the runner API expands it to files. */
+export const EVENT_FILES_REF = "event_files_ref";
+
+/**
+ * addEventFiles (dispatch/eventfiles.go): the event context of a message. The
+ * first prompt of a run has its own key. The bundle is read from R2 when the
+ * Worker serves the command (no network I/O in the transaction).
+ */
+function withEventFiles<T extends object>(
+  fx: Fx,
+  m: { run_id: string; message_id: string; dedupe_key?: string },
+  item: T,
+): T {
+  const key = m.dedupe_key === "prompt" ? `prompt:${m.run_id}` : m.message_id;
+  const row = fx.repo.sql
+    .exec<{ r2_key: string }>("SELECT r2_key FROM event_context WHERE message_id = ?", key)
+    .toArray()[0];
+  return row ? { ...item, [EVENT_FILES_REF]: row.r2_key } : item;
+}
+
 /** Dispatcher.deliver: pending messages to the live session (one turn claim inside the tx). */
 export function deliver(fx: Fx, runId: string): void {
   const s = fx.repo.latestSession(runId);
   const pending = fx.repo.listInputs(runId, 0, ["pending"]);
   const d = decideDelivery(s, pending);
   if (d.kind === "none" || !s) return;
-  const items = pending.map((m) => toItem(m));
+  const items = pending.map((m) => withEventFiles(fx, m, toItem(m)));
   const ids = pending.map((m) => m.message_id);
   if (d.kind === "start_turn" && spendStopsTurn(fx, runId)) {
     transition(fx, runId, { event: "spend_limit" }, (run) => {
@@ -539,6 +621,31 @@ function reportTurnEnd(fx: Fx, r: Run): void {
   const [to, side, event] = turnEndMessage(fx, r);
   if (event) sendLifecycle(fx, r, to, side, event);
   checkMergeCompletion(fx, r);
+  const judge = r.metadata?.["judge"];
+  if (judge) {
+    // A judge run reports judge.result; the scoring service finishes the score from the judge run.
+    const msgId = `judge:${r.id}:${marker}`;
+    fx.enqueue({
+      dest: dest.jobs(),
+      kind: "judge.result",
+      msgId,
+      payload: {
+        kind: "judge.result",
+        msgId,
+        runId: r.metadata?.["judge_scored_run"] ?? r.id,
+        scorerId: r.metadata?.["judge_scorer"] ?? "",
+        result: {
+          judge_run_id: r.id,
+          judge,
+          state: r.state,
+          result: r.result ?? "",
+          error: r.error ?? "",
+          turn_marker: marker,
+        },
+      },
+    });
+    return;
+  }
   fx.enqueue({
     dest: dest.jobs(),
     kind: "scoring.runFinished",
@@ -579,7 +686,12 @@ function reportRootFailure(fx: Fx, r: Run): void {
     fx.repo.createInbox(it);
     projectInbox(fx, it);
   }
-  notify(fx, wi, "error", "The factory hit an error while working on this request: " + truncate(firstLine(r.error ?? ""), 500));
+  notify(
+    fx,
+    wi,
+    "error",
+    "The factory hit an error while working on this request: " + truncate(firstLine(r.error ?? ""), 500),
+  );
 }
 
 function reportBlocked(fx: Fx, r: Run): void {
@@ -625,7 +737,13 @@ export interface NewRun {
  * createRunWith: the run (queued), its first message, the first queue entry
  * (dedupe key "prompt") and the slot request, in one transaction (T15).
  */
-export function createRun(fx: Fx, nr: NewRun, actor: string, msgId?: string, ledger?: { actionKey: string; target: string }): Run {
+export function createRun(
+  fx: Fx,
+  nr: NewRun,
+  actor: string,
+  msgId?: string,
+  ledger?: { actionKey: string; target: string },
+): Run {
   if (!nr.prompt.trim()) throw invalid("prompt is required");
   const now = iso(fx.now());
   const r: Run = {
@@ -768,6 +886,8 @@ export interface DispatchPlan {
   startingRepoRefs?: unknown[];
   /** Agent pins of a trial; the caller applied them to config already. */
   agentPins?: Record<string, unknown>;
+  /** Message ID of a follow-up to the root run (the event context names it). */
+  messageId?: string;
 }
 
 /**
@@ -789,7 +909,7 @@ export function dispatchRoot(fx: Fx, p: DispatchPlan): { workItem: WorkItem; run
   if (wi?.root_run_id) {
     const root = fx.repo.getRun(wi.root_run_id);
     if (root && root.state !== "cancelled") {
-      const msgId = newMsgId(fx);
+      const msgId = p.messageId || newMsgId(fx);
       sendMessage(fx, root.id, p.prompt, p.actor, [], msgId);
       if (p.ledger) fx.repo.recordDispatch(p.ledger.actionKey, p.ledger.target, root.id);
       return { workItem: wi, run: fx.repo.mustRun(root.id), followUp: true };
@@ -971,7 +1091,8 @@ export function checkOrchestrationDepth(fx: Fx, parent: Run): void {
 /** RunAgents: children of a parent run in one transaction (the parent lock is the transaction). */
 export function runAgents(fx: Fx, parentId: string, plans: ChildPlan[], summary = ""): Run[] {
   if (plans.length === 0) throw invalid("agent_run_configs must contain at least one child");
-  if (plans.length > MAX_RUN_AGENTS_BATCH) throw invalid(`at most ${MAX_RUN_AGENTS_BATCH} children per run_agents call`);
+  if (plans.length > MAX_RUN_AGENTS_BATCH)
+    throw invalid(`at most ${MAX_RUN_AGENTS_BATCH} children per run_agents call`);
   const parent = fx.repo.mustRun(parentId);
   if (isTerminal(parent.state)) throw conflict(`parent run is ${parent.state}`);
   checkOrchestrationDepth(fx, parent);
@@ -986,7 +1107,9 @@ export function runAgents(fx: Fx, parentId: string, plans: ChildPlan[], summary 
   let bestRank = 0;
   for (const p of plans) {
     if (p.config.type === "FOREMAN" || !canSpawnCheck(p.config, callerName, parent.config.type)) {
-      throw forbidden(`agent ${JSON.stringify(p.config.name)} may not be started by ${JSON.stringify(callerName)} (spawnableBy)`);
+      throw forbidden(
+        `agent ${JSON.stringify(p.config.name)} may not be started by ${JSON.stringify(callerName)} (spawnableBy)`,
+      );
     }
     const child = createRun(
       fx,

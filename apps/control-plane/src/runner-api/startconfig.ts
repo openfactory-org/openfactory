@@ -28,7 +28,11 @@ export const defaultStartConfig: StartConfigBuilder = async (env, run, session) 
   const maxSession = Math.round(parseDuration(env.OF_MAX_SESSION_DURATION, 8 * 3_600_000) / 1000);
   return {
     conversation_id: run.id,
-    env: { OF_RUN_ID: run.id, OF_FACTORY_ID: run.factory_id, ...(run.work_item_id ? { OF_WORK_ITEM_ID: run.work_item_id } : {}) },
+    env: {
+      OF_RUN_ID: run.id,
+      OF_FACTORY_ID: run.factory_id,
+      ...(run.work_item_id ? { OF_WORK_ITEM_ID: run.work_item_id } : {}),
+    },
     harness: {
       type: cfg.harness?.type ?? "claude",
       model: cfg.harness?.model ?? "",

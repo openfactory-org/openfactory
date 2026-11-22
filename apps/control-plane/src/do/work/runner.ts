@@ -115,7 +115,12 @@ export function failStart(fx: Fx, runId: string, n: number, message: string): Ru
     s.failure_code = "invalid_configuration";
     endSession(fx, s, "setup_failed", "", { destroy: true });
     fx.repo.resetSessionInputs(runId, n);
-    applySessionEnd(fx, s, { reason: "setup_failed", failure_code: "invalid_configuration", message, last_event_seq: s.event_ack });
+    applySessionEnd(fx, s, {
+      reason: "setup_failed",
+      failure_code: "invalid_configuration",
+      message,
+      last_event_seq: s.event_ack,
+    });
   }
   return rerr(422, "configuration_error", message);
 }
@@ -134,7 +139,12 @@ interface WireEvent {
  * POST /session/events: append + every effect + the delivery decision, in
  * the caller's one transaction. Returns the ack.
  */
-export function appendEvents(fx: Fx, runId: string, n: number, batch: { events: WireEvent[] | null }): { ack: number } | RunnerError {
+export function appendEvents(
+  fx: Fx,
+  runId: string,
+  n: number,
+  batch: { events: WireEvent[] | null },
+): { ack: number } | RunnerError {
   const auth = authSession(fx, runId, n);
   if ("error" in auth) return auth;
   const s = auth;
@@ -179,7 +189,8 @@ function processEvent(fx: Fx, s: RunSession, e: RunnerEvent): void {
       if (!cur.ready_at) cur.ready_at = iso(fx.now());
       fx.repo.putSession(cur);
       Object.assign(s, cur);
-      if (Array.isArray(d.repositories)) resolveStartCommits(fx, s.run_id, d.repositories as { path: string; commit: string }[]);
+      if (Array.isArray(d.repositories))
+        resolveStartCommits(fx, s.run_id, d.repositories as { path: string; commit: string }[]);
       return;
     }
     case "turn.started": {
@@ -363,7 +374,12 @@ function resolveStartCommits(fx: Fx, runId: string, repos: { path: string; commi
 
 // ---------- commands ----------
 
-export function pollCommands(fx: Fx, runId: string, n: number, after: number): { commands: RunnerCommand[] } | RunnerError {
+export function pollCommands(
+  fx: Fx,
+  runId: string,
+  n: number,
+  after: number,
+): { commands: RunnerCommand[] } | RunnerError {
   const auth = authSession(fx, runId, n);
   if ("error" in auth) return auth;
   if (after > 0 && fx.repo.ackCommands(auth, after)) fx.repo.putSession(auth);
@@ -383,11 +399,17 @@ export function enqueueCommand(fx: Fx, s: RunSession, type: string, data: unknow
 const END_REASONS = new Set(["idle", "stopped", "cancelled", "setup_failed", "deadline", "fatal"]);
 
 /** POST /session/end (runnerapi/end.go + Dispatcher.SessionEnded) in one transaction (N2). */
-export function endSessionByRunner(fx: Fx, runId: string, n: number, req: EndRequest): Record<string, never> | RunnerError {
+export function endSessionByRunner(
+  fx: Fx,
+  runId: string,
+  n: number,
+  req: EndRequest,
+): Record<string, never> | RunnerError {
   const auth = authSession(fx, runId, n);
   if ("error" in auth) return auth;
   if (!END_REASONS.has(req.reason)) return rerr(400, "bad_request", `invalid end reason ${JSON.stringify(req.reason)}`);
-  if (typeof req.last_event_seq !== "number" || req.last_event_seq < 0) return rerr(400, "bad_request", "invalid last_event_seq");
+  if (typeof req.last_event_seq !== "number" || req.last_event_seq < 0)
+    return rerr(400, "bad_request", "invalid last_event_seq");
   const s = auth;
   if (req.last_event_seq > s.event_ack) return rerr(409, "seq_gap", "event sequence gap", s.event_ack);
   if (req.failure_code) s.failure_code = runnerFailureCode(req.failure_code);
@@ -398,9 +420,17 @@ export function endSessionByRunner(fx: Fx, runId: string, n: number, req: EndReq
 }
 
 /** Dispatcher.applySessionEnd. */
-export function applySessionEnd(fx: Fx, s: RunSession, req: Pick<EndRequest, "reason" | "failure_code" | "message" | "last_event_seq">): void {
+export function applySessionEnd(
+  fx: Fx,
+  s: RunSession,
+  req: Pick<EndRequest, "reason" | "failure_code" | "message" | "last_event_seq">,
+): void {
   const lost = (code: FailureCode) =>
-    transition(fx, s.run_id, { event: "session_lost", failureCode: code, priorRetries: priorRetries(fx.repo.listSessions(s.run_id), s.session) });
+    transition(fx, s.run_id, {
+      event: "session_lost",
+      failureCode: code,
+      priorRetries: priorRetries(fx.repo.listSessions(s.run_id), s.session),
+    });
   switch (req.reason) {
     case "setup_failed":
       transition(fx, s.run_id, { event: "setup_failed", failureCode: req.failure_code ?? "" }, (r) =>

@@ -1,7 +1,18 @@
 // WorkDO (key team:<t>|work:<token>): one work item (or a run tree without
 // one), its runs, sessions, runner protocol, inbox items, dispatch ledger and
 // tool idempotency rows. Every request or alarm step is one transactionSync.
-import { conflict, invalid, isOfError, newRoutedId, notFound, OfError, pullRequestSource, sourceKey, type FailureCode } from "@openfactory/core";
+import {
+  buildConversation,
+  usageCoverage,
+  conflict,
+  invalid,
+  newRoutedId,
+  notFound,
+  OfError,
+  pullRequestSource,
+  sourceKey,
+  type FailureCode,
+} from "@openfactory/core";
 import { failureForSandboxReason, gateNetworkPolicy, parseProviderError, type TaskStatus } from "@openfactory/sandbox";
 import type { EndRequest, StartRequest } from "@openfactory/runner-proto";
 import type { Ack, CallMeta, CoreEvent, OutboxEnvelope, OutboxPayloads } from "../../contracts/do-messages";
@@ -12,8 +23,15 @@ import type { OutboxRow } from "../../lib/outbox/outbox";
 import type { TimerRow } from "../../lib/timers/timers";
 import { decideDeadline, decideSilent, DEFAULT_LOST_AFTER_MS } from "../../engine/liveness";
 import { parseDuration } from "../../engine/sessions";
-import { isTerminal, STAGES, type InboxItem, type PullRequestRef, type Run, type RunSession, type Stage } from "../../engine/types";
-import { taskIdOf } from "../../engine/timeline";
+import {
+  isTerminal,
+  STAGES,
+  type InboxItem,
+  type PullRequestRef,
+  type Run,
+  type RunSession,
+  type Stage,
+} from "../../engine/types";
 import { defaultProviderId, providerFor, targetOf } from "../dispatch/providers";
 import {
   createRun as engineCreateRun,
@@ -23,15 +41,14 @@ import {
   cancelOne,
   setStage,
   dispatchRoot,
-  endSession,
   loseCode,
   loseSession,
   requestSlot,
+  DEFAULT_SANDBOX_IMAGE,
   runAgents,
   sendMessage,
   stopSession,
   transition,
-  enqueueProvider,
   projectInbox,
   projectWorkItem,
   type ChildPlan,
@@ -39,8 +56,20 @@ import {
   type EngineConfig,
   type Fx,
 } from "./engine";
-import { buildTask, commitGrant, mintBootstrap, onGrant, startFailed, startSucceeded, taskPolicy, type Grant, type GrantPrep } from "./grant";
+import {
+  buildTask,
+  commitGrant,
+  mintBootstrap,
+  onGrant,
+  startFailed,
+  startSucceeded,
+  taskPolicy,
+  type Grant,
+  type GrantPrep,
+} from "./grant";
 import { m0001 } from "./migrations/0001_init";
+import { compactRunMessages, type CompactionRpc } from "../../compaction/compact";
+import { pruneRunData, retentionMs, type RetentionRpc } from "../../retention/sweep";
 import { Repo } from "./repo";
 import {
   appendEvents,
@@ -65,6 +94,19 @@ export function setNoticeDeliverer(fn: NoticeDeliverer): void {
   noticeDeliverer = fn;
 }
 
+/** OF_OBJECT_STORE_RETENTION in ms; an invalid value keeps data (0) and is logged. */
+function safeRetentionMs(env: Env): number {
+  try {
+    return retentionMs(env);
+  } catch (e) {
+    console.warn(
+      "work: OF_OBJECT_STORE_RETENTION is invalid; run data is kept",
+      e instanceof Error ? e.message : String(e),
+    );
+    return 0;
+  }
+}
+
 export function engineConfig(env: Env): EngineConfig {
   const pub = (env.OF_PUBLIC_URL ?? "").replace(/\/+$/, "");
   return {
@@ -79,6 +121,9 @@ export function engineConfig(env: Env): EngineConfig {
     maxDepth: Number((env as unknown as Record<string, string>).OF_MAX_ORCHESTRATION_DEPTH ?? "") || 1,
     runnerVersion: env.OF_RUNNER_VERSION ?? "",
     allowUnenforced: env.OF_ALLOW_UNENFORCED_NETWORK_POLICY ?? "",
+    sandboxImage:
+      ((env as unknown as Record<string, string | undefined>).OF_SANDBOX_IMAGE ?? "").trim() || DEFAULT_SANDBOX_IMAGE,
+    retentionMs: safeRetentionMs(env),
   };
 }
 
@@ -100,7 +145,7 @@ export interface CreateRunInput {
   };
 }
 
-export class WorkDO extends BaseDO {
+export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
   private readonly live = new LiveHub(this.ctx);
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -143,10 +188,27 @@ export class WorkDO extends BaseDO {
     this.onTimer<{ runId: string; session: number }>("start_timeout", (t) =>
       this.fxSync((fx) => {
         const s = fx.repo.getSession(t.payload.runId, t.payload.session);
-        if (s?.state === "assigned") loseCode(fx, s, "deadline_exceeded", "sandbox_create_failed", true, { cancel: true });
+        if (s?.state === "assigned")
+          loseCode(fx, s, "deadline_exceeded", "sandbox_create_failed", true, { cancel: true });
       }),
     );
     this.onTimer<{ runId: string; session: number }>("deadline", (t) => this.fxSync((fx) => this.onDeadline(fx, t)));
+    // Data upkeep of finished runs: each timer sends a queue job that calls back compactRun / retentionSweep.
+    this.onTimerAsync<{ runId: string }>("compact", async (t) => {
+      await this.env.JOBS.send({
+        kind: "compaction.run",
+        msgId: `compact:${t.payload.runId}`,
+        doName: this.doName(),
+        runId: t.payload.runId,
+      });
+    });
+    this.onTimerAsync("retention", async () => {
+      await this.env.JOBS.send({
+        kind: "retention.sweep",
+        msgId: `retention:${this.doName()}:${Date.now()}`,
+        doName: this.doName(),
+      });
+    });
     this.onTimerAsync<{ runId: string; session: number }>("liveness", (t) => this.onLiveness(t));
   }
 
@@ -177,6 +239,7 @@ export class WorkDO extends BaseDO {
       target: (h) => targetOf(this.env, h),
       enqueue: (input) => this.enqueue(input),
       setTimer: (n, k, d, p) => this.setTimer(n, k, d, p),
+      setEarliestTimer: (n, k, d, p) => this.timers.setEarliest(n, k, d, p ?? null),
       clearTimer: (n) => void this.clearTimer(n),
       wakeCommands: (runId, s) => wakes.cmd.add(`cmd:${runId}:${s}`),
       wakeRun: (runId) => wakes.run.add(`run:${runId}`),
@@ -249,11 +312,18 @@ export class WorkDO extends BaseDO {
 
   // ---------- runs (Worker -> WorkDO) ----------
 
-  async runsCreate(meta: CallMeta, input: CreateRunInput): Promise<{ run: Run; workItemId?: string; followUp?: boolean }> {
+  async runsCreate(
+    meta: CallMeta,
+    input: CreateRunInput,
+  ): Promise<{ run: Run; workItemId?: string; followUp?: boolean }> {
     return this.rpc(() =>
       this.txFx((fx) => {
         if (input.dispatch) {
           const out = dispatchRoot(fx, input.dispatch);
+          // saveWorkItemState: the pins of a trial apply to the children that run_agents starts.
+          const pins = input.dispatch.agentPins;
+          if (pins && Object.keys(pins).length > 0)
+            fx.repo.setMeta(`agent_pins:${out.workItem.id}`, JSON.stringify(pins));
           const refs = input.dispatch.startingRepoRefs;
           if (refs?.length && !out.followUp) fx.repo.setRunState(out.run.id, "repo_refs", JSON.stringify(refs));
           return { run: out.run, workItemId: out.workItem.id, followUp: out.followUp };
@@ -268,7 +338,11 @@ export class WorkDO extends BaseDO {
     );
   }
 
-  async runsMessage(_meta: CallMeta, runId: string, input: { message: string; actor: string; attachments?: string[]; messageId?: string }) {
+  async runsMessage(
+    _meta: CallMeta,
+    runId: string,
+    input: { message: string; actor: string; attachments?: string[]; messageId?: string },
+  ) {
     return this.rpc(() =>
       this.txFx((fx) => sendMessage(fx, runId, input.message, input.actor, input.attachments ?? [], input.messageId)),
     );
@@ -319,6 +393,81 @@ export class WorkDO extends BaseDO {
     return this.rpc(() => new Repo(this.sql, Date.now).latestSession(runId)?.active_turn_id ?? "");
   }
 
+  // ---------- data upkeep (WS13: compaction and retention) ----------
+
+  /** CompactionRpc: one step that moves the messages of a finished run to R2. */
+  async compactRun(runId: string): Promise<{ more: boolean }> {
+    return this.rpc(async () => {
+      const repo = new Repo(this.sql, Date.now);
+      const r = repo.getRun(runId);
+      if (!r || !isTerminal(r.state)) return { more: false };
+      const out = await compactRunMessages(
+        {
+          bucket: this.env.DATA,
+          now: () => Date.now(),
+          readRows: (id, after, limit) =>
+            this.sql
+              .exec<{ seq: number; data: string }>(
+                "SELECT seq, data FROM run_messages WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT ?",
+                id,
+                after,
+                limit,
+              )
+              .toArray(),
+          deleteRows: (id, upto) =>
+            this.tx(() => {
+              const n = this.sql.exec("DELETE FROM run_messages WHERE run_id = ? AND seq <= ?", id, upto).rowsWritten;
+              const prev = Number(repo.getRunState(id, "compacted_upto") ?? "0");
+              if (upto > prev) repo.setRunState(id, "compacted_upto", String(upto));
+              return n;
+            }),
+        },
+        runId,
+      );
+      return { more: out.more };
+    });
+  }
+
+  /**
+   * RetentionRpc: one step that deletes the R2 data (transcript, compacted
+   * messages, snapshots) of finished runs older than OF_OBJECT_STORE_RETENTION.
+   * The rows stay. The next timer is set for the next run that expires.
+   */
+  async retentionSweep(): Promise<{ more: boolean }> {
+    return this.rpc(async () => {
+      const keep = safeRetentionMs(this.env);
+      if (keep <= 0) return { more: false };
+      const now = Date.now();
+      const rows = this.sql
+        .exec<{ id: string; data: string }>(
+          "SELECT id, data FROM runs WHERE state IN ('succeeded', 'failed', 'error', 'cancelled') AND id NOT IN (SELECT run_id FROM run_state WHERE k = 'data_pruned')",
+        )
+        .toArray();
+      const runs: { id: string; lastActivityMs: number }[] = [];
+      for (const row of rows) {
+        const r = JSON.parse(row.data) as Run;
+        runs.push({ id: row.id, lastActivityMs: Date.parse(r.finished_at ?? r.created_at) || now });
+      }
+      const out = await pruneRunData({
+        bucket: this.env.DATA,
+        teamId: this.teamId(),
+        runs,
+        nowMs: now,
+        retentionMs: keep,
+      });
+      this.tx(() => {
+        const repo = new Repo(this.sql, Date.now);
+        for (const id of out.pruned) repo.setRunState(id, "data_pruned", String(now));
+        if (!out.more) {
+          const left = runs.filter((r) => !out.pruned.includes(r.id)).map((r) => r.lastActivityMs);
+          if (left.length > 0)
+            this.timers.setEarliest("retention", "retention", Math.min(...left) + keep + 60_000, null);
+        }
+      });
+      return { more: out.more };
+    });
+  }
+
   // ---------- reads ----------
 
   async getRun(runId: string): Promise<Run> {
@@ -332,9 +481,19 @@ export class WorkDO extends BaseDO {
       switch (op) {
         case "getRun":
           return repo.mustRun(runId);
-        case "listRunMessages":
+        case "listRunMessages": {
           repo.mustRun(runId);
-          return { messages: repo.listMessages(runId, Number(params.after ?? 0), Number(params.limit ?? 0)) };
+          // compacted_upto: messages at or below it are in R2 (runs/<id>/messages.ndjson).
+          const upto = Number(repo.getRunState(runId, "compacted_upto") ?? "0");
+          return {
+            messages: repo.listMessages(runId, Number(params.after ?? 0), Number(params.limit ?? 0)),
+            ...(upto > 0 ? { compacted_upto: upto } : {}),
+          };
+        }
+        case "getAgentPins": {
+          const raw = repo.getMeta(`agent_pins:${params.id ?? ""}`);
+          return { pins: raw ? (JSON.parse(raw) as Record<string, unknown>) : {} };
+        }
         case "listRunInputs":
           repo.mustRun(runId);
           return { inputs: repo.listInputs(runId) };
@@ -343,11 +502,12 @@ export class WorkDO extends BaseDO {
           return { events: repo.listTimeline(runId) };
         case "listRunSessions":
           repo.mustRun(runId);
-          return { sessions: repo.listSessions(runId).map(publicSession) };
+          return { sessions: repo.listSessions(runId).map((x) => sessionView(this.sql, x)) };
         case "getRunDiagnostics": {
           repo.mustRun(runId);
           const out: unknown[] = [];
-          for (const s of repo.listSessions(runId)) out.push(...repo.listEvents(runId, s.session).filter((e) => e.type === "diagnostic"));
+          for (const s of repo.listSessions(runId))
+            out.push(...repo.listEvents(runId, s.session).filter((e) => e.type === "diagnostic"));
           return { diagnostics: out };
         }
         case "listRunChildren":
@@ -435,7 +595,11 @@ export class WorkDO extends BaseDO {
           return this.txFx((fx) => {
             const wi = fx.repo.getWorkItem(params.id);
             if (!wi) throw notFound(`work item ${params.id}`);
-            const b = (body ?? {}) as { local_owner?: string; labels?: Record<string, string>; event?: { kind: string; data?: Record<string, unknown>; run_id?: string; actor?: string } };
+            const b = (body ?? {}) as {
+              local_owner?: string;
+              labels?: Record<string, string>;
+              event?: { kind: string; data?: Record<string, unknown>; run_id?: string; actor?: string };
+            };
             if (b.local_owner !== undefined) wi.local_owner = b.local_owner;
             if (b.labels) wi.labels = { ...(wi.labels ?? {}), ...b.labels };
             if (b.local_owner !== undefined || b.labels) {
@@ -443,7 +607,15 @@ export class WorkDO extends BaseDO {
               fx.repo.putWorkItem(wi);
               projectWorkItem(fx, wi);
             }
-            if (b.event?.kind) workItemEvent(fx, wi.id, b.event.kind, b.event.run_id ?? "", b.event.actor ?? actorOfMeta(meta), b.event.data ?? {});
+            if (b.event?.kind)
+              workItemEvent(
+                fx,
+                wi.id,
+                b.event.kind,
+                b.event.run_id ?? "",
+                b.event.actor ?? actorOfMeta(meta),
+                b.event.data ?? {},
+              );
             return fx.repo.getWorkItem(wi.id);
           });
         case "mcpLinkPullRequest":
@@ -459,12 +631,20 @@ export class WorkDO extends BaseDO {
             wi.pull_requests = list;
             const key = sourceKey(pullRequestSource(pr as never));
             if (key && !(wi.references ?? []).some((r) => r.key === key)) {
-              wi.references = [...(wi.references ?? []), { kind: "pull_request", key, added_at: new Date(fx.now()).toISOString() }];
+              wi.references = [
+                ...(wi.references ?? []),
+                { kind: "pull_request", key, added_at: new Date(fx.now()).toISOString() },
+              ];
             }
             wi.updated_at = new Date(fx.now()).toISOString();
             fx.repo.putWorkItem(wi);
             projectWorkItem(fx, wi);
-            if (i < 0) workItemEvent(fx, wi.id, "pr_linked", "", actorOfMeta(meta), { repo: pr.repo, number: pr.number, url: pr.url ?? "" });
+            if (i < 0)
+              workItemEvent(fx, wi.id, "pr_linked", "", actorOfMeta(meta), {
+                repo: pr.repo,
+                number: pr.number,
+                url: pr.url ?? "",
+              });
             return fx.repo.getWorkItem(wi.id);
           });
         case "workItemMessage":
@@ -505,7 +685,8 @@ export class WorkDO extends BaseDO {
         case "workItemStage":
           return this.txFx((fx) => {
             const b = (body ?? {}) as { stage?: string; reason?: string };
-            if (!b.stage || !STAGES.includes(b.stage as Stage)) throw invalid(`invalid stage ${JSON.stringify(b.stage ?? "")}`);
+            if (!b.stage || !STAGES.includes(b.stage as Stage))
+              throw invalid(`invalid stage ${JSON.stringify(b.stage ?? "")}`);
             return setStage(fx, params.id ?? "", b.stage as Stage, actorOfMeta(meta), b.reason ?? "");
           });
         default:
@@ -523,7 +704,11 @@ export class WorkDO extends BaseDO {
   }): Promise<{ run: Run; session: RunSession } | RunnerError> {
     return this.rpc(() =>
       this.txFx((fx) => {
-        if (fx.cfg.runnerVersion && input.req.runner_version !== fx.cfg.runnerVersion && !isDevVersion(input.req.runner_version)) {
+        if (
+          fx.cfg.runnerVersion &&
+          input.req.runner_version !== fx.cfg.runnerVersion &&
+          !isDevVersion(input.req.runner_version)
+        ) {
           return rerr(
             426,
             "runner_version_mismatch",
@@ -555,7 +740,9 @@ export class WorkDO extends BaseDO {
 
   async runnerEvents(runId: string, session: number, batch: unknown): Promise<{ ack: number } | RunnerError> {
     return this.rpc(() =>
-      this.txFx((fx) => appendEvents(fx, runId, session, (batch ?? { events: [] }) as Parameters<typeof appendEvents>[3])),
+      this.txFx((fx) =>
+        appendEvents(fx, runId, session, (batch ?? { events: [] }) as Parameters<typeof appendEvents>[3]),
+      ),
     );
   }
 
@@ -572,7 +759,9 @@ export class WorkDO extends BaseDO {
       this.txFx((fx) => {
         const s = authSession(fx, runId, session);
         if ("error" in s) return s;
-        return { messages: fx.repo.listMessages(runId, after, 200) };
+        void after;
+        // The normalized conversation of all messages (handleConversation in runnerapi/conversation.go).
+        return buildConversation(fx.repo.mustRun(runId), fx.repo.listMessages(runId, 0, 0) as never);
       }),
     );
   }
@@ -604,7 +793,9 @@ export class WorkDO extends BaseDO {
       const repo = new Repo(this.sql, Date.now);
       const r = repo.mustRun(runId);
       const wi = r.work_item_id ? repo.getWorkItem(r.work_item_id) : undefined;
-      const wiRefs = this.sql.exec<{ v: string }>("SELECT v FROM work_item_state WHERE k = 'repo_refs'").toArray()[0]?.v;
+      const wiRefs = this.sql
+        .exec<{ v: string }>("SELECT v FROM work_item_state WHERE k = 'repo_refs'")
+        .toArray()[0]?.v;
       const raw = repo.getRunState(runId, "repo_refs") ?? wiRefs;
       const start = repo.getRunState(runId, "start_commits");
       return {
@@ -620,14 +811,19 @@ export class WorkDO extends BaseDO {
     return this.rpc(() =>
       this.tx(() => {
         const repo = new Repo(this.sql, Date.now);
-        if (list.length > 0 && !repo.getRunState(runId, "start_commits")) repo.setRunState(runId, "start_commits", JSON.stringify(list));
+        if (list.length > 0 && !repo.getRunState(runId, "start_commits"))
+          repo.setRunState(runId, "start_commits", JSON.stringify(list));
         return { ok: true as const };
       }),
     );
   }
 
   /** The timeline event secrets.delivered (names only; one per task). */
-  async runnerSecretsDelivered(runId: string, session: number, data: { names: string[]; harness_credential: unknown }): Promise<{ ok: true }> {
+  async runnerSecretsDelivered(
+    runId: string,
+    session: number,
+    data: { names: string[]; harness_credential: unknown },
+  ): Promise<{ ok: true }> {
     return this.rpc(() =>
       this.txFx((fx) => {
         const s = fx.repo.getSession(runId, session);
@@ -650,7 +846,10 @@ export class WorkDO extends BaseDO {
    * snapshotFiles (transfer.go): for each part, the upload IDs of the newest
    * session before `before` that saved it.
    */
-  async snapshotParts(runId: string, before: number): Promise<{ session: number; part: string; uploadIds: string[] }[]> {
+  async snapshotParts(
+    runId: string,
+    before: number,
+  ): Promise<{ session: number; part: string; uploadIds: string[] }[]> {
     return this.rpc(() => {
       const rows = this.sql
         .exec<{ session: number; part: string; upload_ids: string }>(
@@ -672,7 +871,9 @@ export class WorkDO extends BaseDO {
 
   /** Whether an input of the run names the attachment (downloads of kind attachment). */
   async inputsNameAttachment(runId: string, attachmentId: string): Promise<boolean> {
-    return this.rpc(() => new Repo(this.sql, Date.now).listInputs(runId).some((i) => (i.attachments ?? []).includes(attachmentId)));
+    return this.rpc(() =>
+      new Repo(this.sql, Date.now).listInputs(runId).some((i) => (i.attachments ?? []).includes(attachmentId)),
+    );
   }
 
   /** DispatchDO reconcile only. */
@@ -696,7 +897,13 @@ export class WorkDO extends BaseDO {
   }
 
   /** The work item and its root run, for the intake decisions (rootAgentName). */
-  async intakeState(): Promise<{ workItemId?: string; stage?: string; rootRunId?: string; rootAgent?: string; creatorId?: string }> {
+  async intakeState(): Promise<{
+    workItemId?: string;
+    stage?: string;
+    rootRunId?: string;
+    rootAgent?: string;
+    creatorId?: string;
+  }> {
     return this.rpc(() => {
       const repo = new Repo(this.sql, Date.now);
       const wi = repo.getWorkItem();
@@ -716,11 +923,16 @@ export class WorkDO extends BaseDO {
     return this.rpc(() =>
       this.tx(() => {
         const now = Date.now();
-        if (actionKey && this.sql.exec("SELECT 1 FROM bot_actions WHERE action_key = ?", actionKey).toArray().length) return true;
+        if (actionKey && this.sql.exec("SELECT 1 FROM bot_actions WHERE action_key = ?", actionKey).toArray().length)
+          return true;
         this.sql.exec("DELETE FROM bot_actions WHERE at_ms < ?", now - 3_600_000);
         const n = Number(this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM bot_actions").one().n);
         if (n >= 20) return false;
-        this.sql.exec("INSERT OR IGNORE INTO bot_actions (action_key, at_ms) VALUES (?, ?)", actionKey || `anon:${now}:${Math.random()}`, now);
+        this.sql.exec(
+          "INSERT OR IGNORE INTO bot_actions (action_key, at_ms) VALUES (?, ?)",
+          actionKey || `anon:${now}:${Math.random()}`,
+          now,
+        );
         return true;
       }),
     );
@@ -802,7 +1014,15 @@ export class WorkDO extends BaseDO {
         const provider = providerFor(this.env, team, p.providerId, p.workerId);
         try {
           await provider.start(p.task);
-          this.txFx((fx) => startSucceeded(fx, p.task.runId, p.task.session, p.workerId ? `worker:${p.workerId}` : p.providerId, p.workerId));
+          this.txFx((fx) =>
+            startSucceeded(
+              fx,
+              p.task.runId,
+              p.task.session,
+              p.workerId ? `worker:${p.workerId}` : p.providerId,
+              p.workerId,
+            ),
+          );
         } catch (e) {
           this.txFx((fx) => startFailed(fx, p.task.runId, p.task.session, e));
         }
@@ -880,7 +1100,8 @@ export class WorkDO extends BaseDO {
         fx.setTimer(t.name, "liveness", Math.max(at, Date.now() + 1000), t.payload);
         return;
       }
-      if (action.useReasonMap) loseCode(fx, cur, action.reason, failureForSandboxReason(action.reason) ?? "", true, { cancel: action.cancel });
+      if (action.useReasonMap)
+        loseCode(fx, cur, action.reason, failureForSandboxReason(action.reason) ?? "", true, { cancel: action.cancel });
       else loseCode(fx, cur, action.reason, action.code, true, { cancel: action.cancel });
     });
   }
@@ -990,8 +1211,10 @@ export function unresolveInbox(fx: Fx, id: string, actor: string): InboxItem {
   if (!it) throw notFound(`inbox item ${id}`);
   if (!it.resolved) throw conflict("inbox item is not resolved");
   const at = it.resolved_at ? Date.parse(it.resolved_at) : NaN;
-  if (!Number.isFinite(at) || fx.now() - at > UNRESOLVE_WINDOW_MS) throw conflict("the resolve is older than 10m0s and cannot be undone");
-  if (it.resolved_via === "forge" || (!it.resolved_by && !it.resolved_via)) throw conflict("the platform closed this item and it cannot be undone");
+  if (!Number.isFinite(at) || fx.now() - at > UNRESOLVE_WINDOW_MS)
+    throw conflict("the resolve is older than 10m0s and cannot be undone");
+  if (it.resolved_via === "forge" || (!it.resolved_by && !it.resolved_via))
+    throw conflict("the platform closed this item and it cannot be undone");
   if (it.run_id && it.answer_message_id) {
     const input = fx.repo.getInput(it.answer_message_id);
     if (input && input.state !== "pending") throw conflict("the run already read the answer");
@@ -1005,7 +1228,8 @@ export function unresolveInbox(fx: Fx, id: string, actor: string): InboxItem {
   delete it.answer_message_id;
   fx.repo.putInbox(it);
   projectInbox(fx, it);
-  if (it.work_item_id) workItemEvent(fx, it.work_item_id, "note", it.run_id ?? "", actor, { inbox_id: it.id, text: "resolve undone" });
+  if (it.work_item_id)
+    workItemEvent(fx, it.work_item_id, "note", it.run_id ?? "", actor, { inbox_id: it.id, text: "resolve undone" });
   if (it.run_id && resumesRun(it)) {
     const short = [...old].length > 500 ? [...old].slice(0, 499).join("") + "…" : old;
     const msg = `[human correction] ${actorLabel(actor)} withdrew the answer to ${JSON.stringify(it.title)} (it was: ${short}). Ignore that answer. A new answer will arrive as a follow-up message.`;
@@ -1022,9 +1246,29 @@ function actorOfMeta(meta: CallMeta): string {
   return meta.principal?.userId ?? meta.principal?.id ?? "api";
 }
 
-function publicSession(s: RunSession): Omit<RunSession, "bootstrap_hash" | "instance_hash"> {
-  const { bootstrap_hash: _b, instance_hash: _i, ...rest } = s;
-  return rest;
+/** SessionView (api/runs_ext.go): one session of a run with the snapshot parts it saved. */
+function sessionView(sql: SqlStorage, s: RunSession): Record<string, unknown> {
+  const parts = new Set(
+    sql
+      .exec<{ part: string }>("SELECT part FROM snapshot_parts WHERE run_id = ? AND session = ?", s.run_id, s.session)
+      .toArray()
+      .map((r) => r.part),
+  );
+  const u = s.usage ?? { input_tokens: 0, output_tokens: 0, cost_usd: 0, duration_ms: 0 };
+  return {
+    session: s.session,
+    number: s.session,
+    state: s.state,
+    assigned_at: s.assigned_at,
+    ...(s.started_at ? { started_at: s.started_at } : {}),
+    ...(s.ready_at ? { ready_at: s.ready_at } : {}),
+    ...(s.ended_at ? { ended_at: s.ended_at } : {}),
+    ...(s.end_reason ? { end_reason: s.end_reason } : {}),
+    ...(s.failure_code ? { failure_code: s.failure_code } : {}),
+    ...(s.sandbox_reason ? { sandbox_reason: s.sandbox_reason } : {}),
+    usage: { ...u, coverage: usageCoverage(u) },
+    snapshot: { workspace: parts.has("workspace"), harness_state: parts.has("harness_state") },
+  };
 }
 
 function isDevVersion(v: string): boolean {
@@ -1033,13 +1277,26 @@ function isDevVersion(v: string): boolean {
 }
 
 function failureClass(code: FailureCode | string): "user" | "platform" {
-  const user = ["invalid_configuration", "environment_setup_failed", "harness_auth_failed", "external_authentication_required", "integration_disabled", "agent_failed", "out_of_memory"];
+  const user = [
+    "invalid_configuration",
+    "environment_setup_failed",
+    "harness_auth_failed",
+    "external_authentication_required",
+    "integration_disabled",
+    "agent_failed",
+    "out_of_memory",
+  ];
   return user.includes(code) ? "user" : "platform";
 }
 
 function providerOf(env: Env, team: string, backend: string, workerId?: string) {
   if (workerId) return providerFor(env, team, "", workerId);
-  return providerFor(env, team, backend.startsWith("worker:") ? "" : backend, backend.startsWith("worker:") ? backend.slice(7) : undefined);
+  return providerFor(
+    env,
+    team,
+    backend.startsWith("worker:") ? "" : backend,
+    backend.startsWith("worker:") ? backend.slice(7) : undefined,
+  );
 }
 
 /** The checksum of the published runner binary, or undefined when it is not in R2. */
@@ -1063,4 +1320,3 @@ async function ignoreNotFound(p: Promise<void>): Promise<void> {
     throw e;
   }
 }
-

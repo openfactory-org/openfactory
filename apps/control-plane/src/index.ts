@@ -61,7 +61,13 @@ function withRequestId(res: Response, requestId: string, extraCookie?: string): 
   return out;
 }
 
-async function handleApi(request: Request, env: Env, ctx: ExecutionContext, url: URL, requestId: string): Promise<Response> {
+async function handleApi(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  url: URL,
+  requestId: string,
+): Promise<Response> {
   const path = url.pathname.slice(API_PREFIX.length) || "/";
   const problemCtx = { instance: url.pathname, requestId };
   // Worker protocol v2 socket: the worker proves itself inside the socket (WS6).
@@ -75,9 +81,13 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext, url:
     }
   }
   const m = router.match(request.method, path);
-  if (m.kind === "not_found") return problemResponse(new OfError("resource_not_found", `no route for ${url.pathname}`), problemCtx);
+  if (m.kind === "not_found")
+    return problemResponse(new OfError("resource_not_found", `no route for ${url.pathname}`), problemCtx);
   if (m.kind === "method_not_allowed") {
-    return new Response("Method Not Allowed\n", { status: 405, headers: { allow: m.allow.join(", "), "x-request-id": requestId } });
+    return new Response("Method Not Allowed\n", {
+      status: 405,
+      headers: { allow: m.allow.join(", "), "x-request-id": requestId },
+    });
   }
   const rctx: RouteContext = { params: m.params, url, requestId, route: m.route, executionCtx: ctx };
   let clearCookie: string | undefined;
@@ -86,9 +96,13 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext, url:
       const p = await authenticate(request, env);
       if (!p) {
         if (hasSessionCookie(request)) clearCookie = clearSessionCookie(env);
-        throw new OfError("authentication_required", "missing credentials: sign in or send an Authorization: Bearer header", {
-          extra: { login_providers: loginProviders(env) },
-        });
+        throw new OfError(
+          "authentication_required",
+          "missing credentials: sign in or send an Authorization: Bearer header",
+          {
+            extra: { login_providers: loginProviders(env) },
+          },
+        );
       }
       // Team-wide routes are checked here and again in the owner DO; factory-scoped routes in the owner DO.
       if (!isFactoryScoped(m.route)) requireRole(p, "", m.route.role);
@@ -104,7 +118,13 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext, url:
   }
 }
 
-async function handleServer(request: Request, env: Env, ctx: ExecutionContext, url: URL, requestId: string): Promise<Response> {
+async function handleServer(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  url: URL,
+  requestId: string,
+): Promise<Response> {
   for (const h of matchServerRoutes(url.pathname)) {
     const res = await h(request, env, ctx, url, requestId);
     if (res) return withRequestId(res, requestId);
@@ -117,7 +137,10 @@ async function handleServer(request: Request, env: Env, ctx: ExecutionContext, u
     const res = await handleCloudIdRoute(request, env, url);
     if (res) return withRequestId(res, requestId);
   }
-  return problemResponse(notImplemented(`${url.pathname} is not implemented yet`), { instance: url.pathname, requestId });
+  return problemResponse(notImplemented(`${url.pathname} is not implemented yet`), {
+    instance: url.pathname,
+    requestId,
+  });
 }
 
 /** The MCP paths: /mcp, /api/v1/mcp/factory, /mcp/proxy/*, /mcp/integrations/*, /.well-known/oauth-*, /oauth/*. */
@@ -156,7 +179,11 @@ async function scheduleRetention(env: Env, scheduledTime: number): Promise<void>
   if (d.getUTCMinutes() !== 0) return;
   const hour = Math.floor(scheduledTime / 3_600_000);
   const names = [doName.team(DEFAULT_TEAM), doName.index(DEFAULT_TEAM)];
-  await env.JOBS.sendBatch(names.map((n) => ({ body: { kind: "retention.sweep", msgId: `retention:${n}:${hour}`, doName: n } satisfies JobMessage })));
+  await env.JOBS.sendBatch(
+    names.map((n) => ({
+      body: { kind: "retention.sweep", msgId: `retention:${n}:${hour}`, doName: n } satisfies JobMessage,
+    })),
+  );
 }
 
 export default {
@@ -182,8 +209,9 @@ export default {
     // Safety net (1/min): re-arm the alarms of the team's TeamDO and DispatchDO, then owner hooks.
     const jobs: Promise<unknown>[] = [
       env.TEAM.getByName(doName.team(DEFAULT_TEAM)).ensureAlarm(),
-      (env.DISPATCH.getByName(doName.dispatch(DEFAULT_TEAM)) as unknown as { ensureAlarm?: () => Promise<void> }).ensureAlarm?.() ??
-        Promise.resolve(),
+      (
+        env.DISPATCH.getByName(doName.dispatch(DEFAULT_TEAM)) as unknown as { ensureAlarm?: () => Promise<void> }
+      ).ensureAlarm?.() ?? Promise.resolve(),
       env.INDEX.getByName(doName.index(DEFAULT_TEAM)).ensureAlarm(),
       ...cronHooksList().map((h) => h(env, ctx)),
       scheduleRetention(env, controller.scheduledTime),

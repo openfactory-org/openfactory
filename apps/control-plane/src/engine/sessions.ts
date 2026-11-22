@@ -67,7 +67,10 @@ export function computeSeconds(s: Pick<RunSession, "assigned_at" | "started_at">
  * priorRetries: the ended sessions before `before`, newest first, that ended
  * "lost" or "not_started"; stops at the first other one.
  */
-export function priorRetries(list: readonly Pick<RunSession, "session" | "state" | "end_reason">[], before: number): number {
+export function priorRetries(
+  list: readonly Pick<RunSession, "session" | "state" | "end_reason">[],
+  before: number,
+): number {
   const sorted = [...list].sort((a, b) => a.session - b.session);
   let count = 0;
   for (let i = sorted.length - 1; i >= 0; i--) {

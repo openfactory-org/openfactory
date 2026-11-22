@@ -9,13 +9,13 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll } from "vitest";
+import { afterAll, beforeAll } from "vitest";
 import { type Api, uniq, waitFor } from "./api.ts";
 import { adminApi } from "./context.ts";
 import { REPO_ROOT } from "./paths.ts";
 import type { TaskEnv } from "./runner.ts";
 import { target } from "./target.ts";
-import { FakeWorker, newWorkerKey } from "./worker.ts";
+import { FakeWorker } from "./worker.ts";
 
 export interface SessionSource {
   readonly kind: "shim" | "worker";
@@ -77,26 +77,14 @@ class WorkerSessions implements SessionSource {
   /** Enrolls and connects the fake worker (once). */
   connect(): Promise<FakeWorker> {
     this.connecting ??= (async () => {
+      // The worker target runs with OF_SANDBOX_PROVIDER=local, which places
+      // tasks on development process workers: a worker that connects with
+      // the admin API key (OF_DEV_PROCESS_WORKERS=true on the control plane).
       const name = uniq("ct-worker");
-      const enrollment = await this.api.post<{ token: string }>("/workers/enrollments", { name }, 201);
-      const key = newWorkerKey();
-      const enrolled = await this.api.post<{ worker_id: string }>(
-        "/workers/enroll",
-        {
-          enrollment_token: enrollment.token,
-          name,
-          public_key: key.publicKeyB64,
-          facts: { arch: "amd64", os: "linux", vcpus: 4, memory_mib: 8192, kvm: true },
-          slots: 8,
-          slot_size: { vcpus: 1, memory_mib: 1024 },
-        },
-        201,
-        { key: null },
-      );
-      this.workerId = enrolled.worker_id;
+      this.workerId = name;
       this.worker = await FakeWorker.connect(
-        { kind: "ed25519", workerId: enrolled.worker_id, privateKey: key.privateKey },
-        { workerId: enrolled.worker_id, name, backend: "microvm", capacity: 8, slots: 8 },
+        { kind: "bearer", token: this.api.key ?? "" },
+        { workerId: name, name, backend: "process", capacity: 8, slots: 8 },
       );
       return this.worker;
     })();
@@ -153,6 +141,12 @@ export function useSessions(): SessionSource {
     }
     return src;
   };
+  // The worker source connects before the first test creates a run: a run
+  // created while no worker is connected would start at a later session.
+  beforeAll(async () => {
+    const s = get();
+    if (s instanceof WorkerSessions) await s.connect();
+  });
   afterAll(async () => {
     await src?.close();
   });

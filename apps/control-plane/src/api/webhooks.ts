@@ -3,7 +3,7 @@
 // (partition "webhook:<id>"). The worker-side ingress handlers for
 // POST /webhooks/w/{uid}[/{token}] and POST /integrations/github/webhook are
 // at the end of this file.
-import { OfError, doName, type Event, type Webhook } from "@openfactory/core";
+import { OfError, doName, type Event, type Webhook, type WebhookDelivery } from "@openfactory/core";
 import type { Env } from "../contracts/env";
 import { callMeta, json, opParams, opResult, teamApi, teamOf, type Handler, type RouteContext } from "../http/handler";
 import { teamIntegrations, teamSecrets, resolverFor } from "../forges/env";
@@ -147,6 +147,15 @@ async function enqueue(env: Env, teamId: string, partition: string, event: Event
   return env.INGRESS.getByName(doName.ingress(teamId, partition)).enqueue(partition, event as never, dedupeKey);
 }
 
+interface DeliveryLogRpc {
+  recordDelivery(rec: WebhookDelivery): Promise<void>;
+  rateLimit(webhookId: string, nowMs: number): Promise<{ ok: boolean; retryMs: number }>;
+}
+
+function deliveryLog(env: Env, teamId: string, webhookId: string): DeliveryLogRpc {
+  return env.INGRESS.getByName(doName.ingress(teamId, webhookPartition(webhookId))) as unknown as DeliveryLogRpc;
+}
+
 /** POST /webhooks/w/{uid} and /webhooks/w/{uid}/{token}. */
 export async function serveWebhookIngress(
   request: Request,
@@ -165,6 +174,9 @@ export async function serveWebhookIngress(
     },
     getSecret: (teamId, factoryId, name) => teamSecrets(env).get(teamId, factoryId, name),
     enqueue: (teamId, partition, ev, key) => enqueue(env, teamId, partition, ev, key),
+    // The delivery log and the shared 60/min limit live in the IngressDO of the webhook.
+    record: (teamId, rec) => deliveryLog(env, teamId, rec.webhook_id).recordDelivery(rec),
+    rateLimit: (webhookId, nowMs) => deliveryLog(env, INGRESS_TEAM, webhookId).rateLimit(webhookId, nowMs),
   });
 }
 

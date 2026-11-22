@@ -6,7 +6,10 @@ export const MAX_WAIT_S = 25;
 export const HEARTBEAT_MS = 15_000;
 
 /** Opens a subscribe socket on a DO. Returns undefined when the DO did not upgrade. */
-export async function subscribe(stub: { fetch(input: string, init?: RequestInit): Promise<Response> }, path: string): Promise<WebSocket | undefined> {
+export async function subscribe(
+  stub: { fetch(input: string, init?: RequestInit): Promise<Response> },
+  path: string,
+): Promise<WebSocket | undefined> {
   const res = await stub.fetch(`https://do${path}`, { headers: { Upgrade: "websocket" } });
   const ws = res.webSocket ?? undefined;
   if (!ws) return undefined;
@@ -18,7 +21,11 @@ export async function subscribe(stub: { fetch(input: string, init?: RequestInit)
  * Waits for one frame on the socket, the timeout, or the close. Resolves
  * "frame" | "timeout" | "closed". Always closes the socket.
  */
-export function waitForWake(ws: WebSocket, waitMs: number, signal?: AbortSignal): Promise<"frame" | "timeout" | "closed"> {
+export function waitForWake(
+  ws: WebSocket,
+  waitMs: number,
+  signal?: AbortSignal,
+): Promise<"frame" | "timeout" | "closed"> {
   return new Promise((resolve) => {
     let done = false;
     const finish = (r: "frame" | "timeout" | "closed") => {

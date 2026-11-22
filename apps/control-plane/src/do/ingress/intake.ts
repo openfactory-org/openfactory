@@ -25,6 +25,39 @@ import { prFactsKey } from "../../metrics/build";
 import { applyOverrides } from "../../scoring/overrides";
 import { matchingAutomations } from "../../triggers/match";
 import { setIntakeHandler, type IntakeResult } from "./index";
+import { build as buildBundle, promptSection, storeBundle, type Builder } from "../../eventctx/index";
+
+/** The event context of one message: the R2 bundle, its message ID and its prompt section. */
+export interface BundleRef {
+  ref: string;
+  messageId: string;
+  promptSection: string;
+}
+
+/** Provider context builders of the event context (integrations, forge review threads). */
+export type BuildersFor = (env: Env) => Builder[];
+let buildersFor: BuildersFor = () => [];
+export function setEventContextBuilders(fn: BuildersFor): void {
+  buildersFor = fn;
+}
+
+/**
+ * eventBundle + storeEventBundle (engine/eventfiles.go): builds the event
+ * context of a message in the IngressDO (the builders do network I/O) and
+ * stores it in R2 by hash. withContext runs the provider builders (the first
+ * message of a run). A failure gives no event files; intake goes on.
+ */
+export async function storeEventBundle(env: Env, ev: CoreEvent, withContext: boolean): Promise<BundleRef | undefined> {
+  try {
+    const messageId = newId("msg");
+    const b = await buildBundle(messageId, ev as unknown as Event, withContext, buildersFor(env));
+    if (!b) return undefined;
+    return { ref: await storeBundle(env.DATA, b), messageId, promptSection: promptSection(b) };
+  } catch (e) {
+    console.warn("intake: event context", ev.provider, ev.type, e instanceof Error ? e.message : String(e));
+    return undefined;
+  }
+}
 
 /** The reopen window of a completed work item (references.go ReopenWindow). */
 export const REOPEN_WINDOW_MS = 7 * 24 * 3_600_000;
@@ -60,14 +93,49 @@ export interface IntakeDeps {
   prFacts(ev: CoreEvent): Promise<void>;
   router: {
     resolve(factoryId: string, key: string): Promise<{ wiId: string; token: string; status: string } | null>;
-    resolveOrReserve(i: { factoryId: string; sourceKeys: string[]; actionKey: string; target: string }): Promise<{ wiId: string; token: string; created: boolean }>;
+    resolveOrReserve(i: {
+      factoryId: string;
+      sourceKeys: string[];
+      actionKey: string;
+      target: string;
+    }): Promise<{ wiId: string; token: string; created: boolean }>;
     reopen(i: { factoryId: string; sourceKey: string; wiId: string }): Promise<boolean>;
   };
   work(token: string): {
-    applyAction(i: unknown): Promise<{ ok: true; served: boolean; terminal: boolean; workItemId?: string; rootRunId?: string; rootAgent?: string }>;
-    intakeState(): Promise<{ workItemId?: string; stage?: string; rootRunId?: string; rootAgent?: string; creatorId?: string }>;
+    applyAction(i: unknown): Promise<{
+      ok: true;
+      served: boolean;
+      terminal: boolean;
+      workItemId?: string;
+      rootRunId?: string;
+      rootAgent?: string;
+    }>;
+    intakeState(): Promise<{
+      workItemId?: string;
+      stage?: string;
+      rootRunId?: string;
+      rootAgent?: string;
+      creatorId?: string;
+    }>;
     allowBotAction(actionKey: string): Promise<boolean>;
     reopen(i: { actionKey: string; event: CoreEvent }): Promise<unknown>;
+  };
+  /** The event context of a message (optional: without it runs get no event files). */
+  bundle?(ev: CoreEvent, withContext: boolean): Promise<BundleRef | undefined>;
+}
+
+/** One bundle per (event, withContext) within one HandleEvent. */
+function bundler(d: IntakeDeps, ev: CoreEvent): (withContext: boolean) => Promise<{ bundle?: BundleRef }> {
+  const memo = new Map<boolean, Promise<BundleRef | undefined>>();
+  return async (withContext) => {
+    if (!d.bundle) return {};
+    let p = memo.get(withContext);
+    if (!p) {
+      p = d.bundle(ev, withContext);
+      memo.set(withContext, p);
+    }
+    const b = await p;
+    return b ? { bundle: b } : {};
   };
 }
 
@@ -86,11 +154,16 @@ export function platformIntakeDeps(env: Env, teamId: string): IntakeDeps {
   const router = env.ROUTER.getByName(doName.router(teamId));
   return {
     listFactoryIds: async () =>
-      (opOut<{ items?: { id: string }[] }>(await team.api(meta(), "listFactories", { "?limit": "500" }, null), "listFactories").items ?? []).map((f) => f.id),
+      (
+        opOut<{ items?: { id: string }[] }>(
+          await team.api(meta(), "listFactories", { "?limit": "500" }, null),
+          "listFactories",
+        ).items ?? []
+      ).map((f) => f.id),
     snapshot: async (fid) => (await team.configSnapshot(fid)) as Snapshot,
     factoryByAlias: async (alias) => {
       try {
-        return (opOut<{ id?: string }>(await team.api(meta(), "getFactory", { uid: alias }, null), "getFactory")).id;
+        return opOut<{ id?: string }>(await team.api(meta(), "getFactory", { uid: alias }, null), "getFactory").id;
       } catch {
         return undefined;
       }
@@ -122,6 +195,7 @@ export function platformIntakeDeps(env: Env, teamId: string): IntakeDeps {
       reopen: (i) => router.reopen(i),
     },
     work: (token) => env.WORK.getByName(doName.work(teamId, token)) as unknown as ReturnType<IntakeDeps["work"]>,
+    bundle: (ev, withContext) => storeEventBundle(env, ev, withContext),
   };
 }
 
@@ -184,16 +258,18 @@ export async function handleEvent(d: IntakeDeps, teamId: string, ev: CoreEvent):
   const ids = ev.factory_id ? [ev.factory_id] : await d.listFactoryIds();
   for (const id of ids) {
     const snap = await d.snapshot(id);
-    if (ev.factory_id || factoryCovers(ev, snap.runtime.repositories, Object.keys(snap.integrations ?? {}))) snaps.push(snap);
+    if (ev.factory_id || factoryCovers(ev, snap.runtime.repositories, Object.keys(snap.integrations ?? {})))
+      snaps.push(snap);
   }
   // 3. Sender.
   const user = await senderTrust(d, ev, teamId);
 
   const errs: Errs = { list: [] };
   const served = new Set<string>();
+  const bundles = bundler(d, ev);
   for (const snap of snaps) {
     try {
-      if (await handleForFactory(d, snap, ev, akey, user, errs)) served.add(snap.factory.id);
+      if (await handleForFactory(d, snap, ev, akey, user, errs, bundles)) served.add(snap.factory.id);
     } catch (e) {
       errs.list.push(e);
     }
@@ -202,10 +278,12 @@ export async function handleEvent(d: IntakeDeps, teamId: string, ev: CoreEvent):
   // 7. A mention of a factory alias that nothing served goes to its foreman.
   if (isMention(ev) && !ev.actor.is_bot) {
     try {
-      const alias = String(ev.attributes.alias ?? "").trim().replace(/^@/, "");
+      const alias = String(ev.attributes.alias ?? "")
+        .trim()
+        .replace(/^@/, "");
       const fid = ev.factory_id || (alias ? await d.factoryByAlias(alias) : undefined);
       const snap = snaps.find((s) => s.factory.id === fid);
-      if (fid && snap && !served.has(fid)) await dispatchMention(d, snap, ev, akey);
+      if (fid && snap && !served.has(fid)) await dispatchMention(d, snap, ev, akey, bundles);
     } catch (e) {
       errs.list.push(e);
     }
@@ -220,7 +298,13 @@ export async function handleEvent(d: IntakeDeps, teamId: string, ev: CoreEvent):
   return { retry: true, error: err instanceof Error ? err.message : String(err) };
 }
 
-async function dispatchMention(d: IntakeDeps, snap: Snapshot, ev: CoreEvent, akey: string): Promise<void> {
+async function dispatchMention(
+  d: IntakeDeps,
+  snap: Snapshot,
+  ev: CoreEvent,
+  akey: string,
+  bundles = bundler(d, ev),
+): Promise<void> {
   if (ev.actor.trust !== "member") {
     console.info("intake: mention from a sender without a link ignored", ev.provider, ev.actor.handle);
     return;
@@ -229,13 +313,24 @@ async function dispatchMention(d: IntakeDeps, snap: Snapshot, ev: CoreEvent, ake
   if (!agent) throw new OfError("invalid_request", `factory ${snap.factory.id} has no foreman`);
   const target = `mention:${snap.factory.id}`;
   const key = sourceKey(ev.source as never);
-  const r = await d.router.resolveOrReserve({ factoryId: snap.factory.id, sourceKeys: key ? [key] : [], actionKey: akey || ev.id, target });
+  const r = await d.router.resolveOrReserve({
+    factoryId: snap.factory.id,
+    sourceKeys: key ? [key] : [],
+    actionKey: akey || ev.id,
+    target,
+  });
   await d.work(r.token).applyAction({
     actionKey: akey,
     target,
     kind: "mention",
     event: ev,
-    dispatchRequest: dispatchPlan(snap, agent, ev, { prompt: "", triggeredBy: "mention", workItemId: r.wiId, sourceKey: key }),
+    ...(await bundles(true)),
+    dispatchRequest: dispatchPlan(snap, agent, ev, {
+      prompt: "",
+      triggeredBy: "mention",
+      workItemId: r.wiId,
+      sourceKey: key,
+    }),
   });
 }
 
@@ -263,7 +358,15 @@ function dispatchPlan(
 }
 
 /** Steps 4-6 for one factory. Returns whether the action was served there. */
-async function handleForFactory(d: IntakeDeps, snap: Snapshot, ev: CoreEvent, akey: string, user: User | undefined, errs: Errs): Promise<boolean> {
+async function handleForFactory(
+  d: IntakeDeps,
+  snap: Snapshot,
+  ev: CoreEvent,
+  akey: string,
+  user: User | undefined,
+  errs: Errs,
+  bundles = bundler(d, ev),
+): Promise<boolean> {
   const fid = snap.factory.id;
   const rt = snap.runtime;
   if (rt.require_linked_actor && ev.actor.trust === "external" && linkRequiredFor(ev.provider)) {
@@ -301,6 +404,7 @@ async function handleForFactory(d: IntakeDeps, snap: Snapshot, ev: CoreEvent, ak
         target: `wi:${wi.wiId}`,
         kind: "continue",
         event: ev,
+        ...(await bundles(false)),
         continuation: { kind, trust, alias: snap.factory.alias ?? "" },
       });
       served = true;
@@ -317,12 +421,20 @@ async function handleForFactory(d: IntakeDeps, snap: Snapshot, ev: CoreEvent, ak
     const target = `auto:${a.id}`;
     const base = resolveAgent(snap, a.agent);
     if (!base) {
-      local.push(new OfError("invalid_request", `automation ${a.name}: agent ${JSON.stringify(a.agent)} does not exist`));
+      local.push(
+        new OfError("invalid_request", `automation ${a.name}: agent ${JSON.stringify(a.agent)} does not exist`),
+      );
       continue;
     }
     let agent: AgentConfig;
     try {
-      agent = a.overrides ? (applyOverrides(base as never, a.overrides as never, (rt.machines ?? null) as never) as unknown as AgentConfig) : base;
+      agent = a.overrides
+        ? (applyOverrides(
+            base as never,
+            a.overrides as never,
+            (rt.machines ?? null) as never,
+          ) as unknown as AgentConfig)
+        : base;
     } catch (e) {
       local.push(e);
       continue;
@@ -333,17 +445,32 @@ async function handleForFactory(d: IntakeDeps, snap: Snapshot, ev: CoreEvent, ak
       try {
         const r = wi
           ? { wiId: wi.wiId, token: wi.token }
-          : await d.router.resolveOrReserve({ factoryId: fid, sourceKeys: key ? [key] : [], actionKey: akey || ev.id, target });
+          : await d.router.resolveOrReserve({
+              factoryId: fid,
+              sourceKeys: key ? [key] : [],
+              actionKey: akey || ev.id,
+              target,
+            });
         const res = await d.work(r.token).applyAction({
           actionKey: akey,
           target,
           kind: "createRoot",
           event: ev,
-          dispatchRequest: dispatchPlan(snap, agent, ev, { prompt: a.prompt, triggeredBy, workItemId: r.wiId, sourceKey: key, automationId: a.id }),
+          ...(await bundles(true)),
+          dispatchRequest: dispatchPlan(snap, agent, ev, {
+            prompt: a.prompt,
+            triggeredBy,
+            workItemId: r.wiId,
+            sourceKey: key,
+            automationId: a.id,
+          }),
         });
         served = true;
         wi = { wiId: res.workItemId ?? r.wiId, token: r.token };
-        state = { ...(res.rootRunId ? { rootRunId: res.rootRunId } : {}), ...(res.rootAgent !== undefined ? { rootAgent: res.rootAgent } : {}) };
+        state = {
+          ...(res.rootRunId ? { rootRunId: res.rootRunId } : {}),
+          ...(res.rootAgent !== undefined ? { rootAgent: res.rootAgent } : {}),
+        };
         rootServed = true;
       } catch (e) {
         // Stop here: the root run comes from the first match. A retry does the rest.
@@ -354,9 +481,25 @@ async function handleForFactory(d: IntakeDeps, snap: Snapshot, ev: CoreEvent, ak
       try {
         if (rootServed) {
           // The root run already has the action.
-          await d.work(wi.token).applyAction({ actionKey: akey, target, kind: "deliverToRoot", event: ev, dispatchRequest: { ...dispatchPlan(snap, agent, ev, { prompt: a.prompt, triggeredBy }), alreadyServed: true } });
+          await d.work(wi.token).applyAction({
+            actionKey: akey,
+            target,
+            kind: "deliverToRoot",
+            event: ev,
+            dispatchRequest: {
+              ...dispatchPlan(snap, agent, ev, { prompt: a.prompt, triggeredBy }),
+              alreadyServed: true,
+            },
+          });
         } else {
-          await d.work(wi.token).applyAction({ actionKey: akey, target, kind: "deliverToRoot", event: ev, dispatchRequest: dispatchPlan(snap, agent, ev, { prompt: a.prompt, triggeredBy }) });
+          await d.work(wi.token).applyAction({
+            actionKey: akey,
+            target,
+            kind: "deliverToRoot",
+            event: ev,
+            ...(await bundles(false)),
+            dispatchRequest: dispatchPlan(snap, agent, ev, { prompt: a.prompt, triggeredBy }),
+          });
         }
         served = true;
         rootServed = true;
@@ -365,7 +508,14 @@ async function handleForFactory(d: IntakeDeps, snap: Snapshot, ev: CoreEvent, ak
       }
     } else {
       try {
-        await d.work(wi.token).applyAction({ actionKey: akey, target, kind: "sideRun", event: ev, dispatchRequest: dispatchPlan(snap, agent, ev, { prompt: a.prompt, triggeredBy }) });
+        await d.work(wi.token).applyAction({
+          actionKey: akey,
+          target,
+          kind: "sideRun",
+          event: ev,
+          ...(await bundles(true)),
+          dispatchRequest: dispatchPlan(snap, agent, ev, { prompt: a.prompt, triggeredBy }),
+        });
         served = true;
       } catch (e) {
         local.push(e);
@@ -378,21 +528,34 @@ async function handleForFactory(d: IntakeDeps, snap: Snapshot, ev: CoreEvent, ak
 
 /** The IngressDO intake handler over the platform bindings. */
 export function registerIntake(): void {
-  setIntakeHandler((env, ctx, event) => handleEvent(platformIntakeDeps(env, ctx.teamId), ctx.teamId, structuredClone(event)));
+  setIntakeHandler((env, ctx, event) =>
+    handleEvent(platformIntakeDeps(env, ctx.teamId), ctx.teamId, structuredClone(event)),
+  );
 }
 
 registerIntake();
-
 
 /**
  * A manual run of an automation (POST .../schedules/{id}/run): one work item
  * and root run for the event, idempotent on the event ID. Returns the root run ID.
  */
-export async function dispatchAutomation(d: IntakeDeps, factoryId: string, a: Automation, ev: CoreEvent): Promise<{ runId?: string; workItemId?: string }> {
+export async function dispatchAutomation(
+  d: IntakeDeps,
+  factoryId: string,
+  a: Automation,
+  ev: CoreEvent,
+): Promise<{ runId?: string; workItemId?: string }> {
   const snap = await d.snapshot(factoryId);
   const base = resolveAgent(snap, a.agent);
-  if (!base) throw new OfError("invalid_request", `automation ${a.name}: agent ${JSON.stringify(a.agent)} does not exist`);
-  const agent = a.overrides ? (applyOverrides(base as never, a.overrides as never, (snap.runtime.machines ?? null) as never) as unknown as AgentConfig) : base;
+  if (!base)
+    throw new OfError("invalid_request", `automation ${a.name}: agent ${JSON.stringify(a.agent)} does not exist`);
+  const agent = a.overrides
+    ? (applyOverrides(
+        base as never,
+        a.overrides as never,
+        (snap.runtime.machines ?? null) as never,
+      ) as unknown as AgentConfig)
+    : base;
   const target = `auto:${a.id}`;
   const akey = actionKey(ev) || ev.id;
   const r = await d.router.resolveOrReserve({ factoryId, sourceKeys: [], actionKey: akey, target });
@@ -401,7 +564,16 @@ export async function dispatchAutomation(d: IntakeDeps, factoryId: string, a: Au
     target,
     kind: "createRoot",
     event: ev,
-    dispatchRequest: dispatchPlan(snap, agent, ev, { prompt: a.prompt, triggeredBy: triggeredByFor(ev.provider, a.id), workItemId: r.wiId, automationId: a.id }),
+    ...(await bundler(d, ev)(true)),
+    dispatchRequest: dispatchPlan(snap, agent, ev, {
+      prompt: a.prompt,
+      triggeredBy: triggeredByFor(ev.provider, a.id),
+      workItemId: r.wiId,
+      automationId: a.id,
+    }),
   });
-  return { ...(res.rootRunId ? { runId: res.rootRunId } : {}), ...(res.workItemId ? { workItemId: res.workItemId } : {}) };
+  return {
+    ...(res.rootRunId ? { runId: res.rootRunId } : {}),
+    ...(res.workItemId ? { workItemId: res.workItemId } : {}),
+  };
 }

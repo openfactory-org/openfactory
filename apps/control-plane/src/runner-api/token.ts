@@ -57,7 +57,10 @@ export async function deriveRunnerKey(signingKey: string): Promise<RunnerKey> {
   return { kid, key };
 }
 
-export async function runnerKeys(env: { OF_SIGNING_KEY: string; OF_SIGNING_KEY_PREVIOUS?: string }): Promise<RunnerKey[]> {
+export async function runnerKeys(env: {
+  OF_SIGNING_KEY: string;
+  OF_SIGNING_KEY_PREVIOUS?: string;
+}): Promise<RunnerKey[]> {
   const out = [await deriveRunnerKey(env.OF_SIGNING_KEY)];
   if (env.OF_SIGNING_KEY_PREVIOUS) out.push(await deriveRunnerKey(env.OF_SIGNING_KEY_PREVIOUS));
   return out;
@@ -71,14 +74,27 @@ export async function mintSessionToken(
   const k = keys[0]!;
   const iat = Math.floor(nowMs / 1000);
   // Field order matches the Go struct (v, kid, team, run, ses, sub, iat, exp).
-  const claims: SessionClaims = { v: 1, kid: k.kid, team: c.team, run: c.run, ses: c.ses, sub: c.sub, iat, exp: iat + SESSION_TTL_S };
+  const claims: SessionClaims = {
+    v: 1,
+    kid: k.kid,
+    team: c.team,
+    run: c.run,
+    ses: c.ses,
+    sub: c.sub,
+    iat,
+    exp: iat + SESSION_TTL_S,
+  };
   const p = b64url(enc.encode(JSON.stringify(claims)));
   const s = b64url(await hmac(k.key, p));
   return { token: SESSION_PREFIX + p + "." + s, expiresAt: new Date(claims.exp * 1000).toISOString() };
 }
 
 /** Verifies a session token. Returns undefined for any failure. */
-export async function verifySessionToken(keys: RunnerKey[], token: string, nowMs = Date.now()): Promise<SessionClaims | undefined> {
+export async function verifySessionToken(
+  keys: RunnerKey[],
+  token: string,
+  nowMs = Date.now(),
+): Promise<SessionClaims | undefined> {
   if (token.length > MAX_LEN || !token.startsWith(SESSION_PREFIX)) return undefined;
   const rest = token.slice(SESSION_PREFIX.length);
   const dot = rest.indexOf(".");

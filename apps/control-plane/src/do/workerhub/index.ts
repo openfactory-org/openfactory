@@ -140,7 +140,11 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
       if (!ws) return;
       const att = this.att(ws);
       if (att.phase === "ready") return;
-      closeQuietly(ws, att.phase === "challenge" ? 1008 : 1002, att.phase === "challenge" ? "auth_failed" : "expected hello");
+      closeQuietly(
+        ws,
+        att.phase === "challenge" ? 1008 : 1002,
+        att.phase === "challenge" ? "auth_failed" : "expected hello",
+      );
     });
     this.onTimerAsync("liveness", () => this.checkLiveness());
   }
@@ -328,7 +332,8 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
       return new Response("expected a WebSocket upgrade\n", { status: 426 });
     }
     const workerId = this.workerId();
-    if (request.headers.get("x-of-worker-id") !== workerId) return new Response("worker ID mismatch\n", { status: 400 });
+    if (request.headers.get("x-of-worker-id") !== workerId)
+      return new Response("worker ID mismatch\n", { status: 400 });
     const mode: Mode = request.headers.get("x-of-auth-mode") === "apikey" ? "apikey" : "key";
     if (this.state("revoked") === "1") return new Response("revoked\n", { status: 403 });
 
@@ -348,7 +353,8 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
       this.tx(() => this.setState("revoked", "1"));
       return new Response("revoked\n", { status: 403 });
     }
-    if (mode === "key" && rec.publicKey === "") return new Response("the worker has no key; enroll it\n", { status: 401 });
+    if (mode === "key" && rec.publicKey === "")
+      return new Response("the worker has no key; enroll it\n", { status: 401 });
     if (mode === "apikey" && rec.publicKey !== "") {
       return new Response("this worker is enrolled: connect with its key\n", { status: 401 });
     }
@@ -361,17 +367,29 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
     const connId = newId("wconn");
     this.ctx.acceptWebSocket(server, [connId]);
     const now = Date.now();
-    const att: Attachment = { connId, mode, phase: mode === "key" ? "challenge" : "hello", openedMs: now, lastSeenMs: now };
+    const att: Attachment = {
+      connId,
+      mode,
+      phase: mode === "key" ? "challenge" : "hello",
+      openedMs: now,
+      lastSeenMs: now,
+    };
     if (mode === "key") {
       att.nonce = b64url(randomBytes(32));
-      server.send(JSON.stringify({ type: "auth.challenge", params: { nonce: att.nonce, connection_id: connId, protocols: [1] } }));
+      server.send(
+        JSON.stringify({ type: "auth.challenge", params: { nonce: att.nonce, connection_id: connId, protocols: [1] } }),
+      );
     }
     server.serializeAttachment(att);
     this.tx(() => {
       this.setState("record", JSON.stringify(rec));
       this.setTimer(`handshake:${connId}`, "handshake", now + HANDSHAKE_MS, { connId });
     });
-    return new Response(null, { status: 101, webSocket: client, headers: { "Sec-WebSocket-Protocol": WORKER_SUBPROTOCOL } });
+    return new Response(null, {
+      status: 101,
+      webSocket: client,
+      headers: { "Sec-WebSocket-Protocol": WORKER_SUBPROTOCOL },
+    });
   }
 
   // ---------- frames ----------
@@ -379,7 +397,9 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
   override async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     const att = this.att(ws);
     const prev = this.chains.get(att.connId) ?? Promise.resolve();
-    const next = prev.then(() => this.handleFrame(ws, message)).catch((e) => console.error("WorkerHubDO: frame failed", e));
+    const next = prev
+      .then(() => this.handleFrame(ws, message))
+      .catch((e) => console.error("WorkerHubDO: frame failed", e));
     this.chains.set(att.connId, next);
     await next;
   }
@@ -438,7 +458,13 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
     ws.serializeAttachment(att);
   }
 
-  private async verify(publicKey: string, workerId: string, connId: string, nonce: string, sig: string): Promise<boolean> {
+  private async verify(
+    publicKey: string,
+    workerId: string,
+    connId: string,
+    nonce: string,
+    sig: string,
+  ): Promise<boolean> {
     try {
       const raw = fromAnyB64(publicKey);
       if (!raw || raw.length !== 32) return false;
@@ -497,7 +523,12 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
           continue;
         }
         const old = this.statusOf(r);
-        this.sql.exec("UPDATE hub_tasks SET status = ?, updated_ms = ? WHERE task_id = ?", JSON.stringify(s), now, r.task_id);
+        this.sql.exec(
+          "UPDATE hub_tasks SET status = ?, updated_ms = ? WHERE task_id = ?",
+          JSON.stringify(s),
+          now,
+          r.task_id,
+        );
         if (s.state === "exited" && old.state !== "exited") this.notifyExit(s);
       }
       for (const id of held.keys()) {
@@ -519,9 +550,14 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
       this.rejectPending(this.att(old).connId, "the connection was replaced");
       closeQuietly(old, 1001, "replaced by a new connection");
     }
-    const welcome: Record<string, unknown> = { connection_id: att.connId, heartbeat_ms: HEARTBEAT_MS, draining: rec.draining };
+    const welcome: Record<string, unknown> = {
+      connection_id: att.connId,
+      heartbeat_ms: HEARTBEAT_MS,
+      draining: rec.draining,
+    };
     if (hubSettings.minRuntimeVersion) welcome.min_runtime_version = hubSettings.minRuntimeVersion;
-    if (hubSettings.recommendedRuntimeVersion) welcome.recommended_runtime_version = hubSettings.recommendedRuntimeVersion;
+    if (hubSettings.recommendedRuntimeVersion)
+      welcome.recommended_runtime_version = hubSettings.recommendedRuntimeVersion;
     if ((hello.features ?? []).includes("access_token")) {
       // Additive (needs the schema change requested by WS6): only for workers that ask.
       const t = await mintWorkerToken(this.env, this.teamId(), rec.id);
@@ -554,7 +590,12 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
         const old = this.statusOf(r);
         const merged = mergeStatus(old, s);
         if (merged === old) return false;
-        this.sql.exec("UPDATE hub_tasks SET status = ?, updated_ms = ? WHERE task_id = ?", JSON.stringify(merged), Date.now(), s.taskId);
+        this.sql.exec(
+          "UPDATE hub_tasks SET status = ?, updated_ms = ? WHERE task_id = ?",
+          JSON.stringify(merged),
+          Date.now(),
+          s.taskId,
+        );
         if (merged.state === "exited" && old.state !== "exited") {
           this.notifyExit(merged);
           this.reportCapacity();
@@ -566,7 +607,13 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
       return;
     }
     if (f.type === "request" && typeof f.id === "string") {
-      ws.send(JSON.stringify({ type: "response", id: f.id, error: { code: "unknown_method", message: `unknown method ${String(f.method)}` } }));
+      ws.send(
+        JSON.stringify({
+          type: "response",
+          id: f.id,
+          error: { code: "unknown_method", message: `unknown method ${String(f.method)}` },
+        }),
+      );
     }
     // heartbeat and unknown events: lastSeenMs is already updated.
   }
@@ -667,7 +714,8 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
       if (rec.draining) throw new ProviderError("at_capacity", "the worker is draining");
       if (!this.current()) throw new ProviderError("unavailable", "the worker is not connected");
       const limit = this.slotLimit();
-      if (limit > 0 && this.slotsUsed() >= limit) throw new ProviderError("at_capacity", `all ${limit} slots of the worker are in use`);
+      if (limit > 0 && this.slotsUsed() >= limit)
+        throw new ProviderError("at_capacity", `all ${limit} slots of the worker are in use`);
       const now = Date.now();
       const s: TaskStatus = { taskId: task.taskId, state: "accepted" };
       this.sql.exec(
@@ -697,15 +745,25 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
       });
       throw e;
     }
-    const reported = fromWireStatus((result as { status?: unknown }).status) ?? { taskId: task.taskId, state: "accepted" as const };
+    const reported = fromWireStatus((result as { status?: unknown }).status) ?? {
+      taskId: task.taskId,
+      state: "accepted" as const,
+    };
     const merged = this.tx(() => {
       const r = this.row(task.taskId);
       const m = mergeStatus(r ? this.statusOf(r) : undefined, reported);
-      this.sql.exec("UPDATE hub_tasks SET status = ?, updated_ms = ? WHERE task_id = ?", JSON.stringify(m), Date.now(), task.taskId);
+      this.sql.exec(
+        "UPDATE hub_tasks SET status = ?, updated_ms = ? WHERE task_id = ?",
+        JSON.stringify(m),
+        Date.now(),
+        task.taskId,
+      );
       return m;
     });
     const cache = (extras?.git_cache ?? []) as { clone_url?: string }[];
-    const repos = Array.isArray(cache) ? cache.map((c) => c?.clone_url).filter((u): u is string => typeof u === "string") : [];
+    const repos = Array.isArray(cache)
+      ? cache.map((c) => c?.clone_url).filter((u): u is string => typeof u === "string")
+      : [];
     if (repos.length > 0) {
       await this.team()
         .api({ requestId: newId("req") }, "workers.noteRepos", { id: this.workerId() }, { repos })
@@ -718,14 +776,16 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
   async taskStatus(taskId: string): Promise<TaskStatus> {
     await this.ready;
     const r = this.row(taskId);
-    if (!r || r.destroyed === 1) throw new ProviderError("not_found", `task ${taskId} is not known to worker ${this.workerId()}`);
+    if (!r || r.destroyed === 1)
+      throw new ProviderError("not_found", `task ${taskId} is not known to worker ${this.workerId()}`);
     return this.statusOf(r);
   }
 
   async taskCancel(taskId: string, graceSeconds: number): Promise<void> {
     await this.ready;
     const r = this.row(taskId);
-    if (!r || r.destroyed === 1) throw new ProviderError("not_found", `task ${taskId} is not known to worker ${this.workerId()}`);
+    if (!r || r.destroyed === 1)
+      throw new ProviderError("not_found", `task ${taskId} is not known to worker ${this.workerId()}`);
     await this.request("task.cancel", { task_id: taskId, grace_seconds: Math.max(0, Math.round(graceSeconds)) });
   }
 
@@ -819,6 +879,7 @@ export class WorkerHubDO extends BaseDO implements WorkerHubRpc {
       await this.revoke();
       return;
     }
-    if (before && before.draining !== rec.draining && this.current()) this.fireAndForget("drain", { draining: rec.draining });
+    if (before && before.draining !== rec.draining && this.current())
+      this.fireAndForget("drain", { draining: rec.draining });
   }
 }

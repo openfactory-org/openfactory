@@ -35,8 +35,10 @@ export function parseSpendLimit(v: unknown): SpendLimit {
   return out;
 }
 
-export const over = (l: Pick<Limit, "limit_usd" | "spent_usd">): boolean => l.limit_usd > 0 && l.spent_usd >= l.limit_usd;
-export const fraction = (l: Pick<Limit, "limit_usd" | "spent_usd">): number => (l.limit_usd <= 0 ? 0 : l.spent_usd / l.limit_usd);
+export const over = (l: Pick<Limit, "limit_usd" | "spent_usd">): boolean =>
+  l.limit_usd > 0 && l.spent_usd >= l.limit_usd;
+export const fraction = (l: Pick<Limit, "limit_usd" | "spent_usd">): number =>
+  l.limit_usd <= 0 ? 0 : l.spent_usd / l.limit_usd;
 
 /** dayStart: "YYYY-MM-DD" (UTC) of t. */
 export function dayKey(ms: number): string {

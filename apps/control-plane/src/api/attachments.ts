@@ -20,7 +20,16 @@ function tooLarge(instance: string): Response {
   const detail = `an attachment is limited to ${MAX_ATTACHMENT_BYTES} bytes`;
   const title = "The request body is too large.";
   return new Response(
-    JSON.stringify({ type: "/errors/payload-too-large", title, status: 413, code: "payload_too_large", error: { code: "payload_too_large", message: `${title} (${detail})` }, retryable: false, detail, instance }),
+    JSON.stringify({
+      type: "/errors/payload-too-large",
+      title,
+      status: 413,
+      code: "payload_too_large",
+      error: { code: "payload_too_large", message: `${title} (${detail})` },
+      retryable: false,
+      detail,
+      instance,
+    }),
     { status: 413, headers: { "content-type": "application/problem+json" } },
   );
 }
@@ -42,8 +51,20 @@ export const uploadAttachment: Handler = async (req, env, ctx) => {
   }
   const createdBy = ctx.principal?.userId || ctx.principal?.id || "";
   const createdAt = new Date().toISOString();
-  await env.DATA.put(key, data, { httpMetadata: { contentType: ct }, customMetadata: { created_by: createdBy, created_at: createdAt } });
-  const att: Attachment = { id, team_id: team, name, content_type: ct, bytes: data.byteLength, key, created_by: createdBy, created_at: createdAt };
+  await env.DATA.put(key, data, {
+    httpMetadata: { contentType: ct },
+    customMetadata: { created_by: createdBy, created_at: createdAt },
+  });
+  const att: Attachment = {
+    id,
+    team_id: team,
+    name,
+    content_type: ct,
+    bytes: data.byteLength,
+    key,
+    created_by: createdBy,
+    created_at: createdAt,
+  };
   return json(201, publicAttachment(att));
 };
 
@@ -52,6 +73,7 @@ export async function checkAttachments(env: Env, teamId: string, ids: string[]):
   if (ids.length === 0) return;
   if (ids.length > 20) throw new OfError("invalid_request", "a message can have at most 20 attachments");
   for (const id of ids) {
-    if (!(await getAttachment(env, teamId, id))) throw new OfError("invalid_request", `attachment ${JSON.stringify(id)} does not exist`);
+    if (!(await getAttachment(env, teamId, id)))
+      throw new OfError("invalid_request", `attachment ${JSON.stringify(id)} does not exist`);
   }
 }

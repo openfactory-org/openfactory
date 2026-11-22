@@ -43,9 +43,23 @@ describe("lifecycle", () => {
     ]);
   });
   it("text and data of a failed child", () => {
-    const p = lifecycleParts(run({ name: "implement", agent_name: "coder", state: "failed", failure_code: "agent_failed", result: "x" }), false, "failed", "https://f.example");
+    const p = lifecycleParts(
+      run({ name: "implement", agent_name: "coder", state: "failed", failure_code: "agent_failed", result: "x" }),
+      false,
+      "failed",
+      "https://f.example",
+    );
     expect(p.content).toBe('Child run "implement" failed. Failure code: agent_failed.');
-    expect(Object.keys(p.data)).toEqual(["event", "run_id", "name", "agent", "failure_code", "result", "result_truncated", "url"]);
+    expect(Object.keys(p.data)).toEqual([
+      "event",
+      "run_id",
+      "name",
+      "agent",
+      "failure_code",
+      "result",
+      "result_truncated",
+      "url",
+    ]);
     expect(lifecycleParts(run({ name: "" }), true, "succeeded", "").content).toBe('Side run "run_c" succeeded.');
   });
   it("truncates the result on a UTF-8 boundary", () => {
@@ -78,7 +92,9 @@ describe("delivery", () => {
     const ready = { state: "active" as const, ready_at: "x", capabilities: [] as string[] };
     expect(decideDelivery({ ...ready, active_turn_id: "" }, [{ kind: "user" }]).kind).toBe("start_turn");
     expect(decideDelivery({ ...ready, active_turn_id: "t" }, [{ kind: "user" }]).kind).toBe("none");
-    expect(decideDelivery({ ...ready, active_turn_id: "t", capabilities: ["mid_turn_input"] }, [{ kind: "user" }]).kind).toBe("mid_turn");
+    expect(
+      decideDelivery({ ...ready, active_turn_id: "t", capabilities: ["mid_turn_input"] }, [{ kind: "user" }]).kind,
+    ).toBe("mid_turn");
     expect(decideDelivery({ ...ready, ready_at: undefined, active_turn_id: "" }, [{ kind: "user" }]).kind).toBe("none");
   });
 });
@@ -99,7 +115,12 @@ describe("sessions", () => {
   });
   it("computeSeconds from start or assignment", () => {
     expect(computeSeconds({ assigned_at: "2026-01-01T00:00:00Z" }, Date.parse("2026-01-01T00:00:10Z"))).toBe(10);
-    expect(computeSeconds({ assigned_at: "2026-01-01T00:00:00Z", started_at: "2026-01-01T00:00:04Z" }, Date.parse("2026-01-01T00:00:10Z"))).toBe(6);
+    expect(
+      computeSeconds(
+        { assigned_at: "2026-01-01T00:00:00Z", started_at: "2026-01-01T00:00:04Z" },
+        Date.parse("2026-01-01T00:00:10Z"),
+      ),
+    ).toBe(6);
   });
   it("parses the duration vars", () => {
     expect(parseDuration("30m", 0)).toBe(1_800_000);
@@ -113,10 +134,18 @@ describe("timeline", () => {
   it("keeps the Go event ID formulas", () => {
     const r = run({ state: "queued", queued_at: "2026-11-22T10:00:00.000Z" });
     expect(queuedEventId(r)).toBe(`run.queued:run_c:${Date.parse("2026-11-22T10:00:00.000Z")}000000`);
-    const rows = transitionRows(r, { event: "session_lost", failureCode: "sandbox_lost", priorRetries: 1 }, { state: "queued", changed: true, retry: true, failureCode: "sandbox_lost" }, 2, 0);
+    const rows = transitionRows(
+      r,
+      { event: "session_lost", failureCode: "sandbox_lost", priorRetries: 1 },
+      { state: "queued", changed: true, retry: true, failureCode: "sandbox_lost" },
+      2,
+      0,
+    );
     expect(rows.map((x) => x.type)).toEqual(["run.retry_scheduled", "run.queued"]);
     expect(rows[0]!.data).toEqual({ failure_code: "sandbox_lost", attempt: 2 });
-    expect(transitionRows(run({ state: "cancelled" }), { event: "cancel" }, { state: "cancelled", changed: true }, 1, 0)).toEqual([]);
+    expect(
+      transitionRows(run({ state: "cancelled" }), { event: "cancel" }, { state: "cancelled", changed: true }, 1, 0),
+    ).toEqual([]);
   });
 });
 
@@ -128,16 +157,28 @@ describe("liveness and deadline", () => {
     const s = { ...base, last_seen_at: new Date(now - 100_000).toISOString() };
     expect(decideSilent(s, now, { lostAfterMs }).kind).toBe("ask_status");
     expect(decideSilent(s, now, { lostAfterMs }, "not_found")).toMatchObject({ kind: "lose", code: "sandbox_lost" });
-    expect(decideSilent(s, now, { lostAfterMs }, { taskId: "x", state: "exited", reason: "container_oom" })).toMatchObject({ kind: "lose", useReasonMap: true, reason: "container_oom" });
+    expect(
+      decideSilent(s, now, { lostAfterMs }, { taskId: "x", state: "exited", reason: "container_oom" }),
+    ).toMatchObject({ kind: "lose", useReasonMap: true, reason: "container_oom" });
     expect(decideSilent(s, now, { lostAfterMs }, { taskId: "x", state: "running" }).kind).toBe("wait");
     const s2 = { ...base, last_seen_at: new Date(now - 200_000).toISOString() };
-    expect(decideSilent(s2, now, { lostAfterMs }, "unavailable")).toMatchObject({ kind: "lose", code: "runner_lost", cancel: true });
+    expect(decideSilent(s2, now, { lostAfterMs }, "unavailable")).toMatchObject({
+      kind: "lose",
+      code: "runner_lost",
+      cancel: true,
+    });
   });
   it("an assigned session is lost only on exit, not found or the start timeout", () => {
     const now = Date.parse("2026-01-01T00:10:00Z");
-    const s = { state: "assigned" as const, bootstrap_expires_at: "2099-01-01T00:00:00Z", last_seen_at: new Date(now - 500_000).toISOString() };
+    const s = {
+      state: "assigned" as const,
+      bootstrap_expires_at: "2099-01-01T00:00:00Z",
+      last_seen_at: new Date(now - 500_000).toISOString(),
+    };
     expect(decideSilent(s, now, { lostAfterMs }, { taskId: "x", state: "running" }).kind).toBe("wait");
-    expect(decideSilent({ ...s, bootstrap_expires_at: new Date(now - 1).toISOString() }, now, { lostAfterMs })).toMatchObject({ code: "sandbox_create_failed" });
+    expect(
+      decideSilent({ ...s, bootstrap_expires_at: new Date(now - 1).toISOString() }, now, { lostAfterMs }),
+    ).toMatchObject({ code: "sandbox_create_failed" });
   });
   it("deadline: stop once, then lose after the grace", () => {
     const o = { maxSessionMs: 1000, stopGraceMs: 100, lostAfterMs: 90 };
@@ -170,7 +211,15 @@ describe("admission", () => {
   });
   it("factory limit is exact and FIFO", () => {
     const res = admit(
-      { waiting: [row("a", "f"), row("b", "f"), row("c", "g")], leases: [], factoryLimits: new Map([["f", 1]]), workers: [], buckets: new Map(), spendBlocked: new Set(), maxSandboxes: 0 },
+      {
+        waiting: [row("a", "f"), row("b", "f"), row("c", "g")],
+        leases: [],
+        factoryLimits: new Map([["f", 1]]),
+        workers: [],
+        buckets: new Map(),
+        spendBlocked: new Set(),
+        maxSandboxes: 0,
+      },
       0,
     );
     expect(res.grants.map((g) => g.run_id)).toEqual(["a", "c"]);
@@ -227,7 +276,10 @@ describe("text and hosts", () => {
     expect(truncate("abcdef", 3)).toBe("abc\n…[truncated 3 bytes]");
   });
   it("required hosts add the control plane and the R2 S3 host", () => {
-    const h = requiredHosts({ harness: { type: "claude" } }, { controlUrl: "https://factory.example.com", r2AccountId: "ABC123" });
+    const h = requiredHosts(
+      { harness: { type: "claude" } },
+      { controlUrl: "https://factory.example.com", r2AccountId: "ABC123" },
+    );
     expect(h).toEqual(["factory.example.com", "abc123.r2.cloudflarestorage.com", "api.anthropic.com"]);
   });
 });

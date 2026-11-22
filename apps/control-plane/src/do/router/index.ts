@@ -54,7 +54,16 @@ export class RouterDO extends BaseDO {
         p.version,
       );
       for (const key of p.keys) {
-        if (first(this.sql, "SELECT 1 FROM routes WHERE factory_id = ? AND source_key = ? AND work_item_id = ?", p.factoryId, key, p.wiId)) continue;
+        if (
+          first(
+            this.sql,
+            "SELECT 1 FROM routes WHERE factory_id = ? AND source_key = ? AND work_item_id = ?",
+            p.factoryId,
+            key,
+            p.wiId,
+          )
+        )
+          continue;
         this.sql.exec(
           `INSERT OR IGNORE INTO routes (factory_id, source_key, work_item_id, work_token, kind, status, completed_ms, wi_version, updated_ms)
            VALUES (?, ?, ?, ?, 'thread', ?, ?, ?, ?)`,

@@ -46,12 +46,20 @@ export const getWorkItem: Handler = async (_req, env, ctx) => {
 const op =
   (name: string, status = 200): Handler =>
   async (req, env, ctx) =>
-    json(status, await workFor(env, ctx, ctx.params.id ?? "").api(metaOf(ctx), name, { id: ctx.params.id ?? "" }, await body(req)));
+    json(
+      status,
+      await workFor(env, ctx, ctx.params.id ?? "").api(metaOf(ctx), name, { id: ctx.params.id ?? "" }, await body(req)),
+    );
 
 const wiOp =
   (name: string): Handler =>
   async (req, env, ctx) => {
-    const out = (await workFor(env, ctx, ctx.params.id ?? "").api(metaOf(ctx), name, { id: ctx.params.id ?? "" }, await body(req))) as WorkItem | { work_item: WorkItem };
+    const out = (await workFor(env, ctx, ctx.params.id ?? "").api(
+      metaOf(ctx),
+      name,
+      { id: ctx.params.id ?? "" },
+      await body(req),
+    )) as WorkItem | { work_item: WorkItem };
     return json(200, wiView(env, "work_item" in out ? out.work_item : out));
   };
 

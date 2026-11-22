@@ -25,7 +25,13 @@ export interface TimelineRow {
 }
 
 /** timelineTransition: the rows of a run state change. */
-export function transitionRows(r: Run, input: StateInput, res: RunResult, session: number, nowMs: number): TimelineRow[] {
+export function transitionRows(
+  r: Run,
+  input: StateInput,
+  res: RunResult,
+  session: number,
+  nowMs: number,
+): TimelineRow[] {
   const rows: TimelineRow[] = [];
   switch (r.state) {
     case "queued": {
@@ -82,7 +88,13 @@ export function transitionRows(r: Run, input: StateInput, res: RunResult, sessio
   return rows;
 }
 
-export function sessionEndedRow(runId: string, session: number, reason: string, sandbox: string, nowMs: number): TimelineRow {
+export function sessionEndedRow(
+  runId: string,
+  session: number,
+  reason: string,
+  sandbox: string,
+  nowMs: number,
+): TimelineRow {
   const data: Record<string, unknown> = { reason };
   if (sandbox) data.sandbox_reason = sandbox;
   return { eventId: `session.ended:${taskIdOf(runId, session)}`, type: "session.ended", session, atMs: nowMs, data };

@@ -1,4 +1,4 @@
-// RequiredHosts (internal/engine/required_hosts.go) without Bedrock and
+// RequiredHosts (internal/engine/required_hosts.go) without hosted model gateways and
 // image registries, plus the R2 S3 host (plan: "R2 must be reachable"). Pure.
 import type { AgentConfig } from "./types";
 

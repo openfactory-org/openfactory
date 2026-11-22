@@ -1,26 +1,54 @@
 // REST handlers: runs. Owner: WS5. The Worker authenticates; the WorkDO of
 // the run (by its partition token) owns it; lists come from IndexDO.
-import { doName, invalid, newRoutedId, newToken, notFound, OfError, partitionOf } from "@openfactory/core";
+import {
+  builtinMCPProvider,
+  defaultModel,
+  doName,
+  invalid,
+  newRoutedId,
+  newToken,
+  notFound,
+  OfError,
+  partitionOf,
+} from "@openfactory/core";
+import type { MachineSpec as CoreMachineSpec, MCPServer } from "@openfactory/core";
 import type { CallMeta, CoreEvent } from "../contracts/do-messages";
 import type { Env } from "../contracts/env";
 import { registerCronHook, registerServerRoute } from "../builder";
 import { runView } from "../engine/view";
-import { isTerminal, waitsForInput, type AgentConfig, type Run, type RunMessage, type RunSession } from "../engine/types";
+import {
+  isTerminal,
+  waitsForInput,
+  type AgentConfig,
+  type Run,
+  type RunMessage,
+  type RunSession,
+} from "../engine/types";
 import { notImplementedHandler, type Handler, type RouteContext } from "../http/handler";
 import { handleRunMcp, RUN_MCP_PREFIX } from "../orchestration/index";
 import { handleRunnerApi, RUNNER_PREFIX } from "../runner-api/index";
 import { sseResponse, subscribe } from "../stream/index";
 import { checkAttachments } from "./attachments";
 import { dispatchAutomation, platformIntakeDeps } from "../do/ingress/intake";
+import { applyOverrides } from "../scoring/overrides";
+import { mergeMessages, readCompactedMessages } from "../compaction/compact";
+import type { Overrides } from "../scoring/types";
 
 // Registered lazily: a static import of ./schedules closes a module cycle
 // through the TeamDO modules at load time.
-void import("./schedules").then(({ setManualRunDispatcher }) => setManualRunDispatcher(async (env, input) => {
-  const out = await dispatchAutomation(platformIntakeDeps(env, input.teamId), input.factoryId, input.automation, input.event as unknown as CoreEvent);
-  if (!out.runId) throw new OfError("internal_error", "the automation started no run");
-  const run = (await env.WORK.getByName(doName.work(input.teamId, partitionOf(out.runId))).getRun(out.runId)) as Run;
-  return runView(run, { publicUrl: (env.OF_PUBLIC_URL ?? "").replace(/\/+$/, "") });
-}));
+void import("./schedules").then(({ setManualRunDispatcher }) =>
+  setManualRunDispatcher(async (env, input) => {
+    const out = await dispatchAutomation(
+      platformIntakeDeps(env, input.teamId),
+      input.factoryId,
+      input.automation,
+      input.event as unknown as CoreEvent,
+    );
+    if (!out.runId) throw new OfError("internal_error", "the automation started no run");
+    const run = (await env.WORK.getByName(doName.work(input.teamId, partitionOf(out.runId))).getRun(out.runId)) as Run;
+    return runView(run, { publicUrl: (env.OF_PUBLIC_URL ?? "").replace(/\/+$/, "") });
+  }),
+);
 
 // ---------- server routes and cron owned by WS5 ----------
 
@@ -67,31 +95,45 @@ function publicUrl(env: Env): string {
 }
 
 async function viewOf(env: Env, ctx: RouteContext, run: Run): Promise<Record<string, unknown>> {
-  const sessions = (await workFor(env, ctx, run.id).api(metaOf(ctx), "listRunSessions", { runId: run.id }, null)) as { sessions: RunSession[] };
+  const sessions = (await workFor(env, ctx, run.id).api(metaOf(ctx), "listRunSessions", { runId: run.id }, null)) as {
+    sessions: RunSession[];
+  };
   return runView(run, { publicUrl: publicUrl(env), latest: sessions.sessions.at(-1) });
 }
 
 /** Factory and agent from TeamDO (configSnapshot: { factory: {id, team_id}, agents: AgentConfig[] }). */
-async function resolveAgent(env: Env, ctx: RouteContext, factoryRef: string, agentRef: string): Promise<{ factoryId: string; agent: AgentConfig }> {
-  const snap = (await env.TEAM.getByName(doName.team(teamOf(ctx))).configSnapshot(factoryRef)) as {
-    factory?: { id: string };
-    agents?: AgentConfig[];
-  } | null;
+interface Snapshot {
+  factory?: { id: string };
+  agents?: AgentConfig[];
+  runtime?: { machines?: Record<string, CoreMachineSpec> | null };
+}
+
+interface Resolved {
+  factoryId: string;
+  agent: AgentConfig;
+  machines?: Record<string, CoreMachineSpec> | null;
+}
+
+async function resolveAgent(env: Env, ctx: RouteContext, factoryRef: string, agentRef: string): Promise<Resolved> {
+  const snap = (await env.TEAM.getByName(doName.team(teamOf(ctx))).configSnapshot(factoryRef)) as Snapshot | null;
   if (!snap?.factory) throw notFound(`factory ${factoryRef}`);
   const agent = (snap.agents ?? []).find((a) => a.id === agentRef || a.name === agentRef);
   if (!agent) throw invalid(`agent ${JSON.stringify(agentRef)} does not exist in factory ${factoryRef}`);
-  return { factoryId: snap.factory.id, agent };
+  return { factoryId: snap.factory.id, agent, machines: snap.runtime?.machines ?? null };
 }
 
 /** An agent by its stable ID across the team's factories (agent_identity_uid without factory_id). */
-async function resolveAgentById(env: Env, ctx: RouteContext, agentId: string): Promise<{ factoryId: string; agent: AgentConfig }> {
+async function resolveAgentById(env: Env, ctx: RouteContext, agentId: string): Promise<Resolved> {
   const team = env.TEAM.getByName(doName.team(teamOf(ctx)));
-  const list = (await team.api(metaOf(ctx), "listFactories", { "?limit": "500" }, null)) as { items?: { id: string }[]; $error?: { detail: string } };
+  const list = (await team.api(metaOf(ctx), "listFactories", { "?limit": "500" }, null)) as {
+    items?: { id: string }[];
+    $error?: { detail: string };
+  };
   if (list.$error) throw new OfError("internal_error", list.$error.detail);
   for (const f of list.items ?? []) {
-    const snap = (await team.configSnapshot(f.id)) as { factory?: { id: string }; agents?: AgentConfig[] } | null;
+    const snap = (await team.configSnapshot(f.id)) as Snapshot | null;
     const agent = (snap?.agents ?? []).find((a) => a.id === agentId);
-    if (snap?.factory && agent) return { factoryId: snap.factory.id, agent };
+    if (snap?.factory && agent) return { factoryId: snap.factory.id, agent, machines: snap.runtime?.machines ?? null };
   }
   throw notFound(`agent ${agentId}`);
 }
@@ -102,13 +144,123 @@ function actorOf(ctx: RouteContext): string {
 
 // ---------- handlers ----------
 
+/** RunConfig of POST /runs (internal/api/runs.go): optional overrides for the agent of the run. */
+interface RunConfigBody {
+  harness?: {
+    type?: string;
+    model?: string;
+    auth?: { source?: string; secretName?: string };
+    [k: string]: unknown;
+  } | null;
+  model_id?: string;
+  environment_id?: string;
+  machine?: string | CoreMachineSpec | null;
+  worker_host?: string;
+  mcp_servers?: Record<string, MCPServer> | null;
+  secrets?: string[] | null;
+  idle_timeout_minutes?: number | null;
+}
+
 interface CreateRunBody {
   prompt?: string;
   title?: string;
   agent_identity_uid?: string;
   factory_id?: string;
   agent_name?: string;
+  config?: RunConfigBody | null;
   metadata?: Record<string, string>;
+}
+
+const SECRET_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
+
+/** normalizeHarness (internal/api/runs.go). */
+function normalizeHarness(h: NonNullable<RunConfigBody["harness"]>, workerHost: string): void {
+  const t = String(h.type ?? "").toLowerCase();
+  if (t === "" || t === "claude" || t === "claude-code") h.type = "claude-code";
+  else if (t === "codex") h.type = "codex";
+  else throw invalid("harness.type must be one of claude, claude-code, codex");
+  if (!h.model) h.model = defaultModel(h.type);
+  const a = h.auth;
+  if (a) {
+    if (a.source === "managedSecret") {
+      if (!a.secretName) throw invalid("harness.auth.secretName is required with source managedSecret");
+    } else if (a.source === "workerEnvironment") {
+      if (a.secretName) throw invalid("harness.auth.secretName is not allowed with source workerEnvironment");
+      if (workerHost === "" || workerHost === "server")
+        throw invalid("harness.auth.source workerEnvironment requires a self-hosted worker_host");
+    } else throw invalid("harness.auth.source must be managedSecret or workerEnvironment");
+  }
+}
+
+/** ValidateMCPServers (internal/api/runs.go): each server selects exactly one transport. */
+export function validateMcpServers(m: Record<string, MCPServer> | null | undefined): void {
+  for (const [name, srv] of Object.entries(m ?? {})) {
+    if (name.trim() === "") throw invalid("mcp_servers keys must be non-empty");
+    const s = srv as MCPServer & {
+      managedId?: string;
+      command?: string;
+      url?: string;
+      args?: unknown[];
+      env?: object;
+      headers?: object;
+      allowWrite?: boolean;
+    };
+    const n = [!!s.managedId, !!s.command, !!s.url].filter(Boolean).length;
+    if (n !== 1) throw invalid(`mcp_servers.${name} must set exactly one of managedId, command or url`);
+    if (s.url) {
+      let ok: boolean;
+      try {
+        const u = new URL(s.url);
+        ok = (u.protocol === "http:" || u.protocol === "https:") && u.host !== "";
+      } catch {
+        ok = false;
+      }
+      if (!ok) throw invalid(`mcp_servers.${name}.url must be an absolute http(s) URL`);
+      if ((s.args?.length ?? 0) > 0 || Object.keys(s.env ?? {}).length > 0)
+        throw invalid(`mcp_servers.${name}: args and env apply only to command servers`);
+    }
+    if (s.command && Object.keys(s.headers ?? {}).length > 0)
+      throw invalid(`mcp_servers.${name}: headers apply only to url servers`);
+    if (s.managedId?.startsWith("builtin/")) {
+      if (!builtinMCPProvider(s.managedId).known)
+        throw invalid(`mcp_servers.${name}: unknown built-in MCP server ${JSON.stringify(s.managedId)}`);
+    } else if (s.allowWrite) throw invalid(`mcp_servers.${name}: allowWrite is only valid with a built-in managedId`);
+  }
+}
+
+/** The sparse overrides of a RunConfig (CreateRun in internal/api/runs.go). */
+function runConfigOverrides(cfgIn: RunConfigBody | null | undefined): Overrides | null {
+  if (!cfgIn) return null;
+  let workerHost = (cfgIn.worker_host ?? "").trim();
+  if (workerHost === "managed" || workerHost === "default") workerHost = "";
+  let harness: RunConfigBody["harness"] = null;
+  if (cfgIn.harness) {
+    harness = { ...cfgIn.harness };
+    if (!harness.model) harness.model = cfgIn.model_id ?? "";
+    normalizeHarness(harness, workerHost);
+  }
+  validateMcpServers(cfgIn.mcp_servers);
+  for (const sn of cfgIn.secrets ?? [])
+    if (!SECRET_NAME_RE.test(sn)) throw invalid(`invalid secret name ${JSON.stringify(sn)}`);
+  const t = cfgIn.idle_timeout_minutes;
+  if (t !== undefined && t !== null && (t < 0 || t > 60))
+    throw invalid("idle_timeout_minutes must be between 0 and 60");
+  let machine = "";
+  if (cfgIn.machine !== undefined && cfgIn.machine !== null) {
+    if (typeof cfgIn.machine === "string") machine = cfgIn.machine;
+    else if (typeof cfgIn.machine === "object") machine = cfgIn.machine.name ?? "";
+    else throw invalid("config.machine must be a machine name or a machine object");
+  }
+  const ov: Overrides = {};
+  if (harness) ov.harness = harness as Overrides["harness"];
+  else if (cfgIn.model_id) ov.model = cfgIn.model_id;
+  if (cfgIn.secrets?.length) ov.secrets = cfgIn.secrets;
+  if (cfgIn.mcp_servers && Object.keys(cfgIn.mcp_servers).length) ov.mcp_servers = cfgIn.mcp_servers;
+  if (t !== undefined && t !== null) ov.idle_timeout_minutes = t;
+  if (cfgIn.environment_id) ov.environment_id = cfgIn.environment_id;
+  if (workerHost) ov.worker_host = workerHost;
+  if (machine) ov.machine = machine;
+  return ov;
 }
 
 /** POST /api/v1/runs: a run of an agent: a new work item with the run as its root. */
@@ -117,10 +269,14 @@ export const createRun: Handler = async (req, env, ctx) => {
   if (!b.prompt?.trim()) throw invalid("prompt is required");
   const factoryRef = b.factory_id ?? "";
   const agentRef = b.agent_identity_uid || b.agent_name || "";
-  if (!agentRef || (!factoryRef && !b.agent_identity_uid)) throw invalid("set agent_identity_uid, or factory_id and agent_name");
-  const { factoryId, agent } = factoryRef
+  if (!agentRef || (!factoryRef && !b.agent_identity_uid))
+    throw invalid("set agent_identity_uid, or factory_id and agent_name");
+  const ov = runConfigOverrides(b.config);
+  const resolved = factoryRef
     ? await resolveAgent(env, ctx, factoryRef, agentRef)
     : await resolveAgentById(env, ctx, b.agent_identity_uid!);
+  const factoryId = resolved.factoryId;
+  const agent = applyOverrides(resolved.agent as never, ov, resolved.machines as never) as unknown as AgentConfig;
   const token = newToken("w");
   const out = (await env.WORK.getByName(doName.work(teamOf(ctx), token)).runsCreate(metaOf(ctx), {
     dispatch: {
@@ -163,8 +319,16 @@ export const dispatchRun: Handler = async (req, env, ctx) => {
 export const listRuns: Handler = async (_req, env, ctx) => {
   const q = Object.fromEntries(ctx.url.searchParams);
   if (q.parent_run_id) {
-    const res = (await workFor(env, ctx, q.parent_run_id).api(metaOf(ctx), "listRunChildren", { runId: q.parent_run_id }, null)) as { runs: Run[] };
-    return json(200, { items: res.runs.map((r) => runView(r, { publicUrl: publicUrl(env) })), page_info: { has_next_page: false } });
+    const res = (await workFor(env, ctx, q.parent_run_id).api(
+      metaOf(ctx),
+      "listRunChildren",
+      { runId: q.parent_run_id },
+      null,
+    )) as { runs: Run[] };
+    return json(200, {
+      items: res.runs.map((r) => runView(r, { publicUrl: publicUrl(env) })),
+      page_info: { has_next_page: false },
+    });
   }
   const res = await env.INDEX.getByName(doName.index(teamOf(ctx))).list(metaOf(ctx), "runs", q);
   return json(200, res);
@@ -180,9 +344,35 @@ export const getRun: Handler = async (_req, env, ctx) => {
 const workApi =
   (op: string, field: string): Handler =>
   async (_req, env, ctx) => {
-    const out = (await workFor(env, ctx, ctx.params.runId ?? "").api(metaOf(ctx), op, { ...Object.fromEntries(ctx.url.searchParams), ...ctx.params }, null)) as Record<string, unknown[]>;
+    const out = (await workFor(env, ctx, ctx.params.runId ?? "").api(
+      metaOf(ctx),
+      op,
+      { ...Object.fromEntries(ctx.url.searchParams), ...ctx.params },
+      null,
+    )) as Record<string, unknown[]>;
     return json(200, { items: out[field] ?? [], page_info: { has_next_page: false } });
   };
+
+/**
+ * The messages of a run after `after`: compacted ones from R2 (when the run
+ * was compacted and `after` is below the compacted prefix), then the rows
+ * that WorkDO still holds.
+ */
+export async function readRunMessages(
+  env: Env,
+  stub: { api(meta: CallMeta, op: string, params: Record<string, string>, body: unknown): Promise<unknown> },
+  meta: CallMeta,
+  runId: string,
+  after: number,
+): Promise<RunMessage[]> {
+  const res = (await stub.api(meta, "listRunMessages", { runId, after: String(after), limit: "0" }, null)) as {
+    messages: RunMessage[];
+    compacted_upto?: number;
+  };
+  if (!res.compacted_upto || after >= res.compacted_upto) return res.messages;
+  const compacted = (await readCompactedMessages(env.DATA, runId)).filter((m) => m.seq > after) as RunMessage[];
+  return mergeMessages(compacted, res.messages);
+}
 
 /** GET /api/v1/runs/{runId}/messages */
 export const listRunMessages: Handler = async (_req, env, ctx) => {
@@ -195,9 +385,13 @@ export const listRunMessages: Handler = async (_req, env, ctx) => {
   if (limit <= 0 || limit > 1000) limit = 1000;
   const stub = workFor(env, ctx, runId);
   const run = (await stub.getRun(runId)) as Run;
-  const res = (await stub.api(metaOf(ctx), "listRunMessages", { runId, after: String(after), limit: "0" }, null)) as { messages: RunMessage[] };
-  const roles = q.getAll("role").flatMap((r) => r.split(",")).map((r) => r.trim()).filter(Boolean);
-  let msgs = roles.length ? res.messages.filter((m) => roles.includes(m.role)) : res.messages;
+  const all = await readRunMessages(env, stub, metaOf(ctx), runId, after);
+  const roles = q
+    .getAll("role")
+    .flatMap((r) => r.split(","))
+    .map((r) => r.trim())
+    .filter(Boolean);
+  let msgs = roles.length ? all.filter((m) => roles.includes(m.role)) : all;
   const out: Record<string, unknown> = { run_id: run.id, state: String(runView(run).state) };
   if (msgs.length > limit) {
     msgs = msgs.slice(0, limit);
@@ -219,7 +413,7 @@ export const postRunMessage: Handler = async (req, env, ctx) => {
     actor: actorOf(ctx),
     ...(b.attachments ? { attachments: b.attachments } : {}),
   });
-  return json(202, rec);
+  return json(202, { run_id: ctx.params.runId ?? "", ...rec });
 };
 
 /** POST /api/v1/runs/{runId}/followups */
@@ -228,7 +422,11 @@ export const followUpRun: Handler = postRunMessage;
 /** POST /api/v1/runs/{runId}/cancel */
 export const cancelRun: Handler = async (req, env, ctx) => {
   const b = await body<{ cascade?: boolean }>(req);
-  const res = (await workFor(env, ctx, ctx.params.runId ?? "").runsCancel(metaOf(ctx), ctx.params.runId ?? "", b.cascade !== false)) as {
+  const res = (await workFor(env, ctx, ctx.params.runId ?? "").runsCancel(
+    metaOf(ctx),
+    ctx.params.runId ?? "",
+    b.cascade !== false,
+  )) as {
     cancelled: string[];
     run: Run;
   };
@@ -261,9 +459,9 @@ export const streamRunEvents: Handler = async (req, env, ctx) => {
         lastState = run.state;
         events.push({ event: "run", data: view });
       }
-      const res = (await stub.api(metaOf(ctx), "listRunMessages", { runId, after: cursor, limit: "0" }, null)) as { messages: RunMessage[] };
-      for (const m of res.messages) events.push({ id: String(m.seq), event: "message", data: m });
-      const next = res.messages.at(-1) ? String(res.messages.at(-1)!.seq) : cursor;
+      const msgs = await readRunMessages(env, stub, metaOf(ctx), runId, Number(cursor) || 0);
+      for (const m of msgs) events.push({ id: String(m.seq), event: "message", data: m });
+      const next = msgs.at(-1) ? String(msgs.at(-1)!.seq) : cursor;
       const finished = isTerminal(run.state) || (stopOnIdle && waitsForInput(run.state));
       if (finished) events.push({ event: "done", data: view });
       return { events, cursor: next, done: finished };
@@ -291,10 +489,9 @@ export const getRunDiagnostics: Handler = workApi("getRunDiagnostics", "diagnost
 export const listRunSessions: Handler = workApi("listRunSessions", "sessions");
 /** GET /api/v1/runs/{runId}/conversation */
 export const getRunConversation: Handler = async (_req, env, ctx) => {
-  const res = (await workFor(env, ctx, ctx.params.runId ?? "").api(metaOf(ctx), "listRunMessages", { runId: ctx.params.runId ?? "" }, null)) as {
-    messages: RunMessage[];
-  };
-  return json(200, { run_id: ctx.params.runId, items: res.messages });
+  const runId = ctx.params.runId ?? "";
+  const items = await readRunMessages(env, workFor(env, ctx, runId), metaOf(ctx), runId, 0);
+  return json(200, { run_id: runId, items });
 };
 
 export { OfError };

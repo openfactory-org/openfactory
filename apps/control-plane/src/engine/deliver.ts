@@ -46,7 +46,11 @@ export function toItem(m: RunInput, lookup?: (id: string) => AttachmentMeta | un
   const item: InputItem = {
     message_id: m.message_id,
     kind: m.kind as InputItem["kind"],
-    sender: { type: m.sender.type, ...(m.sender.id ? { id: m.sender.id } : {}), ...(m.sender.name ? { name: m.sender.name } : {}) },
+    sender: {
+      type: m.sender.type,
+      ...(m.sender.id ? { id: m.sender.id } : {}),
+      ...(m.sender.name ? { name: m.sender.name } : {}),
+    },
     content: m.content,
     attachments: [],
   };
@@ -55,7 +59,9 @@ export function toItem(m: RunInput, lookup?: (id: string) => AttachmentMeta | un
   for (const id of m.attachments ?? []) {
     const found = lookup?.(id);
     item.attachments!.push(
-      found ? { id, name: found.name, content_type: found.content_type, bytes: found.bytes } : { id, name: "", content_type: "", bytes: 0 },
+      found
+        ? { id, name: found.name, content_type: found.content_type, bytes: found.bytes }
+        : { id, name: "", content_type: "", bytes: 0 },
     );
   }
   return item;

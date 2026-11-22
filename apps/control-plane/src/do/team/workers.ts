@@ -174,7 +174,10 @@ function mustRow(kit: TeamKit, id: string): WorkerRow {
   return r;
 }
 
-export function statusOf(r: Pick<WorkerRow, "conn" | "draining" | "revoked_ms" | "last_seen_ms">, nowMs = Date.now()): WorkerStatus {
+export function statusOf(
+  r: Pick<WorkerRow, "conn" | "draining" | "revoked_ms" | "last_seen_ms">,
+  nowMs = Date.now(),
+): WorkerStatus {
   if (r.revoked_ms !== null) return "revoked";
   if (r.draining) return "draining";
   if (r.conn === "online") {
@@ -269,7 +272,8 @@ function checkSlotSize(v: unknown, required: boolean): SlotSizeJson | undefined 
   const int = (k: string, min: number): number | undefined => {
     const x = o[k];
     if (x === undefined || x === null) return undefined;
-    if (typeof x !== "number" || !Number.isInteger(x) || x < min) throw invalid(`slot_size.${k} must be an integer of at least ${min}`);
+    if (typeof x !== "number" || !Number.isInteger(x) || x < min)
+      throw invalid(`slot_size.${k} must be an integer of at least ${min}`);
     return x;
   };
   const vcpus = int("vcpus", 1);
@@ -341,14 +345,24 @@ async function createEnrollment(kit: TeamKit, call: OpCall): Promise<unknown> {
 }
 
 /** TeamRpc.workersEnroll: public enrollment with a single-use token. */
-export async function workersEnroll(kit: TeamKit, input: Parameters<TeamRpc["workersEnroll"]>[0]): Promise<{ workerId: string }> {
+export async function workersEnroll(
+  kit: TeamKit,
+  input: Parameters<TeamRpc["workersEnroll"]>[0],
+): Promise<{ workerId: string }> {
   const token = input.enrollmentToken ?? "";
   if (!token.startsWith(ENROLLMENT_PREFIX)) throw new OfError("authentication_required", "invalid enrollment token");
   const hash = await sha256Hex(token);
   const now = Date.now();
   // The token is consumed first, in its own transaction: it is used up even if a later step fails.
   const enr = kit.tx(() => {
-    const r = first<{ id: string; name: string; labels: string; factories: string; expires_ms: number; used_ms: number | null }>(
+    const r = first<{
+      id: string;
+      name: string;
+      labels: string;
+      factories: string;
+      expires_ms: number;
+      used_ms: number | null;
+    }>(
       kit.sql,
       "SELECT id, name, labels, factories, expires_ms, used_ms FROM worker_enrollments WHERE token_hash = ?",
       hash,
@@ -404,7 +418,12 @@ export async function workersEnroll(kit: TeamKit, input: Parameters<TeamRpc["wor
 // ---------- updates ----------
 
 /** TeamRpc.workersUpdate: PATCH /workers/{id}. */
-export async function workersUpdate(kit: TeamKit, meta: CallMeta, workerId: string, patch: unknown): Promise<WorkerView> {
+export async function workersUpdate(
+  kit: TeamKit,
+  meta: CallMeta,
+  workerId: string,
+  patch: unknown,
+): Promise<WorkerView> {
   const b = bodyObject(patch);
   const name = optString(b, "name");
   const labels = checkLabels(optStringMap(b, "labels"));
@@ -418,7 +437,8 @@ export async function workersUpdate(kit: TeamKit, meta: CallMeta, workerId: stri
     const args: unknown[] = [];
     if (name !== undefined) {
       const n = checkName(name);
-      if (nameTaken(kit, n, workerId)) throw new OfError("conflict", `a worker named ${JSON.stringify(n)} already exists`);
+      if (nameTaken(kit, n, workerId))
+        throw new OfError("conflict", `a worker named ${JSON.stringify(n)} already exists`);
       sets.push("name = ?");
       args.push(n);
     }
@@ -467,7 +487,13 @@ export async function workersRevoke(kit: TeamKit, meta: CallMeta, workerId: stri
   return kit.tx(() => {
     const r = mustRow(kit, workerId);
     if (r.revoked_ms === null) {
-      run(kit.sql, "UPDATE workers SET revoked_ms = ?, conn = 'offline', updated_ms = ? WHERE id = ?", Date.now(), Date.now(), workerId);
+      run(
+        kit.sql,
+        "UPDATE workers SET revoked_ms = ?, conn = 'offline', updated_ms = ? WHERE id = ?",
+        Date.now(),
+        Date.now(),
+        workerId,
+      );
       audit(kit, workerId, "revoke", "ok", "", actorOf(meta.principal));
     }
     return view(kit, mustRow(kit, workerId));
@@ -504,21 +530,31 @@ async function gitCredential(kit: TeamKit, call: OpCall): Promise<unknown> {
   const p = call.principal();
   const id = call.params.id ?? "";
   const repo = normalizeRepo(call.query.repo ?? "");
-  if (p.kind !== "worker" || p.id !== id) throw new OfError("not_authorized", "a worker can ask only for its own git credentials");
+  if (p.kind !== "worker" || p.id !== id)
+    throw new OfError("not_authorized", "a worker can ask only for its own git credentials");
   if (repo === "") throw invalid("repo is required");
   const decision = kit.tx(() => {
     const r = getRow(kit, id);
     let refusal = "";
     if (!r) refusal = "unknown worker";
     else if (r.revoked_ms !== null) refusal = "the worker is revoked";
-    else if (!first(kit.sql, "SELECT 1 FROM worker_repos WHERE worker_id = ? AND repo = ? AND last_ms >= ?", id, repo, Date.now() - REPO_WINDOW_MS)) {
+    else if (
+      !first(
+        kit.sql,
+        "SELECT 1 FROM worker_repos WHERE worker_id = ? AND repo = ? AND last_ms >= ?",
+        id,
+        repo,
+        Date.now() - REPO_WINDOW_MS,
+      )
+    ) {
       refusal = "the repository was not sent to this worker in the last 7 days";
     }
     audit(kit, id, "git_credential", refusal ? "refused" : "ok", refusal ? `${repo}: ${refusal}` : repo, actorOf(p));
     return { refusal, factories: r ? (parseJson(r.factories, []) as string[]) : [] };
   });
   if (decision.refusal) throw new OfError("not_authorized", decision.refusal);
-  if (!gitCredentialMinter) throw new OfError("feature_not_available", "git credentials for the worker cache are not configured");
+  if (!gitCredentialMinter)
+    throw new OfError("feature_not_available", "git credentials for the worker cache are not configured");
   const c = await gitCredentialMinter(kit, { workerId: id, repo, factories: decision.factories });
   return { username: c.username, password: c.password, expires_at: c.expiresAt };
 }
@@ -534,9 +570,11 @@ function hubConnect(kit: TeamKit, call: OpCall): WorkerRecord {
 function devRegister(kit: TeamKit, call: OpCall): WorkerRecord {
   const p = call.principal();
   const id = call.params.id ?? "";
-  if (!devAllowed(kit)) throw new OfError("not_authorized", "development process workers are not allowed (OF_DEV_PROCESS_WORKERS)");
+  if (!devAllowed(kit))
+    throw new OfError("not_authorized", "development process workers are not allowed (OF_DEV_PROCESS_WORKERS)");
   if (p.role !== "admin") throw new OfError("not_authorized", "a development worker needs the API key of an admin");
-  if (!WORKER_ID_RE.test(id) || id.toLowerCase().startsWith("openfactory")) throw invalid(`invalid worker ID ${JSON.stringify(id)}`);
+  if (!WORKER_ID_RE.test(id) || id.toLowerCase().startsWith("openfactory"))
+    throw invalid(`invalid worker ID ${JSON.stringify(id)}`);
   return kit.tx(() => {
     const r = getRow(kit, id);
     if (r) {
@@ -734,7 +772,12 @@ const PROVIDER_HOSTS = new Set(["cloudflare-sandbox", "daytona", "boatdev", "mic
  * provider, a registered worker of the team (ID or name) or a pool whose
  * label a worker has. Sync, no I/O.
  */
-export function preflightWorkerHosts(kit: TeamKit, def: CompiledDefinition, chk: DefinitionCheck, providers: readonly string[] = []): void {
+export function preflightWorkerHosts(
+  kit: TeamKit,
+  def: CompiledDefinition,
+  chk: DefinitionCheck,
+  providers: readonly string[] = [],
+): void {
   const refs: { file: string; host: string }[] = [];
   const add = (file: string, host: string | undefined) => {
     if (host === undefined || BUILTIN_HOSTS.has(host) || PROVIDER_HOSTS.has(host) || providers.includes(host)) return;
@@ -767,5 +810,7 @@ export function preflightWorkerHosts(kit: TeamKit, def: CompiledDefinition, chk:
 }
 
 export function setup(_kit: TeamKit): void {
-  registerPreflight("worker hosts", (kit, _f, def, _files, chk) => preflightWorkerHosts(kit, def, chk, registeredProviders()));
+  registerPreflight("worker hosts", (kit, _f, def, _files, chk) =>
+    preflightWorkerHosts(kit, def, chk, registeredProviders()),
+  );
 }

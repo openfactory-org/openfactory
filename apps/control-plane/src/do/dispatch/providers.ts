@@ -149,6 +149,7 @@ export function providerFor(env: Env, teamId: string, providerId: string, worker
   if (workerId) return workerFactory ? workerFactory(env, teamId, workerId) : new WorkerProvider(env, teamId, workerId);
   const f = factories.get(providerId);
   if (f) return f(env, teamId);
-  if (providerId === "cloudflare-sandbox") return new ServiceBindingProvider(providerId, env.PROVIDER_CLOUDFLARE_SANDBOX);
+  if (providerId === "cloudflare-sandbox")
+    return new ServiceBindingProvider(providerId, env.PROVIDER_CLOUDFLARE_SANDBOX);
   throw new OfError("invalid_request", `sandbox provider ${JSON.stringify(providerId)} is not available`);
 }

@@ -27,9 +27,21 @@ const hub = (id: string) => env.WORKER_HUB.getByName(doName.workerHub(TEAM, id))
 const meta = (principal?: Principal): CallMeta => ({ requestId: "req_test", ...(principal ? { principal } : {}) });
 
 const b64url = (b: ArrayBuffer | Uint8Array): string =>
-  btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  btoa(String.fromCharCode(...new Uint8Array(b)))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
 
-async function op(name: string, params: Record<string, string> = {}, body: unknown = null, p: Principal = ADMIN): Promise<any> {
+// Loose JSON of the op results: the tests read deep fields.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Loose = any;
+
+async function op(
+  name: string,
+  params: Record<string, string> = {},
+  body: unknown = null,
+  p: Principal = ADMIN,
+): Promise<Loose> {
   return team().api(meta(p), name, params, body);
 }
 
@@ -55,11 +67,15 @@ async function rejection(p: Promise<unknown>): Promise<string> {
 let seq = 0;
 
 /** Enrolls a KVM host and returns its ID and key pair. */
-async function enroll(opts: { slots?: number; name?: string } = {}): Promise<{ id: string; keys: CryptoKeyPair; publicKey: string }> {
+async function enroll(
+  opts: { slots?: number; name?: string } = {},
+): Promise<{ id: string; keys: CryptoKeyPair; publicKey: string }> {
   const e = await op("createWorkerEnrollment", {}, { labels: { gpu: "" } });
   expect(e.$status).toBe(201);
   const keys = (await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"])) as CryptoKeyPair;
-  const publicKey = btoa(String.fromCharCode(...new Uint8Array((await crypto.subtle.exportKey("raw", keys.publicKey)) as ArrayBuffer)));
+  const publicKey = btoa(
+    String.fromCharCode(...new Uint8Array((await crypto.subtle.exportKey("raw", keys.publicKey)) as ArrayBuffer)),
+  );
   const res = await exports.default.fetch("http://localhost/api/v1/workers/enroll", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -123,7 +139,10 @@ class FakeWorker {
       workerAuthMessage(opts.signAs ?? this.id, p.connection_id, p.nonce) as Uint8Array<ArrayBuffer>,
     );
     this.send({ type: "auth.response", params: { worker_id: this.id, alg: "ed25519", sig: b64url(sig) } });
-    const tasks = [...this.tasks.values(), ...(opts.extraTasks ?? [])].map((s) => ({ task_id: s.taskId, status: toWireStatus(s) }));
+    const tasks = [...this.tasks.values(), ...(opts.extraTasks ?? [])].map((s) => ({
+      task_id: s.taskId,
+      status: toWireStatus(s),
+    }));
     this.send({
       type: "hello",
       params: {
@@ -228,7 +247,12 @@ function task(n: number, run = "run_wabcdefghijklmnoabcdefghijkl"): SandboxTask 
     image: "ghcr.io/example/sandbox:1",
     platform: { os: "linux", arch: "amd64" },
     resources: { vcpus: 1, memoryMiB: 2048 },
-    env: { OF_CONTROL_URL: "http://localhost", OF_RUN_ID: run, OF_SESSION: String(n), OF_BOOTSTRAP_TOKEN: "ofb_default.fake.fake" },
+    env: {
+      OF_CONTROL_URL: "http://localhost",
+      OF_RUN_ID: run,
+      OF_SESSION: String(n),
+      OF_BOOTSTRAP_TOKEN: "ofb_default.fake.fake",
+    },
     maxSessionSeconds: 3600,
     failureRetentionSeconds: 0,
   };
@@ -246,6 +270,7 @@ function routeCtx(operationId: string, params: Record<string, string>, principal
   };
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function workerView(id: string): Promise<any> {
   return op("getWorker", { id }, null, VIEWER);
 }
@@ -261,7 +286,9 @@ describe("enrollment", () => {
     expect(e.body.token).toMatch(/^ofe_/);
     expect(e.body.command).toContain("openfactory-runtime worker enroll --url http://localhost --token ofe_");
     const keys = (await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"])) as CryptoKeyPair;
-    const pk = btoa(String.fromCharCode(...new Uint8Array((await crypto.subtle.exportKey("raw", keys.publicKey)) as ArrayBuffer)));
+    const pk = btoa(
+      String.fromCharCode(...new Uint8Array((await crypto.subtle.exportKey("raw", keys.publicKey)) as ArrayBuffer)),
+    );
     const body = {
       enrollment_token: e.body.token,
       name: "ignored-host-name",
@@ -293,7 +320,10 @@ describe("enrollment", () => {
       slots: 1,
       slot_size: { vcpus: 1, memory_mib: 1024 },
     };
-    const res = await exports.default.fetch("http://localhost/api/v1/workers/enroll", { method: "POST", body: JSON.stringify(body) });
+    const res = await exports.default.fetch("http://localhost/api/v1/workers/enroll", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
     expect(res.status).toBe(400);
     expect(((await res.json()) as { detail: string }).detail).toContain("/dev/kvm");
     const again = await exports.default.fetch("http://localhost/api/v1/workers/enroll", {
@@ -400,27 +430,43 @@ describe("drain and revoke", () => {
 
   it("revoke closes the socket, refuses connections and git credentials", async () => {
     const { id, keys } = await enroll();
-    setGitCredentialMinter(async (_kit, input) => ({ username: "x-access-token", password: `fake-${input.repo}`, expiresAt: "2026-11-22T01:00:00Z" }));
+    setGitCredentialMinter(async (_kit, input) => ({
+      username: "x-access-token",
+      password: `fake-${input.repo}`,
+      expiresAt: "2026-11-22T01:00:00Z",
+    }));
     const w = new FakeWorker(id, keys);
     await w.connect();
     const workerP: Principal = { kind: "worker", id, teamId: TEAM, role: "user", factoryRoles: {} };
     const repo = "https://github.com/acme/app.git";
     // Not sent to this worker yet: refused.
-    expect((await op("getWorkerGitCredential", { id, "?repo": repo }, null, workerP)).$error.code).toBe("not_authorized");
+    expect((await op("getWorkerGitCredential", { id, "?repo": repo }, null, workerP)).$error.code).toBe(
+      "not_authorized",
+    );
     await hub(id).taskAssign(task(1), { git_cache: [{ key: "k", clone_url: repo }] });
     const cred = await op("getWorkerGitCredential", { id, "?repo": repo }, null, workerP);
-    expect(cred).toMatchObject({ username: "x-access-token", password: "fake-https://github.com/acme/app", expires_at: "2026-11-22T01:00:00Z" });
+    expect(cred).toMatchObject({
+      username: "x-access-token",
+      password: "fake-https://github.com/acme/app",
+      expires_at: "2026-11-22T01:00:00Z",
+    });
     // Another worker cannot ask for this worker's credentials.
     const other: Principal = { ...workerP, id: "wkr_other" };
     expect((await op("getWorkerGitCredential", { id, "?repo": repo }, null, other)).$error.code).toBe("not_authorized");
 
-    const res = await revokeWorker(new Request("http://localhost/x", { method: "POST" }), env, routeCtx("revokeWorker", { id }));
+    const res = await revokeWorker(
+      new Request("http://localhost/x", { method: "POST" }),
+      env,
+      routeCtx("revokeWorker", { id }),
+    );
     expect(res.status).toBe(200);
     await eventually("closed", async () => w.closed);
     expect(w.closed).toMatchObject({ code: 1008, reason: "revoked" });
     expect((await workerView(id)).status).toBe("revoked");
     expect(await w.connect()).toBe(403);
-    expect((await op("getWorkerGitCredential", { id, "?repo": repo }, null, workerP)).$error.code).toBe("not_authorized");
+    expect((await op("getWorkerGitCredential", { id, "?repo": repo }, null, workerP)).$error.code).toBe(
+      "not_authorized",
+    );
     expect(await rejection(hub(id).taskAssign(task(2)))).toBe("unavailable");
   });
 });
@@ -544,7 +590,12 @@ describe("providers and machines", () => {
       ],
       automations: [{ name: "x", overrides: { worker_host: "nowhere" } }],
     } as unknown as CompiledDefinition;
-    const chk = { definition: null, errors: [] as { file: string; field: string; message: string }[], warnings: [], skipped: [] };
+    const chk = {
+      definition: null,
+      errors: [] as { file: string; field: string; message: string }[],
+      warnings: [],
+      skipped: [],
+    };
     await runInDurableObject(env.TEAM.getByName(doName.team(TEAM)), async (_i, state) => {
       preflightWorkerHosts({ sql: state.storage.sql } as unknown as TeamKit, def, chk as never);
     });

@@ -19,7 +19,9 @@ const STATE_UPPER: Record<string, string> = {
 };
 
 /** statusMessage (views.go): nil when the run has no text, no failure code and no reason. */
-export function statusMessage(r: Run): { message: string; failure_code?: string; retryable: boolean; detail?: string } | undefined {
+export function statusMessage(
+  r: Run,
+): { message: string; failure_code?: string; retryable: boolean; detail?: string } | undefined {
   const detail: string[] = [];
   let retryable = false;
   const info = r.failure_code ? lookupFailure(r.failure_code) : undefined;
@@ -39,7 +41,10 @@ export function statusMessage(r: Run): { message: string; failure_code?: string;
 /** deriveTitle (views.go): a short title from the first non-empty line of a prompt. */
 export function deriveTitle(prompt: string): string {
   for (const raw of prompt.split("\n")) {
-    const line = raw.trim().replace(/^[#*\->]+/, "").trim();
+    const line = raw
+      .trim()
+      .replace(/^[#*\->]+/, "")
+      .trim();
     if (!line) continue;
     const chars = [...line];
     return chars.length <= 80 ? line : chars.slice(0, 79).join("") + "…";
@@ -48,7 +53,10 @@ export function deriveTitle(prompt: string): string {
 }
 
 /** The openapi Run: state in capital letters, phase in lower case, run_id, source. */
-export function runView(r: Run, opts: { publicUrl?: string; latest?: RunSession; rootRunId?: string } = {}): Record<string, unknown> {
+export function runView(
+  r: Run,
+  opts: { publicUrl?: string; latest?: RunSession; rootRunId?: string } = {},
+): Record<string, unknown> {
   const { id, state, triggered_by: _t, ...rest } = r;
   const { source, ref } = runSourceAndRef(r as Parameters<typeof runSourceAndRef>[0]);
   let upd = r.created_at;
@@ -69,9 +77,14 @@ export function runView(r: Run, opts: { publicUrl?: string; latest?: RunSession;
     depth: 0,
     active_child_runs: 0,
     session: opts.latest?.session ?? 0,
-    usage: { ...(r.usage ?? { input_tokens: 0, output_tokens: 0, cost_usd: 0, duration_ms: 0 }), coverage: usageCoverage(r.usage ?? {}) },
+    usage: {
+      ...(r.usage ?? { input_tokens: 0, output_tokens: 0, cost_usd: 0, duration_ms: 0 }),
+      coverage: usageCoverage(r.usage ?? {}),
+    },
     updated_at: upd,
   };
+  // spawnable_by is [] (not null) in API output (api/openapi.json).
+  if (r.config) out.config = { ...r.config, spawnable_by: r.config.spawnable_by ?? [] };
   if (opts.publicUrl) {
     out.url = runUrl(opts.publicUrl, id);
     out.run_url = out.url;

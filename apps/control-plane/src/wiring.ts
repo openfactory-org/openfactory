@@ -36,6 +36,8 @@ import { configSnapshot, listFactories } from "./do/team/factories";
 import { setScheduleActiveRunCheck } from "./do/team/schedules";
 import { normalizeRepo, setGitCredentialMinter } from "./do/team/workers";
 import { resolverFor } from "./forges/env";
+import { reviewBuilders } from "./eventctx/index";
+import { setEventContextBuilders } from "./do/ingress/intake";
 import { b64url, sha256 } from "./lib/bytes";
 import { adfText, markdownToAdf } from "./integrations/jira/adf";
 import { newApiClient as jiraApiClient } from "./integrations/jira/jira";
@@ -59,7 +61,15 @@ const META: CallMeta = { requestId: "integrations" };
 /** Partition of a chat or tracker event: one per source thread or issue, so events of one thread stay in order. */
 export async function integrationPartition(ev: Event): Promise<string> {
   const s = ev.source;
-  const key = [ev.provider, s.workspace ?? "", s.repo ?? "", s.channel ?? "", s.thread_id ?? "", s.external_id ?? "", s.number ?? ""].join("\u0000");
+  const key = [
+    ev.provider,
+    s.workspace ?? "",
+    s.repo ?? "",
+    s.channel ?? "",
+    s.thread_id ?? "",
+    s.external_id ?? "",
+    s.number ?? "",
+  ].join("\u0000");
   return `${ev.provider}:${b64url(await sha256(key)).slice(0, 22)}`;
 }
 
@@ -68,7 +78,11 @@ export async function publishEvents(env: Env, events: Event[]): Promise<void> {
   for (const ev of events) {
     const teamId = ev.team_id || DEFAULT_TEAM;
     const partition = await integrationPartition(ev);
-    await env.INGRESS.getByName(doName.ingress(teamId, partition)).enqueue(partition, ev as never, ev.delivery_id || ev.id);
+    await env.INGRESS.getByName(doName.ingress(teamId, partition)).enqueue(
+      partition,
+      ev as never,
+      ev.delivery_id || ev.id,
+    );
   }
 }
 
@@ -80,7 +94,9 @@ function workStub(env: Env, teamId: string, id: string) {
 export function workSide(env: Env, teamId = DEFAULT_TEAM): WorkSide {
   return {
     async factoryOf(workItemId) {
-      const wi = (await workStub(env, teamId, workItemId).api(META, "getWorkItem", { id: workItemId }, null)) as { factory_id?: string };
+      const wi = (await workStub(env, teamId, workItemId).api(META, "getWorkItem", { id: workItemId }, null)) as {
+        factory_id?: string;
+      };
       return wi.factory_id ?? "";
     },
     async openInboxItem(workItemId): Promise<InboxItemRef | null> {
@@ -94,13 +110,23 @@ export function workSide(env: Env, teamId = DEFAULT_TEAM): WorkSide {
       let best: { id: string; kind?: string; created_at?: string } | undefined;
       const pref = (k?: string) => k === "approval" || k === "question";
       for (const it of out.items ?? []) {
-        if (!best || (pref(it.kind) && !pref(best.kind)) || (pref(it.kind) === pref(best.kind) && (it.created_at ?? "") > (best.created_at ?? ""))) best = it;
+        if (
+          !best ||
+          (pref(it.kind) && !pref(best.kind)) ||
+          (pref(it.kind) === pref(best.kind) && (it.created_at ?? "") > (best.created_at ?? ""))
+        )
+          best = it;
       }
       return best ? { id: best.id } : null;
     },
     async onAction(inboxId, option, actor) {
       const principal: Principal = { kind: "user", id: actor, userId: actor, teamId, role: "user", factoryRoles: {} };
-      await workStub(env, teamId, inboxId).api({ requestId: "chat-action", principal }, "resolveInbox", { id: inboxId }, { resolution: option, via: INBOX_VIA_CHAT });
+      await workStub(env, teamId, inboxId).api(
+        { requestId: "chat-action", principal },
+        "resolveInbox",
+        { id: inboxId },
+        { resolution: option, via: INBOX_VIA_CHAT },
+      );
     },
   };
 }
@@ -134,7 +160,9 @@ let cached: { env: Env; handlers: IntegrationHandlers; linker: Linker } | undefi
 export function integrationsFor(env: Env): { handlers: IntegrationHandlers; linker: Linker } {
   if (cached && cached.env === env) return cached;
   const linker = linkerFor(env);
-  const handlers = createIntegrationHandlers(integrationDeps(env, { publish: (evs) => publishEvents(env, evs), linker, work: workSide(env) }));
+  const handlers = createIntegrationHandlers(
+    integrationDeps(env, { publish: (evs) => publishEvents(env, evs), linker, work: workSide(env) }),
+  );
   cached = { env, handlers, linker };
   return cached;
 }
@@ -142,7 +170,12 @@ export function integrationsFor(env: Env): { handlers: IntegrationHandlers; link
 const INBOUND = new Set<string>(INBOUND_PATHS);
 
 function isLinkerPath(path: string): boolean {
-  return path.startsWith(LINK_PATH) || path.startsWith(LINK_START_PATH) || path === LINK_CALLBACK_PATH || path.startsWith(LINKS_PATH);
+  return (
+    path.startsWith(LINK_PATH) ||
+    path.startsWith(LINK_START_PATH) ||
+    path === LINK_CALLBACK_PATH ||
+    path.startsWith(LINKS_PATH)
+  );
 }
 
 registerServerRoute("/webhooks/w/", (request, env, ctx) => routeWebhookIngress(request, env, ctx));
@@ -164,6 +197,15 @@ registerServerRoute("/integrations/", async (request, env, ctx, url) => {
 
 registerResponders((env) => Object.values(integrationsFor(env).handlers.responders));
 
+// Event context builders of intake: chat threads (slack, teams) and forge review threads.
+setEventContextBuilders((env) => [
+  ...reviewBuilders(resolverFor(env)),
+  ...Object.entries(integrationsFor(env).handlers.contextBuilders).map(([provider, b]) => ({
+    provider: () => provider,
+    eventContext: (ev: Event) => b.eventContext(ev),
+  })),
+]);
+
 // ---------- built-in MCP integration servers (WS11) ----------
 
 function asIntegration(rec: IntegrationRecord): Integration {
@@ -180,19 +222,32 @@ export function integrationBackend(env: Env): IntegrationBackend {
         throw e;
       });
       if (!Object.keys(attached).some((k) => sameIntegrationProvider(k, provider))) {
-        throw new Error(`the factory does not attach the ${provider} integration (add it to factory.yaml integrations)`);
+        throw new Error(
+          `the factory does not attach the ${provider} integration (add it to factory.yaml integrations)`,
+        );
       }
-      return (await selectTeam(store, run.teamId || DEFAULT_TEAM, provider, run.factoryId, workspace)) as unknown as IntegrationRecord;
+      return (await selectTeam(
+        store,
+        run.teamId || DEFAULT_TEAM,
+        provider,
+        run.factoryId,
+        workspace,
+      )) as unknown as IntegrationRecord;
     },
-    credential: (_env, run, rec) => integrationSecret(rpcSecrets(env, run.teamId || DEFAULT_TEAM), asIntegration(rec), ""),
-    linearQuery: (rec, token, query, variables) => new LinearClient("", token, rec.config["token_type"] ?? "").query(query, variables),
-    linearCreateComment: (rec, token, issueId, body) => new LinearClient("", token, rec.config["token_type"] ?? "").createComment(issueId, body),
-    jiraRequest: (rec, token, method, path, body) => jiraApiClient(asIntegration(rec), token).json(method, path, body as never),
+    credential: (_env, run, rec) =>
+      integrationSecret(rpcSecrets(env, run.teamId || DEFAULT_TEAM), asIntegration(rec), ""),
+    linearQuery: (rec, token, query, variables) =>
+      new LinearClient("", token, rec.config["token_type"] ?? "").query(query, variables),
+    linearCreateComment: (rec, token, issueId, body) =>
+      new LinearClient("", token, rec.config["token_type"] ?? "").createComment(issueId, body),
+    jiraRequest: (rec, token, method, path, body) =>
+      jiraApiClient(asIntegration(rec), token).json(method, path, body as never),
     jiraText: (adf) => adfText(adf),
     markdownToADF: (md) => markdownToAdf(md),
     slackCall: (_rec, token, method, params) => new SlackClient("", token).call(method, new URLSearchParams(params)),
     slackPost: (_rec, token, msg) => new SlackClient("", token).postMessage(msg),
-    teamsPost: (rec, channelId, rootId, text) => integrationsFor(env).handlers.teams.handler.postMessage(asIntegration(rec), channelId, rootId, text),
+    teamsPost: (rec, channelId, rootId, text) =>
+      integrationsFor(env).handlers.teams.handler.postMessage(asIntegration(rec), channelId, rootId, text),
   };
 }
 
@@ -226,7 +281,11 @@ function installId(env: Env): string {
 
 registerProvider("daytona", (env) => {
   const apiKey = env.OF_DAYTONA_API_KEY ?? "";
-  if (apiKey === "") throw new OfError("invalid_request", "sandbox provider daytona is not configured: set the OF_DAYTONA_API_KEY secret");
+  if (apiKey === "")
+    throw new OfError(
+      "invalid_request",
+      "sandbox provider daytona is not configured: set the OF_DAYTONA_API_KEY secret",
+    );
   return createDaytonaProvider({
     apiKey,
     installId: installId(env),
@@ -238,7 +297,11 @@ registerProvider("daytona", (env) => {
 
 registerProvider("boatdev", (env) => {
   const apiKey = env.OF_BOATDEV_API_KEY ?? "";
-  if (apiKey === "") throw new OfError("invalid_request", "sandbox provider boatdev is not configured: set the OF_BOATDEV_API_KEY secret");
+  if (apiKey === "")
+    throw new OfError(
+      "invalid_request",
+      "sandbox provider boatdev is not configured: set the OF_BOATDEV_API_KEY secret",
+    );
   return createBoatdevProvider({ apiKey, installId: installId(env) });
 });
 
@@ -250,12 +313,17 @@ setScheduleActiveRunCheck(async (kit, factoryId, automationId) => {
   const idx = kit.env.INDEX.getByName(doName.index(kit.teamId()));
   let cursor = "";
   for (let page = 0; page < 50; page++) {
-    const out = (await idx.list(META, "runs", { factory_id: factoryId, limit: "200", ...(cursor ? { cursor } : {}) })) as {
+    const out = (await idx.list(META, "runs", {
+      factory_id: factoryId,
+      limit: "200",
+      ...(cursor ? { cursor } : {}),
+    })) as {
       items?: { id: string; state?: string; triggered_by?: string }[];
       page_info?: { next_cursor?: string };
     };
     for (const r of out.items ?? []) {
-      if (!FINISHED.has((r.state ?? "").toLowerCase()) && startedByAutomation(r.triggered_by ?? "", automationId)) return r.id;
+      if (!FINISHED.has((r.state ?? "").toLowerCase()) && startedByAutomation(r.triggered_by ?? "", automationId))
+        return r.id;
     }
     cursor = out.page_info?.next_cursor ?? "";
     if (!cursor) break;
@@ -298,14 +366,20 @@ setGitCredentialMinter(async (kit, input) => {
     for (const r of snap.runtime?.repositories ?? []) {
       if (!r.owner || !r.name) continue;
       const codeForge = (r.codeForge ?? "github").toUpperCase();
-      const forge = await resolver.forge({ teamId: kit.teamId(), factoryId, codeForge, repo: `${r.owner}/${r.name}` }).catch(() => null);
+      const forge = await resolver
+        .forge({ teamId: kit.teamId(), factoryId, codeForge, repo: `${r.owner}/${r.name}` })
+        .catch(() => null);
       if (!forge) continue;
       const url = await forge.cloneURL(r.owner, r.name).catch(() => "");
       if (url === "" || normalizeRepo(withoutCredentials(url)) !== input.repo) continue;
       const u = new URL(url);
       const password = decodeURIComponent(u.password);
       if (password === "") throw new OfError("not_authorized", `the forge gave no credential for ${input.repo}`);
-      return { username: decodeURIComponent(u.username), password, expiresAt: new Date(Date.now() + GIT_CREDENTIAL_TTL_MS).toISOString() };
+      return {
+        username: decodeURIComponent(u.username),
+        password,
+        expiresAt: new Date(Date.now() + GIT_CREDENTIAL_TTL_MS).toISOString(),
+      };
     }
   }
   throw new OfError("not_authorized", `${input.repo} is not a repository of the worker's factories`);

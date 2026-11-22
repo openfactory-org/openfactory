@@ -767,7 +767,10 @@ export async function configSnapshot(kit: TeamKit, factoryId: string): Promise<u
     factory: f,
     version_id: vid,
     runtime: rt ? (JSON.parse(rt.data) as FactoryRuntime) : { version_id: "", repositories: null },
-    agents: listAgents(kit, f.id),
+    // Raw configs: spawnable_by null (foreman only) differs from [] (nobody); agentOut is for API output.
+    agents: all<{ data: string }>(kit.sql, "SELECT data FROM agents WHERE factory_id = ? ORDER BY ord", f.id).map(
+      (r) => JSON.parse(r.data) as AgentConfig,
+    ),
     automations: listAutomations(kit, f.id),
     scorers: all<{ data: string }>(kit.sql, "SELECT data FROM scorers WHERE factory_id = ? ORDER BY ord", f.id).map(
       (r) => JSON.parse(r.data) as Scorer,

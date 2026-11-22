@@ -348,7 +348,10 @@ export class IndexDO extends BaseDO implements IndexRpc, RetentionRpc {
       }
     };
     const inList = (col: string, key: string) => {
-      const vals = (q[key] ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+      const vals = (q[key] ?? "")
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean);
       if (vals.length) {
         where.push(`${col} IN (${vals.map(() => "?").join(",")})`);
         args.push(...vals);
@@ -381,7 +384,11 @@ export class IndexDO extends BaseDO implements IndexRpc, RetentionRpc {
         eq("factory_id", "factory_id");
         inList("stage", "stage");
         since();
-        const r = sqlPage(this.sql, { select: "SELECT id, created_ms, data FROM work_item_summaries", where, args }, page);
+        const r = sqlPage(
+          this.sql,
+          { select: "SELECT id, created_ms, data FROM work_item_summaries", where, args },
+          page,
+        );
         return listResponse(data(r.rows), r.next);
       }
       case "inbox": {
@@ -404,9 +411,19 @@ export class IndexDO extends BaseDO implements IndexRpc, RetentionRpc {
         const r = sqlPage(this.sql, { select: "SELECT id, created_ms, data FROM inbox", where, args }, page);
         const items = r.rows.map((row) => {
           const it = JSON.parse(String(row["data"])) as J;
-          if (user) {
-            const read = first(this.sql, "SELECT 1 FROM inbox_reads WHERE inbox_id = ? AND user_id = ?", row["id"], user);
-            it["read"] = read !== undefined;
+          // InboxItemView (api/inbox.go): recipients and the read state of the caller.
+          it["is_read"] = user
+            ? first(this.sql, "SELECT 1 FROM inbox_reads WHERE inbox_id = ? AND user_id = ?", row["id"], user) !==
+              undefined
+            : false;
+          if (!Array.isArray(it["recipients"])) {
+            it["recipients"] = this.sql
+              .exec<{ user_id: string }>(
+                "SELECT user_id FROM inbox_recipients WHERE inbox_id = ? ORDER BY user_id",
+                row["id"],
+              )
+              .toArray()
+              .map((x) => x.user_id);
           }
           return it;
         });
@@ -426,14 +443,23 @@ export class IndexDO extends BaseDO implements IndexRpc, RetentionRpc {
         eq("suite", "suite");
         inList("state", "state");
         since();
-        const r = sqlPage(this.sql, { select: "SELECT id, created_ms, data FROM benchmark_summaries", where, args }, page);
+        const r = sqlPage(
+          this.sql,
+          { select: "SELECT id, created_ms, data FROM benchmark_summaries", where, args },
+          page,
+        );
         return listResponse(data(r.rows), r.next);
       }
       case "deadLetters": {
         where.push("redriven = 0");
         const r = sqlPage(
           this.sql,
-          { select: "SELECT id, origin_do, origin_msg_id, kind, lane, attempts, last_error, created_ms FROM dead_letters", where, args },
+          {
+            select:
+              "SELECT id, origin_do, origin_msg_id, kind, lane, attempts, last_error, created_ms FROM dead_letters",
+            where,
+            args,
+          },
           page,
         );
         return listResponse(r.rows, r.next);
@@ -458,11 +484,22 @@ export class IndexDO extends BaseDO implements IndexRpc, RetentionRpc {
         }
         const r = sqlPage(
           this.sql,
-          { select: "SELECT id, work_item_id, kind, at_ms, data FROM work_item_metric_events", where, args, timeCol: "at_ms" },
+          {
+            select: "SELECT id, work_item_id, kind, at_ms, data FROM work_item_metric_events",
+            where,
+            args,
+            timeCol: "at_ms",
+          },
           page,
         );
         return listResponse(
-          r.rows.map((x) => ({ id: x["id"], work_item_id: x["work_item_id"], kind: x["kind"], at_ms: x["at_ms"], data: JSON.parse(String(x["data"])) as unknown })),
+          r.rows.map((x) => ({
+            id: x["id"],
+            work_item_id: x["work_item_id"],
+            kind: x["kind"],
+            at_ms: x["at_ms"],
+            data: JSON.parse(String(x["data"])) as unknown,
+          })),
           r.next,
         );
       }
@@ -502,8 +539,13 @@ export class IndexDO extends BaseDO implements IndexRpc, RetentionRpc {
   async deadLetterRedriven(originDO: string, msgId: string): Promise<boolean> {
     return this.rpc(
       () =>
-        this.tx(() => this.sql.exec("UPDATE dead_letters SET redriven = 1 WHERE origin_do = ? AND origin_msg_id = ?", originDO, msgId))
-          .rowsWritten > 0,
+        this.tx(() =>
+          this.sql.exec(
+            "UPDATE dead_letters SET redriven = 1 WHERE origin_do = ? AND origin_msg_id = ?",
+            originDO,
+            msgId,
+          ),
+        ).rowsWritten > 0,
     );
   }
 

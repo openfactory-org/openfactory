@@ -58,7 +58,10 @@ function deps(over: Partial<PlannerDeps> = {}): PlannerDeps & { recorded: unknow
     snapshot: async () => ({
       factory: { id: "fac_1" },
       runtime: { repositories: [{ codeForge: "GITHUB", owner: "acme", name: "api" }] },
-      agents: [{ name: "foreman", type: "FOREMAN" }, { name: "coder", type: "IMPLEMENT", spawnable_by: ["foreman"] }],
+      agents: [
+        { name: "foreman", type: "FOREMAN" },
+        { name: "coder", type: "IMPLEMENT", spawnable_by: ["foreman"] },
+      ],
       integrations: { slack: {} },
     }),
     state: async () => ({ repoRefs: [] }),
@@ -67,9 +70,17 @@ function deps(over: Partial<PlannerDeps> = {}): PlannerDeps & { recorded: unknow
     },
     environment: async () => undefined,
     secret: async (fid, name) => secrets[`${fid}/${name}`],
-    listSecrets: async (fid) => (fid ? [{ name: "API_TOKEN", type: "generic", factory_id: fid }] : [{ name: "CLAUDE_KEY", type: "anthropic_api_key" }]),
+    listSecrets: async (fid) =>
+      fid
+        ? [{ name: "API_TOKEN", type: "generic", factory_id: fid }]
+        : [{ name: "CLAUDE_KEY", type: "anthropic_api_key" }],
     resolveManagedMcp: async () => ({ url: "http://cp/mcp/proxy/x", headers: { Authorization: "Bearer old" } }),
-    forges: { forge: async () => ({ cloneURL: async (o: string, n: string) => `https://x-access-token:ghs_tok@github.com/${o}/${n}.git` }) as never },
+    forges: {
+      forge: async () =>
+        ({
+          cloneURL: async (o: string, n: string) => `https://x-access-token:ghs_tok@github.com/${o}/${n}.git`,
+        }) as never,
+    },
     sandboxUrl: "http://cp",
     now: () => Date.parse("2026-01-01T00:00:00Z"),
     ...over,
@@ -80,7 +91,11 @@ describe("planner helpers", () => {
   it("parseRepoSpec", () => {
     expect(parseRepoSpec("acme/api")).toEqual({ codeForge: "GITHUB", owner: "acme", name: "api" });
     expect(parseRepoSpec("gitlab:grp/sub/repo")).toEqual({ codeForge: "GITLAB", owner: "grp/sub", name: "repo" });
-    expect(parseRepoSpec("https://dev.azure.com/org/proj/_git/repo.git")).toEqual({ codeForge: "AZURE_DEVOPS", owner: "org/proj/_git", name: "repo" });
+    expect(parseRepoSpec("https://dev.azure.com/org/proj/_git/repo.git")).toEqual({
+      codeForge: "AZURE_DEVOPS",
+      owner: "org/proj/_git",
+      name: "repo",
+    });
     expect(() => parseRepoSpec("nope")).toThrow(/invalid repository/);
   });
 
@@ -94,7 +109,12 @@ describe("planner helpers", () => {
   it("credentials", () => {
     expect(effectiveCredentialStrategy("", "creator")).toBe("CREATOR");
     expect(effectiveCredentialStrategy("executor", "CREATOR")).toBe("EXECUTOR");
-    expect(credentialScope([{ codeForge: "github", owner: "a", name: "b" }], [{ codeForge: "GITHUB", owner: "A", repo: "B", ref: "x" }])).toEqual({ GITHUB: ["a/b"] });
+    expect(
+      credentialScope(
+        [{ codeForge: "github", owner: "a", name: "b" }],
+        [{ codeForge: "GITHUB", owner: "A", repo: "B", ref: "x" }],
+      ),
+    ).toEqual({ GITHUB: ["a/b"] });
     expect(splitCloneUrl("https://u:p@h/x.git")).toEqual({ clean: "https://h/x.git", username: "u", password: "p" });
     expect(headerSecrets("Bearer abc")).toEqual(["Bearer abc", "abc"]);
     expect(redactList(["abc", "abcd", "abcdef", "abcd"])).toEqual(["abcdef", "abcd"]);
@@ -102,7 +122,14 @@ describe("planner helpers", () => {
 
   it("applyRepoRefs pins and adds", async () => {
     const repos = [{ forge: "GITHUB", owner: "acme", name: "api", path: "api", ref: "", cloneUrl: "u" }];
-    await applyRepoRefs(repos, [{ codeForge: "github", owner: "ACME", repo: "api", ref: "a".repeat(40) }, { codeForge: "github", owner: "acme", repo: "web", ref: "b".repeat(40) }], async () => "u2");
+    await applyRepoRefs(
+      repos,
+      [
+        { codeForge: "github", owner: "ACME", repo: "api", ref: "a".repeat(40) },
+        { codeForge: "github", owner: "acme", repo: "web", ref: "b".repeat(40) },
+      ],
+      async () => "u2",
+    );
     expect(repos[0]!.ref).toBe("a".repeat(40));
     expect(repos[1]).toMatchObject({ name: "web", cloneUrl: "u2", path: "web" });
   });
@@ -111,7 +138,10 @@ describe("planner helpers", () => {
 describe("planner", () => {
   it("plans a session: env, secrets, default credential, repositories, skills, MCP", async () => {
     const d = deps();
-    const r = run({}, { secrets: ["API_TOKEN"], mcp_servers: { reg: { managedId: "slack-x" }, factory: { url: "http://evil" } } });
+    const r = run(
+      {},
+      { secrets: ["API_TOKEN"], mcp_servers: { reg: { managedId: "slack-x" }, factory: { url: "http://evil" } } },
+    );
     const p = await new Planner(d).plan(r);
     expect(p.env.OF_RUN_ID).toBe(r.id);
     expect(p.env.OF_PUBLIC_URL).toBe("http://cp");
@@ -119,7 +149,16 @@ describe("planner", () => {
     expect(p.secretEnv).toEqual({ API_TOKEN: "s3cr3t-value" });
     expect(p.credential).toEqual({ source: "default", secret: "CLAUDE_KEY", scope: "team", type: "anthropic_api_key" });
     expect(p.harnessAuth).toEqual({ ANTHROPIC_API_KEY: "sk-ant-team" });
-    expect(p.repos).toEqual([{ forge: "GITHUB", owner: "acme", name: "api", path: "api", ref: "", cloneUrl: "https://x-access-token:ghs_tok@github.com/acme/api.git" }]);
+    expect(p.repos).toEqual([
+      {
+        forge: "GITHUB",
+        owner: "acme",
+        name: "api",
+        path: "api",
+        ref: "",
+        cloneUrl: "https://x-access-token:ghs_tok@github.com/acme/api.git",
+      },
+    ]);
     expect(p.workDir).toBe("api");
     expect(p.skills.map((s) => s.name)).toEqual(expect.arrayContaining(["github", "chat"]));
     expect(p.systemPrompt).toContain("Do it.");
@@ -131,7 +170,9 @@ describe("planner", () => {
 
     const env = { OF_PUBLIC_URL: "http://cp", OF_R2_ACCOUNT_ID: "acct" } as unknown as Env;
     const sc = startConfigOf(env, r, { session: 1 } as RunSession, p);
-    expect(sc.workspace.repositories).toEqual([{ forge: "GITHUB", clone_url: "https://github.com/acme/api.git", path: "api", ref: "" }]);
+    expect(sc.workspace.repositories).toEqual([
+      { forge: "GITHUB", clone_url: "https://github.com/acme/api.git", path: "api", ref: "" },
+    ]);
     expect(sc.harness.mcp_servers?.factory).toEqual({ url: `http://cp/mcp/run/${r.id}`, auth: "session_token" });
     expect(sc.env?.OF_WORKDIR).toBe("api");
     expect(sc.idle_timeout_seconds).toBe(600);
@@ -152,12 +193,27 @@ describe("planner", () => {
   });
 
   it("two fitting team secrets are ambiguous", async () => {
-    const d = deps({ listSecrets: async (fid) => (fid ? [] : [{ name: "A", type: "anthropic_api_key" }, { name: "B", type: "anthropic_oauth_token" }]) });
-    expect(await new Planner(d).findDefaultCredential(run())).toEqual({ source: "none", reason: "ambiguous", scope: "team", candidates: ["A", "B"] });
+    const d = deps({
+      listSecrets: async (fid) =>
+        fid
+          ? []
+          : [
+              { name: "A", type: "anthropic_api_key" },
+              { name: "B", type: "anthropic_oauth_token" },
+            ],
+    });
+    expect(await new Planner(d).findDefaultCredential(run())).toEqual({
+      source: "none",
+      reason: "ambiguous",
+      scope: "team",
+      candidates: ["A", "B"],
+    });
   });
 
   it("a missing secret is a configuration error", async () => {
-    await expect(new Planner(deps()).plan(run({}, { secrets: ["NOPE"] }))).rejects.toMatchObject({ code: "resource_not_found" });
+    await expect(new Planner(deps()).plan(run({}, { secrets: ["NOPE"] }))).rejects.toMatchObject({
+      code: "resource_not_found",
+    });
   });
 
   it("git credential for a repository of the run, forbidden otherwise", async () => {
@@ -185,7 +241,9 @@ describe("transfer", () => {
     expect(ownsKey(r, "snapshots/default/run_x/1/x")).toBe(true);
     expect(ownsKey(r, "runs/run_y/x")).toBe(false);
     const sha = "0".repeat(64);
-    expect(validateUpload({ kind: "artifact", name: "a/../b", bytes: 1, sha256: sha })?.message).toBe("name has a .. path element");
+    expect(validateUpload({ kind: "artifact", name: "a/../b", bytes: 1, sha256: sha })?.message).toBe(
+      "name has a .. path element",
+    );
     expect(validateUpload({ kind: "snapshot", name: "a", bytes: 1, sha256: sha })?.code).toBe("bad_request");
     expect(validateUpload({ kind: "artifact", name: "a", bytes: 200 << 20, sha256: sha })?.status).toBe(413);
     expect(validateUpload({ kind: "transcript", name: "t.jsonl", bytes: 10, sha256: sha })).toBeUndefined();

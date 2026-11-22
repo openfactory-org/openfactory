@@ -80,7 +80,9 @@ export class FakeWorker {
   /** Connects, authenticates, sends hello and waits for welcome. */
   static async connect(auth: WorkerAuth, hello: HelloOptions, timeoutMs = 15_000): Promise<FakeWorker> {
     const url = target.baseUrl.replace(/^http/, "ws") + "/api/v1/workers/connect";
-    const headers: Record<string, string> = {};
+    // The Go runtime sends OF-Worker-ID on the upgrade so the hub can route
+    // the connection before any frame arrives (internal/sandbox/direct).
+    const headers: Record<string, string> = { "OF-Worker-ID": hello.workerId };
     if (auth.kind === "bearer") headers.authorization = `Bearer ${auth.token}`;
     // Node's WebSocket (undici) accepts {protocols, headers}.
     const Ctor = WebSocket as unknown as new (
@@ -89,6 +91,9 @@ export class FakeWorker {
     ) => WebSocket;
     const ws = new Ctor(url, { protocols: [WORKER_SUBPROTOCOL], headers });
     const w = new FakeWorker(ws);
+    // Listen before "open": the control plane sends auth.challenge at once,
+    // and undici can deliver it in the same task as the open event.
+    w.attach();
     await new Promise<void>((resolve, reject) => {
       const t = setTimeout(() => reject(new Error(`worker connect to ${url}: timeout`)), timeoutMs);
       ws.addEventListener("open", () => {
@@ -104,7 +109,6 @@ export class FakeWorker {
         reject(new Error(`worker connect to ${url}: closed ${ev.code} ${ev.reason}`));
       });
     });
-    w.attach();
     if (ws.protocol !== WORKER_SUBPROTOCOL) {
       w.close();
       throw new Error(`worker connect: server selected subprotocol "${ws.protocol}", want ${WORKER_SUBPROTOCOL}`);
@@ -127,6 +131,9 @@ export class FakeWorker {
       tasks: [],
       version: "1.0.0-contract",
     };
+    // An enrolled worker speaks protocol v2.1 (auth.challenge), as the Go
+    // worker agent does; the bearer (API key) worker stays at v2.0.
+    if (auth.kind === "ed25519") params.protocol_minor = 1;
     if (hello.name) params.name = hello.name;
     if (hello.labels) params.labels = hello.labels;
     if (hello.slots !== undefined) params.slots = hello.slots;
@@ -266,7 +273,15 @@ export class FakeWorker {
     const hit = this.received.find(pred);
     if (hit) return Promise.resolve(hit);
     return new Promise((resolve, reject) => {
-      const t = setTimeout(() => reject(new Error(`worker: no matching frame within ${timeoutMs} ms`)), timeoutMs);
+      const t = setTimeout(
+        () =>
+          reject(
+            new Error(
+              `worker: no matching frame within ${timeoutMs} ms (received: ${this.received.map((f) => f.type + (f.error ? `:${f.error.code}` : "")).join(", ") || "none"}${this.closed ? `; closed ${this.closeCode}` : ""})`,
+            ),
+          ),
+        timeoutMs,
+      );
       this.waiters.push({
         pred,
         resolve: (f) => {

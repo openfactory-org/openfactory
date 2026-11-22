@@ -69,7 +69,7 @@ export function buildTask(fx: Fx, run: Run, n: number, token: string, _grant: Gr
     session: n,
     teamId: fx.teamId,
     factoryId: run.factory_id,
-    image: m?.image ?? "",
+    image: m?.image || fx.cfg.sandboxImage,
     platform: { os: "linux", arch, ...(m?.user ? { user: m.user } : {}) },
     resources: {
       ...(m?.vcpus ? { vcpus: m.vcpus } : {}),
@@ -85,7 +85,9 @@ export function buildTask(fx: Fx, run: Run, n: number, token: string, _grant: Gr
       // The bootstrap substitutes {arch}.
       [TASK_ENV.runnerUrl]: `${fx.cfg.controlUrl}/runner/v1/bin/linux-{arch}`,
       ...(x.runnerSha256 ? { [TASK_ENV.runnerSha256]: x.runnerSha256 } : {}),
-      ...(lock !== "none" && x.loopbackDaemonPorts?.length ? { [ENV_LOOPBACK_DAEMON_PORTS]: x.loopbackDaemonPorts.join(",") } : {}),
+      ...(lock !== "none" && x.loopbackDaemonPorts?.length
+        ? { [ENV_LOOPBACK_DAEMON_PORTS]: x.loopbackDaemonPorts.join(",") }
+        : {}),
     },
     ...(policy ? { networkPolicy: policy } : {}),
     maxSessionSeconds: Math.round(fx.cfg.maxSessionMs / 1000),
@@ -197,10 +199,25 @@ export function commitGrant(fx: Fx, prep: GrantPrep): void {
   fx.repo.createSession(s);
   // ensurePrompt: the dedupe key makes it a no-op when the engine queued it.
   if (run.prompt) {
-    fx.repo.appendInput({ message_id: "", run_id: run.id, kind: "user", sender: { type: "platform" }, content: run.prompt, dedupe_key: "prompt" });
+    fx.repo.appendInput({
+      message_id: "",
+      run_id: run.id,
+      kind: "user",
+      sender: { type: "platform" },
+      content: run.prompt,
+      dedupe_key: "prompt",
+    });
   }
   if (n === 1) {
-    timeline(fx, run.id, 0, "run.queued", queuedEventId(run), { reason: "new" }, ms(run.queued_at) ?? ms(run.created_at));
+    timeline(
+      fx,
+      run.id,
+      0,
+      "run.queued",
+      queuedEventId(run),
+      { reason: "new" },
+      ms(run.queued_at) ?? ms(run.created_at),
+    );
   }
   const { changed } = transition(fx, run.id, { event: "assigned" });
   fx.repo.sql.exec("UPDATE grants SET state = 'used' WHERE run_id = ? AND session = ?", g.runId, g.session);
@@ -208,7 +225,10 @@ export function commitGrant(fx: Fx, prep: GrantPrep): void {
     endSession(fx, s, "not_started", "");
     return;
   }
-  fx.setTimer(timerName.start(task.taskId), "start_timeout", now + fx.cfg.startTimeoutMs + 1, { runId: run.id, session: n });
+  fx.setTimer(timerName.start(task.taskId), "start_timeout", now + fx.cfg.startTimeoutMs + 1, {
+    runId: run.id,
+    session: n,
+  });
   fx.enqueue({
     dest: `provider:${s.backend}`,
     kind: "provider.start",
@@ -233,6 +253,9 @@ export function startSucceeded(fx: Fx, runId: string, n: number, backend: string
   });
 }
 
+/** The wait before a run asks for a slot again after a start failed for capacity. */
+export const CAPACITY_BACKOFF_MS = 2_000;
+
 /** startFailed: end the session that never started and apply the lost event (claim.go). */
 export function startFailed(fx: Fx, runId: string, n: number, err: unknown): void {
   const s = fx.repo.getSession(runId, n);
@@ -244,6 +267,7 @@ export function startFailed(fx: Fx, runId: string, n: number, err: unknown): voi
   if (!f.code || !f.consumesRetry) prior = 0;
   if (!lookupFailure(code)) code = "sandbox_create_failed";
   console.warn("work: start task failed", runId, n, err instanceof Error ? err.message : String(err));
+  if (code === "resource_unavailable") fx.repo.setMeta(`slot_after:${runId}`, String(fx.now() + CAPACITY_BACKOFF_MS));
   transition(fx, runId, { event: "session_lost", failureCode: code, priorRetries: prior });
 }
 

@@ -32,8 +32,12 @@ describe("RouterDO", () => {
     const r = router(t);
     const a = await r.resolveOrReserve({ factoryId: "f", sourceKeys: ["k1"], actionKey: "x", target: "auto:1" });
     const b = await r.resolveOrReserve({ factoryId: "f", sourceKeys: ["k2"], actionKey: "y", target: "auto:1" });
-    expect(await r.addReference({ factoryId: "f", key: "k1", kind: "pull_request", wiId: b.wiId, token: b.token })).toEqual({ ok: false, ownerWiId: a.wiId });
-    expect(await r.addReference({ factoryId: "f", key: "pr:9", kind: "pull_request", wiId: b.wiId, token: b.token })).toEqual({ ok: true });
+    expect(
+      await r.addReference({ factoryId: "f", key: "k1", kind: "pull_request", wiId: b.wiId, token: b.token }),
+    ).toEqual({ ok: false, ownerWiId: a.wiId });
+    expect(
+      await r.addReference({ factoryId: "f", key: "pr:9", kind: "pull_request", wiId: b.wiId, token: b.token }),
+    ).toEqual({ ok: true });
     expect((await r.resolve("f", "pr:9"))?.wiId).toBe(b.wiId);
     await r.receive({
       msgId: "s1",
@@ -83,7 +87,9 @@ describe("IngressDO", () => {
     await g.pump();
     // e3 waits behind the failed e2.
     expect(seen).toEqual(["e1"]);
-    const list = (await g.deliveries(null, "listEvents", {})) as { events: { id: string; state: string; attempts: number }[] };
+    const list = (await g.deliveries(null, "listEvents", {})) as {
+      events: { id: string; state: string; attempts: number }[];
+    };
     expect(list.events.find((x) => x.id === "e2")).toMatchObject({ state: "pending", attempts: 1 });
   });
 });

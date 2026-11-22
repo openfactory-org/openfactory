@@ -97,7 +97,15 @@ export interface Snapshot {
     repositories?: RepoRef[] | null;
     skills?: Skill[];
     credential_strategy?: string;
-    cloud_providers?: { gcp?: { projectNumber?: string; workloadIdentityFederationPoolId?: string; workloadIdentityFederationProviderId?: string; serviceAccountEmail?: string }; audiences?: string[] };
+    cloud_providers?: {
+      gcp?: {
+        projectNumber?: string;
+        workloadIdentityFederationPoolId?: string;
+        workloadIdentityFederationProviderId?: string;
+        serviceAccountEmail?: string;
+      };
+      audiences?: string[];
+    };
   };
   agents: { name: string; type: string; description?: string; spawnable_by?: string[] | null }[];
   integrations?: Record<string, unknown>;
@@ -121,7 +129,12 @@ export interface PlannerDeps {
   /** Secrets of one scope with their types. */
   listSecrets(factoryId: string): Promise<{ name: string; type: string; factory_id?: string }[]>;
   resolveManagedMcp(run: Run, managedId: string): Promise<McpServer>;
-  forges: ForgeResolver & { forgeForUser?(l: Parameters<ForgeResolver["forge"]>[0], userId: string): Promise<{ forge: Forge; userToken: boolean }> };
+  forges: ForgeResolver & {
+    forgeForUser?(
+      l: Parameters<ForgeResolver["forge"]>[0],
+      userId: string,
+    ): Promise<{ forge: Forge; userToken: boolean }>;
+  };
   sandboxUrl: string;
   now(): number;
 }
@@ -199,7 +212,11 @@ export function splitCloneUrl(raw: string): { clean: string; username?: string; 
   const password = u.password ? decodeURIComponent(u.password) : undefined;
   u.username = "";
   u.password = "";
-  return { clean: u.toString(), ...(username !== undefined ? { username } : {}), ...(password !== undefined ? { password } : {}) };
+  return {
+    clean: u.toString(),
+    ...(username !== undefined ? { username } : {}),
+    ...(password !== undefined ? { password } : {}),
+  };
 }
 
 /** applyRepoRefs: pins checkouts to the starting commits; adds missing repositories. */
@@ -212,7 +229,11 @@ export async function applyRepoRefs(
     const forge = ref.codeForge.toUpperCase();
     let found = false;
     for (const r of repos) {
-      if (r.forge.toUpperCase() === forge && r.owner.toLowerCase() === ref.owner.toLowerCase() && r.name.toLowerCase() === ref.repo.toLowerCase()) {
+      if (
+        r.forge.toUpperCase() === forge &&
+        r.owner.toLowerCase() === ref.owner.toLowerCase() &&
+        r.name.toLowerCase() === ref.repo.toLowerCase()
+      ) {
         r.ref = ref.ref;
         found = true;
       }
@@ -254,7 +275,7 @@ function openAIEnv(h: string, v: string): Record<string, string> {
   return harnessName(h) === "codex" ? { OPENAI_API_KEY: v, CODEX_API_KEY: v } : { OPENAI_API_KEY: v };
 }
 
-/** HarnessAuthEnv: a credential as harness environment variables (no Bedrock: no AWS). */
+/** HarnessAuthEnv: a credential as harness environment variables (model provider keys only; object storage uses R2 over S3 with SigV4). */
 export function harnessAuthEnv(h: string, model: string, type: string, value: string): Record<string, string> {
   const v = value.trim();
   switch (type) {
@@ -345,7 +366,8 @@ export class Planner {
     for (const name of r.config.secrets ?? []) {
       if (!ENV_NAME_RE.test(name) || name.startsWith(METADATA_ENV_PREFIX)) continue;
       const v = await this.d.secret(r.factory_id, name);
-      if (v === undefined) throw new OfError("resource_not_found", `secret ${JSON.stringify(name)}: secret ${name} not found`);
+      if (v === undefined)
+        throw new OfError("resource_not_found", `secret ${JSON.stringify(name)}: secret ${name} not found`);
       env[name] = v;
     }
     Object.assign(env, metadataEnv(r.metadata));
@@ -360,12 +382,21 @@ export class Planner {
 
   /** credentialUser: the person whose forge credential a CREATOR run uses, else "". */
   credentialUser(r: Run, snap: Snapshot, st: PlannerState): string {
-    if (effectiveCredentialStrategy(r.config.credential_strategy, snap.runtime.credential_strategy) !== CREDENTIAL_CREATOR) return "";
+    if (
+      effectiveCredentialStrategy(r.config.credential_strategy, snap.runtime.credential_strategy) !== CREDENTIAL_CREATOR
+    )
+      return "";
     if (r.run_as) return r.run_as.kind === "user" && r.run_as.id ? r.run_as.id : "";
     return st.workItem?.creator_id ?? "";
   }
 
-  private async forgeFor(r: Run, codeForge: string, repo: string, userId: string, scope: string[] | undefined): Promise<Forge> {
+  private async forgeFor(
+    r: Run,
+    codeForge: string,
+    repo: string,
+    userId: string,
+    scope: string[] | undefined,
+  ): Promise<Forge> {
     const l = { teamId: r.team_id, factoryId: r.factory_id, codeForge, repo, ...(scope ? { scope } : {}) };
     if (userId && this.d.forges.forgeForUser) {
       const res = await this.d.forges.forgeForUser(l, userId);
@@ -405,7 +436,9 @@ export class Planner {
   runSkills(r: Run, snap: Snapshot, wi: WorkItem | undefined): Skill[] {
     const integrations = Object.keys(snap.integrations ?? {}).sort();
     const forges = (snap.runtime.repositories ?? []).map((x) => x.codeForge);
-    const self = r.triggered_by === SELF_IMPROVEMENT || (wi?.source as { provider?: string } | undefined)?.provider === SELF_IMPROVEMENT;
+    const self =
+      r.triggered_by === SELF_IMPROVEMENT ||
+      (wi?.source as { provider?: string } | undefined)?.provider === SELF_IMPROVEMENT;
     const builtin = builtinSkillsForRun({ agentType: r.config.type, forges, integrations, selfImprovement: self });
     return mergeSkills(this.cfg(r).skills ?? [], snap.runtime.skills ?? [], [], builtin);
   }
@@ -435,14 +468,23 @@ export class Planner {
         } catch (e) {
           throw wrap(e, `mcp server ${JSON.stringify(name)}: managedId ${JSON.stringify(s.managedId)}`);
         }
-        if (!got.url && !got.command) throw invalid(`mcp server ${JSON.stringify(name)}: managedId ${JSON.stringify(s.managedId)} has no url or command`);
+        if (!got.url && !got.command)
+          throw invalid(
+            `mcp server ${JSON.stringify(name)}: managedId ${JSON.stringify(s.managedId)} has no url or command`,
+          );
         let agentHeaders = s.headers;
         if (base && got.url?.startsWith(base + "/mcp/")) {
-          agentHeaders = Object.fromEntries(Object.entries(s.headers ?? {}).filter(([k]) => k.toLowerCase() !== "authorization"));
+          agentHeaders = Object.fromEntries(
+            Object.entries(s.headers ?? {}).filter(([k]) => k.toLowerCase() !== "authorization"),
+          );
         }
         const env = { ...(got.env ?? {}), ...(s.env ?? {}) };
         const headers = { ...(got.headers ?? {}), ...(agentHeaders ?? {}) };
-        s = { ...got, ...(Object.keys(env).length ? { env } : {}), ...(Object.keys(headers).length ? { headers } : {}) };
+        s = {
+          ...got,
+          ...(Object.keys(env).length ? { env } : {}),
+          ...(Object.keys(headers).length ? { headers } : {}),
+        };
         delete s.managedId;
         if (!Object.keys(env).length) delete s.env;
         if (!Object.keys(headers).length) delete s.headers;
@@ -473,7 +515,9 @@ export class Planner {
     if (!base) return out;
     for (const [name, srv] of Object.entries(mcp)) {
       if (!srv.url?.startsWith(base + "/mcp/")) continue;
-      srv.headers = Object.fromEntries(Object.entries(srv.headers ?? {}).filter(([k]) => k.toLowerCase() !== "authorization"));
+      srv.headers = Object.fromEntries(
+        Object.entries(srv.headers ?? {}).filter(([k]) => k.toLowerCase() !== "authorization"),
+      );
       out.add(name);
     }
     return out;
@@ -484,36 +528,59 @@ export class Planner {
     const none: HarnessCredential = { source: CREDENTIAL_NONE, reason: "no_secret" };
     const types = CREDENTIAL_TYPES[harnessName(r.config.harness?.type ?? "")] ?? [];
     if (types.length === 0) return none;
-    const scopes: [string, string][] = r.factory_id ? [["factory", r.factory_id], ["team", ""]] : [["team", ""]];
+    const scopes: [string, string][] = r.factory_id
+      ? [
+          ["factory", r.factory_id],
+          ["team", ""],
+        ]
+      : [["team", ""]];
     const shadowed = new Set<string>();
     for (const [scopeName, fid] of scopes) {
       const list = (await this.d.listSecrets(fid)).filter((s) => (s.factory_id ?? "") === fid);
       const fits = list.filter((s) => !shadowed.has(s.name) && types.includes(s.type));
       for (const s of list) shadowed.add(s.name);
-      if (fits.length === 1) return { source: CREDENTIAL_DEFAULT, secret: fits[0]!.name, scope: scopeName, type: fits[0]!.type };
-      if (fits.length > 1) return { source: CREDENTIAL_NONE, reason: "ambiguous", scope: scopeName, candidates: fits.map((s) => s.name).sort() };
+      if (fits.length === 1)
+        return { source: CREDENTIAL_DEFAULT, secret: fits[0]!.name, scope: scopeName, type: fits[0]!.type };
+      if (fits.length > 1)
+        return {
+          source: CREDENTIAL_NONE,
+          reason: "ambiguous",
+          scope: scopeName,
+          candidates: fits.map((s) => s.name).sort(),
+        };
     }
     return none;
   }
 
-  private async secretAuth(r: Run, factoryId: string, name: string): Promise<{ auth: Record<string, string>; type: string }> {
+  private async secretAuth(
+    r: Run,
+    factoryId: string,
+    name: string,
+  ): Promise<{ auth: Record<string, string>; type: string }> {
     const v = await this.d.secret(factoryId, name);
-    if (v === undefined) throw new OfError("resource_not_found", `harness auth secret ${JSON.stringify(name)}: secret ${name} not found`);
+    if (v === undefined)
+      throw new OfError("resource_not_found", `harness auth secret ${JSON.stringify(name)}: secret ${name} not found`);
     const list = await this.d.listSecrets(factoryId);
     const type = list.find((s) => s.name === name && (s.factory_id ?? "") === factoryId)?.type ?? "generic";
     return { auth: harnessAuthEnv(r.config.harness?.type ?? "", r.config.harness?.model ?? "", type, v), type };
   }
 
   /** resolveHarnessAuth: harness.auth, the run environment, the default credential, or nothing. */
-  async resolveHarnessAuth(r: Run, env: Record<string, string>): Promise<{ auth: Record<string, string>; credential: HarnessCredential }> {
+  async resolveHarnessAuth(
+    r: Run,
+    env: Record<string, string>,
+  ): Promise<{ auth: Record<string, string>; credential: HarnessCredential }> {
     const a = this.cfg(r).harness?.auth;
     if (a) {
-      if (a.source === CREDENTIAL_WORKER_ENVIRONMENT) return { auth: {}, credential: { source: CREDENTIAL_WORKER_ENVIRONMENT } };
-      if (!a.secretName || (a.source && a.source !== CREDENTIAL_MANAGED_SECRET)) return { auth: {}, credential: { source: CREDENTIAL_NONE } };
+      if (a.source === CREDENTIAL_WORKER_ENVIRONMENT)
+        return { auth: {}, credential: { source: CREDENTIAL_WORKER_ENVIRONMENT } };
+      if (!a.secretName || (a.source && a.source !== CREDENTIAL_MANAGED_SECRET))
+        return { auth: {}, credential: { source: CREDENTIAL_NONE } };
       const { auth, type } = await this.secretAuth(r, r.factory_id, a.secretName);
       return { auth, credential: { source: CREDENTIAL_MANAGED_SECRET, secret: a.secretName, type } };
     }
-    if (hasCredentialEnv(r.config.harness?.type ?? "", env)) return { auth: {}, credential: { source: CREDENTIAL_NONE, reason: "run_environment" } };
+    if (hasCredentialEnv(r.config.harness?.type ?? "", env))
+      return { auth: {}, credential: { source: CREDENTIAL_NONE, reason: "run_environment" } };
     const cred = await this.findDefaultCredential(r);
     if (cred.source !== CREDENTIAL_DEFAULT) return { auth: {}, credential: cred };
     const { auth } = await this.secretAuth(r, cred.scope === "factory" ? r.factory_id : "", cred.secret!);
@@ -532,7 +599,14 @@ export class Planner {
     if (repos.length > 0 && !st.startCommits) {
       await this.d.recordStartCommits(
         r,
-        repos.map((c) => ({ codeForge: c.forge, owner: c.owner, repo: c.name, path: c.path, ref: c.ref, resolved: isCommitSha(c.ref) })),
+        repos.map((c) => ({
+          codeForge: c.forge,
+          owner: c.owner,
+          repo: c.name,
+          path: c.path,
+          ref: c.ref,
+          resolved: isCommitSha(c.ref),
+        })),
       );
     }
     const skills = this.runSkills(r, snap, st.workItem);
@@ -541,7 +615,9 @@ export class Planner {
       cfg,
       (st.workItem ?? null) as unknown as Parameters<typeof composeSystemPrompt>[1],
       r as unknown as Parameters<typeof composeSystemPrompt>[2],
-      (snap.agents ?? []).map((a) => ({ id: "", ...a, description: a.description ?? "" })) as unknown as Parameters<typeof composeSystemPrompt>[3],
+      (snap.agents ?? []).map((a) => ({ id: "", ...a, description: a.description ?? "" })) as unknown as Parameters<
+        typeof composeSystemPrompt
+      >[3],
     );
     const secretNames = new Set(r.config.secrets ?? []);
     const plain: Record<string, string> = {};
@@ -577,7 +653,11 @@ export class Planner {
   }
 
   /** RunnerGitCredential: the credential of one repository of the run, else forbidden. */
-  async gitCredential(r: Run, host: string, path: string): Promise<{ username: string; password: string; expiresAt: string }> {
+  async gitCredential(
+    r: Run,
+    host: string,
+    path: string,
+  ): Promise<{ username: string; password: string; expiresAt: string }> {
     const [snap, st] = await Promise.all([this.d.snapshot(r.factory_id), this.d.state(r)]);
     const envr = await this.environment(r);
     const repos = await this.checkouts(r, snap, st, envr);
@@ -593,7 +673,11 @@ export class Planner {
       if (u.host.toLowerCase() !== host.toLowerCase() || got !== want) continue;
       const pw = u.password ? decodeURIComponent(u.password) : "";
       if (!pw) throw new OfError("not_authorized", `the forge gave no credential for ${got}`);
-      return { username: decodeURIComponent(u.username), password: pw, expiresAt: new Date(this.d.now() + GIT_CREDENTIAL_TTL_MS).toISOString() };
+      return {
+        username: decodeURIComponent(u.username),
+        password: pw,
+        expiresAt: new Date(this.d.now() + GIT_CREDENTIAL_TTL_MS).toISOString(),
+      };
     }
     throw new OfError("not_authorized", `${host}/${want} is not a repository of this run`);
   }
@@ -657,7 +741,12 @@ export function startConfigOf(env: Env, run: Run, session: RunSession, plan: Run
   return {
     conversation_id: run.id,
     workspace: {
-      repositories: plan.repos.map((r) => ({ forge: r.forge, clone_url: splitCloneUrl(r.cloneUrl).clean, path: r.path, ref: r.ref })),
+      repositories: plan.repos.map((r) => ({
+        forge: r.forge,
+        clone_url: splitCloneUrl(r.cloneUrl).clean,
+        path: r.path,
+        ref: r.ref,
+      })),
       setup_commands: [
         ...plan.setupCommands.map((c) => ({ origin: "machine", command: c })),
         ...plan.envSetupCommands.map((c) => ({ origin: "environment", command: c })),
@@ -723,7 +812,14 @@ export function secretsOf(plan: RunnerPlan): SecretsResponse {
 // ---------- platform deps ----------
 
 const internalMeta = (team: string, run: Run): CallMeta => {
-  const principal: Principal = { kind: "run", id: run.id, runId: run.id, teamId: team, role: "admin", factoryRoles: {} };
+  const principal: Principal = {
+    kind: "run",
+    id: run.id,
+    runId: run.id,
+    teamId: team,
+    role: "admin",
+    factoryRoles: {},
+  };
   return { requestId: newId("req"), principal };
 };
 
@@ -761,7 +857,10 @@ export function platformDeps(env: Env, run: Run): PlannerDeps {
       let p = secretCache.get(k);
       if (!p) {
         p = (async () => {
-          const v = opOut<{ found?: boolean; value?: string }>(await team.api(meta, "secretsGet", {}, { factory_id: fid, name }), "secretsGet");
+          const v = opOut<{ found?: boolean; value?: string }>(
+            await team.api(meta, "secretsGet", {}, { factory_id: fid, name }),
+            "secretsGet",
+          );
           return v?.found ? (v.value ?? "") : undefined;
         })();
         secretCache.set(k, p);
@@ -781,13 +880,20 @@ export function platformDeps(env: Env, run: Run): PlannerDeps {
       return p;
     },
     resolveManagedMcp: async (r, managedId) =>
-      opOut<McpServer>(await team.api(meta, "mcp.resolve", {}, { run: { id: r.id, mcpServers: (r.config as Cfg).mcp_servers ?? {} }, managedId }), "mcp.resolve"),
+      opOut<McpServer>(
+        await team.api(
+          meta,
+          "mcp.resolve",
+          {},
+          { run: { id: r.id, mcpServers: (r.config as Cfg).mcp_servers ?? {} }, managedId },
+        ),
+        "mcp.resolve",
+      ),
     forges: resolverFor(env) as unknown as PlannerDeps["forges"],
     sandboxUrl: (env.OF_PUBLIC_URL ?? "").replace(/\/+$/, ""),
     now: () => Date.now(),
   };
 }
-
 
 let depsFactory: (env: Env, run: Run) => PlannerDeps = platformDeps;
 /** Tests replace the platform dependencies of the planner. */

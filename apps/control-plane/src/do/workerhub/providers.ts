@@ -16,7 +16,12 @@ import type { WorkerRecord, WorkerStatus } from "../team/workers";
 type ListedWorker = WorkerRecord & { status: WorkerStatus; slotsUsed: number; arch: string };
 
 async function listWorkers(env: Env, teamId: string): Promise<ListedWorker[]> {
-  const r = await (env.TEAM.getByName(doName.team(teamId)) as unknown as TeamRpc).api({ requestId: newId("req") }, "workers.list", {}, null);
+  const r = await (env.TEAM.getByName(doName.team(teamId)) as unknown as TeamRpc).api(
+    { requestId: newId("req") },
+    "workers.list",
+    {},
+    null,
+  );
   if (isOpError(r)) throw new Error(`workers.list: ${r.$error.detail}`);
   return r as ListedWorker[];
 }
@@ -56,7 +61,15 @@ export function workerProvider(env: Env, teamId: string, workerId: string): Sand
     cached = {
       arch: archOf(w?.arch ?? ""),
       slots: w?.slots ?? 0,
-      ...(w?.slotSize ? { slotSize: { vcpus: w.slotSize.vcpus, memoryMiB: w.slotSize.memory_mib, ...(w.slotSize.scratch_gib ? { scratchGiB: w.slotSize.scratch_gib } : {}) } } : {}),
+      ...(w?.slotSize
+        ? {
+            slotSize: {
+              vcpus: w.slotSize.vcpus,
+              memoryMiB: w.slotSize.memory_mib,
+              ...(w.slotSize.scratch_gib ? { scratchGiB: w.slotSize.scratch_gib } : {}),
+            },
+          }
+        : {}),
     };
     return cached;
   });

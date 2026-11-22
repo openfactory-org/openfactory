@@ -26,7 +26,13 @@ export function benchmarkPort(env: Env, teamId: string): BenchmarkPort {
 }
 
 export function scoringOptions(env: Env): ScoringOptions {
-  return { publicUrl: env.OF_PUBLIC_URL };
+  const opt = (v: string | undefined) => (v ?? "").trim();
+  return {
+    publicUrl: env.OF_PUBLIC_URL,
+    ...(opt(env.OF_CORRECTNESS_MODEL) ? { correctnessModel: opt(env.OF_CORRECTNESS_MODEL) } : {}),
+    ...(opt(env.OF_ANALYSIS_MODEL) ? { analysisModel: opt(env.OF_ANALYSIS_MODEL) } : {}),
+    ...(opt(env.OF_IMPROVEMENT_AGENT) ? { improvementAgent: opt(env.OF_IMPROVEMENT_AGENT) } : {}),
+  };
 }
 
 export function scoringService(env: Env, teamId: string = DEFAULT_TEAM): ScoringService {
