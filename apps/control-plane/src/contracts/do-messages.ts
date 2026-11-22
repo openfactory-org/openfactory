@@ -130,6 +130,8 @@ export interface OutboxPayloads {
     factoryId: string;
     runCreatedMs: number;
     costUsd: number;
+    rootRunId?: string;
+    workDO?: string;
   };
   // TeamDO -> DispatchDO
   /** key (factoryId, versionId). */
@@ -189,6 +191,8 @@ export interface OutboxPayloads {
   "provider.cancel": { providerId: string; workerId?: string; taskId: string; graceSeconds: number };
   "provider.destroy": { providerId: string; workerId?: string; taskId: string };
   "provider.status": { providerId: string; workerId?: string; taskId: string };
+  /** key (taskId, "ack"). Sent after session.started so the provider stops its start watchdog. */
+  "provider.ack": { target: DispatchTarget; providerId: string; taskId: string };
 
   // Any DO -> IndexDO (unordered, versioned)
   /** key (entity, id, version); upsert if newer. */
@@ -234,6 +238,7 @@ export const OUTBOX_KINDS = [
   "provider.cancel",
   "provider.destroy",
   "provider.status",
+  "provider.ack",
   "index.project",
   "index.workItemEvent",
   "index.prFacts",

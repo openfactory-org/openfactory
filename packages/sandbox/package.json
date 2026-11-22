@@ -7,7 +7,9 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./testing": "./src/testing/index.ts"
+    "./testing": "./src/testing/index.ts",
+    "./microvm": "./src/microvm/index.ts",
+    "./local": "./src/local/index.ts"
   },
   "scripts": {
     "test": "vitest run",

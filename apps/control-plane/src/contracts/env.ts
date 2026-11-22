@@ -44,6 +44,10 @@ export interface Vars {
   OF_OIDC_ISSUER_URL: string;
   OF_OIDC_CLIENT_ID: string;
   OF_LOG_LEVEL: string;
+  /** Maximum depth of nested orchestration (runs started by runs). */
+  OF_MAX_ORCHESTRATION_DEPTH?: string;
+  /** Maximum sandboxes open at once for the team. */
+  OF_MAX_SANDBOXES?: string;
 }
 
 /** Secrets (`wrangler secret put`). Required ones are listed in wrangler.jsonc. */
@@ -104,6 +108,8 @@ export const VAR_NAMES = [
   "OF_OIDC_ISSUER_URL",
   "OF_OIDC_CLIENT_ID",
   "OF_LOG_LEVEL",
+  "OF_MAX_ORCHESTRATION_DEPTH",
+  "OF_MAX_SANDBOXES",
 ] as const satisfies readonly (keyof Vars)[];
 
 /** Required secrets (wrangler.jsonc secrets.required). */
