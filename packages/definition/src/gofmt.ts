@@ -1,55 +1,11 @@
 // Go formatting helpers. Validation messages of the Go compiler use fmt verbs
 // (%q, %v); these helpers produce the same text so that messages port exactly.
+// goQuote (%q) lives in @openfactory/core.
 
-const printRe = /^[\p{L}\p{M}\p{N}\p{P}\p{S}]$/u;
+export { goQuote } from "@openfactory/core";
 
 function hex(n: number, width: number): string {
   return n.toString(16).padStart(width, "0");
-}
-
-/** goQuote formats s like Go's strconv.Quote (the %q verb for strings). */
-export function goQuote(s: string): string {
-  let out = '"';
-  for (const ch of s) {
-    const cp = ch.codePointAt(0) ?? 0;
-    if (ch === '"') {
-      out += '\\"';
-    } else if (ch === "\\") {
-      out += "\\\\";
-    } else if (cp === 0x20 || (cp > 0x20 && cp !== 0x7f && printRe.test(ch))) {
-      out += ch;
-    } else {
-      switch (cp) {
-        case 7:
-          out += "\\a";
-          break;
-        case 8:
-          out += "\\b";
-          break;
-        case 12:
-          out += "\\f";
-          break;
-        case 10:
-          out += "\\n";
-          break;
-        case 13:
-          out += "\\r";
-          break;
-        case 9:
-          out += "\\t";
-          break;
-        case 11:
-          out += "\\v";
-          break;
-        default:
-          if (cp < 0x80) out += "\\x" + hex(cp, 2);
-          else if (cp >= 0xd800 && cp <= 0xdfff) out += "\\ufffd";
-          else if (cp < 0x10000) out += "\\u" + hex(cp, 4);
-          else out += "\\U" + hex(cp, 8);
-      }
-    }
-  }
-  return out + '"';
 }
 
 /** goFloat formats a float64 like Go's %v verb (strconv 'g', shortest). */

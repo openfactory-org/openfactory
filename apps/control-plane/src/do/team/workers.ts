@@ -15,7 +15,7 @@ import { isoOf, listResponse } from "../../lib/page";
 import type { Migration } from "../../lib/sql/migrate";
 import { all, first, run } from "../../lib/sql/query";
 import { registeredProviders } from "../dispatch/providers";
-import { registerPreflight, type DefinitionCheck } from "./factories";
+import { agentFile, automationFile, registerPreflight, type DefinitionCheck } from "./factories";
 import { created, noContent, type OpCall, type TeamKit, type TeamOp } from "./index";
 import type { CompiledDefinition } from "@openfactory/definition";
 // A static import: a dynamic import() from a DO op can still wait for module
@@ -796,6 +796,11 @@ const BUILTIN_HOSTS = new Set(["", "server", "managed"]);
 /** Sandbox providers of the control plane (a workerHost may name one). */
 const PROVIDER_HOSTS = new Set(["cloudflare-sandbox", "daytona", "boatdev", "microvm"]);
 
+/** isProviderHost: a workerHost that names the default provider or a sandbox provider, not a worker. */
+export function isProviderHost(host: string, providers: readonly string[]): boolean {
+  return BUILTIN_HOSTS.has(host) || PROVIDER_HOSTS.has(host) || providers.includes(host);
+}
+
 /**
  * Port of preflightWorkerHosts (internal/engine/preflight.go): a workerHost of
  * an agent or an automation override must be a built-in host, a sandbox
@@ -810,11 +815,11 @@ export function preflightWorkerHosts(
 ): void {
   const refs: { file: string; host: string }[] = [];
   const add = (file: string, host: string | undefined) => {
-    if (host === undefined || BUILTIN_HOSTS.has(host) || PROVIDER_HOSTS.has(host) || providers.includes(host)) return;
+    if (host === undefined || isProviderHost(host, providers)) return;
     refs.push({ file, host });
   };
-  for (const a of def.agents ?? []) add(`agents/${a.name}/agent.md`, a.worker_host);
-  for (const au of def.automations ?? []) add(`automations/${au.name}/automation.md`, au.overrides?.worker_host);
+  for (const a of def.agents ?? []) add(agentFile(a.name), a.worker_host);
+  for (const au of def.automations ?? []) add(automationFile(au.name), au.overrides?.worker_host);
   if (refs.length === 0) return;
   const known = new Set<string>();
   const labels = new Set<string>();

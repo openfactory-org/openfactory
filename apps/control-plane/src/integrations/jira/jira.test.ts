@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { signHS256 } from "../jwt";
+import { SignJWT } from "jose";
 import { NOW, integration, kit, post, user } from "../testkit";
 import { hmacSha256Hex, toHex } from "../util";
 import { adfMentions, adfText, markdownToAdf } from "./adf";
 import { JiraHandler, browseUrl, pickTransition, qsh } from "./jira";
 import { JiraNameResolver } from "./resolver";
+
+const signHS256 = (secret: string, claims: Record<string, unknown>) =>
+  new SignJWT(claims).setProtectedHeader({ alg: "HS256", typ: "JWT" }).sign(new TextEncoder().encode(secret));
 
 const SECRETS = { JIRA_TOKEN: "api-token", JIRA_HOOK: "jsec", JIRA_SHARED: "shared" };
 const URL_ = "https://of.example.com/integrations/jira/webhook";

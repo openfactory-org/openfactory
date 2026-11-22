@@ -3,6 +3,7 @@
 // last item of the previous page, sort_by=created_at, sort_order=asc|desc.
 // Response: {"items": [...], "page_info": {"has_next_page", "next_cursor"}}.
 import { OfError } from "@openfactory/core";
+import { b64url, fromB64url, fromUtf8, utf8 } from "./bytes";
 
 export const DEFAULT_PAGE_SIZE = 50;
 export const MAX_PAGE_SIZE = 200;
@@ -25,25 +26,15 @@ export interface ListResponse<T> {
   [extra: string]: unknown;
 }
 
-function b64urlEncode(s: string): string {
-  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-function b64urlDecode(s: string): string {
-  if (!/^[A-Za-z0-9_-]*$/.test(s)) throw new Error("bad base64url");
-  const pad = s.length % 4 === 0 ? "" : "=".repeat(4 - (s.length % 4));
-  return atob(s.replace(/-/g, "+").replace(/_/g, "/") + pad);
-}
-
 /** Cursor of an item created at `ms` (unix ms). Nanoseconds as in Go. */
 export function encodeCursor(ms: number, id: string): string {
-  return b64urlEncode(`${BigInt(Math.trunc(ms)) * 1_000_000n}:${id}`);
+  return b64url(utf8(`${BigInt(Math.trunc(ms)) * 1_000_000n}:${id}`));
 }
 
 export function decodeCursor(s: string): { ms: number; id: string } {
   let raw: string;
   try {
-    raw = b64urlDecode(s);
+    raw = fromUtf8(fromB64url(s));
   } catch {
     throw new OfError("invalid_request", "malformed cursor");
   }

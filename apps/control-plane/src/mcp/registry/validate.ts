@@ -10,7 +10,9 @@ import {
 } from "@openfactory/core";
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-const PLACEHOLDER_RE = /\{\{\s*[A-Z_][A-Z0-9_]*\s*\}\}/;
+// The same name grammar as secret expansion (secrets/expand.ts), so every
+// placeholder this check accepts is one the proxy can expand.
+const PLACEHOLDER_RE = /\{\{[\t\n\f\r ]*[A-Za-z_][A-Za-z0-9_]*[\t\n\f\r ]*\}\}/;
 const SENSITIVE_RE = /(authorization|token|secret|password|passwd|api[-_]?key|apikey|credential|cookie|private)/i;
 
 const invalid = (msg: string) => new OfError("invalid_request", msg);

@@ -217,9 +217,29 @@ export function cut(s: string, sep: string): [before: string, after: string, fou
   return [s.slice(0, i), s.slice(i + sep.length), true];
 }
 
-/** Go strings.EqualFold for the ASCII and simple Unicode cases. */
+// The one-code-point case mappings of code point c, else c: a mapping such as
+// "ß" -> "SS" is full folding, not simple folding.
+const one = (c: string, m: string): string => ([...m].length === 1 ? m : c);
+const simpleLower = (c: string): string => one(c, c.toLowerCase());
+const simpleUpper = (c: string): string => one(c, c.toUpperCase());
+
+/**
+ * Go strings.EqualFold: equality under Unicode simple case folding. It
+ * compares code point by code point, so "ß" and "SS" differ (full folding),
+ * while "K" (Kelvin sign) and "k", or "ς" and "Σ", are equal.
+ */
 export function equalFold(a: string, b: string): boolean {
-  return a.toLowerCase() === b.toLowerCase() || a.toUpperCase() === b.toUpperCase();
+  if (a === b) return true;
+  const x = [...a];
+  const y = [...b];
+  if (x.length !== y.length) return false;
+  for (let i = 0; i < x.length; i++) {
+    const p = x[i]!;
+    const q = y[i]!;
+    if (p === q) continue;
+    if (simpleLower(p) !== simpleLower(q) && simpleUpper(p) !== simpleUpper(q)) return false;
+  }
+  return true;
 }
 
 /** Go sort.Strings order: byte order of the UTF-8 forms. */

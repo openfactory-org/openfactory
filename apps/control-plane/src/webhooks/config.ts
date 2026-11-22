@@ -6,7 +6,8 @@ import { matchPayload } from "../triggers/payload";
 import { matchTrigger, validateTrigger } from "../triggers/match";
 import { filterValue } from "../triggers/filter";
 import { isObj } from "../triggers/payload";
-import { AttrWebhookID, EventWebhookReceived, ProviderWebhook } from "../triggers/attributes";
+import { EVENT_ATTR, EVENT_PROVIDER } from "@openfactory/core";
+import { EventWebhookReceived } from "../triggers/attributes";
 import { SCHEME_STANDARD_WEBHOOKS, schemeKnown, signatureHeaders, signatureSchemes } from "./signature";
 
 export const AUTH_TOKEN = "token";
@@ -144,19 +145,23 @@ export function testFilter(
   filter: unknown,
   d: Pick<WebhookDelivery, "webhook_id" | "status" | "body"> & { bodyText?: string },
 ): FilterTestResult {
-  validateTrigger({ provider: ProviderWebhook, event: EventWebhookReceived, filter });
+  validateTrigger({ provider: EVENT_PROVIDER.Webhook, event: EventWebhookReceived, filter });
   const v = filterValue(filter);
   const parts: Record<string, unknown> = isObj(v) ? { ...v } : {};
   const pattern = parts["payload"];
   delete parts["payload"];
   const res: FilterTestResult = { would_trigger: false, webhook_matched: false, payload_matched: false };
   const ev = {
-    provider: ProviderWebhook,
+    provider: EVENT_PROVIDER.Webhook,
     type: EventWebhookReceived,
     actor: { provider: "webhook", external_id: "", handle: "", is_bot: false },
-    attributes: { [AttrWebhookID]: d.webhook_id },
+    attributes: { [EVENT_ATTR.WebhookID]: d.webhook_id },
   };
-  res.webhook_matched = matchTrigger(ev, { provider: ProviderWebhook, event: EventWebhookReceived, filter: parts });
+  res.webhook_matched = matchTrigger(ev, {
+    provider: EVENT_PROVIDER.Webhook,
+    event: EventWebhookReceived,
+    filter: parts,
+  });
   const reasons: string[] = [];
   if (!res.webhook_matched) reasons.push("the delivery came from a different webhook");
   const body = d.bodyText ?? (d.body === undefined || d.body === null ? "" : d.body);

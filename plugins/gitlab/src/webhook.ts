@@ -15,7 +15,7 @@ import {
   BodyTooLargeError,
   DeliveryAmbiguousError,
   EVENT_ATTR as A,
-  PROVIDER_GITLAB,
+  EVENT_PROVIDER,
   constantTimeEqual,
   errorResult,
   extractMentions,
@@ -27,7 +27,7 @@ import {
   stringSet,
 } from "@openfactory/plugin-api";
 
-export const PROVIDER = PROVIDER_GITLAB;
+export const PROVIDER = EVENT_PROVIDER.GitLab;
 export const WEBHOOK_PATH = "/plugins/gitlab/webhook";
 
 interface GlUser {

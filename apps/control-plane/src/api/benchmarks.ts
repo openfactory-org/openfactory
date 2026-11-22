@@ -14,7 +14,8 @@ import {
 } from "../http/handler";
 import { bodyObject, optString, str } from "../lib/body";
 import { makeTaskFromRun } from "../scoring/benchmark-tasks";
-import { unwrapOp, workEngine, workRunsPort } from "../scoring/clients";
+import { unwrapOp } from "../lib/rpc";
+import { workEngine, workRunsPort } from "../scoring/clients";
 import { benchmarkDoName } from "../scoring/names";
 import type { BenchmarkPlan } from "../do/benchmark/index";
 import { factoryAccess, indexList } from "./measure";

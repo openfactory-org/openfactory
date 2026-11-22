@@ -1,17 +1,15 @@
 // REST handlers: outbox dead letters. Owner: WS5. The dead-letter index is in
 // IndexDO; redrive goes to the DO named in the row.
 import { doName, notFound, OfError } from "@openfactory/core";
-import type { Handler } from "../http/handler";
+import { callMeta, json, teamOf, type Handler } from "../http/handler";
 import type { DO_BINDINGS } from "../contracts/env";
 import { type Env } from "../contracts/env";
-import { json, metaOf, teamOf } from "./runs";
 
 /** GET /api/v1/outbox/dead */
 export const listDeadOutboxMessages: Handler = async (_req, env, ctx) =>
   json(
-    200,
     await env.INDEX.getByName(doName.index(teamOf(ctx))).list(
-      metaOf(ctx),
+      callMeta(ctx),
       "deadLetters",
       Object.fromEntries(ctx.url.searchParams),
     ),
@@ -58,5 +56,5 @@ export const redriveOutboxMessage: Handler = async (_req, env, ctx) => {
       ? await stub.redrive(dl.msgId)
       : await stub.outboxRedrive!(dl.msgId);
   if (ok) await index.deadLetterRedriven(dl.originDO, dl.msgId);
-  return json(200, { redriven: ok });
+  return json({ redriven: ok });
 };

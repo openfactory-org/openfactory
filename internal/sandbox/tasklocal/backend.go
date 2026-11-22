@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/openfactory-org/openfactory/internal/rtcore"
-	"github.com/openfactory-org/openfactory/internal/sandbox/netlock"
 )
 
 var _ rtcore.TaskBackend = (*Backend)(nil)
@@ -182,7 +181,7 @@ func (b *Backend) Start(ctx context.Context, task rtcore.Task) (rtcore.TaskStatu
 		}
 	}
 
-	if netlock.Restricted(task.NetworkPolicy) {
+	if rtcore.Restricted(task.NetworkPolicy) {
 		// The process shares the network of the host. Say so, so that a
 		// worker with this backend does not look restricted.
 		slog.WarnContext(ctx, "tasklocal: the local backend does not enforce network policies; this restricted task has full network access",

@@ -61,6 +61,9 @@ describe("normalizeHost and isIpLiteral", () => {
     ["[2001:db8::1]:443", "2001:db8::1"],
     ["2001:db8::1", "2001:db8::1"],
     ["  ", ""],
+    ["[::1]", "::1"],
+    ["[::1", "::1"],
+    ["host:", "host"],
   ])("%s → %s", (a, b) => expect(normalizeHost(a)).toBe(b));
 
   it.each([
@@ -71,6 +74,10 @@ describe("normalizeHost and isIpLiteral", () => {
     ["example.com", false],
     ["999.1.1.1", false],
     ["deadbeef.example", false],
+    ["::ffff:203.0.113.7", true],
+    ["1:2:3", false],
+    ["cafe::babe::1", false],
+    ["fe80::1%en0", false],
   ])("%s is IP: %s", (h, want) => expect(isIpLiteral(h)).toBe(want));
 });
 

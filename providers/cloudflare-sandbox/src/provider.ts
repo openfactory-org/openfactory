@@ -15,6 +15,7 @@ import {
   type SandboxTask,
   type TaskStatus,
 } from "@openfactory/sandbox";
+import { paginateCursor } from "@openfactory/sandbox/provider-kit";
 import type { RegistryPage } from "./registry";
 
 export const PROVIDER_ID = "cloudflare-sandbox";
@@ -172,19 +173,17 @@ export class CloudflareSandboxProvider implements SandboxProvider {
   async list(): Promise<TaskStatus[]> {
     const out: TaskStatus[] = [];
     const reg = this.d.registry();
-    let cursor: string | undefined;
-    for (let i = 0; i < 1000; i++) {
+    const ids = paginateCursor(async (cursor) => {
       const page = await reg.list(cursor);
-      for (const id of page.taskIds) {
-        try {
-          out.push(await this.d.sandbox(id).status());
-        } catch (e) {
-          if (parseProviderError(e)?.kind !== "not_found") throw e;
-          await reg.remove(id); // stale index row
-        }
+      return { items: page.taskIds, cursor: page.cursor };
+    });
+    for await (const id of ids) {
+      try {
+        out.push(await this.d.sandbox(id).status());
+      } catch (e) {
+        if (parseProviderError(e)?.kind !== "not_found") throw e;
+        await reg.remove(id); // stale index row
       }
-      cursor = page.cursor;
-      if (!cursor) break;
     }
     return out;
   }

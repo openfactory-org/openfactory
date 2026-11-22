@@ -9,6 +9,7 @@
 //     is compared.
 //   - Webhook created_at (a zero time in Go) is not part of the port output.
 
+import { normalizeHost, resolvePolicy } from "@openfactory/core";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,7 +19,6 @@ import { validateCron } from "../src/cron.ts";
 import { defaultDefinition } from "../src/defaults.ts";
 import { diff, diffSummary } from "../src/diff.ts";
 import { parseRepoAtCommit, roundHundredths } from "../src/extras.ts";
-import { normalizeHost, resolvePolicy } from "../src/networkpolicy.ts";
 import { loadDir } from "../src/node.ts";
 import { validDeliveryIdHeader, validURLTokenSecret } from "../src/resources.ts";
 import { triggerEvents, triggerProviders } from "../src/triggers.ts";

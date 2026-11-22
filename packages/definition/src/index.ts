@@ -2,6 +2,23 @@
 // definition trees. Port of internal/definition. Worker-safe (no Node APIs);
 // loadDir is in "@openfactory/definition/node".
 
+import {
+  BUILTIN_PREFIX,
+  catalog,
+  defaultModel,
+  harnessForModel,
+  ipString,
+  mergePolicies,
+  models,
+  normalizeHost,
+  normalizeType,
+  parseIP,
+  reasoningLevels,
+  resolvePolicy,
+  validatePolicy,
+  validateReasoningLevel,
+} from "@openfactory/core";
+
 export type * from "./types.ts";
 export { compile, normalizePath } from "./compile.ts";
 export {
@@ -64,5 +81,25 @@ export {
   type SchemaCatalog,
 } from "./schema.ts";
 export { splitFrontmatter } from "./yamlnode.ts";
-export * as harnessModels from "./harness-models.ts";
-export * as networkPolicy from "./networkpolicy.ts";
+
+// The harness model catalog and the network policy helpers live in
+// @openfactory/core. These namespaces keep the names that importers of this
+// package use.
+export const harnessModels = {
+  defaultModel,
+  harnessForModel,
+  models,
+  normalizeType,
+  reasoningLevels,
+  validateReasoningLevel,
+};
+export const networkPolicy = {
+  BUILTIN_PREFIX,
+  catalog,
+  ipString,
+  mergePolicies,
+  normalizeHost,
+  parseIP,
+  resolvePolicy,
+  validatePolicy,
+};

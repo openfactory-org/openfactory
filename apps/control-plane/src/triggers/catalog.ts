@@ -1,5 +1,6 @@
 // The trigger catalog: filter keys per provider and event. Port of
 // internal/triggers/catalog.go.
+import { EVENT_ATTR, EVENT_PROVIDER } from "@openfactory/core";
 import * as T from "./attributes";
 
 export type CmpKind =
@@ -49,29 +50,31 @@ const f = (attrs: string[], cmp: CmpKind, extra: Partial<FieldSpec> = {}): Field
 const SB = KEY_SKIP_BOTS;
 
 export const CATALOG: Record<string, ProviderSpec> = {
-  [T.ProviderGitHub]: {
+  [EVENT_PROVIDER.GitHub]: {
     fields: {
-      repos: f([T.AttrRepo], "fold"),
-      labels: f([T.AttrLabels], "fold", { addedAttr: T.AttrAddedLabels }),
-      assignees: f([T.AttrAssignees], "fold"),
-      authors: f([T.AttrAuthor], "fold"),
+      repos: f([EVENT_ATTR.Repo], "fold"),
+      labels: f([EVENT_ATTR.Labels], "fold", { addedAttr: EVENT_ATTR.AddedLabels }),
+      assignees: f([EVENT_ATTR.Assignees], "fold"),
+      authors: f([EVENT_ATTR.Author], "fold"),
       keywords: f([], "keyword"),
-      mentioned: f([T.AttrMentioned], "fold"),
-      base_branches: f([T.AttrBaseBranch], "branch"),
-      pr_numbers: f([T.AttrPRNumber], "int"),
-      paths: f([T.AttrPaths], "glob"),
-      reviewers: f([T.AttrReviewers], "fold"),
-      reviewer_teams: f([T.AttrReviewerTeams], "fold"),
-      review_states: f([T.AttrReviewState], "fold", { enumValues: ["approved", "changes_requested", "commented"] }),
-      branches: f([T.AttrBranch], "branch"),
-      conclusions: f([T.AttrConclusion], "fold"),
-      workflows: f([T.AttrWorkflow], "exact"),
-      states: f([T.AttrCommitState], "fold", { enumValues: ["success", "failure", "error"] }),
-      contexts: f([T.AttrContext], "fold"),
+      mentioned: f([EVENT_ATTR.Mentioned], "fold"),
+      base_branches: f([EVENT_ATTR.BaseBranch], "branch"),
+      pr_numbers: f([EVENT_ATTR.PRNumber], "int"),
+      paths: f([EVENT_ATTR.Paths], "glob"),
+      reviewers: f([EVENT_ATTR.Reviewers], "fold"),
+      reviewer_teams: f([EVENT_ATTR.ReviewerTeams], "fold"),
+      review_states: f([EVENT_ATTR.ReviewState], "fold", {
+        enumValues: ["approved", "changes_requested", "commented"],
+      }),
+      branches: f([EVENT_ATTR.Branch], "branch"),
+      conclusions: f([EVENT_ATTR.Conclusion], "fold"),
+      workflows: f([EVENT_ATTR.Workflow], "exact"),
+      states: f([EVENT_ATTR.CommitState], "fold", { enumValues: ["success", "failure", "error"] }),
+      contexts: f([EVENT_ATTR.Context], "fold"),
     },
     aliases: {
-      baseBranches: f([T.AttrBaseBranch], "branch", { native: "base_branches" }),
-      prNumbers: f([T.AttrPRNumber], "int", { native: "pr_numbers" }),
+      baseBranches: f([EVENT_ATTR.BaseBranch], "branch", { native: "base_branches" }),
+      prNumbers: f([EVENT_ATTR.PRNumber], "int", { native: "pr_numbers" }),
     },
     events: {
       ...ev(["repos", "labels", "assignees", "authors", "keywords", SB], "issue_created"),
@@ -110,13 +113,13 @@ export const CATALOG: Record<string, ProviderSpec> = {
       ...ev(["repos", SB], "check_run_rerequested", "check_suite_rerequested"),
     },
   },
-  [T.ProviderGitLab]: {
+  [EVENT_PROVIDER.GitLab]: {
     fields: {
-      repos: f([T.AttrRepo], "fold"),
-      actions: f([T.AttrAction], "fold"),
-      base_branches: f([T.AttrBaseBranch], "branch"),
-      branches: f([T.AttrBranch], "branch"),
-      mentioned: f([T.AttrMentioned], "fold", { serverManaged: true }),
+      repos: f([EVENT_ATTR.Repo], "fold"),
+      actions: f([EVENT_ATTR.Action], "fold"),
+      base_branches: f([EVENT_ATTR.BaseBranch], "branch"),
+      branches: f([EVENT_ATTR.Branch], "branch"),
+      mentioned: f([EVENT_ATTR.Mentioned], "fold", { serverManaged: true }),
     },
     aliases: {},
     events: {
@@ -125,17 +128,17 @@ export const CATALOG: Record<string, ProviderSpec> = {
       ...ev(["repos", "branches"], "push"),
     },
   },
-  [T.ProviderAzureDevOps]: {
+  [EVENT_PROVIDER.AzureDevOps]: {
     fields: {
-      repos: f([T.AttrRepo], "fold"),
-      base_branches: f([T.AttrBaseBranch], "branch"),
-      branches: f([T.AttrBranch], "branch"),
-      source_repos: f([T.AttrSourceRepo], "fold", { serverManaged: true }),
-      mentioned: f([T.AttrMentioned], "fold"),
-      work_item_types: f([T.AttrWorkItemType], "exact"),
-      labels: f([T.AttrLabels], "fold", { addedAttr: T.AttrAddedLabels }),
-      assignees: f([T.AttrAssignees], "fold"),
-      authors: f([T.AttrAuthor], "fold"),
+      repos: f([EVENT_ATTR.Repo], "fold"),
+      base_branches: f([EVENT_ATTR.BaseBranch], "branch"),
+      branches: f([EVENT_ATTR.Branch], "branch"),
+      source_repos: f([EVENT_ATTR.SourceRepo], "fold", { serverManaged: true }),
+      mentioned: f([EVENT_ATTR.Mentioned], "fold"),
+      work_item_types: f([EVENT_ATTR.WorkItemType], "exact"),
+      labels: f([EVENT_ATTR.Labels], "fold", { addedAttr: EVENT_ATTR.AddedLabels }),
+      assignees: f([EVENT_ATTR.Assignees], "fold"),
+      authors: f([EVENT_ATTR.Author], "fold"),
     },
     aliases: {},
     events: {
@@ -158,16 +161,16 @@ export const CATALOG: Record<string, ProviderSpec> = {
       push: { keys: ["repos", "branches"], notAuthorable: true },
     },
   },
-  [T.ProviderJira]: {
+  [EVENT_PROVIDER.Jira]: {
     fields: {
-      project_keys: f([T.AttrProjectKey], "exact"),
-      labels: f([T.AttrLabels], "exact", { addedAttr: T.AttrAddedLabels }),
-      status_ids: f([T.AttrStatusID], "exact"),
+      project_keys: f([EVENT_ATTR.ProjectKey], "exact"),
+      labels: f([EVENT_ATTR.Labels], "exact", { addedAttr: EVENT_ATTR.AddedLabels }),
+      status_ids: f([EVENT_ATTR.StatusID], "exact"),
       keywords: f([], "noop"),
     },
     aliases: {
-      projects: f([T.AttrProjectName], "fold", { plainListOnly: true, native: "project_keys" }),
-      statuses: f([T.AttrStatusName], "fold", { plainListOnly: true, native: "status_ids" }),
+      projects: f([EVENT_ATTR.ProjectName], "fold", { plainListOnly: true, native: "project_keys" }),
+      statuses: f([EVENT_ATTR.StatusName], "fold", { plainListOnly: true, native: "status_ids" }),
     },
     events: {
       ...ev(["project_keys", "labels"], "issue_created", "issue_labeled"),
@@ -175,23 +178,23 @@ export const CATALOG: Record<string, ProviderSpec> = {
       ...ev(["project_keys", "labels", "keywords"], "agent_session_created"),
     },
   },
-  [T.ProviderLinear]: {
+  [EVENT_PROVIDER.Linear]: {
     fields: {
-      team_ids: f([T.AttrTeamID], "exact"),
-      project_ids: f([T.AttrProjectID], "exact"),
-      labels: f([T.AttrLabels], "fold", { addedAttr: T.AttrAddedLabels }),
-      state_ids: f([T.AttrStateID], "exact"),
-      assignee_ids: f([T.AttrAssignees], "exact"),
-      mentioned_user_ids: f([T.AttrMentioned], "exact"),
-      creator_ids: f([T.AttrAuthor], "exact"),
-      issue_ids: f([T.AttrIssueID], "exact"),
+      team_ids: f([EVENT_ATTR.TeamID], "exact"),
+      project_ids: f([EVENT_ATTR.ProjectID], "exact"),
+      labels: f([EVENT_ATTR.Labels], "fold", { addedAttr: EVENT_ATTR.AddedLabels }),
+      state_ids: f([EVENT_ATTR.StateID], "exact"),
+      assignee_ids: f([EVENT_ATTR.Assignees], "exact"),
+      mentioned_user_ids: f([EVENT_ATTR.Mentioned], "exact"),
+      creator_ids: f([EVENT_ATTR.Author], "exact"),
+      issue_ids: f([EVENT_ATTR.IssueID], "exact"),
       keywords: f([], "keyword"),
     },
     aliases: {
-      teams: f([T.AttrTeamName], "exact", { plainListOnly: true, native: "team_ids" }),
-      projects: f([T.AttrProjectName], "exact", { plainListOnly: true, native: "project_ids" }),
-      states: f([T.AttrStateName], "exact", { plainListOnly: true, native: "state_ids" }),
-      issues: f([T.AttrIssueNumber], "int", { plainListOnly: true, native: "issue_ids" }),
+      teams: f([EVENT_ATTR.TeamName], "exact", { plainListOnly: true, native: "team_ids" }),
+      projects: f([EVENT_ATTR.ProjectName], "exact", { plainListOnly: true, native: "project_ids" }),
+      states: f([EVENT_ATTR.StateName], "exact", { plainListOnly: true, native: "state_ids" }),
+      issues: f([EVENT_ATTR.IssueNumber], "int", { plainListOnly: true, native: "issue_ids" }),
     },
     events: {
       ...ev(
@@ -208,18 +211,21 @@ export const CATALOG: Record<string, ProviderSpec> = {
       ...ev(["team_ids", "project_ids", "labels", "creator_ids", "keywords"], "agent_session_created"),
     },
   },
-  [T.ProviderSlack]: {
+  [EVENT_PROVIDER.Slack]: {
     fields: {
-      channel_ids: f([T.AttrChannelID], "exact"),
-      user_ids: f([T.AttrUserID], "exact"),
+      channel_ids: f([EVENT_ATTR.ChannelID], "exact"),
+      user_ids: f([EVENT_ATTR.UserID], "exact"),
       keywords: f([], "keyword"),
-      emojis: f([T.AttrEmoji], "emoji"),
-      item_user_ids: f([T.AttrItemUserID], "exact"),
+      emojis: f([EVENT_ATTR.Emoji], "emoji"),
+      item_user_ids: f([EVENT_ATTR.ItemUserID], "exact"),
     },
     aliases: {
-      channels: f([T.AttrChannelName], "channelName", { plainListOnly: true, native: "channel_ids" }),
-      users: f([T.AttrUserName, T.AttrUserEmail], "fold", { plainListOnly: true, native: "user_ids" }),
-      itemUsers: f([T.AttrItemUserName, T.AttrItemUserEmail], "fold", { plainListOnly: true, native: "item_user_ids" }),
+      channels: f([EVENT_ATTR.ChannelName], "channelName", { plainListOnly: true, native: "channel_ids" }),
+      users: f([EVENT_ATTR.UserName, EVENT_ATTR.UserEmail], "fold", { plainListOnly: true, native: "user_ids" }),
+      itemUsers: f([EVENT_ATTR.ItemUserName, EVENT_ATTR.ItemUserEmail], "fold", {
+        plainListOnly: true,
+        native: "item_user_ids",
+      }),
     },
     events: {
       ...ev(
@@ -234,41 +240,45 @@ export const CATALOG: Record<string, ProviderSpec> = {
       ...ev(["channel_ids", "user_ids"], "member_joined_channel"),
     },
   },
-  [T.ProviderTeams]: {
+  [EVENT_PROVIDER.Teams]: {
     fields: {
-      team_ids: f([T.AttrTeamID], "fold", { inOnly: true, exactlyOne: true, required: true }),
-      channel_ids: f([T.AttrChannelID], "exact", { inOnly: true, required: true }),
-      user_ids: f([T.AttrUserID], "fold"),
+      team_ids: f([EVENT_ATTR.TeamID], "fold", { inOnly: true, exactlyOne: true, required: true }),
+      channel_ids: f([EVENT_ATTR.ChannelID], "exact", { inOnly: true, required: true }),
+      user_ids: f([EVENT_ATTR.UserID], "fold"),
       keywords: f([], "keyword"),
     },
     aliases: {
-      channels: f([T.AttrChannelName], "channelNameFold", { plainListOnly: true, native: "channel_ids" }),
-      users: f([T.AttrUserName], "fold", { plainListOnly: true, native: "user_ids" }),
+      channels: f([EVENT_ATTR.ChannelName], "channelNameFold", { plainListOnly: true, native: "channel_ids" }),
+      users: f([EVENT_ATTR.UserName], "fold", { plainListOnly: true, native: "user_ids" }),
     },
     events: ev(["team_ids", "channel_ids", "user_ids", "keywords"], "app_mention", "message_posted"),
   },
-  [T.ProviderWebhook]: {
+  [EVENT_PROVIDER.Webhook]: {
     fields: {
-      webhook_ids: f([T.AttrWebhookID, T.AttrWebhookName], "exact", { inOnly: true, exactlyOne: true, required: true }),
+      webhook_ids: f([EVENT_ATTR.WebhookID, EVENT_ATTR.WebhookName], "exact", {
+        inOnly: true,
+        exactlyOne: true,
+        required: true,
+      }),
     },
     aliases: {},
     events: ev(["webhook_ids", KEY_PAYLOAD], T.EventWebhookReceived),
   },
-  [T.ProviderSchedule]: {
-    fields: { schedule_ids: f([T.AttrAutomationID], "exact", { serverManaged: true }) },
+  [EVENT_PROVIDER.Schedule]: {
+    fields: { schedule_ids: f([EVENT_ATTR.AutomationID], "exact", { serverManaged: true }) },
     aliases: {},
     events: ev(["schedule_ids"], T.EventCronFired),
   },
 };
 
 /** Providers that never match events authored by the platform itself. */
-export const SELF_IGNORED_PROVIDERS = new Set([
-  T.ProviderSlack,
-  T.ProviderTeams,
-  T.ProviderLinear,
-  T.ProviderJira,
-  T.ProviderGitLab,
-  T.ProviderAzureDevOps,
+export const SELF_IGNORED_PROVIDERS = new Set<string>([
+  EVENT_PROVIDER.Slack,
+  EVENT_PROVIDER.Teams,
+  EVENT_PROVIDER.Linear,
+  EVENT_PROVIDER.Jira,
+  EVENT_PROVIDER.GitLab,
+  EVENT_PROVIDER.AzureDevOps,
 ]);
 
 /** Canonical trigger provider names, sorted. */
@@ -289,10 +299,10 @@ export function canonicalProvider(p: string): string {
   switch (c) {
     case "microsoft_teams":
     case "msteams":
-      return T.ProviderTeams;
+      return EVENT_PROVIDER.Teams;
     case "azuredevops":
     case "ado":
-      return T.ProviderAzureDevOps;
+      return EVENT_PROVIDER.AzureDevOps;
   }
   return c;
 }

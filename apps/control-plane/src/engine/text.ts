@@ -1,17 +1,14 @@
 // Text helpers of internal/engine (runs.go, engine.go, inbox.go). Pure.
+import { clipBytes, cutBytes, fromUtf8, utf8 } from "@openfactory/core";
 import type { CoreEvent } from "../contracts/do-messages";
 import type { SourceRef, WorkItem } from "./types";
 
-const enc = new TextEncoder();
-const dec = new TextDecoder();
-
 /** truncate (engine.go): cut at n bytes on a rune boundary and say how much was cut. */
 export function truncate(s: string, n: number): string {
-  const b = enc.encode(s);
+  const b = utf8(s);
   if (b.length <= n) return s;
-  let cut = n;
-  while (cut > 0 && cut < b.length && (b[cut]! & 0xc0) === 0x80) cut--;
-  return dec.decode(b.subarray(0, cut)) + `\n…[truncated ${b.length - cut} bytes]`;
+  const kept = cutBytes(b, n);
+  return fromUtf8(kept) + `\n…[truncated ${b.length - kept.length} bytes]`;
 }
 
 export function firstLine(s: string): string {
@@ -73,12 +70,7 @@ export function workItemTitle(req: DispatchText): string {
   if (!t && req.event) t = firstLine(req.event.text ?? "");
   if (!t) t = firstLine(req.prompt ?? "");
   if (!t) t = "Untitled work item";
-  const b = enc.encode(t);
-  if (b.length > 120) {
-    let cut = 117;
-    while (cut > 0 && (b[cut]! & 0xc0) === 0x80) cut--;
-    t = dec.decode(b.subarray(0, cut)) + "...";
-  }
+  if (utf8(t).length > 120) t = clipBytes(t, 117) + "...";
   return t;
 }
 

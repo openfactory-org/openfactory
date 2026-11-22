@@ -1,10 +1,9 @@
 // Ports of internal/notify notify_test.go and internal/mergeguard and
 // internal/eventctx tests.
 import { describe, expect, it } from "vitest";
-import { OfError, type Event, type OutboundMessage } from "@openfactory/core";
-import { Router, normalizeProvider, permanent, routes, teamOfOrigin } from "./index";
-import type { Responder } from "../forges/registry";
-import { ApiError } from "../forges/util/http";
+import { ApiError, OfError, type Event, type OutboundMessage, type Responder } from "@openfactory/core";
+import { teamOfDoName } from "../lib/outbox/dest";
+import { Router, normalizeProvider, permanent, routes } from "./index";
 import { isMergeTool, parse, wrap, words, REFUSAL_TEXT } from "../mergeguard/index";
 import * as ec from "../eventctx/index";
 import { FakeResolver } from "../../test/fakes/forge";
@@ -70,7 +69,7 @@ describe("notify router", () => {
     await expect(new Router([new Rec("github", new Error("boom"))]).deliverOnce("t", msg("github"))).rejects.toThrow(
       "boom",
     );
-    expect(teamOfOrigin("team:acme|work:w123")).toBe("acme");
+    expect(teamOfDoName("team:acme|work:w123")).toBe("acme");
   });
   it("lists notification routes", () => {
     const rs = routes({ slack: { channel: "C1" }, jira: null }, ["github", "linear", "gitlab"], ["slack", "github"]);

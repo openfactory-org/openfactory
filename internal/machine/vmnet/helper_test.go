@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 )
 
 // TestHelperStopDuringBackoff stops the helper while it waits to restart a
@@ -92,7 +94,7 @@ func TestDNSRelayBoundsInflight(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _ = r.Run(ctx) }()
-	if err := WaitListen(ctx, listen, 2*time.Second); err != nil {
+	if err := rtcore.WaitDial(ctx, "tcp", listen, 2*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	c, err := net.Dial("udp4", listen)

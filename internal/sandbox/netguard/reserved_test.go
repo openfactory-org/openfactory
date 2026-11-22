@@ -61,6 +61,10 @@ func TestReservedAddr(t *testing.T) {
 		{"2002:101:101::1", false},  // 6to4 of 1.1.1.1
 		{"2001:db8::1", true},
 		{"2001:0:4136:e378::1", true}, // Teredo
+		{"64:ff9b:1::a00:1", true},    // local-use NAT64
+		{"::a00:1", true},             // IPv4-compatible
+		{"fec0::1", true},             // site-local
+		{"100::1", true},              // discard
 		{"2606:4700:4700::1111", false},
 	}
 	for _, tt := range tests {
@@ -74,6 +78,22 @@ func TestReservedAddr(t *testing.T) {
 	}
 	if !ReservedAddr(netip.Addr{}) {
 		t.Error("invalid address is not reserved")
+	}
+}
+
+// TestReservedPrefixesDisjoint checks that no prefix overlaps another. The
+// microVM worker loads the table into nftables interval sets, which refuse
+// overlapping elements.
+func TestReservedPrefixesDisjoint(t *testing.T) {
+	for i, a := range ReservedPrefixes {
+		if a != a.Masked() {
+			t.Errorf("%s is not masked", a)
+		}
+		for _, b := range ReservedPrefixes[i+1:] {
+			if a.Overlaps(b) {
+				t.Errorf("%s overlaps %s", a, b)
+			}
+		}
 	}
 }
 

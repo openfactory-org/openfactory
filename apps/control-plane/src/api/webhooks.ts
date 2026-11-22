@@ -11,6 +11,7 @@ import { teamIntegrations, teamSecrets, resolverFor } from "../forges/env";
 import { handleGitHubWebhook, type FactoryInfo } from "../forges/github/webhook";
 import { matchPayload } from "../triggers/payload";
 import { handleWebhookDelivery, webhookPartition } from "../webhooks/ingress";
+import { isOpError, unwrapOp } from "../lib/rpc";
 
 /** GET /api/v1/factories/{uid}/webhooks */
 export const listWebhooks: Handler = teamApi();
@@ -173,10 +174,10 @@ export async function serveWebhookIngress(
   const team = env.TEAM.getByName(doName.team(INGRESS_TEAM));
   return handleWebhookDelivery(request, uid, token, {
     async getWebhook(id) {
-      const out = (await team.api({ requestId: "webhook-ingress" }, "webhooksResolve", { "?id": id }, undefined)) as
-        { webhook: Webhook; team_id: string } | { $error: { code: string; detail: string } } | null;
+      const out = unwrapOp<{ webhook: Webhook; team_id: string } | null>(
+        await team.api({ requestId: "webhook-ingress" }, "webhooksResolve", { "?id": id }, undefined),
+      );
       if (!out) return null;
-      if ("$error" in out) throw new Error(`${out.$error.code}: ${out.$error.detail}`);
       return { webhook: out.webhook, teamId: out.team_id };
     },
     getSecret: (teamId, factoryId, name) => teamSecrets(env).get(teamId, factoryId, name),
@@ -191,13 +192,14 @@ export async function serveWebhookIngress(
 export async function serveGitHubWebhook(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const resolver = resolverFor(env);
   const factories = async (teamId: string): Promise<FactoryInfo[]> => {
-    const out = (await env.TEAM.getByName(doName.team(teamId)).api(
+    const out = await env.TEAM.getByName(doName.team(teamId)).api(
       { requestId: "github-webhook" },
       "forgeFactories",
       {},
       undefined,
-    )) as { items?: FactoryInfo[] } | { $error: unknown } | null;
-    return out && "items" in out ? (out.items ?? []) : [];
+    );
+    if (isOpError(out)) return [];
+    return (out as { items?: FactoryInfo[] } | null)?.items ?? [];
   };
   return handleGitHubWebhook(request, {
     teams: async () => [INGRESS_TEAM],
@@ -232,10 +234,8 @@ export async function serveGitHubWebhook(request: Request, env: Env, ctx: Execut
 }
 
 async function teamOp(env: Env, teamId: string, op: string, body: unknown): Promise<void> {
-  const out = (await env.TEAM.getByName(doName.team(teamId)).api({ requestId: "github-webhook" }, op, {}, body)) as {
-    $error?: { code: string; detail: string };
-  } | null;
-  if (out?.$error) console.warn("github webhook:", op, out.$error.code, out.$error.detail);
+  const out: unknown = await env.TEAM.getByName(doName.team(teamId)).api({ requestId: "github-webhook" }, op, {}, body);
+  if (isOpError(out)) console.warn("github webhook:", op, out.$error.code, out.$error.detail);
 }
 
 /** Routes a server path to the ingress handlers; null when the path is not one of them. */

@@ -15,27 +15,25 @@ import {
   newId,
 } from "@openfactory/core";
 import type { Actor, Event, Integration, OutboundMessage, PullRequestRef, SourceRef } from "@openfactory/core";
-import { A, PROVIDER_LINEAR } from "../eventattr";
-import { ApiClient } from "../http";
+import { EVENT_ATTR as A, EVENT_PROVIDER } from "@openfactory/core";
+import { ApiClient } from "@openfactory/core";
 import { intake, selectTeam } from "../select";
 import { dashboardHint, member } from "../shared";
-import type { Fetch, IntegrationDeps, IssueTracker, Logger, Responder, WebhookOutcome } from "../types";
+import type { Fetch, IntegrationDeps, IssueTracker, Logger, WebhookOutcome } from "../types";
 import { consoleLogger } from "../types";
+import { difference, formatOutbound, stringSet, type Responder } from "@openfactory/core";
 import {
   Dedupe,
   cfg,
-  diff,
   errMessage,
   errorResponse,
-  formatOutbound,
   integrationSecret,
   jsonResponse,
   readBody,
-  stringSet,
   verifyHmacSha256Hex,
 } from "../util";
 
-export const PROVIDER = PROVIDER_LINEAR;
+export const PROVIDER = EVENT_PROVIDER.Linear;
 export const WEBHOOK_PATH = "/integrations/linear/webhook";
 export const DEFAULT_GRAPHQL_URL = "https://api.linear.app/graphql";
 /** Bounds webhookTimestamp (replay protection). */
@@ -452,7 +450,7 @@ export class LinearHandler implements Responder, IssueTracker {
         } else if (p.action === "update") {
           if ("labelIds" in uf) {
             const prev = Array.isArray(uf["labelIds"]) ? (uf["labelIds"] as string[]) : [];
-            const addedIds = diff(is.labelIds ?? [], prev);
+            const addedIds = difference(is.labelIds ?? [], prev);
             const added = (is.labels ?? []).flatMap((l) => addedIds.filter((id) => id === l.id).map(() => l.name));
             if (added.length > 0) {
               const a = cp();

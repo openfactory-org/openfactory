@@ -18,29 +18,28 @@ import {
   queryEscape,
 } from "@openfactory/core";
 import type { Actor, Event, Integration, OutboundMessage, PullRequestRef, SourceRef } from "@openfactory/core";
-import { A, PROVIDER_JIRA } from "../eventattr";
-import { ApiClient } from "../http";
-import { parseJwt } from "../jwt";
+import { EVENT_ATTR as A, EVENT_PROVIDER } from "@openfactory/core";
+import { ApiClient } from "@openfactory/core";
+import { claimString, decodeUnverified, verifyJwt } from "../jwt";
 import { intake, selectTeam } from "../select";
 import { dashboardHint, member } from "../shared";
-import type { IntegrationDeps, IssueTracker, Logger, Responder, WebhookOutcome } from "../types";
+import type { IntegrationDeps, IssueTracker, Logger, WebhookOutcome } from "../types";
 import { consoleLogger } from "../types";
+import { difference, formatOutbound, type Responder } from "@openfactory/core";
 import {
   Dedupe,
   cfg,
-  diff,
   errMessage,
   errorResponse,
-  formatOutbound,
   integrationSecret,
   jsonResponse,
   readBody,
-  toHex,
+  sha256Hex,
   verifyHmacSha256Hex,
 } from "../util";
 import { adfMentions, adfText, markdownToAdf } from "./adf";
 
-export const PROVIDER = PROVIDER_JIRA;
+export const PROVIDER = EVENT_PROVIDER.Jira;
 export const WEBHOOK_PATH = "/integrations/jira/webhook";
 
 interface JiraUser {
@@ -80,7 +79,7 @@ export async function qsh(method: string, path: string, query: URLSearchParams):
     return enc(k) + "=" + vals.join(",");
   });
   const canonical = method.toUpperCase() + "&" + (path === "" ? "/" : path) + "&" + parts.join("&");
-  return toHex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical)));
+  return sha256Hex(canonical);
 }
 
 /** The web URL of an issue. */
@@ -177,7 +176,7 @@ export class JiraHandler implements Responder, IssueTracker {
     const auth = req.headers.get("Authorization") ?? "";
     if (auth.startsWith("JWT ")) {
       try {
-        jwtIss = parseJwt(auth.slice(4)).claimString("iss");
+        jwtIss = claimString(decodeUnverified(auth.slice(4)).claims, "iss");
       } catch {
         /* a bad token fails verification below */
       }
@@ -226,11 +225,13 @@ export class JiraHandler implements Responder, IssueTracker {
       return false;
     }
     try {
-      const j = parseJwt(auth.slice(4));
-      await j.verifyHS256(sec);
-      j.verifyTime(this.now().getTime(), 60_000);
       const ck = cfg(in_, "client_key");
-      if (ck !== "" && j.claimString("iss") !== ck) return false;
+      const claims = await verifyJwt(auth.slice(4), sec, {
+        alg: "HS256",
+        nowMs: this.now().getTime(),
+        skewMs: 60_000,
+        ...(ck !== "" ? { issuer: ck } : {}),
+      });
       const u = new URL(req.url);
       let path = u.pathname;
       try {
@@ -238,7 +239,7 @@ export class JiraHandler implements Responder, IssueTracker {
       } catch {
         /* keep the raw path */
       }
-      return j.claimString("qsh") === (await qsh(req.method, path, u.searchParams));
+      return claimString(claims, "qsh") === (await qsh(req.method, path, u.searchParams));
     } catch {
       return false;
     }
@@ -361,7 +362,7 @@ export class JiraHandler implements Responder, IssueTracker {
         for (const it of p.changelog.items ?? []) {
           switch (it.field.toLowerCase()) {
             case "labels": {
-              const added = diff(splitLabels(it.toString), splitLabels(it.fromString ?? ""));
+              const added = difference(splitLabels(it.toString), splitLabels(it.fromString ?? ""));
               if (added.length > 0) {
                 const a = base();
                 a[A.Labels] = splitLabels(it.toString);

@@ -1,9 +1,9 @@
 // GitHub webhook deliveries → core events. Port of internal/forge/github/events.go.
 import { newId, type Event, type SourceRef } from "@openfactory/core";
-import * as A from "../eventattr";
-import { extractMentions, stringSet } from "../util/text";
+import { EVENT_ATTR as A, EVENT_PROVIDER } from "@openfactory/core";
+import { extractMentions, stringSet } from "@openfactory/core";
 
-export const PROVIDER = A.ProviderGitHub;
+export const PROVIDER = EVENT_PROVIDER.GitHub;
 /** Marks issues and pull requests routed to a factory: "factory:<alias>". */
 export const ALIAS_LABEL_PREFIX = "factory:";
 

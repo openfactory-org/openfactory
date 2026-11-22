@@ -97,7 +97,7 @@ export class AzureDevOpsClient {
       baseUrl: `${this.baseUrl}/${pathEscape(cfg.organization)}`,
       userAgent: "openfactory-azuredevops",
       ...(cfg.fetch ? { fetch: cfg.fetch } : {}),
-      authorize: (h, method, url) => {
+      authorize: (h, { method, url }) => {
         h.set("Authorization", auth);
         if (method === "PATCH" && url.pathname.toLowerCase().includes("/_apis/wit/workitems/")) {
           // A work item is changed with a JSON Patch document.
@@ -500,13 +500,13 @@ export class AzureDevOpsClient {
 
   /** Adds an artifact link from the work item to a pull request. Does nothing when the link exists. */
   async attachPullRequestToWorkItem(project: string, id: number, pr: PullRequestRef): Promise<void> {
-    const split = splitRepo(pr.repo);
-    const repoProject = split.owner || project;
-    if (split.name === "" || !pr.number) {
+    const { owner, name } = splitRepo(pr.repo);
+    const repoProject = owner || project;
+    if (name === "" || !pr.number) {
       throw new OfError("invalid_request", "azuredevops: a pull request needs a repository and a number");
     }
     const r = await this.wrap(`get repository ${pr.repo}`, () =>
-      this.api.json<Repository>("GET", withVersion(repoAPI(repoProject, split.name))),
+      this.api.json<Repository>("GET", withVersion(repoAPI(repoProject, name))),
     );
     if (!r.id || !r.project?.id) throw new OfError("internal_error", `azuredevops: repository ${pr.repo} has no ID`);
     // vstfs:///Git/PullRequestId/{project ID}%2F{repository ID}%2F{number}

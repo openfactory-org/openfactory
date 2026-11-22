@@ -81,16 +81,6 @@ export class IndexDO extends BaseDO implements IndexRpc, RetentionRpc {
     return new Response("not found", { status: 404 });
   }
 
-  override async webSocketMessage(): Promise<void> {}
-
-  override async webSocketClose(ws: WebSocket, code: number): Promise<void> {
-    try {
-      ws.close(code === 1005 ? 1000 : code, "bye");
-    } catch {
-      /* closed */
-    }
-  }
-
   // ---------- projections ----------
 
   /** Upsert if newer (entity, id, version); summary null deletes. */

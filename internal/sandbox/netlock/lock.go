@@ -271,27 +271,30 @@ func startNetguard(ctx context.Context, p Params, proxyUID int) (func(), error) 
 		<-done
 	}
 	addr := "127.0.0.1:" + strconv.Itoa(ProxyPort)
-	deadline := time.Now().Add(10 * time.Second)
-	d := &net.Dialer{Timeout: time.Second}
-	for {
-		c, err := d.DialContext(ctx, "tcp", addr)
-		if err == nil {
-			_ = c.Close()
-			return stop, nil
-		}
+	// Stop waiting when netguard exits before it listens.
+	wctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
 		select {
 		case <-done:
-			return nil, errors.New("netguard exited at start")
-		case <-ctx.Done():
-			stop()
-			return nil, ctx.Err()
-		case <-time.After(100 * time.Millisecond):
+			cancel()
+		case <-wctx.Done():
 		}
-		if time.Now().After(deadline) {
-			stop()
-			return nil, fmt.Errorf("netguard does not listen on %s", addr)
-		}
+	}()
+	err := rtcore.WaitDial(wctx, "tcp", addr, 10*time.Second)
+	if err == nil {
+		return stop, nil
 	}
+	select {
+	case <-done:
+		return nil, errors.New("netguard exited at start")
+	default:
+	}
+	stop()
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	return nil, fmt.Errorf("netguard does not listen on %s: %w", addr, err)
 }
 
 func probeAsAgent(ctx context.Context, p Params, spec ProbeSpec) (ProbeResult, error) {

@@ -1,9 +1,10 @@
 // Worker-side calls of the TeamDO mcp module, and the injectable runtime of
 // the MCP code (fetch, clock, encrypter), so that tests replace the network.
-import { DEFAULT_TEAM, OfError, doName, type ErrorCode } from "@openfactory/core";
+import { DEFAULT_TEAM, doName } from "@openfactory/core";
 import type { CallMeta } from "../contracts/do-messages";
 import type { Env } from "../contracts/env";
-import { localEncrypter, type Encrypter } from "./envelope";
+import { unwrapOp } from "../lib/rpc";
+import { localEncrypter, type Encrypter } from "../secrets/envelope";
 
 /** What the MCP Worker code needs besides env. Tests pass fakes. */
 export interface McpRuntime {
@@ -39,10 +40,5 @@ export async function teamOp<T = unknown>(
     opts.params ?? {},
     body,
   )) as unknown;
-  if (typeof out === "object" && out !== null) {
-    const e = (out as { $error?: { code: string; detail: string; extra?: Record<string, unknown> } }).$error;
-    if (e) throw new OfError(e.code as ErrorCode, e.detail, e.extra ? { extra: e.extra } : {});
-    if (typeof (out as { $status?: unknown }).$status === "number") return (out as { body?: T }).body as T;
-  }
-  return out as T;
+  return unwrapOp<T>(out);
 }

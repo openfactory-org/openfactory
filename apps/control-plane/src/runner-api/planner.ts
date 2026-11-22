@@ -25,6 +25,7 @@ import { parseDuration } from "../engine/sessions";
 import type { Run, RunSession, WorkItem } from "../engine/types";
 import type { Forge, ForgeResolver } from "../forges/forge";
 import { resolverFor } from "../forges/env";
+import { isOpError, unwrapOp } from "../lib/rpc";
 import { expandWith } from "../secrets/expand";
 import {
   deniedWithoutRequired,
@@ -833,15 +834,6 @@ const internalMeta = (team: string, run: Run): CallMeta => {
   return { requestId: newId("req"), principal };
 };
 
-function opOut<T>(out: unknown, op: string): T {
-  if (typeof out === "object" && out !== null && "$error" in out) {
-    const e = (out as { $error: { code: string; detail: string } }).$error;
-    throw new OfError(e.code as never, `${op}: ${e.detail}`);
-  }
-  if (typeof out === "object" && out !== null && "$status" in out) return (out as { body?: unknown }).body as T;
-  return out as T;
-}
-
 /** PlannerDeps over the DO bindings of env. */
 export function platformDeps(env: Env, run: Run): PlannerDeps {
   const team = env.TEAM.getByName(doName.team(run.team_id));
@@ -856,18 +848,16 @@ export function platformDeps(env: Env, run: Run): PlannerDeps {
       await work().recordStartCommits(r.id, list);
     },
     environment: async (id) => {
-      const out = await team.api(meta, "getEnvironment", { id }, null);
-      if (typeof out === "object" && out !== null && "$error" in out) {
-        if ((out as { $error: { code: string } }).$error.code === "resource_not_found") return undefined;
-      }
-      return opOut<Environment>(out, "getEnvironment");
+      const out: unknown = await team.api(meta, "getEnvironment", { id }, null);
+      if (isOpError(out) && out.$error.code === "resource_not_found") return undefined;
+      return unwrapOp<Environment>(out, "getEnvironment");
     },
     secret: (fid, name) => {
       const k = `${fid}\u0000${name}`;
       let p = secretCache.get(k);
       if (!p) {
         p = (async () => {
-          const v = opOut<{ found?: boolean; value?: string }>(
+          const v = unwrapOp<{ found?: boolean; value?: string }>(
             await team.api(meta, "secretsGet", {}, { factory_id: fid, name }),
             "secretsGet",
           );
@@ -881,7 +871,7 @@ export function platformDeps(env: Env, run: Run): PlannerDeps {
       let p = listCache.get(fid);
       if (!p) {
         p = (async () =>
-          opOut<{ items?: { name: string; type: string; factory_id?: string }[] }>(
+          unwrapOp<{ items?: { name: string; type: string; factory_id?: string }[] }>(
             await team.api(meta, "listSecrets", fid ? { "?factory_id": fid } : {}, null),
             "listSecrets",
           )?.items ?? [])();
@@ -890,7 +880,7 @@ export function platformDeps(env: Env, run: Run): PlannerDeps {
       return p;
     },
     resolveManagedMcp: async (r, managedId) =>
-      opOut<McpServer>(
+      unwrapOp<McpServer>(
         await team.api(
           meta,
           "mcp.resolve",

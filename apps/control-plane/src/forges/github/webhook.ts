@@ -7,10 +7,10 @@ import type { Event, Integration } from "@openfactory/core";
 import type { Forge, ForgeResolver } from "../forge";
 import type { IntegrationSource, SecretSource } from "../registry";
 import { DeliveryAmbiguousError, intakeVerified, repoOwner, DeliveryUnverifiedError } from "../util/select";
-import { hasMention, splitRepo } from "../util/text";
+import { hasMention, splitRepo } from "@openfactory/core";
 import { errorJSON, jsonResponse, readBody, verifyHmacSha256Hex } from "../util/webhook";
 import { utf8 } from "../../lib/bytes";
-import * as A from "../eventattr";
+import { EVENT_ATTR as A } from "@openfactory/core";
 import { FORGE_NAME } from "./client";
 import {
   ALIAS_LABEL_PREFIX,

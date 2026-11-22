@@ -8,9 +8,9 @@ import type {
   EventContextOmitted,
   EventContextResult,
   IntegrationDeps,
-  Responder,
 } from "../types";
-import { errMessage, integrationSecret, truncate } from "../util";
+import { truncate, type Responder } from "@openfactory/core";
+import { errMessage, integrationSecret } from "../util";
 import { SlackClient, type Block, type SlackMessage } from "./client";
 
 export const PROVIDER = "slack";

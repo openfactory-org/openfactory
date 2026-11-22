@@ -5,6 +5,7 @@
 // Applied migrations are recorded in schema_migrations with the sha256 of
 // their SQL, like storetest/upgrade.go records released files. A changed
 // released migration is reported, not re-applied.
+import { sha256Hex } from "../bytes";
 
 export interface Migration {
   /** NNNN from the file name. Unique within a scope. */
@@ -22,13 +23,6 @@ export interface AppliedMigration {
   name: string;
   sha256: string;
   applied_ms: number;
-}
-
-const enc = new TextEncoder();
-
-async function sha256Hex(s: string): Promise<string> {
-  const d = await crypto.subtle.digest("SHA-256", enc.encode(s));
-  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /** Checks a migration list: positive, strictly increasing versions. Throws on a bad list. */

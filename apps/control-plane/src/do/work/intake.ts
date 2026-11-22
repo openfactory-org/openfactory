@@ -3,7 +3,7 @@
 // (actionKey, target). Port of engine/events.go routeToWorkItem,
 // handlePullRequestClosed, deliverToRoot, startSideRun, dispatchMention,
 // engine/inbox.go closeHandoffs and engine/mergecomplete.go.
-import { invalid, pullRequestSource, sourceKey } from "@openfactory/core";
+import { conflict, invalid, notFound, pullRequestSource, sourceKey } from "@openfactory/core";
 import type { CoreEvent } from "../../contracts/do-messages";
 import {
   CONTINUE_EVENT,
@@ -18,19 +18,23 @@ import {
   autoFollowUp,
   type MessageTrust,
 } from "../../engine/intake";
-import { buildDispatchPrompt } from "../../engine/text";
+import { buildDispatchPrompt, truncate } from "../../engine/text";
 import {
   isTerminal,
   stageTerminal,
   waitsForInput,
+  type InboxItem,
   type PullRequestRef,
   type Run,
   type WorkItem,
+  type WorkItemRef,
 } from "../../engine/types";
 import {
+  cancelTree,
   createRun,
   dispatchRoot,
   newMsgId,
+  notifyTop,
   projectWorkItem,
   resolveInboxItem,
   resumesRun,
@@ -39,7 +43,6 @@ import {
   sendMessage,
   setStage,
   workItemEvent,
-  notify,
   writeBackComplete,
   writeBackPullRequest,
   type DispatchPlan,
@@ -280,47 +283,119 @@ function routeToWorkItem(fx: Fx, input: ApplyActionInput, rec: (ref: string) => 
   return result(fx, true);
 }
 
-/** ResolveInbox from a chat or forge reply: resolution, timeline and the answer to the run. */
+/** ResolveInbox from a chat or forge reply. An item that is gone or already resolved is skipped. */
 function answer(fx: Fx, inboxId: string, resolution: string, actor: string, via: string, label?: string): void {
   const it = fx.repo.getInbox(inboxId);
   if (!it || it.resolved) return;
-  resolveInboxItem(fx, it, resolution, actor, via);
+  answerInbox(fx, it, resolution, actor, { via, ...(label !== undefined ? { label } : {}) });
+}
+
+// ---------- work item operations ----------
+//
+// One copy each of Engine.ResolveInbox, Engine.LinkPullRequest and
+// Engine.CompleteWorkItem. The REST API, the Factory MCP, the run tools and
+// event intake call them inside their own transaction.
+
+export interface AnswerOptions {
+  /** Text sent to the run after the resolution. */
+  message?: string;
+  /** The tool that resolved the item (chat, forge, ...). */
+  via?: string;
+  /** A readable name of the actor (actorLabel). */
+  label?: string;
+}
+
+/**
+ * answerInbox (Engine.ResolveInbox): resolves an open item, writes the
+ * answer or approval_decided event and sends the resolution to the run that
+ * waits on it. The caller checks the approvers of an approval.
+ */
+export function answerInbox(
+  fx: Fx,
+  it: InboxItem,
+  resolution: string,
+  actor: string,
+  opts: AnswerOptions = {},
+): InboxItem {
+  resolveInboxItem(fx, it, resolution, actor, opts.via);
   workItemEvent(fx, it.work_item_id, it.kind === "approval" ? "approval_decided" : "answer", it.run_id ?? "", actor, {
     inbox_id: it.id,
-    resolution,
+    resolution: truncate(resolution, 4000),
   });
   if (it.run_id && resumesRun(it)) {
-    const rec = sendMessage(fx, it.run_id, resolutionMessage(it, actorLabel(label ?? actor), resolution), actor);
+    const text = opts.message ? `${resolution}\n\n${opts.message}` : resolution;
+    const rec = sendMessage(fx, it.run_id, resolutionMessage(it, actorLabel(actor, opts.label), text), actor);
     it.answer_message_id = rec.message_id;
     fx.repo.putInbox(it);
   }
+  return it;
 }
 
-/** LinkPullRequest inside the transaction: the PR on the work item and its reference key. */
-export function linkPullRequest(fx: Fx, wi: WorkItem, pr: PullRequestRef): WorkItem {
+export interface LinkResult {
+  workItem: WorkItem;
+  /** True when the pull request was new on the work item. */
+  added: boolean;
+  /** The reference key of the pull request, or "" without a repo and a number. */
+  key: string;
+}
+
+/**
+ * linkPullRequest (Engine.LinkPullRequest): attaches a pull request to a
+ * work item, or updates the one that matches by URL or by repository (any
+ * case) and number. A new pull request gets its reference key (when it has a
+ * repo and a number), a pr_linked event and the tracker write-back.
+ */
+export function linkPullRequest(fx: Fx, wi: WorkItem, input: PullRequestRef): LinkResult {
+  const pr: PullRequestRef = { ...input };
+  if (!pr.url && (!pr.repo || !pr.number)) throw invalid("pull request url or repo+number is required");
+  if (!pr.state) pr.state = "open";
   const list = wi.pull_requests ?? [];
-  const i = list.findIndex((x) => x.forge === pr.forge && x.repo === pr.repo && x.number === pr.number);
-  if (i >= 0)
-    list[i] = {
-      ...list[i]!,
-      ...Object.fromEntries(Object.entries(pr).filter(([, v]) => v !== "" && v !== undefined)),
-    } as PullRequestRef;
-  else list.push(pr);
-  wi.pull_requests = list;
+  const i = list.findIndex(
+    (p) =>
+      (!!pr.url && p.url === pr.url) ||
+      (!!pr.repo && !!pr.number && (p.repo ?? "").toLowerCase() === pr.repo.toLowerCase() && p.number === pr.number),
+  );
   const added = i < 0;
-  const key = sourceKey(pullRequestSource(pr as never));
-  if (key && !(wi.references ?? []).some((r) => r.key === key)) {
-    wi.references = [
-      ...(wi.references ?? []),
-      { kind: "pull_request", key, added_at: new Date(fx.now()).toISOString() },
-    ];
+  const key = pr.repo && pr.number ? sourceKey(pullRequestSource(pr)) : "";
+  if (!added) {
+    const merged = { ...list[i]! };
+    if (pr.forge) merged.forge = pr.forge;
+    if (pr.repo) merged.repo = pr.repo;
+    if (pr.number) merged.number = pr.number;
+    if (pr.url) merged.url = pr.url;
+    if (pr.branch) merged.branch = pr.branch;
+    merged.state = pr.state;
+    list[i] = merged;
+  } else {
+    list.push(pr);
+    const refs = wi.references ?? [];
+    if (key && !refs.some((r) => r.key === key)) {
+      const ref: WorkItemRef = {
+        kind: "pull_request",
+        key,
+        source: pullRequestSource(pr),
+        added_at: new Date(fx.now()).toISOString(),
+      };
+      wi.references = [...refs, ref];
+      fx.repo.sql.exec(
+        "INSERT OR IGNORE INTO work_item_refs (key, kind, added_ms, data) VALUES (?, ?, ?, ?)",
+        key,
+        "pull_request",
+        fx.now(),
+        JSON.stringify(ref),
+      );
+    }
   }
+  wi.pull_requests = list;
   wi.updated_at = new Date(fx.now()).toISOString();
   fx.repo.putWorkItem(wi);
-  // Attach the pull request to the tracker issues.
-  if (added) writeBackPullRequest(fx, wi, pr);
+  if (added) {
+    workItemEvent(fx, wi.id, "pr_linked", "", "system", { ...pr });
+    // Attach the pull request to the tracker issues.
+    writeBackPullRequest(fx, wi, pr);
+  }
   projectWorkItem(fx, wi);
-  return wi;
+  return { workItem: wi, added, key };
 }
 
 /** handlePullRequestClosed: record the PR; after the last merge the foreman gets a turn, then completion. */
@@ -337,7 +412,7 @@ function handlePullRequestClosed(fx: Fx, wi0: WorkItem, ev: CoreEvent, actor: st
   };
   const prKey = sourceKey(pullRequestSource(pr as never));
   const isSourcePR = !!wi0.source_key && wi0.source_key === prKey;
-  const cur = isSourcePR ? wi0 : linkPullRequest(fx, wi0, pr);
+  const cur = isSourcePR ? wi0 : linkPullRequest(fx, wi0, pr).workItem;
   const ref = pr.url || `${pr.repo}#${pr.number}`;
   const who = actor || "someone";
   if (merged) {
@@ -427,13 +502,28 @@ export function checkMergeCompletion(fx: Fx, r: Run): void {
   );
 }
 
-/** CompleteWorkItem (in one transaction): stage, child cancels, open inbox items, notice. */
-export function completeWorkItem(fx: Fx, wiId: string, actor: string, note: string): void {
-  const wi = setStage(fx, wiId, "complete", actor || "system", note);
+/**
+ * completeWorkItem (Engine.CompleteWorkItem): the stage, the tracker
+ * write-back, a stop of the child runs of the root run (the root run winds
+ * down on its own), the open inbox items of the work item and the completion
+ * notice. A completed work item is left as it is; a cancelled one is a
+ * conflict.
+ */
+export function completeWorkItem(fx: Fx, wiId: string, actor0: string, note: string): WorkItem {
+  const actor = actor0 || "system";
+  const cur = fx.repo.getWorkItem(wiId);
+  if (!cur) throw notFound(`work item ${wiId}`);
+  if (cur.stage === "complete") return cur;
+  if (cur.stage === "cancelled") throw conflict("work item was cancelled");
+  // The stage changes first, so the cancelled children do not report to the root run.
+  const wi = setStage(fx, wiId, "complete", actor, note);
   // Move the tracker issues to done.
   writeBackComplete(fx, wi);
+  if (wi.root_run_id) cancelTree(fx, wi.root_run_id, actor, wi.root_run_id);
   for (const it of fx.repo.listInbox({ resolved: false })) {
-    if (it.work_item_id === wi.id) resolveInboxItem(fx, it, "work item completed", actor || "system");
+    if (it.work_item_id === wi.id) resolveInboxItem(fx, it, "work item completed", actor);
   }
-  if (note) notify(fx, wi, "update", note);
+  const out = fx.repo.getWorkItem(wi.id) ?? wi;
+  notifyTop(fx, out, "update", note ? `This work item is complete. ${note}` : "This work item is complete.");
+  return out;
 }

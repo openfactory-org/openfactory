@@ -9,7 +9,8 @@
     ".": "./src/index.ts",
     "./testing": "./src/testing/index.ts",
     "./microvm": "./src/microvm/index.ts",
-    "./local": "./src/local/index.ts"
+    "./local": "./src/local/index.ts",
+    "./provider-kit": "./src/provider-kit/index.ts"
   },
   "scripts": {
     "test": "vitest run",

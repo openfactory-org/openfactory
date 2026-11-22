@@ -1,5 +1,6 @@
 // Port of internal/engine/lifecycle.go and the turn-end decision of
 // internal/engine/runs.go (turnEndMessage, TurnMarker). Pure.
+import { clipBytes } from "@openfactory/core";
 import type { Run, RunState } from "./types";
 
 /** The most bytes of a child result that a lifecycle message carries. */
@@ -22,16 +23,10 @@ export function lifecycleEvent(st: RunState | string): string {
   return "";
 }
 
-const enc = new TextEncoder();
-const dec = new TextDecoder();
-
 /** truncateUTF8: cut s to at most max bytes on a UTF-8 boundary. */
 export function truncateUTF8(s: string, max: number): [string, boolean] {
-  const b = enc.encode(s);
-  if (b.length <= max) return [s, false];
-  let cut = max;
-  while (cut > 0 && (b[cut]! & 0xc0) === 0x80) cut--;
-  return [dec.decode(b.subarray(0, cut)), true];
+  const t = clipBytes(s, max);
+  return [t, t !== s];
 }
 
 /** Go strconv.Quote for the label of a lifecycle message (ASCII-safe subset). */

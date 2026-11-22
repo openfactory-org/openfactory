@@ -10,13 +10,15 @@
 // triggers/schedule/{paused,last_error,last_fired}/).
 import { OfError, type Automation, type Trigger, type Webhook } from "@openfactory/core";
 import { actorId } from "../../auth/roles";
+import { timingSafeEqual } from "../../lib/bytes";
 import { all, first } from "../../lib/sql/query";
 import { dest } from "../../lib/outbox/dest";
 import { listResponse } from "../../lib/page";
 import type { Migration } from "../../lib/sql/migrate";
 import { canonicalProvider } from "../../triggers/catalog";
 import { parseCron } from "../../triggers/cron";
-import { EventCronFired, ProviderSchedule } from "../../triggers/attributes";
+import { EVENT_PROVIDER } from "@openfactory/core";
+import { EventCronFired } from "../../triggers/attributes";
 import { scheduleEvent, scheduleId, scheduleKey } from "../../triggers/schedules";
 import { USER_TOKEN_FORGES, integrationProvider, supportsUserTokens } from "../../forges/registry";
 import {
@@ -91,7 +93,7 @@ const getRow = (kit: TeamKit, key: string) =>
 
 function scheduleTriggers(a: Automation): Trigger[] {
   return (a.triggers ?? []).filter(
-    (t) => canonicalProvider(t.provider) === ProviderSchedule && t.event === EventCronFired && t.schedule,
+    (t) => canonicalProvider(t.provider) === EVENT_PROVIDER.Schedule && t.event === EventCronFired && t.schedule,
   );
 }
 
@@ -396,7 +398,6 @@ function webhookFor(kit: TeamKit, c: OpCall): { wh: Webhook; f: factories.Factor
 
 const WEBHOOK_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,62}$/;
 const LATE_SECRET_SCHEMES = ["vercel", "stripe", "pagerduty"];
-const webhookFile = (name: string) => `webhooks/${name}.yaml`;
 
 async function managedFiles(kit: TeamKit, f: factories.FactoryRecord): Promise<Record<string, string>> {
   if (f.source && f.source !== "managed") {
@@ -409,6 +410,7 @@ async function managedFiles(kit: TeamKit, f: factories.FactoryRecord): Promise<R
   return { ...(await factories.activeFiles(kit, f)) };
 }
 
+/** factories.applyFiles with the error text of the Go webhook routes. */
 async function applyFiles(
   kit: TeamKit,
   c: OpCall,
@@ -416,12 +418,7 @@ async function applyFiles(
   files: Record<string, string>,
   message: string,
 ): Promise<void> {
-  const r = await factories.applyDefinition(kit, f.id, { files, message, author: actorId(c.principal()) });
-  if (r.invalid) {
-    throw new OfError("invalid_request", "definition could not be applied", {
-      extra: { errors: r.version.errors ?? [] },
-    });
-  }
+  await factories.applyFiles(kit, c, f, files, message, "definition could not be applied");
 }
 
 /**
@@ -495,7 +492,7 @@ async function createWebhook(kit: TeamKit, c: OpCall): Promise<unknown> {
     throw new OfError("invalid_request", "auth_mode must be token, url_token or signature");
   }
   const files = await managedFiles(kit, f);
-  if (webhookFile(name) in files) throw new OfError("conflict", `webhook "${name}" already exists`);
+  if (factories.webhookFile(name) in files) throw new OfError("conflict", `webhook "${name}" already exists`);
   if (
     Object.keys(files).filter((p) => p.startsWith("webhooks/") && p.endsWith(".yaml")).length >=
     MAX_WEBHOOKS_PER_FACTORY
@@ -536,7 +533,7 @@ async function createWebhook(kit: TeamKit, c: OpCall): Promise<unknown> {
     ...(req.delivery_id_header ? { deliveryIdHeader: req.delivery_id_header } : {}),
     enabled,
   });
-  files[webhookFile(name)] = doc;
+  files[factories.webhookFile(name)] = doc;
   await applyWithSecret(kit, secretName, store, () => applyFiles(kit, c, f, files, "Add webhook " + name));
   const wh = listWebhooks(kit, f.id).find((w) => w.name === name);
   if (!wh) throw new OfError("resource_not_found", `webhook ${name}`);
@@ -574,7 +571,7 @@ async function updateWebhook(kit: TeamKit, c: OpCall): Promise<unknown> {
     );
   }
   const files = await managedFiles(kit, f);
-  const path = webhookFile(wh.name);
+  const path = factories.webhookFile(wh.name);
   const doc = files[path];
   if (doc === undefined) throw new OfError("resource_not_found", "webhook file " + path);
   const edits: Record<string, unknown> = {};
@@ -739,7 +736,7 @@ export const ops: Record<string, TeamOp> = {
   deleteWebhook: async (kit, c) => {
     const { wh, f } = webhookFor(kit, c);
     const files = await managedFiles(kit, f);
-    delete files[webhookFile(wh.name)];
+    delete files[factories.webhookFile(wh.name)];
     await applyFiles(kit, c, f, files, "Delete webhook " + wh.name);
     return noContent();
   },
@@ -798,8 +795,7 @@ export function setup(kit: TeamKit): void {
         p,
       );
       if (!cur) return false;
-      const a = new Uint8Array(cur.envelope);
-      if (a.length !== old.length || a.some((x, i) => x !== old[i])) return false;
+      if (!timingSafeEqual(new Uint8Array(cur.envelope), old)) return false;
       k.sql.exec("UPDATE user_forge_tokens SET envelope = ? WHERE user_id = ? AND provider = ?", next, uid, p);
       return true;
     },

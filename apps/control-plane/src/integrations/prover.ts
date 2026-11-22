@@ -1,7 +1,6 @@
 // Provider sign-in that proves control of an external account (port of prover.go).
-import { encodeQuery, sameIntegrationProvider } from "@openfactory/core";
+import { ApiClient, encodeQuery, sameIntegrationProvider } from "@openfactory/core";
 import type { Integration } from "@openfactory/core";
-import { ApiClient } from "./http";
 import { NoIntegrationError } from "./select";
 import type { Fetch, IntegrationStore, SecretReader } from "./types";
 import { integrationSecret } from "./util";

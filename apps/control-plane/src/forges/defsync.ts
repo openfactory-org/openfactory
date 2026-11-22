@@ -3,13 +3,20 @@
 // internal/server/defsync.go. Definitions are read with the forge content
 // APIs only (no git). Network I/O happens here, in the Worker; the apply
 // itself is one TeamDO transaction (plan rule 2).
-import { OfError, factoryLink, type Integration, type ValidationError } from "@openfactory/core";
+import {
+  OfError,
+  clipBytes,
+  factoryLink,
+  statusCode,
+  utf8,
+  type Integration,
+  type ValidationError,
+} from "@openfactory/core";
 import type { Forge, ForgeResolver } from "./forge";
 import { checkName, normalizeRepo } from "./github/events";
 import type { DefinitionPR } from "./github/webhook";
-import { statusCode } from "./util/http";
 import { isNoIntegration } from "./util/select";
-import { splitRepo } from "./util/text";
+import { splitRepo } from "@openfactory/core";
 
 export interface GitLocation {
   codeForge: string;
@@ -200,11 +207,8 @@ export function truncateDesc(s0: string): string {
     .split(/\s+/)
     .filter((x) => x)
     .join(" ");
-  const b = new TextEncoder().encode(s);
-  if (b.length <= 140) return s;
-  let cut = 137;
-  while (cut > 0 && (b[cut]! & 0xc0) === 0x80) cut--;
-  return new TextDecoder().decode(b.subarray(0, cut)) + "...";
+  if (utf8(s).length <= 140) return s;
+  return clipBytes(s, 137) + "...";
 }
 
 /** The branch of a git source must compile and pass the preflight before a factory switches to git. */
@@ -305,7 +309,7 @@ export function gitSourceProblem(f: GitFactory, err: unknown, integration?: Pick
   const which = integration ? `of integration ${integration.name}` : "of its integration";
   const repo = f.git_repo ?? "";
   const branch = branchOf(f);
-  const status = statusCode(err) || statusCode((err as { cause?: unknown })?.cause);
+  const status = statusCode(err);
   if (isNoIntegration(err) || isNoIntegration((err as { cause?: unknown })?.cause))
     return `No code host integration covers ${repo}. Connect one under Integrations.`;
   if (err instanceof OfError && err.code === "integration_disabled")

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Integration } from "@openfactory/core";
+import { OfError, type Integration } from "@openfactory/core";
 import { PluginHost, pluginProviders, type HostFactory, type PluginHostBackend } from "./host";
 
 const gitlab = (over: Partial<Integration> = {}): Integration => ({
@@ -18,21 +18,31 @@ const factories: HostFactory[] = [
   { id: "fac_2", teamId: "team_2", alias: "web", name: "Web" },
 ];
 
-function backend(ints: Integration[]): PluginHostBackend & { secretCalls: string[][] } {
+function backend(
+  ints: Integration[],
+  missing: string[] = [],
+): PluginHostBackend & { secretCalls: string[][]; calls: Record<string, number> } {
   const secretCalls: string[][] = [];
+  const calls: Record<string, number> = { listIntegrations: 0, getFactory: 0 };
   return {
     secretCalls,
+    calls,
     listTeams: async () => [
       { id: "team_1", name: "One" },
       { id: "team_2", name: "Two" },
     ],
-    listIntegrations: async (teamId) => ints.filter((i) => teamId === "" || i.team_id === teamId),
+    listIntegrations: async (teamId) => {
+      calls.listIntegrations!++;
+      return ints.filter((i) => teamId === "" || i.team_id === teamId);
+    },
     getSecret: async (teamId, factoryId, name) => {
       secretCalls.push([teamId, factoryId, name]);
+      if (missing.includes(name)) throw new OfError("resource_not_found", `secret ${name}`);
       return `value-of-${name}`;
     },
     listFactories: async (teamId) => factories.filter((f) => teamId === "" || f.teamId === teamId),
     getFactory: async (id) => {
+      calls.getFactory!++;
       const f = factories.find((x) => x.id === id);
       if (!f) throw new Error("resource_not_found: factory");
       return f;
@@ -116,6 +126,50 @@ describe("PluginHost", () => {
     );
     expect(await h.expandSecrets("team:team_1", "no placeholder")).toBe("no placeholder");
     await expect(h.expandSecrets("team:team_1", "{{OTHER}}")).rejects.toMatchObject({ code: "not_authorized" });
+  });
+
+  it("reads the team, the integrations and each distinct secret once per expansion", async () => {
+    const b = backend([gitlab({ config: { webhook_secret_ref: "GL_HOOK", api_ref: "gl_api" } })]);
+    const h = new PluginHost(b, { plugin });
+    expect(await h.expandSecrets("fac_1", "{{GL_HOOK}} {{GL_TOKEN}} {{ GL_HOOK }} {{gl_api}} {{GL_HOOK}}")).toBe(
+      "value-of-GL_HOOK value-of-GL_TOKEN value-of-GL_HOOK value-of-gl_api value-of-GL_HOOK",
+    );
+    expect(b.calls).toEqual({ listIntegrations: 1, getFactory: 1 });
+    expect(b.secretCalls).toEqual([
+      ["team_1", "fac_1", "GL_HOOK"],
+      ["team_1", "fac_1", "GL_TOKEN"],
+      ["team_1", "fac_1", "gl_api"],
+    ]);
+  });
+
+  it("reads no secret when one name of the text is not allowed", async () => {
+    const b = backend([gitlab()]);
+    const h = new PluginHost(b, { plugin });
+    await expect(h.expandSecrets("team:team_1", "{{GL_HOOK}} {{OTHER}}")).rejects.toMatchObject({
+      code: "not_authorized",
+    });
+    expect(b.secretCalls).toEqual([]);
+  });
+
+  it("expands with the grammar of the secret store", async () => {
+    // A secret_ref that is not a secret name cannot be a placeholder: the text stays.
+    const b = backend([gitlab({ secret_ref: "a.b" })]);
+    const h = new PluginHost(b, { plugin });
+    expect(await h.expandSecrets("team:team_1", "{{a.b}} {{x/y-z}} {{\u00a0GL_HOOK}}")).toBe(
+      "{{a.b}} {{x/y-z}} {{\u00a0GL_HOOK}}",
+    );
+    expect(b.secretCalls).toEqual([]);
+  });
+
+  it("reports every missing secret of an expansion together", async () => {
+    const b = backend([gitlab({ config: { a_ref: "GL_HOOK", b_ref: "GL_B" } })], ["GL_HOOK", "GL_B"]);
+    const h = new PluginHost(b, { plugin });
+    await expect(h.expandSecrets("team:team_1", "{{GL_HOOK}} {{GL_TOKEN}} {{GL_B}}")).rejects.toMatchObject({
+      code: "resource_not_found",
+      detail: "unknown secret(s) referenced: GL_HOOK, GL_B",
+    });
+    // getSecret keeps the backend error.
+    await expect(h.getSecret("team:team_1", "GL_B")).rejects.toMatchObject({ code: "resource_not_found" });
   });
 
   it("logs with the plugin name and drops nothing of the attributes", async () => {

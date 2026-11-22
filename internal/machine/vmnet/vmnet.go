@@ -10,10 +10,13 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"text/template"
+
+	"github.com/openfactory-org/openfactory/internal/sandbox/netguard"
 )
 
 // Table is the nftables table of the worker.
@@ -21,7 +24,7 @@ const Table = "openfactory"
 
 // BaseVersion is the version comment of the base ruleset. Change it when the
 // base rules change.
-const BaseVersion = "openfactory base v1"
+const BaseVersion = "openfactory base v2"
 
 // Ports of the per-VM helper on the host address of the tap.
 const (
@@ -52,22 +55,63 @@ func (m Mode) String() string {
 	return "restricted"
 }
 
-// Private4 is the set of IPv4 ranges that a VM never reaches, with any
-// policy: unspecified, RFC 1918, CGNAT, loopback, Azure's platform address,
-// link-local (cloud metadata), IETF and documentation ranges, benchmarking,
-// multicast and reserved.
-var Private4 = []string{
-	"0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "168.63.129.16/32",
-	"169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24", "192.0.2.0/24", "192.88.99.0/24",
-	"192.168.0.0/16", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24",
-	"224.0.0.0/4", "240.0.0.0/4",
+// Private4 and Private6 are the ranges that a VM and the netguard uid never
+// reach, with any policy: netguard.ReservedPrefixes split by address family.
+// The nftables sets enforce them as a second guard behind netguard. VMs have
+// no IPv6 at all; Private6 guards the netguard uid.
+var Private4, Private6 = splitFamilies(netguard.ReservedPrefixes)
+
+// splitFamilies returns the IPv4 and the IPv6 prefixes of ps as strings,
+// each list sorted by address.
+func splitFamilies(ps []netip.Prefix) (v4, v6 []string) {
+	sorted := slices.Clone(ps)
+	slices.SortFunc(sorted, func(a, b netip.Prefix) int {
+		if c := a.Addr().Compare(b.Addr()); c != 0 {
+			return c
+		}
+		return a.Bits() - b.Bits()
+	})
+	for _, p := range sorted {
+		if p.Addr().Is4() {
+			v4 = append(v4, p.String())
+		} else {
+			v6 = append(v6, hex6(p.Addr())+"/"+strconv.Itoa(p.Bits()))
+		}
+	}
+	return v4, v6
 }
 
-// Private6 is the IPv6 counterpart of Private4. VMs have no IPv6 at all;
-// the set guards the proxy uid.
-var Private6 = []string{
-	"::/127", "::ffff:0:0/96", "64:ff9b:1::/48", "100::/64", "2001:db8::/32",
-	"fc00::/7", "fe80::/10", "ff00::/8",
+// hex6 formats an IPv6 address in hexadecimal groups only. netip writes an
+// IPv4-mapped address with a dotted tail (::ffff:0.0.0.0), which the
+// nftables address syntax does not need to accept.
+func hex6(a netip.Addr) string {
+	groups := strings.Split(a.StringExpanded(), ":")
+	// Find the longest run of zero groups (at least two) to write as "::".
+	bestAt, bestLen := -1, 1
+	for i := 0; i < len(groups); {
+		j := i
+		for j < len(groups) && groups[j] == "0000" {
+			j++
+		}
+		if j-i > bestLen {
+			bestAt, bestLen = i, j-i
+		}
+		if j == i {
+			j++
+		}
+		i = j
+	}
+	trim := func(gs []string) string {
+		out := make([]string, len(gs))
+		for i, g := range gs {
+			out[i] = strings.TrimLeft(g[:3], "0") + g[3:]
+		}
+		return strings.Join(out, ":")
+	}
+	if bestAt < 0 {
+		return trim(groups)
+	}
+	return trim(groups[:bestAt]) + "::" + trim(groups[bestAt+bestLen:])
 }
 
 // Config is the network configuration that the rules depend on.
@@ -283,7 +327,7 @@ func RenderRefresh(cfg Config) (string, error) {
 	for _, set := range []struct {
 		name  string
 		items []string
-	}{{"internal_allow4", d.InternalAllow}, {"resolvers4", d.Resolvers}} {
+	}{{"private4", d.Private4}, {"private6", d.Private6}, {"internal_allow4", d.InternalAllow}, {"resolvers4", d.Resolvers}} {
 		fmt.Fprintf(&b, "flush set inet openfactory %s\n", set.name)
 		if len(set.items) > 0 {
 			fmt.Fprintf(&b, "add element inet openfactory %s { %s }\n", set.name, strings.Join(set.items, ", "))
@@ -374,19 +418,4 @@ func ParseResolvers(resolvConf string) []netip.Addr {
 		}
 	}
 	return out
-}
-
-// PrivateAddr reports whether a is in Private4 or Private6.
-func PrivateAddr(a netip.Addr) bool {
-	a = a.Unmap()
-	set := Private6
-	if a.Is4() {
-		set = Private4
-	}
-	for _, s := range set {
-		if p, err := netip.ParsePrefix(s); err == nil && p.Contains(a) {
-			return true
-		}
-	}
-	return false
 }

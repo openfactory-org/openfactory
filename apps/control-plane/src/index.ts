@@ -18,7 +18,7 @@ import { handleCompactionJob } from "./compaction/consumer";
 import { expire as expireEventContext } from "./eventctx";
 import { handleRetentionJob } from "./retention/consumer";
 import { SCORING_JOB_KINDS, handleScoringJob } from "./scoring/jobs";
-import { teamOfOrigin } from "./notify/index";
+import { teamOfDoName } from "./lib/outbox/dest";
 // Registers the engine, provider and MCP backends on load.
 import "./wiring";
 
@@ -163,7 +163,7 @@ const SCORING_KINDS = new Set<string>(SCORING_JOB_KINDS);
 /** The team of a job: from the DO name it names, else the default team. */
 function teamOfJob(msg: JobMessage): string {
   const name = "workDO" in msg ? msg.workDO : "doName" in msg ? msg.doName : "";
-  return teamOfOrigin(name) || DEFAULT_TEAM;
+  return teamOfDoName(name) || DEFAULT_TEAM;
 }
 
 async function handleJob(env: Env, msg: JobMessage): Promise<void> {

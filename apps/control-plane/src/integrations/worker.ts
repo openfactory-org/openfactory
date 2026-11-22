@@ -6,17 +6,10 @@ import { DEFAULT_TEAM, OfError, doName } from "@openfactory/core";
 import type { ExternalIdentity, Integration, User } from "@openfactory/core";
 import type { CallMeta } from "../contracts/do-messages";
 import type { Env } from "../contracts/env";
+import { unwrapOp } from "../lib/rpc";
 import type { IntegrationDeps, IntegrationStore, SecretReader } from "./types";
 
 const META: CallMeta = { requestId: "integrations" };
-
-function unwrap<T>(out: unknown): T {
-  if (typeof out === "object" && out !== null && "$error" in out) {
-    const e = (out as { $error: { code: string; detail: string } }).$error;
-    throw new OfError(e.code as never, e.detail);
-  }
-  return out as T;
-}
 
 /**
  * The store of one team over TeamDO.api. The install has one team
@@ -25,7 +18,7 @@ function unwrap<T>(out: unknown): T {
 export function rpcStore(env: Env, teamId = DEFAULT_TEAM): IntegrationStore {
   const stub = () => env.TEAM.getByName(doName.team(teamId));
   const call = async <T>(op: string, params: Record<string, string> = {}, body?: unknown): Promise<T> =>
-    unwrap<T>(await stub().api(META, op, params, body));
+    unwrapOp<T>(await stub().api(META, op, params, body));
   return {
     listIntegrations: (_team) => call<Integration[]>("integrations.list"),
     getIntegration: (id) => call<Integration | null>("integrations.get", { id }),

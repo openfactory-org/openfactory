@@ -1,7 +1,14 @@
 // {{NAME}} placeholders and redaction. Port of internal/secrets/expand.go.
+//
+// This is the one placeholder grammar of the control plane: the engine, the
+// MCP proxy and the plugin host all expand with expandWith. A name is
+// [A-Za-z_][A-Za-z0-9_]* (the secret name rule of the REST API), with
+// optional ASCII whitespace inside the braces. Go's \s is [\t\n\f\r ], so the
+// class is spelled out: JavaScript's \s also matches \v and Unicode spaces.
+// There is no escape syntax, and text that does not match stays as it is.
 import { OfError } from "@openfactory/core";
 
-const PLACEHOLDER_RE = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
+const PLACEHOLDER_RE = /\{\{[\t\n\f\r ]*([A-Za-z_][A-Za-z0-9_]*)[\t\n\f\r ]*\}\}/g;
 
 /** Distinct names referenced in s, in order of appearance. */
 export function placeholders(s: string): string[] {
@@ -10,10 +17,10 @@ export function placeholders(s: string): string[] {
   return out;
 }
 
-/** Lookup returns undefined for a missing secret. */
+/** Lookup returns undefined for a missing secret. Other errors it throws stop the expansion. */
 export type SecretLookup = (name: string) => Promise<string | undefined> | string | undefined;
 
-/** ExpandWith: one lookup per name; missing names reported together (resource_not_found). */
+/** ExpandWith: one lookup per distinct name; missing names reported together (resource_not_found). */
 export async function expandWith(s: string, lookup: SecretLookup): Promise<string> {
   const names = placeholders(s);
   if (names.length === 0) return s;

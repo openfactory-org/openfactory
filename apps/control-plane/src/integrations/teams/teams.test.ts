@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import type { Event } from "@openfactory/core";
-import { b64urlEncode, signRS256 } from "../jwt";
+import { b64url, utf8, type Event } from "@openfactory/core";
+import { signRS256 } from "../../forges/util/jwt";
 import type { FakeFetch } from "../testkit";
 import { NOW, integration, kit, post, user } from "../testkit";
 import { KeySet } from "./auth";
@@ -24,13 +24,11 @@ beforeAll(async () => {
 });
 
 const token = (over: Record<string, unknown> = {}, header: Record<string, unknown> = { kid: "k1" }) =>
-  signRS256(pair.privateKey, header, {
-    iss: "https://api.botframework.com",
-    aud: APP,
-    exp: nowS + 600,
-    serviceurl: SERVICE,
-    ...over,
-  });
+  signRS256(
+    pair.privateKey,
+    { iss: "https://api.botframework.com", aud: APP, exp: nowS + 600, serviceurl: SERVICE, ...over },
+    header,
+  );
 
 function setup() {
   const k = kit({ BOT_PW: "bot-password" });
@@ -115,7 +113,7 @@ describe("bot connector token validation", () => {
   });
 
   it("rejects an HS256 token signed with a public value", async () => {
-    const hs = `${b64urlEncode(JSON.stringify({ alg: "HS256", kid: "k1" }))}.${b64urlEncode(JSON.stringify({ iss: "https://api.botframework.com", aud: APP, exp: nowS + 60 }))}.${b64urlEncode("sig")}`;
+    const hs = `${b64url(utf8(JSON.stringify({ alg: "HS256", kid: "k1" })))}.${b64url(utf8(JSON.stringify({ iss: "https://api.botframework.com", aud: APP, exp: nowS + 60 })))}.${b64url(utf8("sig"))}`;
     await expect(keys().validate("Bearer " + hs, [APP], "msteams", SERVICE)).rejects.toThrow(/unexpected alg/);
   });
 });

@@ -1,5 +1,5 @@
 // Slack Web API client (port of slack/client.go).
-import { ApiClient } from "../http";
+import { ApiClient } from "@openfactory/core";
 import type { Fetch } from "../types";
 
 export const DEFAULT_API_BASE_URL = "https://slack.com/api";

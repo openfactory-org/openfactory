@@ -11,12 +11,12 @@ import {
   type RegisteredMCPServer,
 } from "@openfactory/core";
 import { checkRedirectURI, redirectAllowed } from "./auth/core";
-import { localEncrypter } from "./envelope";
+import { localEncrypter } from "../secrets/envelope";
 import { handleMessage, serveMcp, textResult, type McpServer } from "./jsonrpc";
 import { MERGE_REFUSED_HEADER, REFUSAL_TEXT, guardMerge, isMergeTool } from "./mergeguard";
 import { authParam, canonicalResource } from "./registry/oauth";
 import { defaultConnection, privateHostWarning, proxied, validate } from "./registry/validate";
-import { matchesWorkItem, parsePullRequestURL, planReference } from "./server/refs";
+import { matchesWorkItem, parsePullRequestURL, planReference, truncate } from "./server/refs";
 
 describe("mergeguard", () => {
   it("isMergeTool", () => {
@@ -385,5 +385,20 @@ describe("envelope", () => {
     );
     await expect(enc.decrypt("team2", "", "mcp-oauth:mcp_1", "mcp_oauth_token", sealed)).rejects.toThrow();
     await expect(enc.decrypt("team1", "", "mcp-oauth:mcp_2", "mcp_oauth_token", sealed)).rejects.toThrow();
+  });
+});
+
+describe("truncate", () => {
+  it.each([
+    ["short", "abc", 5, "abc"],
+    ["exact", "abcde", 5, "abcde"],
+    ["ascii cut", "abcdef", 3, "abc… (truncated)"],
+    // "é" is 2 bytes: a cut inside it drops the partial character.
+    ["split character", "aé", 2, "a… (truncated)"],
+    ["whole character", "aéb", 3, "aé… (truncated)"],
+    // A real U+FFFD before the cut stays.
+    ["replacement character kept", "a\ufffdbc", 4, "a\ufffd… (truncated)"],
+  ])("%s", (_name, s, n, want) => {
+    expect(truncate(s, n)).toBe(want);
   });
 });

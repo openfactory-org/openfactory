@@ -13,7 +13,7 @@ import {
   type RunState,
   type ScorerLabel,
 } from "@openfactory/core";
-import { clip } from "./text";
+import { clipBytes as clip } from "@openfactory/core";
 import {
   MAX_BENCHMARK_CONFIGURATIONS,
   MAX_METADATA_VALUE,

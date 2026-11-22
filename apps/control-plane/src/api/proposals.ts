@@ -12,7 +12,8 @@ import {
   teamOf,
   type Handler,
 } from "../http/handler";
-import { unwrapOp, workEngine } from "../scoring/clients";
+import { unwrapOp } from "../lib/rpc";
+import { workEngine } from "../scoring/clients";
 
 /** GET /api/v1/factories/{uid}/definition/proposals. */
 export const listDefinitionProposals: Handler = teamApi();

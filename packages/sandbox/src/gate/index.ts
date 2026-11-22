@@ -7,7 +7,7 @@
 //   type at or above it. A request above the largest type is invalid_configuration.
 // - Arch comes from the provider capabilities, never from the control plane host.
 
-import type { FailureCode } from "@openfactory/core";
+import { parseIP, stripPort, type FailureCode } from "@openfactory/core";
 import {
   ProviderError,
   TASK_ENV,
@@ -37,28 +37,24 @@ export function isRestricted(policy: TaskNetworkPolicy | undefined): policy is T
 }
 
 // ---------- Hosts (netguard semantics, internal/sandbox/netguard/netguard.go) ----------
+//
+// These match hosts at run time and never reject one. Validation of policy
+// entries (normalizeHost, allowed, withRequired) is in @openfactory/core.
 
-/** Lowercases a host and strips a port, IPv6 brackets and a trailing dot. */
+/**
+ * Lowercases a host and strips a port, IPv6 brackets and a trailing dot
+ * (netguard NormalizeHost). Unlike normalizeHost of @openfactory/core it does
+ * not validate the host.
+ */
 export function normalizeHost(h: string): string {
-  let s = h.trim().toLowerCase();
+  const s = h.trim().toLowerCase();
   if (s === "") return "";
-  if (s.startsWith("[")) {
-    const end = s.indexOf("]");
-    s = end >= 0 ? s.slice(1, end) : s.slice(1);
-  } else {
-    const colons = s.split(":").length - 1;
-    if (colons === 1) s = s.slice(0, s.indexOf(":"));
-  }
-  return s.replace(/\.$/, "");
+  return stripPort(s).replace(/^\[/, "").replace(/\]$/, "").replace(/\.$/, "");
 }
 
-const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
-
-/** True for an IPv4 or IPv6 literal (with or without brackets or port). */
+/** True for an IPv4 or IPv6 literal (with or without brackets or port), as Go net.ParseIP reads it. */
 export function isIpLiteral(host: string): boolean {
-  const h = normalizeHost(host);
-  if (IPV4.test(h)) return true;
-  return h.includes(":") && /^[0-9a-f:.]+(%.+)?$/.test(h);
+  return parseIP(normalizeHost(host)) !== null;
 }
 
 /** Normalized always-allow entries; keeps the "." and "*." prefixes. */

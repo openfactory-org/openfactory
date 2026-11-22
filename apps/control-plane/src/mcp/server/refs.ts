@@ -1,5 +1,6 @@
 // Pure helpers of the Factory MCP server (port of internal/mcpserver/resolve.go):
 // reference parsing and the local setup guidance of start_working.
+import { clipBytes, utf8 } from "@openfactory/core";
 
 export interface PullRequestRef {
   forge: string;
@@ -215,11 +216,6 @@ export function shortId(id: string): string {
   return s;
 }
 
-export function splitRepo(full: string): [string, string] {
-  const i = full.lastIndexOf("/");
-  return i < 0 ? ["", full] : [full.slice(0, i), full.slice(i + 1)];
-}
-
 export function repoSetupFor(
   forge: string,
   owner: string,
@@ -246,11 +242,14 @@ export function repoSetupFor(
   };
 }
 
-/** Go truncate: at most n bytes plus a marker (byte length as in Go). */
+/**
+ * Go truncate: at most n bytes plus a marker. Go cuts at byte n, so a
+ * character split in half becomes U+FFFD in the JSON answer; this cut drops the
+ * partial character instead.
+ */
 export function truncate(s: string, n: number): string {
-  const b = new TextEncoder().encode(s);
-  if (b.length <= n) return s;
-  return new TextDecoder().decode(b.slice(0, n)).replace(/�$/, "") + "… (truncated)";
+  if (utf8(s).length <= n) return s;
+  return clipBytes(s, n) + "… (truncated)";
 }
 
 export function firstLine(s: string): string {

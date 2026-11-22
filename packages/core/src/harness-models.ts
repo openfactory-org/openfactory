@@ -1,6 +1,5 @@
 // Harness model catalog. Port of internal/harness/models.go. The catalogs are
-// advisory: harnesses pass any non-empty model to the CLI. The API matches the
-// temporary copy in packages/definition.
+// advisory: harnesses pass any non-empty model to the CLI.
 
 import { goQuote } from "./gostd";
 import type { HarnessType } from "./types";

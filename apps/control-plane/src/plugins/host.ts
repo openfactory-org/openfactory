@@ -10,6 +10,7 @@ import { RpcTarget } from "cloudflare:workers";
 import { OfError } from "@openfactory/core";
 import type { Integration } from "@openfactory/core";
 import type { HostApi, IntegrationRecord, PluginInfo, RepoRef } from "@openfactory/plugin-api";
+import { expandWith, placeholders } from "../secrets/expand";
 import { integrationToRecord } from "./mappers";
 
 export interface HostFactory {
@@ -44,8 +45,6 @@ export interface PluginHostScope {
   teamId?: string;
   log?: LogFn;
 }
-
-const PLACEHOLDER = /\{\{\s*([A-Za-z_][A-Za-z0-9_./-]*)\s*\}\}/g;
 
 const defaultLog: LogFn = (level, message, fields) => {
   console[level](JSON.stringify({ message, ...fields }));
@@ -112,40 +111,55 @@ export class PluginHost extends RpcTarget implements HostApi {
     return (await this.#backend.getFactory(scope)).teamId;
   }
 
-  async #secret(scope: string, name: string): Promise<string> {
+  /**
+   * Authorizes the plugin to read the named secrets of a scope and returns
+   * where they live. The scope's team and the plugin's integrations are read
+   * once for all names, and no secret is read before every name is allowed.
+   */
+  async #authorize(scope: string, names: string[]): Promise<{ teamId: string; factoryId: string }> {
     const teamId = await this.#teamOfScope(scope);
-    if (teamId === "" || name === "") {
-      throw new OfError("not_authorized", `plugin ${this.#scope.plugin.name} may not read secret "${name}": no team`);
+    const plugin = this.#scope.plugin.name;
+    const empty = names.find((n) => n === "");
+    if (teamId === "" || empty !== undefined) {
+      throw new OfError("not_authorized", `plugin ${plugin} may not read secret "${empty ?? names[0]}": no team`);
     }
     if (this.#scope.teamId && this.#scope.teamId !== teamId) {
-      throw new OfError("not_authorized", `plugin ${this.#scope.plugin.name} may not read secrets of team ${teamId}`);
+      throw new OfError("not_authorized", `plugin ${plugin} may not read secrets of team ${teamId}`);
     }
-    const ints = await this.#integrations(teamId);
-    const allowed = ints.some(
-      (i) => i.secret_ref === name || Object.entries(i.config ?? {}).some(([k, v]) => k.endsWith("_ref") && v === name),
-    );
-    if (!allowed) {
+    const referenced = new Set<string>();
+    for (const i of await this.#integrations(teamId)) {
+      if (i.secret_ref) referenced.add(i.secret_ref);
+      for (const [k, v] of Object.entries(i.config ?? {})) if (k.endsWith("_ref")) referenced.add(v);
+    }
+    const denied = names.find((n) => !referenced.has(n));
+    if (denied !== undefined) {
       throw new OfError(
         "not_authorized",
-        `plugin ${this.#scope.plugin.name} may not read secret "${name}" of team ${teamId}: no ${this.#scope.plugin.name} integration references it`,
+        `plugin ${plugin} may not read secret "${denied}" of team ${teamId}: no ${plugin} integration references it`,
       );
     }
-    const factoryId = scope.startsWith("team:") ? "" : scope;
-    return this.#backend.getSecret(teamId, factoryId, name);
+    return { teamId, factoryId: scope.startsWith("team:") ? "" : scope };
   }
 
   async getSecret(scope: string, name: string): Promise<string> {
-    return this.#secret(scope, name);
+    const { teamId, factoryId } = await this.#authorize(scope, [name]);
+    return this.#backend.getSecret(teamId, factoryId, name);
   }
 
+  /** Expands {{NAME}} placeholders (grammar of secrets/expand.ts). Each distinct name is read once. */
   async expandSecrets(scope: string, text: string): Promise<string> {
-    let out = "";
-    let last = 0;
-    for (const m of text.matchAll(PLACEHOLDER)) {
-      out += text.slice(last, m.index) + (await this.#secret(scope, m[1]!));
-      last = m.index + m[0].length;
-    }
-    return out + text.slice(last);
+    const names = placeholders(text);
+    if (names.length === 0) return text;
+    const { teamId, factoryId } = await this.#authorize(scope, names);
+    return expandWith(text, async (name) => {
+      try {
+        return await this.#backend.getSecret(teamId, factoryId, name);
+      } catch (e) {
+        // A missing secret is reported by expandWith together with the other missing names.
+        if (e instanceof OfError && e.code === "resource_not_found") return undefined;
+        throw e;
+      }
+    });
   }
 
   async listFactories(): Promise<HostFactory[]> {

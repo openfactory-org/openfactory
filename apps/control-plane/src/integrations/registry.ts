@@ -10,14 +10,8 @@ import { SlackResponder } from "./slack/responder";
 import { SlackNameResolver } from "./slack/resolver";
 import { TeamsHandler, MESSAGES_PATH } from "./teams/handler";
 import { TeamsNameResolver } from "./teams/resolver";
-import type {
-  EventContextBuilder,
-  IntegrationDeps,
-  IssueTracker,
-  NameResolver,
-  Responder,
-  WebhookOutcome,
-} from "./types";
+import type { EventContextBuilder, IntegrationDeps, IssueTracker, NameResolver, WebhookOutcome } from "./types";
+import type { Responder } from "@openfactory/core";
 
 export interface IntegrationOptions {
   slackApiBaseUrl?: string;

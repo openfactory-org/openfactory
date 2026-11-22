@@ -7,6 +7,7 @@ import { doName, type Integration } from "@openfactory/core";
 import type { ForgePlugin } from "@openfactory/plugin-api";
 import type { CallMeta } from "../contracts/do-messages";
 import type { Env } from "../contracts/env";
+import { unwrapOp } from "../lib/rpc";
 import { Resolver, type IntegrationSource, type SecretSource, type UserTokenSource } from "./registry";
 
 const meta = (requestId = "forge"): CallMeta => ({ requestId });
@@ -18,13 +19,7 @@ async function teamOp(
   params: Record<string, string>,
   body?: unknown,
 ): Promise<unknown> {
-  const out = await env.TEAM.getByName(doName.team(teamId)).api(meta(), op, params, body);
-  if (typeof out === "object" && out !== null && "$error" in out) {
-    const e = (out as { $error: { code: string; detail: string } }).$error;
-    throw new Error(`TeamDO ${op}: ${e.code}: ${e.detail}`);
-  }
-  if (typeof out === "object" && out !== null && "$status" in out) return (out as { body?: unknown }).body;
-  return out;
+  return unwrapOp(await env.TEAM.getByName(doName.team(teamId)).api(meta(), op, params, body), `TeamDO ${op}`);
 }
 
 export function teamIntegrations(env: Env): IntegrationSource {

@@ -1,14 +1,16 @@
 // The integration selection rule (port of internal/integrations/select.go).
 import {
   OfError,
+  equalFold,
   integrationActive,
   integrationStatus,
   integrationWorkspace,
   integrationWorkspaceKey,
   normalizeWorkspace,
   sameIntegrationProvider,
+  selectRecord,
 } from "@openfactory/core";
-import type { Integration } from "@openfactory/core";
+import type { Integration, RecordRule } from "@openfactory/core";
 import type { IntegrationStore } from "./types";
 
 /** No chat or tracker integration record serves an action. */
@@ -28,8 +30,6 @@ function workspaceLabel(provider: string): string {
   return "workspace";
 }
 
-const eqFold = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
-
 /**
  * Picks the record of factoryId, else the team record, among the records of
  * one team for provider whose workspace is `workspace` (case ignored). A record
@@ -40,29 +40,30 @@ const eqFold = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerC
 export function select(ints: Integration[], provider: string, factoryId: string, workspaceIn: string): Integration {
   const workspace = normalizeWorkspace(provider, workspaceIn);
   const label = workspaceLabel(provider);
-  const tier = (fac: string): Integration[] =>
-    ints.filter(
-      (i) => (i.factory_id ?? "") === fac && (workspace === "" || eqFold(integrationWorkspace(i), workspace)),
-    );
-  const teamTier = tier("");
-  const tiers = factoryId !== "" ? [tier(factoryId), teamTier] : [teamTier];
-  for (const t of tiers) {
-    if (t.length === 0) continue;
-    if (t.length === 1) return t[0]!;
-    const ids = t.map((i) => i.id).join(", ");
-    if (workspace === "") {
-      throw new NoIntegrationError(
-        `${provider}: ${t.length} records (${ids}) can serve this source and it does not name its ${label}: keep one record`,
+  const rule: RecordRule<Integration> = {
+    id: (i) => i.id,
+    team: (i) => i.team_id,
+    factory: (i) => i.factory_id ?? "",
+    serves: (i, ws) => equalFold(integrationWorkspace(i), ws),
+    fail(tier, ws) {
+      const ids = tier.map((i) => i.id).join(", ");
+      if (tier.length > 1) {
+        if (ws === "") {
+          return new NoIntegrationError(
+            `${provider}: ${tier.length} records (${ids}) can serve this source and it does not name its ${label}: keep one record`,
+          );
+        }
+        return new NoIntegrationError(
+          `${provider}: ${tier.length} records (${ids}) serve the ${label} "${ws}": keep one`,
+        );
+      }
+      if (ws === "") return new NoIntegrationError(`no ${provider} integration record serves this source`);
+      return new NoIntegrationError(
+        `no ${provider} integration record for the ${label} "${ws}": add a record with config.${integrationWorkspaceKey(provider)} "${ws}"`,
       );
-    }
-    throw new NoIntegrationError(
-      `${provider}: ${t.length} records (${ids}) serve the ${label} "${workspace}": keep one`,
-    );
-  }
-  if (workspace === "") throw new NoIntegrationError(`no ${provider} integration record serves this source`);
-  throw new NoIntegrationError(
-    `no ${provider} integration record for the ${label} "${workspace}": add a record with config.${integrationWorkspaceKey(provider)} "${workspace}"`,
-  );
+    },
+  };
+  return selectRecord(ints, rule, factoryId, workspace);
 }
 
 /** An error for a record that is not active. */
@@ -120,7 +121,7 @@ export async function intake(
   const cands: Integration[] = [];
   const teams = new Set<string>();
   for (const i of all) {
-    if (!sameIntegrationProvider(i.provider, provider) || !eqFold(integrationWorkspace(i), workspace)) continue;
+    if (!sameIntegrationProvider(i.provider, provider) || !equalFold(integrationWorkspace(i), workspace)) continue;
     if (match && !match(i)) continue;
     cands.push(i);
     teams.add(i.team_id);

@@ -3,11 +3,12 @@
 //   POST /auth/logout             clears the session
 //   GET  /auth/oidc/login         ?return_to=/path
 //   GET  /auth/oidc/callback
-import { DEFAULT_TEAM, OfError, doName, isErrorCode } from "@openfactory/core";
+import { DEFAULT_TEAM, OfError, doName } from "@openfactory/core";
 import type { Env } from "../contracts/env";
 import { serverConfig } from "../config";
 import { csrfOk } from "../http/csrf";
 import { errorResponse, json, opResult } from "../http/handler";
+import { unwrapOp } from "../lib/rpc";
 import type { Identity } from "../do/team/auth";
 import { apiKeyPrincipal } from "./authenticate";
 import { parseKey } from "./apikeys";
@@ -144,19 +145,9 @@ async function oidcCallback(req: Request, env: Env, url: URL): Promise<Response>
     return failLogin("oidc", e, [clear]);
   }
   try {
-    const out = (await env.TEAM.getByName(doName.team(DEFAULT_TEAM)).api(
-      { requestId: "" },
-      "authProvision",
-      {},
-      id,
-    )) as {
-      $error?: { code: string; detail: string; reason?: string };
-      user: { id: string; team_id: string; role: string };
-    };
-    if (out.$error) {
-      const code = isErrorCode(out.$error.code) ? out.$error.code : "internal_error";
-      throw new OfError(code, out.$error.detail, out.$error.reason ? { reason: out.$error.reason } : {});
-    }
+    const out = unwrapOp<{ user: { id: string; team_id: string; role: string } }>(
+      await env.TEAM.getByName(doName.team(DEFAULT_TEAM)).api({ requestId: "" }, "authProvision", {}, id),
+    );
     const cookie = await issueSessionCookie(env, { u: out.user.id, t: out.user.team_id, p: "oidc" });
     audit("auth.login", "success", {
       provider: "oidc",

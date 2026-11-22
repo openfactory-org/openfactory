@@ -231,18 +231,6 @@ export class TeamDO extends BaseDO implements TeamRpc, RetentionRpc {
     return new Response("not found", { status: 404 });
   }
 
-  override async webSocketMessage(): Promise<void> {
-    // Subscribers never send.
-  }
-
-  override async webSocketClose(ws: WebSocket, code: number): Promise<void> {
-    try {
-      ws.close(code === 1005 ? 1000 : code, "bye");
-    } catch {
-      /* already closed */
-    }
-  }
-
   // ---------- REST ----------
 
   /**

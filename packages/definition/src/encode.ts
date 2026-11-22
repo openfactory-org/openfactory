@@ -32,7 +32,7 @@ import type {
   Skill,
   SpendLimit,
   Trigger,
-  Webhook,
+  CompiledWebhook,
 } from "./types.ts";
 import { put } from "./yamlnode.ts";
 
@@ -201,7 +201,7 @@ export function encodeAutomation(a: Automation): Automation {
     .ptr("overrides", a.overrides ? encodeOverrides(a.overrides) : undefined).o as unknown as Automation;
 }
 
-export function encodeWebhook(w: Webhook): Webhook {
+export function encodeWebhook(w: CompiledWebhook): CompiledWebhook {
   return new Out()
     .req("id", w.id, "")
     .req("factory_id", w.factory_id, "")
@@ -210,7 +210,7 @@ export function encodeWebhook(w: Webhook): Webhook {
     .omit("signature_scheme", w.signature_scheme)
     .req("secret_name", w.secret_name, "")
     .omit("delivery_id_header", w.delivery_id_header)
-    .req("enabled", w.enabled, false).o as unknown as Webhook;
+    .req("enabled", w.enabled, false).o as unknown as CompiledWebhook;
 }
 
 function encodeLabel(l: ScorerLabel): ScorerLabel {

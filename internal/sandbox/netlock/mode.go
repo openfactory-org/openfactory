@@ -67,6 +67,3 @@ func ParsePorts(v string) ([]int, error) {
 
 // PortsFromEnv reads OF_LOOPBACK_DAEMON_PORTS.
 func PortsFromEnv() ([]int, error) { return ParsePorts(os.Getenv(EnvLoopbackDaemonPorts)) }
-
-// Restricted reports whether a task policy limits egress.
-func Restricted(p *rtcore.TaskNetworkPolicy) bool { return rtcore.Restricted(p) }

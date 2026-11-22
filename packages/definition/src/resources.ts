@@ -3,7 +3,7 @@
 
 import { secretName } from "./common.ts";
 import { goQuote } from "./gofmt.ts";
-import type { MachineSpec, Webhook } from "./types.ts";
+import type { CompiledWebhook, MachineSpec } from "./types.ts";
 import { type Diag, Doc, isNull, resolve, type YNode } from "./yamlnode.ts";
 
 function isPowerOfTwo(n: number): boolean {
@@ -172,10 +172,10 @@ export function canonicalMIMEHeaderKey(s: string): string {
   return out;
 }
 
-export function parseWebhook(d: Diag, file: string, name: string, content: string): [Webhook, boolean] {
+export function parseWebhook(d: Diag, file: string, name: string, content: string): [CompiledWebhook, boolean] {
   const c = new Doc(d, file);
   const before = d.errs.length;
-  const w: Webhook = { id: "", factory_id: "", name, auth_mode: "token", secret_name: "", enabled: true };
+  const w: CompiledWebhook = { id: "", factory_id: "", name, auth_mode: "token", secret_name: "", enabled: true };
   const root = c.parse(content);
   if (root === null) return [w, false];
   const m = c.mapping(root, "");

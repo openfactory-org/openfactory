@@ -16,9 +16,9 @@ import {
 } from "@openfactory/core";
 import type { CheckRunInput } from "../checkrun";
 import type { CommitStatus, Forge, PullRequestInput, ReviewInput } from "../forge";
-import { HttpClient, statusCode, type FetchFn } from "../util/http";
+import { ApiClient, statusCode, type FetchFn } from "@openfactory/core";
 import { parseRSAPrivateKey, signRS256 } from "../util/jwt";
-import { truncate } from "../util/text";
+import { truncate } from "@openfactory/core";
 import { fromB64 } from "../../lib/bytes";
 
 export const FORGE_NAME = "GITHUB";
@@ -131,7 +131,7 @@ function wrap(msg: string, e: unknown): Error {
 }
 
 export class GitHubClient implements Forge {
-  readonly api: HttpClient;
+  readonly api: ApiClient;
   private readonly cfg: GitHubConfig;
   private readonly keyPem: string | undefined;
   private key: Promise<CryptoKey> | undefined;
@@ -155,11 +155,11 @@ export class GitHubClient implements Forge {
       throw new Error("github: a token or app credentials are required");
     }
     this.web = (cfg.webURL ?? "").replace(/\/+$/, "") || deriveWebURL(base);
-    this.api = new HttpClient({
-      baseURL: base,
+    this.api = new ApiClient({
+      baseUrl: base,
       userAgent: "openfactory-github",
       headers: { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" },
-      authorize: (h, auth) => {
+      authorize: (h, { auth }) => {
         if (auth) h.set("authorization", auth);
       },
       ...(cfg.fetch ? { fetch: cfg.fetch } : {}),
@@ -286,7 +286,7 @@ export class GitHubClient implements Forge {
     if (this.scope) body["repositories"] = this.scope.get(owner.toLowerCase()) ?? [];
     let resp: { token?: string; expires_at?: string } | undefined;
     try {
-      resp = await this.api.do("POST", `/app/installations/${inst}/access_tokens`, body, "Bearer " + jwt);
+      resp = await this.api.json("POST", `/app/installations/${inst}/access_tokens`, body, "Bearer " + jwt);
     } catch (e) {
       this.authFailure(e);
       throw wrap("github: create installation token", e);
@@ -310,7 +310,7 @@ export class GitHubClient implements Forge {
       repo === "" ? "/users/" + pathEscape(owner) + "/installation" : repoPath(owner, repo) + "/installation";
     let resp: { id?: number } | undefined;
     try {
-      resp = await this.api.do("GET", path, undefined, "Bearer " + jwt);
+      resp = await this.api.json("GET", path, undefined, "Bearer " + jwt);
     } catch (e) {
       throw wrap(`github: find app installation for ${owner}`, e);
     }
@@ -324,7 +324,7 @@ export class GitHubClient implements Forge {
     const tok = await this.token(owner, repo);
     const scheme = this.keyPem ? "Bearer " : "token ";
     try {
-      return await this.api.do<T>(method, path, body as object | undefined, scheme + tok);
+      return await this.api.json<T>(method, path, body as object | undefined, scheme + tok);
     } catch (e) {
       if (!this.keyPem && statusCode(e) === 401) this.authFailure(e);
       throw e;
@@ -609,7 +609,7 @@ export class GitHubClient implements Forge {
 
   /** The GraphQL endpoint for the API base URL (GHES: <host>/api/graphql). */
   graphqlPath(): string {
-    const base = this.api.baseURL.replace(/\/+$/, "");
+    const base = this.cfg.baseURL ?? "";
     if (base.endsWith("/api/v3")) return base.slice(0, -"/v3".length) + "/graphql";
     return "/graphql";
   }

@@ -1,8 +1,8 @@
 // Bot Framework authentication: validation of Bot Connector tokens (OpenID
 // metadata + JWKS) and client-credentials tokens for outbound calls.
 // Port of teams/auth.go.
-import { ApiClient } from "../http";
-import { importRsaJwk, parseJwt, type Jwk } from "../jwt";
+import { ApiClient } from "@openfactory/core";
+import { claimString, decodeUnverified, importRsaJwk, verifyJwt, type Jwk } from "../jwt";
 import type { Fetch } from "../types";
 
 export const DEFAULT_OPENID_METADATA_URL = "https://login.botframework.com/v1/.well-known/openidconfiguration";
@@ -79,20 +79,21 @@ export class KeySet {
    */
   async validate(authHeader: string, appIds: string[], channelId: string, serviceUrl: string): Promise<void> {
     if (!authHeader.startsWith("Bearer ") || authHeader.length === 7) throw new Error("teams: missing bearer token");
-    const j = parseJwt(authHeader.slice(7));
-    const e = await this.key(j.headerString("kid"));
-    await j.verifyRS256(e.pub);
-    const iss = j.claimString("iss");
-    if (iss !== BOT_FRAMEWORK_ISSUER) throw new Error(`teams: unexpected issuer "${iss}"`);
-    if (!appIds.some((a) => a !== "" && j.hasAudience(a)))
-      throw new Error("teams: token audience does not match the bot app id");
-    j.verifyTime(this.now(), CLOCK_SKEW_MS);
+    const tok = authHeader.slice(7);
+    const e = await this.key(claimString(decodeUnverified(tok).header, "kid"));
+    const claims = await verifyJwt(tok, e.pub, {
+      alg: "RS256",
+      nowMs: this.now(),
+      skewMs: CLOCK_SKEW_MS,
+      issuer: BOT_FRAMEWORK_ISSUER,
+      audience: appIds.filter((a) => a !== ""),
+    });
     if (e.endorsements.length > 0 && channelId !== "") {
       if (!e.endorsements.some((en) => en.toLowerCase() === channelId.toLowerCase())) {
         throw new Error(`teams: signing key not endorsed for channel "${channelId}"`);
       }
     }
-    const su = j.claimString("serviceurl");
+    const su = claimString(claims, "serviceurl");
     if (
       su !== "" &&
       serviceUrl !== "" &&

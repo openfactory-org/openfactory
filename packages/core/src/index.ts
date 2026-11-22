@@ -9,12 +9,20 @@ export * from "./runstate";
 export * from "./networkpolicy";
 export * from "./redact";
 export * from "./canonical";
+export * from "./bytes";
+export * from "./select";
 export * from "./prompts";
 export * from "./skills";
 export * from "./links";
 export * from "./conversation";
 export * from "./harness-models";
 export * from "./metadata";
+export * from "./eventattr";
+export * from "./text";
+export * from "./responder";
+export * from "./http";
+export { oneLine } from "./gostd";
+export { equalFold } from "./gostd";
 export {
   byteLength,
   compareBytes,

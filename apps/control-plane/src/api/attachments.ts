@@ -3,11 +3,10 @@
 // (custom metadata holds the creator), so no DO row is needed; the runner
 // downloads read the same object (src/runner-api/transfer.ts).
 import { newId, normalizeAttachmentName, OfError } from "@openfactory/core";
-import type { Handler } from "../http/handler";
+import { json, teamOf, type Handler } from "../http/handler";
 import { validateKey } from "../storage/rundata";
 import { attachmentPrefix, getAttachment, MAX_ATTACHMENT_BYTES, type Attachment } from "../runner-api/transfer";
 import type { Env } from "../contracts/env";
-import { json, teamOf } from "./runs";
 
 /** The API form (core.Attachment JSON): attachment_id, the object key stays hidden, created_by omitempty. */
 function publicAttachment(a: Attachment): Record<string, unknown> {
@@ -72,7 +71,7 @@ export const uploadAttachment: Handler = async (req, env, ctx) => {
     created_by: createdBy,
     created_at: createdAt,
   };
-  return json(201, publicAttachment(att));
+  return json(publicAttachment(att), 201);
 };
 
 /** checkAttachments: each ID exists in the team; at most 20 per message. */

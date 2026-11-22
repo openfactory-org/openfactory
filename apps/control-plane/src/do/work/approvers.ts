@@ -1,9 +1,10 @@
 // CanApprove (internal/engine/workitems.go): who can resolve an approval of a
 // factory. ResolveInbox checks it for an approval before the transaction.
-import { doName, forbidden, newId, OfError } from "@openfactory/core";
+import { doName, forbidden, newId, type OfError } from "@openfactory/core";
 import type { CallMeta } from "../../contracts/do-messages";
 import type { Env } from "../../contracts/env";
 import { isApprover, type PrincipalUser } from "../../engine/principal";
+import { isOpError, unwrapOp } from "../../lib/rpc";
 
 /** The TeamDO reads of CanApprove. Tests replace them. */
 export interface ApproverDeps {
@@ -44,14 +45,9 @@ export function teamApproverDeps(env: Env, teamId: string): ApproverDeps {
       return snap?.runtime?.approvers ?? [];
     },
     async user(id) {
-      const out = (await team.api(meta(), "getUser", { id }, null)) as PrincipalUser & {
-        $error?: { code: string; detail: string };
-      };
-      if (out?.$error) {
-        if (out.$error.code === "resource_not_found") return undefined;
-        throw new OfError(out.$error.code as never, `getUser: ${out.$error.detail}`);
-      }
-      return out;
+      const out: unknown = await team.api(meta(), "getUser", { id }, null);
+      if (isOpError(out) && out.$error.code === "resource_not_found") return undefined;
+      return unwrapOp<PrincipalUser>(out, "getUser");
     },
   };
 }

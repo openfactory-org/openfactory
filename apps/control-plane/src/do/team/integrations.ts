@@ -27,6 +27,7 @@ import {
 } from "@openfactory/core";
 import type { ExternalIdentity, Integration, User } from "@openfactory/core";
 import { listResponse } from "../../lib/page";
+import { API_NAME_RE } from "../../secrets/validate";
 import type { Migration } from "../../lib/sql/migrate";
 import { all, first, run } from "../../lib/sql/query";
 import { getUser } from "./auth";
@@ -57,7 +58,6 @@ export const INTEGRATION_PROVIDERS = [
   "jira",
 ] as const;
 const FORGE_PROVIDERS: readonly string[] = ["github", "gitlab", "azure_devops"];
-const SECRET_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
 
 // ---------- records ----------
 
@@ -237,7 +237,7 @@ function integrationFor(kit: TeamKit, id: string): Integration {
 }
 
 function checkSecretRef(v: string | undefined): void {
-  if (v !== undefined && v !== "" && !SECRET_NAME_RE.test(v))
+  if (v !== undefined && v !== "" && !API_NAME_RE.test(v))
     throw new OfError("invalid_request", `invalid secret_ref "${v}"`);
 }
 

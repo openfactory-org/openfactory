@@ -69,3 +69,12 @@ describe("test harness", () => {
     await expect(host.getFactory("nope")).rejects.toMatchObject({ code: "resource_not_found" });
   });
 });
+
+describe("deprecated provider aliases", () => {
+  it("keep the values of EVENT_PROVIDER", async () => {
+    const api = await import("../src/index");
+    expect(api.PROVIDER_GITLAB).toBe(api.EVENT_PROVIDER.GitLab);
+    expect(api.PROVIDER_AZURE_DEVOPS).toBe(api.EVENT_PROVIDER.AzureDevOps);
+    expect([api.PROVIDER_GITLAB, api.PROVIDER_AZURE_DEVOPS]).toEqual(["gitlab", "azure_devops"]);
+  });
+});

@@ -13,7 +13,7 @@ import {
   type TaskNetworkPolicy,
 } from "@openfactory/sandbox";
 import type { OutboxPayloads } from "../../contracts/do-messages";
-import { sha256Hex } from "../../engine/canonical";
+import { sha256Hex } from "@openfactory/core";
 import { requiredHosts } from "../../engine/hosts";
 import { iso, ms, priorRetries, sortedUnique } from "../../engine/sessions";
 import { queuedEventId, taskIdOf } from "../../engine/timeline";

@@ -9,7 +9,7 @@ import { MCP_OAUTH_ERROR, OfError, type RegisteredMCPServer } from "@openfactory
 import type { CallMeta } from "../../contracts/do-messages";
 import type { Env } from "../../contracts/env";
 import { b64, b64url, fromB64, fromUtf8, randomBytes, sha256, utf8 } from "../../lib/bytes";
-import { MCP_STATE_TYPE, MCP_TOKEN_TYPE } from "../envelope";
+import { MCP_STATE_TYPE, MCP_TOKEN_TYPE } from "../../secrets/envelope";
 import { teamOp, teamStub, type McpRuntime } from "../team";
 import { CALLBACK_PATH } from "./store";
 import { checkURL } from "./validate";

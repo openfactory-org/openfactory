@@ -3,6 +3,7 @@
 // changes of the port (cloudProviders has only gcp and audiences, Linux
 // machines only).
 
+import { defaultModel, harnessForModel, normalizeType } from "@openfactory/core";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -13,7 +14,6 @@ import { defaultAgents, defaultDefinition, DEFAULT_AGENT_NAMES } from "../src/de
 import { diff, diffCounts, diffEmpty, diffSummary } from "../src/diff.ts";
 import { render } from "../src/docsgen.ts";
 import { goFloat, goQuote } from "../src/gofmt.ts";
-import { harnessForModel, defaultModel, normalizeType } from "../src/harness-models.ts";
 import { keyLine } from "../src/locate.ts";
 import { loadDir } from "../src/node.ts";
 import { SCHEMA_BASE_URL, SCHEMA_NAMES, schema, schemaForPath, schemas, schemaVersions } from "../src/schema.ts";

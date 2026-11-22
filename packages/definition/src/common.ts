@@ -1,10 +1,15 @@
 // Shared parsers: harness, auth, secrets, MCP servers, network policy and
 // execution settings. Port of internal/definition/common.go.
 
+import {
+  BUILTIN_MCP_PREFIX,
+  BUILTIN_MCP_PROVIDERS,
+  harnessForModel,
+  normalizeHost,
+  resolvePolicy,
+} from "@openfactory/core";
 import { goQuote, goTrimSpace } from "./gofmt.ts";
 import { goParseURL } from "./gourl.ts";
-import { harnessForModel } from "./harness-models.ts";
-import { normalizeHost, resolvePolicy } from "./networkpolicy.ts";
 import type { HarnessAuth, HarnessConfig, HarnessType, MCPServer, NetworkPolicy } from "./types.ts";
 import { type Doc, indexPath, isNull, type Mapping, put, resolve, type YNode } from "./yamlnode.ts";
 
@@ -14,11 +19,7 @@ export const SCHEMA_VERSION = "v1";
 /** RESERVED_MCP_SERVER_NAME is the orchestration server, injected into every run. */
 export const RESERVED_MCP_SERVER_NAME = "factory";
 
-/** BUILTIN_MCP_PREFIX is the managedId namespace of the servers that the control plane serves. */
-export const BUILTIN_MCP_PREFIX = "builtin/";
-
-/** BUILTIN_MCP_PROVIDERS are the integrations with a built-in MCP server. */
-export const BUILTIN_MCP_PROVIDERS = ["jira", "linear", "slack", "teams"];
+export { BUILTIN_MCP_PREFIX, BUILTIN_MCP_PROVIDERS };
 
 export const resourceNameRe = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 export const secretNameRe = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
@@ -515,7 +516,7 @@ function cloneHarness(h: HarnessConfig): HarnessConfig {
 
 /** withModel applies the shorthand `model: X` on top of base. */
 export function withModel(base: HarnessConfig, model: string): HarnessConfig {
-  let t = harnessForModel(model);
+  let t: HarnessConfig["type"] = harnessForModel(model);
   if (t === "") t = base.type;
   if (t !== base.type) return { type: t, model };
   const out = cloneHarness(base);

@@ -258,6 +258,17 @@ export function notify(
   });
 }
 
+/**
+ * e.notifyTop: notify without the review thread. The message is a top-level
+ * reply on the source, for example the completion notice.
+ */
+export function notifyTop(fx: Fx, wi: WorkItem | undefined, kind: string, text: string): void {
+  if (!wi) return;
+  const source: WorkItem["source"] = { ...wi.source };
+  delete source["thread_ref"];
+  notify(fx, { ...wi, source }, kind, text);
+}
+
 // ---------- tracker write-back (engine/references.go) ----------
 
 /** trackerIssues: the linked issues of a work item, and its source when it is a tracker issue. */
@@ -1115,8 +1126,8 @@ export function cancelOne(fx: Fx, runId: string, actor: string): boolean {
   return true;
 }
 
-/** cancelTree (BFS over local children). Returns the cancelled IDs. */
-export function cancelTree(fx: Fx, runId: string, actor: string): Set<string> {
+/** cancelTree (BFS over local children), except the run `skip`. Returns the cancelled IDs. */
+export function cancelTree(fx: Fx, runId: string, actor: string, skip = ""): Set<string> {
   const done = new Set<string>();
   const seen = new Set<string>();
   const queue = [runId];
@@ -1124,7 +1135,7 @@ export function cancelTree(fx: Fx, runId: string, actor: string): Set<string> {
     const id = queue.shift()!;
     if (seen.has(id)) continue;
     seen.add(id);
-    if (cancelOne(fx, id, actor)) done.add(id);
+    if (id !== skip && cancelOne(fx, id, actor)) done.add(id);
     for (const c of fx.repo.listRuns({ parentRunId: id })) queue.push(c.id);
   }
   return done;

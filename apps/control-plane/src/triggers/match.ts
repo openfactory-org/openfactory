@@ -1,6 +1,6 @@
 // Event → automation matching. Port of internal/triggers/match.go.
 import type { Automation, Event, Trigger } from "@openfactory/core";
-import * as T from "./attributes";
+import { EVENT_ATTR, EVENT_PROVIDER } from "@openfactory/core";
 import {
   CATALOG,
   GITHUB_CI_EVENTS,
@@ -26,8 +26,8 @@ export function match(ev: MatchEvent | null | undefined, a: Automation): boolean
   if (!ev || !a.enabled) return false;
   if (ev.factory_id && a.factory_id && ev.factory_id !== a.factory_id) return false;
   for (const [i, t] of (a.triggers ?? []).entries()) {
-    if (canonicalProvider(t.provider) === T.ProviderSchedule) {
-      if (ev.attributes?.[T.AttrAutomationID] !== a.id) continue;
+    if (canonicalProvider(t.provider) === EVENT_PROVIDER.Schedule) {
+      if (ev.attributes?.[EVENT_ATTR.AutomationID] !== a.id) continue;
     }
     try {
       if (matchTrigger(ev, t)) return true;
@@ -53,7 +53,9 @@ export function matchingAutomations(ev: MatchEvent, list: readonly Automation[])
 
 function eventTypeMatches(provider: string, trigger: string, got: string): boolean {
   if (trigger === got) return true;
-  return provider === T.ProviderSlack && trigger === "message_dm" && (got === "message_im" || got === "message_mpim");
+  return (
+    provider === EVENT_PROVIDER.Slack && trigger === "message_dm" && (got === "message_im" || got === "message_mpim")
+  );
 }
 
 /**
@@ -67,27 +69,30 @@ export function matchTrigger(ev: MatchEvent, t: Trigger): boolean {
   if (!eventTypeMatches(provider, t.event, ev.type)) return false;
   const pf = parseFilter(provider, t.event, t.filter, "match");
   const attrs = (ev.attributes ?? {}) as Record<string, unknown>;
-  const isSelf = attrBool(attrs, T.AttrActorIsSelf);
-  const isBot = ev.actor?.is_bot || attrBool(attrs, T.AttrActorIsBot) || isSelf;
+  const isSelf = attrBool(attrs, EVENT_ATTR.ActorIsSelf);
+  const isBot = ev.actor?.is_bot || attrBool(attrs, EVENT_ATTR.ActorIsBot) || isSelf;
   if (SELF_IGNORED_PROVIDERS.has(provider) && isSelf) return false;
-  if (provider === T.ProviderGitHub) {
+  if (provider === EVENT_PROVIDER.GitHub) {
     if (pf.skipBots === SKIP_BOTS_ALL && isBot) return false;
     if (pf.skipBots === SKIP_BOTS_SELF && isSelf) return false;
     if (t.event === "commit_status") {
-      const st = typeof attrs[T.AttrCommitState] === "string" ? (attrs[T.AttrCommitState] as string).toLowerCase() : "";
+      const st =
+        typeof attrs[EVENT_ATTR.CommitState] === "string"
+          ? (attrs[EVENT_ATTR.CommitState] as string).toLowerCase()
+          : "";
       if (st !== "success" && st !== "failure" && st !== "error") return false;
     }
     if (GITHUB_CI_EVENTS.has(t.event) && pf.conds.some((c) => c.key === "labels" || c.key === "authors")) {
-      const n = collect(attrs, [T.AttrLinkedPRCount], "int").values;
+      const n = collect(attrs, [EVENT_ATTR.LinkedPRCount], "int").values;
       if (n.length !== 1 || n[0] !== "1") return false;
     }
-  } else if (provider === T.ProviderSchedule) {
+  } else if (provider === EVENT_PROVIDER.Schedule) {
     const want = t.schedule?.name ?? "";
-    const got = typeof attrs[T.AttrScheduleName] === "string" ? attrs[T.AttrScheduleName] : "";
+    const got = typeof attrs[EVENT_ATTR.ScheduleName] === "string" ? attrs[EVENT_ATTR.ScheduleName] : "";
     if (got !== want) return false;
   }
   let text = ev.text ?? "";
-  if (text === "" && typeof attrs[T.AttrText] === "string") text = attrs[T.AttrText] as string;
+  if (text === "" && typeof attrs[EVENT_ATTR.Text] === "string") text = attrs[EVENT_ATTR.Text] as string;
   for (const c of pf.conds) if (!evalCondition(attrs, text, c)) return false;
   if (pf.payload !== undefined && !matchPayload(pf.payload, ev.payload)) return false;
   return true;
@@ -107,7 +112,7 @@ export function validateTrigger(t: Trigger): void {
   if (!t.event) throw new InvalidFilterError("event is required");
   if (t.event.includes("."))
     throw new InvalidFilterError(`event "${t.event}" must not be dotted; set provider and event separately`);
-  if (t.provider === T.ProviderSchedule) {
+  if (t.provider === EVENT_PROVIDER.Schedule) {
     if (!t.schedule) throw new InvalidFilterError(`schedule is required for schedule.${t.event}`);
     const err = validateCron(t.schedule.cron);
     if (err) throw new InvalidFilterError(`schedule.cron: ${err}`);

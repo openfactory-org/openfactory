@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ApiClient, ApiError, isNotFound, redactUrl, statusOf } from "../src/http";
+import { ApiClient, ApiError, isNotFound, redactUrl, statusCode } from "../src/http";
 import { fromApiError, isNotSupported, notSupported, rpc, toPluginError } from "../src/errors";
 import { mockFetch } from "../src/testing";
 
@@ -52,9 +52,9 @@ describe("ApiClient", () => {
     expect(ae.temporary).toBe(true);
     expect(ae.message).toContain("slow down");
     expect(ae.message).not.toContain("u:p");
-    expect(statusOf(e)).toBe(429);
+    expect(statusCode(e)).toBe(429);
     expect(isNotFound(new ApiError("GET", "u", 404, ""))).toBe(true);
-    expect(statusOf(new Error("x"))).toBe(0);
+    expect(statusCode(new Error("x"))).toBe(0);
   });
 
   it("fails on a body that is not JSON", async () => {

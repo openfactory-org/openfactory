@@ -6,10 +6,14 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/openfactory-org/openfactory/internal/rtcore"
+	"github.com/openfactory-org/openfactory/internal/sandbox/netguard"
 )
 
 func testConfig() Config {
@@ -117,9 +121,9 @@ func TestRenderBase(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		`comment "openfactory base v1"`,
+		`comment "openfactory base v2"`,
 		"elements = { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 168.63.129.16/32, 169.254.0.0/16, 172.16.0.0/12, 192.0.0.0/24, 192.0.2.0/24, 192.88.99.0/24, 192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/4, 240.0.0.0/4 }",
-		"elements = { ::/127, ::ffff:0:0/96, 64:ff9b:1::/48, 100::/64, 2001:db8::/32, fc00::/7, fe80::/10, ff00::/8 }",
+		"elements = { ::/96, ::ffff:0:0/96, 64:ff9b:1::/48, 100::/64, 2001::/32, 2001:db8::/32, fc00::/7, fe80::/10, fec0::/10, ff00::/8 }",
 		"type ipv4_addr . inet_service; flags interval\n    elements = { 10.1.2.3 . 443 }",
 		"elements = { 127.0.0.53 }",
 		"map vm_in  { type ifname : verdict; }",
@@ -155,6 +159,8 @@ func TestRenderRefresh(t *testing.T) {
 	}
 	for _, want := range []string{
 		"flush set inet openfactory internal_allow4\nadd element inet openfactory internal_allow4 { 10.1.2.3 . 443 }",
+		"flush set inet openfactory private4\nadd element inet openfactory private4 { 0.0.0.0/8, ",
+		"flush set inet openfactory private6\nadd element inet openfactory private6 { ::/96, ",
 		"flush chain inet openfactory output\nadd rule inet openfactory output meta skuid 899999 jump ofnet_out",
 		`add rule inet openfactory postrouting ip saddr 10.213.0.0/16 oifname != "ofvm*" masquerade`,
 	} {
@@ -167,13 +173,48 @@ func TestRenderRefresh(t *testing.T) {
 	}
 }
 
-func TestPrivateAddr(t *testing.T) {
-	for a, want := range map[string]bool{
-		"10.0.0.1": true, "169.254.169.254": true, "168.63.129.16": true, "100.100.100.200": true,
-		"1.1.1.1": false, "fd00::1": true, "::ffff:10.0.0.1": true, "2606:4700::1111": false,
+func TestHex6(t *testing.T) {
+	for in, want := range map[string]string{
+		"::":                   "::",
+		"::1":                  "::1",
+		"::ffff:0.0.0.0":       "::ffff:0:0",
+		"64:ff9b:1::":          "64:ff9b:1::",
+		"2001:db8::":           "2001:db8::",
+		"fe80::":               "fe80::",
+		"2001:0:0:1:0:0:0:1":   "2001:0:0:1::1",
+		"1:2:3:4:5:6:7:8":      "1:2:3:4:5:6:7:8",
+		"100::":                "100::",
+		"2001:db8:0:1:1:1:1:1": "2001:db8:0:1:1:1:1:1",
 	} {
-		if got := PrivateAddr(netip.MustParseAddr(a)); got != want {
-			t.Errorf("PrivateAddr(%s) = %v", a, got)
+		a := netip.MustParseAddr(in)
+		got := hex6(a)
+		if got != want {
+			t.Errorf("hex6(%s) = %q, want %q", in, got, want)
+		}
+		if netip.MustParseAddr(got) != a {
+			t.Errorf("hex6(%s) = %q parses to another address", in, got)
+		}
+	}
+}
+
+// TestPrivateSetsMatchNetguard checks that the nftables sets hold exactly the
+// reserved table of netguard, so the two guards cannot drift.
+func TestPrivateSetsMatchNetguard(t *testing.T) {
+	got := map[string]bool{}
+	for _, p := range append(slices.Clone(Private4), Private6...) {
+		got[netip.MustParsePrefix(p).String()] = true
+	}
+	if len(got) != len(netguard.ReservedPrefixes) {
+		t.Errorf("sets have %d prefixes, netguard has %d", len(got), len(netguard.ReservedPrefixes))
+	}
+	for _, p := range netguard.ReservedPrefixes {
+		if !got[p.String()] {
+			t.Errorf("sets lack %s", p)
+		}
+	}
+	for _, p := range Private4 {
+		if !netip.MustParsePrefix(p).Addr().Is4() {
+			t.Errorf("private4 holds %s", p)
 		}
 	}
 }
@@ -274,7 +315,7 @@ func TestDNSRelayUDPAndTCP(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _ = r.Run(ctx) }()
-	if err := WaitListen(ctx, listen, 2*time.Second); err != nil {
+	if err := rtcore.WaitDial(ctx, "tcp", listen, 2*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	c, err := net.Dial("udp4", listen)

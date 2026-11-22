@@ -2,20 +2,12 @@
 // responder shape, converting between the camelCase plugin API and the core wire
 // types. Port of the responder part of internal/plugin/adapters.go.
 
-import type { OutboundMessage, PullRequestRef, SourceRef } from "@openfactory/core";
+import type { OutboundMessage, PullRequestRef, Responder, SourceRef } from "@openfactory/core";
 import type { IssueState, ResponderPlugin } from "@openfactory/plugin-api";
 import { outboundToPlugin, pullRequestToPlugin, sourceToPlugin } from "./mappers";
 
-/** The responder port of the control plane (same shape as forges/registry Responder). */
-export interface ResponderPort {
-  provider(): string;
-  reply(teamId: string, msg: OutboundMessage): Promise<void>;
-  setIssueState?(teamId: string, issue: SourceRef, state: string, factoryId?: string): Promise<void>;
-  attachPullRequest?(teamId: string, issue: SourceRef, pr: PullRequestRef, factoryId?: string): Promise<void>;
-}
-
 /** Serves one provider of a responder plugin. */
-export class PluginResponder implements ResponderPort {
+export class PluginResponder implements Responder {
   constructor(
     private readonly plugin: ResponderPlugin,
     private readonly providerName: string,

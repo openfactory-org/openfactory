@@ -2,7 +2,8 @@
 // the pure parts of improve.go. The orchestration is in service.ts.
 import type { CompiledDefinition, Factory, Run, Score, Scorer } from "@openfactory/core";
 import { scorerName } from "./judge";
-import { f2, oneLine, truncate } from "./text";
+import { oneLine } from "@openfactory/core";
+import { f2, truncate } from "./text";
 import { clampThreshold, DEFAULT_FAILED_RUN_THRESHOLD, type RunsPort } from "./types";
 
 export const REVIEWER_ADMINS = "admins";

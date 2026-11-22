@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildConversation,
+  equalFold,
   canonicalJSON,
   checkNoMetadataEnv,
   compareJSONNumbers,
@@ -178,5 +179,28 @@ describe("canonical JSON and hashing", () => {
     expect(compareJSONNumbers("0.0", "-0")).toBe(0);
     expect(compareJSONNumbers("-10", "-9")).toBe(-1);
     expect(compareJSONNumbers("x", "1")).toBeNull();
+  });
+});
+
+describe("equalFold", () => {
+  // Expected values are Go strings.EqualFold results.
+  it.each([
+    ["Go", "GO", true],
+    ["go", "gopher", false],
+    ["", "", true],
+    ["ß", "SS", false],
+    ["ß", "ss", false],
+    ["ß", "\u1e9e", true],
+    ["\u212a", "k", true],
+    ["\u212a", "K", true],
+    ["σ", "ς", true],
+    ["ς", "Σ", true],
+    ["ΑΣ", "ας", true],
+    ["ΑΣ", "ασ", true],
+    ["ſ", "S", true],
+    ["\ufb01", "FI", false],
+    ["İ", "i", false],
+  ])("%s ~ %s", (a, b, want) => {
+    expect(equalFold(a, b)).toBe(want);
   });
 });

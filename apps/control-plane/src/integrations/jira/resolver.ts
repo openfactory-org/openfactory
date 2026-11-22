@@ -1,11 +1,10 @@
 // Jira name resolver: project names to keys, status names to IDs (port of jira/resolver.go).
 
 import type { Integration } from "@openfactory/core";
-import { ApiError } from "../http";
+import { ApiError, type ApiClient } from "@openfactory/core";
 import { NameLists, addId, addName, sortIds, type NameMap } from "../namelist";
 import type { IntegrationDeps, NameResolver } from "../types";
 import { equalFold, integrationSecret } from "../util";
-import type { ApiClient } from "../http";
 import { PROVIDER, newApiClient } from "./jira";
 import { integrationActive } from "@openfactory/core";
 

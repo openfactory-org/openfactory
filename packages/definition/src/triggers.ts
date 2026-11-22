@@ -1,5 +1,6 @@
 // Trigger catalog and trigger parser. Port of internal/definition/triggers.go.
 
+import { EVENT_PROVIDER, SCHEDULE_CONCURRENCY_ALLOW, SCHEDULE_CONCURRENCY_SKIP } from "@openfactory/core";
 import { validateCron } from "./cron.ts";
 import { goQuote, goTrimSpace } from "./gofmt.ts";
 import type { Schedule, Trigger } from "./types.ts";
@@ -45,21 +46,21 @@ export interface ProviderSpec {
   filter: FilterRule;
 }
 
-export const PROVIDER_GITHUB = "github";
-export const PROVIDER_GITLAB = "gitlab";
-export const PROVIDER_AZURE_DEVOPS = "azure_devops";
-export const PROVIDER_SLACK = "slack";
+export const PROVIDER_GITHUB = EVENT_PROVIDER.GitHub;
+export const PROVIDER_GITLAB = EVENT_PROVIDER.GitLab;
+export const PROVIDER_AZURE_DEVOPS = EVENT_PROVIDER.AzureDevOps;
+export const PROVIDER_SLACK = EVENT_PROVIDER.Slack;
+// Definitions name the Teams trigger provider "microsoft_teams"; events use "teams".
 export const PROVIDER_TEAMS = "microsoft_teams";
-export const PROVIDER_LINEAR = "linear";
-export const PROVIDER_JIRA = "jira";
-export const PROVIDER_SCHEDULE = "schedule";
-export const PROVIDER_WEBHOOK = "webhook";
+export const PROVIDER_LINEAR = EVENT_PROVIDER.Linear;
+export const PROVIDER_JIRA = EVENT_PROVIDER.Jira;
+export const PROVIDER_SCHEDULE = EVENT_PROVIDER.Schedule;
+export const PROVIDER_WEBHOOK = EVENT_PROVIDER.Webhook;
 
 /** WEBHOOK_UID_PREFIX starts the UIDs that the server gives to webhooks. */
 export const WEBHOOK_UID_PREFIX = "whk_";
 
-export const SCHEDULE_CONCURRENCY_ALLOW = "allow";
-export const SCHEDULE_CONCURRENCY_SKIP = "skip";
+export { SCHEDULE_CONCURRENCY_ALLOW, SCHEDULE_CONCURRENCY_SKIP };
 
 function spec(p: Partial<ProviderSpec> & { events: Map<string, string[]> }): ProviderSpec {
   return {

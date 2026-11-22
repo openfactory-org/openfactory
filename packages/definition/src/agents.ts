@@ -1,5 +1,6 @@
 // Agent parser and resolution. Port of internal/definition/agents.go.
 
+import { mergePolicies } from "@openfactory/core";
 import {
   applyHarness,
   dedupe,
@@ -12,7 +13,6 @@ import {
 import { type Compiler, machineRef, sortedNames } from "./compile.ts";
 import { agentSkills } from "./extras.ts";
 import { goQuote, goTrimSpace } from "./gofmt.ts";
-import { mergePolicies } from "./networkpolicy.ts";
 import type { AgentConfig, AgentType, HarnessConfig, MCPServer, NetworkPolicy } from "./types.ts";
 import {
   type Diag,

@@ -10,7 +10,18 @@
 //   key, and the store upserts a score by (scorer, run).
 // - The state of a service call is in TeamDO (score rows, markers), reached
 //   through the ScoringStore port.
-import { OfError, base32, isOfError, type Run, type Score, type Scorer, type WorkItem } from "@openfactory/core";
+import {
+  OfError,
+  base32,
+  isOfError,
+  sha256,
+  sha256Hex,
+  utf8,
+  type Run,
+  type Score,
+  type Scorer,
+  type WorkItem,
+} from "@openfactory/core";
 import { buildTranscript } from "./transcript";
 import {
   improvementPrompt,
@@ -25,7 +36,7 @@ import {
 } from "./improve";
 import { isJudgeRun, judgeAnswer, judgeRequest, scorerExec, scorerName, treeUsage } from "./judge";
 import { resolveLabel, shouldSample } from "./sample";
-import { oneLine } from "./text";
+import { oneLine } from "@openfactory/core";
 import {
   DEFAULT_MAX_FAILURE_AGE_MS,
   DEFAULT_MAX_TRANSCRIPT_BYTES,
@@ -94,14 +105,8 @@ export interface ImprovementTrack {
 
 /** A routed run ID from a hash: `run_` + token (w + 15) + 12 characters. The same input gives the same ID. */
 export async function deterministicRunId(...parts: string[]): Promise<string> {
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(parts.join("|"))));
-  const b = base32(digest);
+  const b = base32(await sha256(parts.join("|")));
   return `run_w${b.slice(0, 15)}${b.slice(15, 27)}`;
-}
-
-export async function sha256Hex(s: string): Promise<string> {
-  const d = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)));
-  return [...d].map((x) => x.toString(16).padStart(2, "0")).join("");
 }
 
 const nowIso = (ms: number): string => new Date(ms).toISOString();
@@ -703,10 +708,8 @@ export class ScoringService {
 async function inboxIdFor(workItemId: string, ref: string): Promise<string> {
   // `inb_` + the partition token of the work item + 12 characters of a hash.
   const m = /^[a-z]+_([wib][a-z2-7]{15})/.exec(workItemId);
-  const token = m?.[1] ?? "w" + base32(new TextEncoder().encode(workItemId)).slice(0, 15).padEnd(15, "a");
-  const d = new Uint8Array(
-    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`inbox|${workItemId}|${ref}`)),
-  );
+  const token = m?.[1] ?? "w" + base32(utf8(workItemId)).slice(0, 15).padEnd(15, "a");
+  const d = await sha256(`inbox|${workItemId}|${ref}`);
   return `inb_${token}${base32(d).slice(0, 12)}`;
 }
 

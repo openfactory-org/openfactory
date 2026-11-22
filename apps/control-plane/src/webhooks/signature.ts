@@ -1,5 +1,5 @@
 // Provider signature schemes of custom webhooks. Port of internal/webhooks/signature.go.
-import { b64, fromHex, timingSafeEqual, toHex, utf8 } from "../lib/bytes";
+import { b64, concat, fromHex, hmacSha256, timingSafeEqual, toHex, utf8 } from "../lib/bytes";
 
 export const SCHEME_GITHUB = "github";
 export const SCHEME_PAGERDUTY = "pagerduty";
@@ -20,14 +20,16 @@ export class SignatureError extends Error {
 
 const sigErr = (m: string) => new SignatureError(m);
 
-type Hash = "SHA-256" | "SHA-1";
-
-async function hmac(hash: Hash, key: Uint8Array, msg: Uint8Array | string): Promise<Uint8Array> {
-  const k = await crypto.subtle.importKey("raw", key as Uint8Array<ArrayBuffer>, { name: "HMAC", hash }, false, [
-    "sign",
-  ]);
-  const m = typeof msg === "string" ? utf8(msg) : msg;
-  return new Uint8Array(await crypto.subtle.sign("HMAC", k, m as Uint8Array<ArrayBuffer>));
+/** HMAC-SHA1 for the Vercel scheme; the other schemes use hmacSha256. */
+async function hmacSha1(key: Uint8Array, msg: Uint8Array): Promise<Uint8Array> {
+  const k = await crypto.subtle.importKey(
+    "raw",
+    key as Uint8Array<ArrayBuffer>,
+    { name: "HMAC", hash: "SHA-1" },
+    false,
+    ["sign"],
+  );
+  return new Uint8Array(await crypto.subtle.sign("HMAC", k, msg as Uint8Array<ArrayBuffer>));
 }
 
 function equalHex(sigHex: string, want: Uint8Array): boolean {
@@ -40,13 +42,8 @@ function equalHex(sigHex: string, want: Uint8Array): boolean {
   return timingSafeEqual(got, want);
 }
 
-const cat = (a: string, body: Uint8Array): Uint8Array => {
-  const p = utf8(a);
-  const out = new Uint8Array(p.length + body.length);
-  out.set(p);
-  out.set(body, p.length);
-  return out;
-};
+/** The UTF-8 bytes of prefix followed by body. */
+const cat = (prefix: string, body: Uint8Array): Uint8Array => concat(utf8(prefix), body);
 
 interface Scheme {
   signatureHeaders: string[];
@@ -109,10 +106,10 @@ const SCHEMES: Record<string, Scheme> = {
       const v = (h.get("X-Hub-Signature-256") ?? "").trim();
       if (v === "") throw sigErr("missing X-Hub-Signature-256 header");
       if (!v.startsWith("sha256=")) throw sigErr("X-Hub-Signature-256 must start with sha256=");
-      if (!equalHex(v.slice(7), await hmac("SHA-256", secret, body))) throw sigErr("signature mismatch");
+      if (!equalHex(v.slice(7), await hmacSha256(secret, body))) throw sigErr("signature mismatch");
     },
     async sign(secret, body, _now, id) {
-      const h = new Headers({ "X-Hub-Signature-256": "sha256=" + toHex(await hmac("SHA-256", secret, body)) });
+      const h = new Headers({ "X-Hub-Signature-256": "sha256=" + toHex(await hmacSha256(secret, body)) });
       if (id) h.set("X-GitHub-Delivery", id);
       return h;
     },
@@ -123,7 +120,7 @@ const SCHEMES: Record<string, Scheme> = {
     async verify(secret, h, body) {
       const v = (h.get("X-PagerDuty-Signature") ?? "").trim();
       if (v === "") throw sigErr("missing X-PagerDuty-Signature header");
-      const want = await hmac("SHA-256", secret, body);
+      const want = await hmacSha256(secret, body);
       let found = false;
       for (const part of v.split(",")) {
         const p = part.trim();
@@ -135,7 +132,7 @@ const SCHEMES: Record<string, Scheme> = {
       throw sigErr("signature mismatch");
     },
     async sign(secret, body, _now, id) {
-      const h = new Headers({ "X-PagerDuty-Signature": "v1=" + toHex(await hmac("SHA-256", secret, body)) });
+      const h = new Headers({ "X-PagerDuty-Signature": "v1=" + toHex(await hmacSha256(secret, body)) });
       if (id) h.set("X-Webhook-Id", id);
       return h;
     },
@@ -146,10 +143,10 @@ const SCHEMES: Record<string, Scheme> = {
     async verify(secret, h, body) {
       const v = (h.get("Sentry-Hook-Signature") ?? "").trim();
       if (v === "") throw sigErr("missing Sentry-Hook-Signature header");
-      if (!equalHex(v, await hmac("SHA-256", secret, body))) throw sigErr("signature mismatch");
+      if (!equalHex(v, await hmacSha256(secret, body))) throw sigErr("signature mismatch");
     },
     async sign(secret, body, _now, id) {
-      const h = new Headers({ "Sentry-Hook-Signature": toHex(await hmac("SHA-256", secret, body)) });
+      const h = new Headers({ "Sentry-Hook-Signature": toHex(await hmacSha256(secret, body)) });
       if (id) h.set("Request-ID", id);
       return h;
     },
@@ -164,7 +161,7 @@ const SCHEMES: Record<string, Scheme> = {
       const sigs = get("Signature");
       if (!id || !ts || !sigs) throw sigErr("missing webhook-id, webhook-timestamp or webhook-signature header");
       checkTimestamp(ts, now, tol);
-      const want = await hmac("SHA-256", standardWebhooksKey(secret), cat(`${id}.${ts}.`, body));
+      const want = await hmacSha256(standardWebhooksKey(secret), cat(`${id}.${ts}.`, body));
       let found = false;
       for (const part of sigs.split(/\s+/).filter((x) => x)) {
         if (!part.startsWith("v1,")) continue;
@@ -183,7 +180,7 @@ const SCHEMES: Record<string, Scheme> = {
     async sign(secret, body, now, id0) {
       const id = id0 || "msg_" + (BigInt(now) * 1_000_000n).toString(36);
       const ts = String(Math.floor(now / 1000));
-      const sig = await hmac("SHA-256", standardWebhooksKey(secret), cat(`${id}.${ts}.`, body));
+      const sig = await hmacSha256(standardWebhooksKey(secret), cat(`${id}.${ts}.`, body));
       return new Headers({ "Webhook-Id": id, "Webhook-Timestamp": ts, "Webhook-Signature": "v1," + b64(sig) });
     },
   },
@@ -206,14 +203,14 @@ const SCHEMES: Record<string, Scheme> = {
       if (ts === "") throw sigErr("Stripe-Signature has no timestamp");
       if (sigs.length === 0) throw sigErr("Stripe-Signature has no v1 signature");
       checkTimestamp(ts, now, tol);
-      const want = await hmac("SHA-256", secret, cat(ts + ".", body));
+      const want = await hmacSha256(secret, cat(ts + ".", body));
       if (sigs.some((s) => equalHex(s, want))) return;
       throw sigErr("signature mismatch");
     },
     async sign(secret, body, now) {
       const ts = String(Math.floor(now / 1000));
       return new Headers({
-        "Stripe-Signature": `t=${ts},v1=` + toHex(await hmac("SHA-256", secret, cat(ts + ".", body))),
+        "Stripe-Signature": `t=${ts},v1=` + toHex(await hmacSha256(secret, cat(ts + ".", body))),
       });
     },
   },
@@ -223,10 +220,10 @@ const SCHEMES: Record<string, Scheme> = {
     async verify(secret, h, body) {
       const v = (h.get("X-Vercel-Signature") ?? "").trim();
       if (v === "") throw sigErr("missing x-vercel-signature header");
-      if (!equalHex(v, await hmac("SHA-1", secret, body))) throw sigErr("signature mismatch");
+      if (!equalHex(v, await hmacSha1(secret, body))) throw sigErr("signature mismatch");
     },
     async sign(secret, body) {
-      return new Headers({ "X-Vercel-Signature": toHex(await hmac("SHA-1", secret, body)) });
+      return new Headers({ "X-Vercel-Signature": toHex(await hmacSha1(secret, body)) });
     },
   },
 };

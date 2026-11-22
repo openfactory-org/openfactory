@@ -4,7 +4,8 @@ import { REPORT_HOST, blockedMessage, decideEgress, recordBlocked, type EgressPr
 import { Egress, SandboxProvider } from "../src/index";
 import { CF_INSTANCE_TYPES } from "../src/provider";
 import type { TaskNetworkPolicy } from "@openfactory/sandbox";
-import { BOOT_GRACE_MS, DEADLINE_SLACK_MS, ENTRYPOINT, INACTIVITY_TIMEOUT_MS, KEEPALIVE_MS } from "../src/task-sandbox";
+import { BOOTSTRAP_ENTRYPOINT } from "@openfactory/sandbox/provider-kit";
+import { BOOT_GRACE_MS, DEADLINE_SLACK_MS, INACTIVITY_TIMEOUT_MS, KEEPALIVE_MS } from "../src/task-sandbox";
 import { fakeProvider, harness } from "./fakes";
 
 const small = CF_INSTANCE_TYPES[1]!;
@@ -106,7 +107,7 @@ describe("OfTaskSandbox state machine", () => {
     expect(s.state).toBe("running");
     expect(h.container.log.slice(0, 3)).toEqual(["intercept:http", "intercept:https:*", "start"]);
     expect(h.container.started).toMatchObject({
-      entrypoint: ENTRYPOINT,
+      entrypoint: [...BOOTSTRAP_ENTRYPOINT],
       enableInternet: false,
       instance: "basic",
       env: {

@@ -5,7 +5,7 @@
 // only stores and decides. Migrations use the range 200-299.
 import { BUILTIN_MCP_PREFIX, MCP_OAUTH_ERROR, OfError, newId, type MCPServer } from "@openfactory/core";
 import type { CompiledDefinition } from "@openfactory/definition";
-import { registerPreflight, type DefinitionCheck } from "./factories";
+import { agentFile, automationFile, registerPreflight, scorerFile, type DefinitionCheck } from "./factories";
 import { inUseError, teamResourceUses, type ReferenceDefinition } from "./settings";
 import { actorId, roleRank } from "../../auth/roles";
 import * as authStore from "../../mcp/auth/store";
@@ -14,8 +14,8 @@ import type { Migration } from "../../lib/sql/migrate";
 import { listResponse } from "../../lib/page";
 import { all, first } from "../../lib/sql/query";
 import { noContent, type OpCall, type TeamKit, type TeamOp } from "./index";
-import { MCP_STATE_TYPE, MCP_TOKEN_TYPE } from "../../mcp/envelope";
-import { b64, fromB64 } from "../../lib/bytes";
+import { MCP_STATE_TYPE, MCP_TOKEN_TYPE } from "../../secrets/envelope";
+import { b64, fromB64, timingSafeEqual } from "../../lib/bytes";
 import { registerRewrapSource, type RewrapSource } from "./secrets";
 
 export const migrations: readonly Migration[] = [
@@ -350,11 +350,10 @@ export function setup(_kit: TeamKit): void {
 }
 
 /**
- * The MCP OAuth token and state envelopes (base64 text, src/mcp/envelope.ts):
+ * The MCP OAuth token and state envelopes (base64 text, src/secrets/envelope.ts):
  * the same format as secret envelopes, so POST /secrets/rewrap includes them.
  */
 function mcpEnvelopes(table: string, keyCol: string, nameOf: (key: string) => string, type: string): RewrapSource {
-  const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
   return {
     name: table,
     list: (k) =>
@@ -368,7 +367,7 @@ function mcpEnvelopes(table: string, keyCol: string, nameOf: (key: string) => st
       })),
     replace: (k, key, old, next) => {
       const cur = first<{ envelope: string }>(k.sql, `SELECT envelope FROM ${table} WHERE ${keyCol} = ?`, key);
-      if (!cur || !sameBytes(fromB64(cur.envelope), old)) return false;
+      if (!cur || !timingSafeEqual(fromB64(cur.envelope), old)) return false;
       k.sql.exec(`UPDATE ${table} SET envelope = ? WHERE ${keyCol} = ?`, b64(next), key);
       return true;
     },
@@ -393,10 +392,9 @@ function preflightMCPServers(
     }
   };
   add("factory.yaml", def.mcpServers);
-  for (const a of def.agents ?? []) add(`agents/${a.name}/agent.md`, a.mcp_servers);
-  for (const au of def.automations ?? [])
-    add(`automations/${au.name}/automation.md`, au.overrides?.mcp_servers ?? undefined);
-  for (const sc of def.scorers ?? []) add(`scorers/${sc.slug}/scorer.md`, sc.mcp_servers);
+  for (const a of def.agents ?? []) add(agentFile(a.name), a.mcp_servers);
+  for (const au of def.automations ?? []) add(automationFile(au.name), au.overrides?.mcp_servers ?? undefined);
+  for (const sc of def.scorers ?? []) add(scorerFile(sc.slug), sc.mcp_servers);
   if (def.scorerDefaults) add("factory.yaml", def.scorerDefaults.mcp_servers ?? undefined);
   if (refs.length === 0) return;
   const known = reg.knownRefs(kit);

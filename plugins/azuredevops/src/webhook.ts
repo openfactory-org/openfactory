@@ -23,7 +23,7 @@ import {
   BodyTooLargeError,
   DeliveryAmbiguousError,
   EVENT_ATTR as A,
-  PROVIDER_AZURE_DEVOPS,
+  EVENT_PROVIDER,
   constantTimeEqual,
   difference,
   errorResult,
@@ -35,7 +35,7 @@ import {
   stripCode,
 } from "@openfactory/plugin-api";
 
-export const PROVIDER = PROVIDER_AZURE_DEVOPS;
+export const PROVIDER = EVENT_PROVIDER.AzureDevOps;
 export const WEBHOOK_PATH = "/plugins/azuredevops/webhook";
 
 interface Identity {

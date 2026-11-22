@@ -3,8 +3,8 @@
 // delivery and hands the event to IngressDO (partition "webhook:<id>"), which
 // dedupes exactly and delivers in order. The failed-authentication budget is
 // counted per isolate, as Go counted it per process.
-import { newId, type Event, type Webhook, type WebhookDelivery } from "@openfactory/core";
-import { sha256, sha256Hex, timingSafeEqual, utf8 } from "../lib/bytes";
+import { clipBytes, newId, type Event, type Webhook, type WebhookDelivery } from "@openfactory/core";
+import { constantTimeEqual, sha256Hex, utf8 } from "../lib/bytes";
 import {
   AUTH_SIGNATURE,
   AUTH_TOKEN,
@@ -111,22 +111,11 @@ export function payloadTitle(body: string, def: string): string {
   for (const k of ["title", "subject", "summary"]) {
     const v = (obj as Record<string, unknown>)[k];
     if (typeof v !== "string") continue;
-    let s = v.trim().split("\n")[0]!.trim();
+    const s = v.trim().split("\n")[0]!.trim();
     if (s === "") continue;
-    const b = utf8(s);
-    if (b.length > 200) {
-      let cut = 200;
-      while (cut > 0 && (b[cut]! & 0xc0) === 0x80) cut--;
-      s = new TextDecoder().decode(b.subarray(0, cut));
-    }
-    return s;
+    return clipBytes(s, 200);
   }
   return def;
-}
-
-/** constantTimeEqual of Go webhooks: compares SHA-256 digests. */
-async function digestEqual(a: Uint8Array, b: Uint8Array): Promise<boolean> {
-  return timingSafeEqual(await sha256(a), await sha256(b));
 }
 
 class SecretUnavailable extends Error {}
@@ -310,11 +299,11 @@ async function authenticate(
     case AUTH_TOKEN: {
       const v = (h.get("authorization") ?? "").trim();
       if (v.length <= 7 || v.slice(0, 7).toLowerCase() !== "bearer ") throw new Error("missing bearer token");
-      if (!(await digestEqual(utf8(v.slice(7).trim()), secret))) throw new Error("bearer token mismatch");
+      if (!constantTimeEqual(utf8(v.slice(7).trim()), secret)) throw new Error("bearer token mismatch");
       return;
     }
     case AUTH_URL_TOKEN:
-      if (!(await digestEqual(utf8(urlToken), secret))) throw new Error("URL token mismatch");
+      if (!constantTimeEqual(utf8(urlToken), secret)) throw new Error("URL token mismatch");
       return;
     case AUTH_SIGNATURE:
       await verify(wh.signature_scheme ?? "", secret, h, body, now, deps.signatureToleranceMs ?? 0);

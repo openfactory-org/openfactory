@@ -2,7 +2,7 @@
 // conversions between them and the SandboxProvider types. The worker speaks
 // snake_case JSON; the control plane uses the camelCase SandboxTask.
 import type { FailureCode } from "@openfactory/core";
-import { failureForSandboxReason } from "../failure";
+import { failureForSandboxReason } from "../failure/index";
 import {
   ProviderError,
   SANDBOX_REASONS,

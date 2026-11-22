@@ -4,6 +4,7 @@
 // trusts the key of an artifact, transcript or snapshot event without state.
 import type { Env } from "../contracts/env";
 import type { Run, RunSession } from "../engine/types";
+import { b64url, fromUtf8, hmacSha256, timingSafeEqual, tryFromB64url, utf8 } from "../lib/bytes";
 import { presignR2 } from "../storage/presign";
 import { validateKey } from "../storage/rundata";
 import type { RunnerKey } from "./token";
@@ -18,39 +19,13 @@ export const MAX_UPLOAD_BYTES: Record<string, number> = {
 };
 export const CLOUD_TOKEN_TTL = { def: 3600, min: 60, max: 3600 };
 
-const enc = new TextEncoder();
-
-function b64url(bytes: Uint8Array): string {
-  let s = "";
-  for (const b of bytes) s += String.fromCharCode(b);
-  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-function unb64url(s: string): Uint8Array | undefined {
-  if (!/^[A-Za-z0-9_-]*$/.test(s)) return undefined;
-  try {
-    const bin = atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4));
-    return Uint8Array.from(bin, (c) => c.charCodeAt(0));
-  } catch {
-    return undefined;
-  }
-}
-
-async function uploadMac(key: Uint8Array, objectKey: string): Promise<Uint8Array> {
-  const k = await crypto.subtle.importKey("raw", key, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  return new Uint8Array(await crypto.subtle.sign("HMAC", k, enc.encode("upload:" + objectKey)));
-}
-
-function equal(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) return false;
-  let d = 0;
-  for (let i = 0; i < a.length; i++) d |= a[i]! ^ b[i]!;
-  return d === 0;
+function uploadMac(key: Uint8Array, objectKey: string): Promise<Uint8Array> {
+  return hmacSha256(key, "upload:" + objectKey);
 }
 
 /** up_<b64url(key)>.<b64url(HMAC("upload:"+key))> with the current key. */
 export async function uploadId(keys: RunnerKey[], objectKey: string): Promise<string> {
-  return `up_${b64url(enc.encode(objectKey))}.${b64url(await uploadMac(keys[0]!.key, objectKey))}`;
+  return `up_${b64url(utf8(objectKey))}.${b64url(await uploadMac(keys[0]!.key, objectKey))}`;
 }
 
 /** The object key of an upload ID that this control plane issued (any known key), else undefined. */
@@ -59,11 +34,11 @@ export async function parseUploadId(keys: RunnerKey[], id: string): Promise<stri
   const rest = id.slice(3);
   const dot = rest.indexOf(".");
   if (dot < 0) return undefined;
-  const kb = unb64url(rest.slice(0, dot));
-  const mac = unb64url(rest.slice(dot + 1));
+  const kb = tryFromB64url(rest.slice(0, dot));
+  const mac = tryFromB64url(rest.slice(dot + 1));
   if (!kb || !mac) return undefined;
-  const key = new TextDecoder().decode(kb);
-  for (const k of keys) if (equal(mac, await uploadMac(k.key, key))) return key;
+  const key = fromUtf8(kb);
+  for (const k of keys) if (timingSafeEqual(mac, await uploadMac(k.key, key))) return key;
   return undefined;
 }
 

@@ -6,6 +6,7 @@
 import { doName, newId, OfError, sourceKey, toOfError, type Automation, type Event } from "@openfactory/core";
 import type { CallMeta, CoreEvent, Principal } from "../../contracts/do-messages";
 import type { Env } from "../../contracts/env";
+import { unwrapOp } from "../../lib/rpc";
 import {
   actionKey,
   continuationKind,
@@ -151,14 +152,6 @@ function bundler(d: IntakeDeps, ev: CoreEvent): (withContext: boolean) => Promis
   };
 }
 
-function opOut<T>(out: unknown, op: string): T {
-  if (typeof out === "object" && out !== null && "$error" in out) {
-    const e = (out as { $error: { code: string; detail: string } }).$error;
-    throw new OfError(e.code as never, `${op}: ${e.detail}`);
-  }
-  return out as T;
-}
-
 export function platformIntakeDeps(env: Env, teamId: string): IntakeDeps {
   const team = env.TEAM.getByName(doName.team(teamId));
   const principal: Principal = { kind: "service_account", id: "intake", teamId, role: "admin", factoryRoles: {} };
@@ -167,7 +160,7 @@ export function platformIntakeDeps(env: Env, teamId: string): IntakeDeps {
   return {
     listFactoryIds: async () =>
       (
-        opOut<{ items?: { id: string }[] }>(
+        unwrapOp<{ items?: { id: string }[] }>(
           await team.api(meta(), "listFactories", { "?limit": "500" }, null),
           "listFactories",
         ).items ?? []
@@ -175,14 +168,14 @@ export function platformIntakeDeps(env: Env, teamId: string): IntakeDeps {
     snapshot: async (fid) => (await team.configSnapshot(fid)) as Snapshot,
     factoryByAlias: async (alias) => {
       try {
-        return opOut<{ id?: string }>(await team.api(meta(), "getFactory", { uid: alias }, null), "getFactory").id;
+        return unwrapOp<{ id?: string }>(await team.api(meta(), "getFactory", { uid: alias }, null), "getFactory").id;
       } catch {
         return undefined;
       }
     },
     user: async (id) => {
       try {
-        return opOut<User>(await team.api(meta(), "getUser", { id }, null), "getUser");
+        return unwrapOp<User>(await team.api(meta(), "getUser", { id }, null), "getUser");
       } catch {
         return undefined;
       }
@@ -208,7 +201,7 @@ export function platformIntakeDeps(env: Env, teamId: string): IntakeDeps {
     },
     work: (token) => env.WORK.getByName(doName.work(teamId, token)) as unknown as ReturnType<IntakeDeps["work"]>,
     resolveRunAs: async (factoryId, runAs) =>
-      opOut<RunPrincipal>(
+      unwrapOp<RunPrincipal>(
         await team.api(meta(), "principals.resolveRunAs", {}, { factoryId, runAs }),
         "principals.resolveRunAs",
       ),

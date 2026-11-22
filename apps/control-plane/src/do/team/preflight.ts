@@ -25,16 +25,21 @@ import type { Migration } from "../../lib/sql/migrate";
 import { all } from "../../lib/sql/query";
 import { listUsers } from "./auth";
 import { listIntegrations } from "./integrations";
-import { registerPreflight, type DefinitionCheck, type FactoryRecord } from "./factories";
+import {
+  agentFile,
+  automationFile,
+  registerPreflight,
+  scorerFile,
+  webhookFile,
+  type DefinitionCheck,
+  type FactoryRecord,
+} from "./factories";
 import { getSecretValue } from "./secrets";
+import { isProviderHost } from "./workers";
 import type { TeamKit, TeamOp } from "./index";
 
 export const migrations: readonly Migration[] = [];
 
-const agentFile = (n: string) => `agents/${n}/agent.md`;
-const automationFile = (n: string) => `automations/${n}/automation.md`;
-const scorerFile = (n: string) => `scorers/${n}/scorer.md`;
-const webhookFile = (n: string) => `webhooks/${n}.yaml`;
 const q = (s: string) => JSON.stringify(s);
 
 const teamUsers = (kit: TeamKit): PrincipalUser[] => listUsers(kit) as unknown as PrincipalUser[];
@@ -397,9 +402,6 @@ export function preflightCredentials(
 
 // ---------- workerEnvironment auth ----------
 
-const BUILTIN_HOSTS = new Set(["", "server", "managed"]);
-const PROVIDER_HOSTS = new Set(["cloudflare-sandbox", "daytona", "boatdev", "microvm"]);
-
 /**
  * preflightWorkerEnvironment: harness auth workerEnvironment takes the
  * credential from the environment of a development process worker. A microVM
@@ -443,7 +445,7 @@ export function preflightWorkerEnvironment(kit: TeamKit, def: CompiledDefinition
       const w = workers.find((x) => x.id === u.host || x.name === u.host);
       if (w) {
         if (w.kind === "microvm") microvm = [w.name];
-      } else if (BUILTIN_HOSTS.has(u.host) || PROVIDER_HOSTS.has(u.host) || providers.includes(u.host)) {
+      } else if (isProviderHost(u.host, providers)) {
         chk.errors.push({
           file: u.file,
           field: u.field,

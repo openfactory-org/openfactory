@@ -4,11 +4,11 @@
 // WorkDO of the run wakes the stream; the Worker then reads the run and its
 // new messages.
 import { doName, invalid, partitionOf } from "@openfactory/core";
-import type { Handler } from "../http/handler";
+import { callMeta, teamOf, type Handler } from "../http/handler";
 import { runView } from "../engine/view";
 import type { Run } from "../engine/types";
 import { HEARTBEAT_MS } from "../stream/index";
-import { metaOf, readRunMessages, teamOf } from "./runs";
+import { readRunMessages } from "./runs";
 
 /** Stream topics accepted by GET /stream?topics= (stream.go). */
 export const STREAM_TOPICS = ["run", "message", "inbox", "workitem", "definition"] as const;
@@ -36,7 +36,7 @@ export const streamEvents: Handler = async (req, env, ctx) => {
 
   const work = runId ? env.WORK.getByName(doName.work(team, partitionOf(runId))) : undefined;
   // 403 or 404 before the stream starts; WorkDO.api checks the caller's role for the run's factory.
-  let run = work ? ((await work.api(metaOf(ctx), "getRun", { runId }, null)) as Run) : undefined;
+  let run = work ? ((await work.api(callMeta(ctx), "getRun", { runId }, null)) as Run) : undefined;
 
   const qs = new URLSearchParams();
   if (runId) qs.set("run", runId);
@@ -92,7 +92,7 @@ export const streamEvents: Handler = async (req, env, ctx) => {
           }
         }
         if (want.includes("message")) {
-          for (const m of await readRunMessages(env, work, metaOf(ctx), runId, lastSeq)) {
+          for (const m of await readRunMessages(env, work, callMeta(ctx), runId, lastSeq)) {
             if (m.seq <= lastSeq) continue;
             lastSeq = m.seq;
             await send("message", String(m.seq), m);

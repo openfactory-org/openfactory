@@ -3,10 +3,19 @@
 // .openfactory/events/<message_id>/. Port of internal/eventctx. Bundles are
 // stored in R2 by the SHA-256 of their JSON (plan rule 9): WorkDO keeps only
 // the reference.
-import { OfError, type Event, type FileDiff, type ReviewThread, type SourceRef } from "@openfactory/core";
+import {
+  OfError,
+  cutBytes,
+  oneLine,
+  splitRepo,
+  truncate,
+  type Event,
+  type FileDiff,
+  type ReviewThread,
+  type SourceRef,
+} from "@openfactory/core";
 import { isNotSupported } from "@openfactory/plugin-api";
 import type { ForgeResolver } from "../forges/forge";
-import { splitRepo } from "../forges/util/text";
 import { b64, fromB64, sha256Hex, utf8 } from "../lib/bytes";
 
 export const DIR = ".openfactory/events";
@@ -83,14 +92,6 @@ export function cleanRel(p: string): string {
     else parts.pop();
   }
   return parts.join("/");
-}
-
-/** Cuts b to at most max bytes at a UTF-8 rune start. */
-export function cutBytes(b: Uint8Array, max: number): Uint8Array {
-  if (b.length <= max) return b;
-  let n = max;
-  while (n > 0 && (b[n]! & 0xc0) === 0x80) n--;
-  return b.subarray(0, n);
 }
 
 function payloadBytes(p: unknown): Uint8Array {
@@ -511,19 +512,13 @@ export function defaultBuilders(): Builder[] {
 const REVIEW_THREAD_FILE = "review_thread.json";
 const FILE_DIFF_FILE = "file_diff.patch";
 
-function oneLine(s: string): string {
-  const t = s
-    .split(/\s+/)
-    .filter((x) => x)
-    .join(" ");
-  const r = Array.from(t);
-  return r.length > 300 ? r.slice(0, 299).join("") + "…" : t;
-}
+/** The text on one line, at most 300 characters. */
+const shortLine = (s: string): string => truncate(oneLine(s), 300);
 
 function readReason(what: string, err: unknown): string {
   // A plugin Worker's OfError crosses RPC as a plain Error: match the code, not the class.
   if (isNotSupported(err)) return "this forge cannot read " + what;
-  return "could not read " + what + ": " + oneLine((err as Error).message);
+  return "could not read " + what + ": " + shortLine((err as Error).message);
 }
 
 function payloadPath(ev: Event): string {
@@ -609,7 +604,7 @@ export function reviewBuilders(src: ForgeResolver | null): Builder[] {
           scope: [s.repo],
         });
       } catch (e) {
-        return leftOut("no forge client: " + oneLine((e as Error).message));
+        return leftOut("no forge client: " + shortLine((e as Error).message));
       }
       if (!f.reviewThread || !f.fileDiff) return leftOut(`the ${provider} forge cannot read review threads or diffs`);
       const files: File[] = [];

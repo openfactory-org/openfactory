@@ -6,10 +6,9 @@
 // Integration records (provider "microsoft_teams"), one per connected team:
 //   config team_id (Graph team UUID, necessary), tenant_id, app_type, app_id
 //   (necessary), channel_ids; secret_ref: the bot app password.
-import { OfError, integrationWorkspace, newId } from "@openfactory/core";
+import { ApiClient, ApiError, OfError, integrationWorkspace, newId } from "@openfactory/core";
 import type { Actor, Event, Integration, OutboundMessage, SourceRef } from "@openfactory/core";
-import { A, INTEGRATION_TEAMS, PROVIDER_TEAMS } from "../eventattr";
-import { ApiClient, ApiError } from "../http";
+import { EVENT_ATTR as A, EVENT_PROVIDER } from "@openfactory/core";
 import { intake, selectTeam } from "../select";
 import { autoRespondToThreadReplies, dashboardHint, member } from "../shared";
 import type {
@@ -18,28 +17,17 @@ import type {
   EventContextResult,
   IntegrationDeps,
   Logger,
-  Responder,
   WebhookOutcome,
 } from "../types";
 import { consoleLogger } from "../types";
-import {
-  Dedupe,
-  cfg,
-  equalFold,
-  errMessage,
-  errorResponse,
-  formatOutbound,
-  integrationSecret,
-  readBody,
-  setCapped,
-  stringSet,
-} from "../util";
+import { formatOutbound, stringSet, type Responder } from "@openfactory/core";
+import { Dedupe, cfg, equalFold, errMessage, errorResponse, integrationSecret, readBody, setCapped } from "../util";
 import { DEFAULT_TOKEN_TENANT, GRAPH_SCOPE, KeySet, TokenSource } from "./auth";
 import { GRAPH_PAGE_SIZE, MAX_THREAD_MESSAGES, cleanText, fitThread, threadEntry, type ThreadEntry } from "./context";
 import { EVENT_CONTEXT_MAX_PAYLOAD_BYTES } from "../types";
 
-export const PROVIDER = PROVIDER_TEAMS;
-export const INTEGRATION_PROVIDER = INTEGRATION_TEAMS;
+export const PROVIDER = EVENT_PROVIDER.Teams;
+export const INTEGRATION_PROVIDER = "microsoft_teams";
 /** The factory.yaml integrations[].type. */
 export const DEFINITION_TYPE = "microsoft-teams";
 export const MESSAGES_PATH = "/integrations/teams/messages";

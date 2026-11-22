@@ -4,7 +4,16 @@
 import { describe, expect, it } from "vitest";
 import type { Principal } from "../contracts/do-messages";
 import { generateKey, parseKey } from "./apikeys";
-import { claimStrings, identityFromClaims, mapRole, oidcConfigFromEnv, safeReturnTo, type OIDCConfig } from "./oidc";
+import {
+  OIDC_MAX_RESPONSE_BYTES,
+  claimStrings,
+  discover,
+  identityFromClaims,
+  mapRole,
+  oidcConfigFromEnv,
+  safeReturnTo,
+  type OIDCConfig,
+} from "./oidc";
 import { actionForRole, canOn, isFactoryScoped, requireRole, roleAuthorizerAllow, roleFor } from "./roles";
 import { hashBootstrap, mintSessionToken, staticKeys, verifySessionToken } from "./run";
 import { Sealer } from "./seal";
@@ -103,6 +112,24 @@ describe("roles (internal/api roles_test, auth RoleAuthorizer)", () => {
 });
 
 describe("OIDC (internal/auth oidc tests)", () => {
+  it("caps the discovery document", async () => {
+    const doc = (issuer: string, pad = 0) =>
+      JSON.stringify({
+        issuer,
+        authorization_endpoint: issuer + "/auth",
+        token_endpoint: issuer + "/token",
+        jwks_uri: issuer + "/jwks",
+        pad: "x".repeat(pad),
+      });
+    const small = "https://idp-small.example.test";
+    const ok = await discover(small, (async () => new Response(doc(small))) as unknown as typeof fetch);
+    expect(ok.d.token_endpoint).toBe(small + "/token");
+    const big = "https://idp-big.example.test";
+    await expect(
+      discover(big, (async () => new Response(doc(big, OIDC_MAX_RESPONSE_BYTES))) as unknown as typeof fetch),
+    ).rejects.toThrow(/too large/);
+  });
+
   const cfg = (o: Partial<OIDCConfig> = {}): OIDCConfig => ({
     issuer: "https://idp.example.test",
     clientId: "cid",

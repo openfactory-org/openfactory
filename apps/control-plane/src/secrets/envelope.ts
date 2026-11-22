@@ -112,6 +112,37 @@ export class Envelopes {
   }
 }
 
+/** Secret types of the MCP OAuth envelopes (bound into the ciphertext as additional data). */
+export const MCP_TOKEN_TYPE = "mcp_oauth_token";
+export const MCP_STATE_TYPE = "mcp_oauth_state";
+
+/** Positional form of Envelopes.encrypt and decrypt, used by the MCP OAuth code. */
+export interface Encrypter {
+  encrypt(
+    teamId: string,
+    factoryId: string,
+    name: string,
+    type: string,
+    value: Uint8Array,
+  ): Promise<Uint8Array<ArrayBuffer>>;
+  decrypt(
+    teamId: string,
+    factoryId: string,
+    name: string,
+    type: string,
+    envelope: Uint8Array,
+  ): Promise<Uint8Array<ArrayBuffer>>;
+}
+
+/** The Encrypter of OF_SECRET_KEY (+ OF_SECRET_KEY_PREVIOUS): the same envelopes as the secret store. */
+export async function localEncrypter(env: Pick<Env, "OF_SECRET_KEY" | "OF_SECRET_KEY_PREVIOUS">): Promise<Encrypter> {
+  const e = await envelopes(env);
+  return {
+    encrypt: (teamId, factoryId, name, type, value) => e.encrypt({ teamId, factoryId, name, type }, value),
+    decrypt: (teamId, factoryId, name, type, envelope) => e.decrypt({ teamId, factoryId, name, type }, envelope),
+  };
+}
+
 const cache = new Map<string, Promise<Envelopes>>();
 
 /** The envelope sealer of OF_SECRET_KEY (+ OF_SECRET_KEY_PREVIOUS), cached per isolate. */

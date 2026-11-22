@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 )
 
 // HelperSpec describes the per-VM network helper.
@@ -115,7 +117,7 @@ func StartHelper(ctx context.Context, spec HelperSpec, o HelperOptions) (*Helper
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
-	if err := WaitListen(ctx, spec.ListenAddr(), timeout); err != nil {
+	if err := rtcore.WaitDial(ctx, "tcp", spec.ListenAddr(), timeout); err != nil {
 		h.Stop()
 		return nil, fmt.Errorf("%w: %s", ErrHelperNotReady, spec.ListenAddr())
 	}
@@ -219,27 +221,6 @@ func (h *Helper) Stop() {
 	select {
 	case <-h.done:
 	case <-time.After(5 * time.Second):
-	}
-}
-
-// WaitListen waits until addr accepts TCP connections.
-func WaitListen(ctx context.Context, addr string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	d := net.Dialer{Timeout: 200 * time.Millisecond}
-	for {
-		c, err := d.DialContext(ctx, "tcp", addr)
-		if err == nil {
-			_ = c.Close()
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(50 * time.Millisecond):
-		}
 	}
 }
 

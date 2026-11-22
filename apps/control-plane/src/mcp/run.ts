@@ -5,6 +5,7 @@
 import { doName, partitionOf, type MCPServer } from "@openfactory/core";
 import type { Env } from "../contracts/env";
 import { runnerKeys, verifySessionToken } from "../runner-api/token";
+import { expandWith, placeholders } from "../secrets/expand";
 import { teamStub } from "./team";
 
 /** What the MCP endpoints read of a run. */
@@ -34,8 +35,6 @@ export interface McpRunBackend {
   /** Expands {{SECRET}} placeholders with the run's factory secrets. */
   expandSecrets(env: Env, run: RunView, value: string): Promise<string>;
 }
-
-const PLACEHOLDER_RE = /\{\{\s*([A-Z_][A-Z0-9_]*)\s*\}\}/g;
 
 /** Normalizes engine config.mcp_servers (snake or camel case) to MCPServer. */
 export function mcpServersOf(raw: unknown): Record<string, MCPServer> {
@@ -132,17 +131,14 @@ export const defaultRunBackend: McpRunBackend = {
   },
 
   async expandSecrets(env, run, value) {
-    const names = [...new Set([...value.matchAll(PLACEHOLDER_RE)].map((m) => m[1]!))];
+    const names = placeholders(value);
     if (names.length === 0) return value;
+    // One read for every name; a missing name is reported by expandWith.
     const vals = await teamStub(env, run.teamId).secretsResolve(
       { requestId: "mcp" },
       { factoryId: run.factoryId, runId: run.id, names },
     );
-    return value.replace(PLACEHOLDER_RE, (_m, n: string) => {
-      const v = vals[n];
-      if (v === undefined) throw new Error(`secret ${n} not found`);
-      return v;
-    });
+    return expandWith(value, (n) => (Object.hasOwn(vals, n) ? vals[n] : undefined));
   },
 };
 

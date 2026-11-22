@@ -27,11 +27,10 @@ import {
   setStage,
   workItemEvent,
   trackerOp,
-  writeBackComplete,
-  writeBackPullRequest,
   type ChildPlan,
   type Fx,
 } from "./engine";
+import { completeWorkItem, linkPullRequest } from "./intake";
 
 export interface ToolCall {
   runId: string;
@@ -356,71 +355,15 @@ function dispatchTool(fx: Fx, caller: Run, call: ToolCall): ToolResult {
     }
     case "complete_work_item": {
       if (!caller.work_item_id) throw invalid("the run has no work item");
-      const out = setStage(fx, caller.work_item_id, "complete", actor, s(input.note));
-      // Move the tracker issues to done.
-      writeBackComplete(fx, out);
-      for (const it of fx.repo.listInbox({ resolved: false })) {
-        it.resolved = true;
-        it.resolution = "completed";
-        it.resolved_by = actor;
-        it.resolved_at = iso(fx.now());
-        fx.repo.putInbox(it);
-        projectInbox(fx, it);
-      }
-      notify(fx, out, "handoff", s(input.note) || "The work is complete.");
+      const out = completeWorkItem(fx, caller.work_item_id, actor, s(input.note));
       return text({ stage: out.stage });
     }
     case "link_pull_request": {
-      // engine.LinkPullRequest: the Worker read the pull request (linkpr.ts)
-      // and its normalized reference key and source.
+      // engine.LinkPullRequest: the Worker read the pull request (linkpr.ts).
       const wi = caller.work_item_id ? fx.repo.getWorkItem(caller.work_item_id) : undefined;
       if (!wi) throw invalid("the run has no work item");
       const pr = { ...(input.pull_request as PullRequestRef | undefined) } as PullRequestRef;
-      if (!pr.url && (!pr.repo || !pr.number)) throw invalid("pull request url or repo+number is required");
-      if (!pr.state) pr.state = "open";
-      const list = wi.pull_requests ?? [];
-      const i = list.findIndex(
-        (p) =>
-          (!!pr.url && p.url === pr.url) ||
-          (!!pr.repo && !!pr.number && p.repo.toLowerCase() === pr.repo.toLowerCase() && p.number === pr.number),
-      );
-      if (i >= 0) {
-        const merged = { ...list[i]! };
-        if (pr.forge) merged.forge = pr.forge;
-        if (pr.repo) merged.repo = pr.repo;
-        if (pr.number) merged.number = pr.number;
-        if (pr.url) merged.url = pr.url;
-        if (pr.branch) merged.branch = pr.branch;
-        merged.state = pr.state;
-        list[i] = merged;
-      } else {
-        list.push(pr);
-      }
-      wi.pull_requests = list;
-      const key = s(input.key);
-      const source = input.source as SourceRef | undefined;
-      if (i < 0 && key && source) {
-        const refs = wi.references ?? [];
-        if (!refs.some((r) => r.key === key)) {
-          const ref: WorkItemRef = { kind: "pull_request", key, source, added_at: iso(fx.now()) };
-          wi.references = [...refs, ref];
-          fx.repo.sql.exec(
-            "INSERT OR IGNORE INTO work_item_refs (key, kind, added_ms, data) VALUES (?, ?, ?, ?)",
-            key,
-            "pull_request",
-            fx.now(),
-            JSON.stringify(ref),
-          );
-        }
-      }
-      wi.updated_at = iso(fx.now());
-      fx.repo.putWorkItem(wi);
-      if (i < 0) {
-        workItemEvent(fx, wi.id, "pr_linked", caller.id, actor, { key, pull_request: pr });
-        // Attach the pull request to the tracker issues.
-        writeBackPullRequest(fx, wi, pr);
-      }
-      projectWorkItem(fx, wi);
+      const { key } = linkPullRequest(fx, wi, pr);
       return text({ linked: key || pr.url });
     }
     case "link_issue": {

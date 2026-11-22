@@ -2,8 +2,7 @@
 // (builtin/package-registries, builtin/claude-code, builtin/codex) with
 // versioned host lists, version selectors, host validation, and the
 // factory+agent merge with deny-wins semantics. Port of internal/networkpolicy.
-// The API matches the temporary copy in packages/definition, plus allowed,
-// withRequired and mergeNetworkPolicies.
+// Host lists are sorted in Go sort.Strings order (UTF-8 byte order).
 
 import { OfError } from "./errors";
 import { goQuote, sortStrings } from "./gostd";
@@ -321,7 +320,7 @@ function parseIPv6(s: string): number[] | null {
   return ip;
 }
 
-/** ipString formats 16 IP bytes like Go"s net.IP.String. */
+/** ipString formats 16 IP bytes like Go's net.IP.String. */
 export function ipString(ip: number[]): string {
   const isV4 = ip.slice(0, 10).every((b) => b === 0) && ip[10] === 0xff && ip[11] === 0xff;
   if (isV4) return ip.slice(12).join(".");

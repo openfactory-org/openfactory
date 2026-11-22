@@ -2,15 +2,7 @@
 // Slack, Teams). Port of the core.Store / core.SecretStore / core.EventBus
 // uses of internal/integrations. The Worker wires the real implementations
 // (TeamDO RPC, secrets, IngressDO); tests pass fakes.
-import type {
-  Event,
-  ExternalIdentity,
-  Integration,
-  OutboundMessage,
-  PullRequestRef,
-  SourceRef,
-  User,
-} from "@openfactory/core";
+import type { Event, ExternalIdentity, Integration, PullRequestRef, SourceRef, User } from "@openfactory/core";
 
 export type Fetch = (input: Request | string | URL, init?: RequestInit) => Promise<Response>;
 
@@ -96,12 +88,6 @@ export interface IntegrationDeps {
   work?: WorkSide;
   log?: Logger;
   now?: () => Date;
-}
-
-/** Posts outbound messages back to a work source. */
-export interface Responder {
-  provider(): string;
-  reply(teamId: string, msg: OutboundMessage): Promise<void>;
 }
 
 /** The write-back of a tracker. */

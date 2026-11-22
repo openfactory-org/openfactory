@@ -6,7 +6,7 @@ import type { CoreEvent } from "../../contracts/do-messages";
 import type { Env } from "../../contracts/env";
 import { normalizeProvider } from "../../engine/intake";
 import type { ForgeResolver } from "../../forges/forge";
-import { splitRepo } from "../../forges/util/text";
+import { splitRepo } from "@openfactory/core";
 
 export type OnboardingReason = "unlinked" | "non_member";
 

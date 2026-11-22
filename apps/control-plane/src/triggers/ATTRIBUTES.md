@@ -4,7 +4,7 @@ Integrations (forges, chat, trackers), the webhook ingress and the scheduler tur
 inbound activity into a `core.Event` and publish it on `core.TopicInboundEvent`.
 `match` / `matchTrigger` (match.ts) evaluate automation triggers against
 that event. This file lists, per provider and event, what each producer must set.
-Constants for every key are in `attributes.ts` (`Attr*`).
+Constants for every key are `EVENT_ATTR` in `@openfactory/core` (`packages/core/src/eventattr.ts`).
 
 ## General rules
 

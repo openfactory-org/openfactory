@@ -17,9 +17,9 @@ import {
 import { isNotSupported, type ForgePlugin, type ForgeTarget as PluginTarget } from "@openfactory/plugin-api";
 import { GitHubClient, parseInstallationId, type TokenCache } from "./github/client";
 import { AZURE_DEVOPS, GIT, GITHUB, GITLAB, type Forge, type ForgeLookup, type ForgeResolver } from "./forge";
-import { statusCode, type FetchFn } from "./util/http";
+import { statusCode, type FetchFn } from "@openfactory/core";
 import { repoOwner, selectIntegration } from "./util/select";
-import { formatOutbound, splitRepo } from "./util/text";
+import { formatOutbound, splitRepo, type Responder } from "@openfactory/core";
 
 /** Maps a codeForge (GITHUB, gitlab, azure-devops...) to the integration provider. */
 export function integrationProvider(codeForge: string): string {
@@ -446,15 +446,6 @@ export class PluginForge implements Forge {
 }
 
 // ---------- Responder ----------
-
-/** Posts outbound messages back to a work source (core.Responder). */
-export interface Responder {
-  provider(): string;
-  reply(teamId: string, msg: OutboundMessage): Promise<void>;
-  /** Tracker write-back (core.IssueTracker). */
-  setIssueState?(teamId: string, issue: SourceRef, state: string, factoryId?: string): Promise<void>;
-  attachPullRequest?(teamId: string, issue: SourceRef, pr: PullRequestRef, factoryId?: string): Promise<void>;
-}
 
 /** Posts replies as comments on the originating issue, pull request or work item. */
 export class ForgeResponder implements Responder {

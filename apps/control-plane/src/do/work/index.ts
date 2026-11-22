@@ -9,10 +9,9 @@ import {
   newRoutedId,
   notFound,
   OfError,
+  lookupFailure,
   partitionOf,
-  pullRequestSource,
   sourceKey,
-  type FailureCode,
 } from "@openfactory/core";
 import { failureForSandboxReason, gateNetworkPolicy, parseProviderError, type TaskStatus } from "@openfactory/sandbox";
 import type { EndRequest, StartRequest } from "@openfactory/runner-proto";
@@ -37,13 +36,10 @@ import {
 import { defaultProviderId, providerFor, targetOf } from "../dispatch/providers";
 import {
   createRun as engineCreateRun,
-  resolveInboxItem,
-  resumesRun,
   actorLabel,
-  resolutionMessage,
+  resumesRun,
   workItemEvent,
   cancel,
-  cancelOne,
   setStage,
   dispatchRoot,
   loseCode,
@@ -89,7 +85,14 @@ import {
 } from "./runner";
 import { runTool, type ToolCall, type ToolResult } from "./tools";
 import { approverDeps, canApprove, notAnApprover } from "./approvers";
-import { applyAction as applyIntake, completeWorkItem, type ApplyActionInput, type ApplyActionResult } from "./intake";
+import {
+  answerInbox,
+  applyAction as applyIntake,
+  completeWorkItem,
+  linkPullRequest,
+  type ApplyActionInput,
+  type ApplyActionResult,
+} from "./intake";
 
 /** Delivers notices (notify service). The integrations workstream sets it; the default logs and acks. */
 export type NoticeDeliverer = (env: Env, envelope: OutboxEnvelope) => Promise<void>;
@@ -309,15 +312,6 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
       return this.live.accept([`run:${run}`], {});
     }
     return new Response("not found", { status: 404 });
-  }
-
-  override async webSocketMessage(): Promise<void> {}
-  override async webSocketClose(ws: WebSocket, code: number): Promise<void> {
-    try {
-      ws.close(code === 1005 ? 1000 : code, "bye");
-    } catch {
-      /* closed */
-    }
   }
 
   // ---------- runs (Worker -> WorkDO) ----------
@@ -680,29 +674,7 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
           return this.txFx((fx) => {
             const wi = fx.repo.getWorkItem(params.id);
             if (!wi) throw notFound(`work item ${params.id}`);
-            const pr = (body ?? {}) as PullRequestRef;
-            if (!pr.repo || !pr.number) throw invalid("pull request repo and number are required");
-            const list = wi.pull_requests ?? [];
-            const i = list.findIndex((x) => x.forge === pr.forge && x.repo === pr.repo && x.number === pr.number);
-            if (i >= 0) list[i] = { ...list[i]!, ...pr };
-            else list.push(pr);
-            wi.pull_requests = list;
-            const key = sourceKey(pullRequestSource(pr as never));
-            if (key && !(wi.references ?? []).some((r) => r.key === key)) {
-              wi.references = [
-                ...(wi.references ?? []),
-                { kind: "pull_request", key, added_at: new Date(fx.now()).toISOString() },
-              ];
-            }
-            wi.updated_at = new Date(fx.now()).toISOString();
-            fx.repo.putWorkItem(wi);
-            projectWorkItem(fx, wi);
-            if (i < 0)
-              workItemEvent(fx, wi.id, "pr_linked", "", actorOfMeta(meta), {
-                repo: pr.repo,
-                number: pr.number,
-                url: pr.url ?? "",
-              });
+            linkPullRequest(fx, wi, (body ?? {}) as PullRequestRef);
             return fx.repo.getWorkItem(wi.id);
           });
         case "workItemMessage":
@@ -735,16 +707,15 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
             const wi = fx.repo.getWorkItem(params.id);
             if (!wi) throw notFound(`work item ${params.id}`);
             if (wi.stage === "cancelled" || wi.stage === "complete") throw conflict(`work item is already ${wi.stage}`);
-            const actor = actorOfMeta(meta);
-            for (const r of fx.repo.listRuns({ workItemId: wi.id })) if (r.parent_run_id) cancelOne(fx, r.id, actor);
-            completeWorkItem(fx, wi.id, actor, ((body ?? {}) as { note?: string }).note ?? "");
-            return fx.repo.getWorkItem(wi.id);
+            return completeWorkItem(fx, wi.id, actorOfMeta(meta), ((body ?? {}) as { note?: string }).note ?? "");
           });
         case "workItemStage":
           return this.txFx((fx) => {
             const b = (body ?? {}) as { stage?: string; reason?: string };
             if (!b.stage || !STAGES.includes(b.stage as Stage))
               throw invalid(`invalid stage ${JSON.stringify(b.stage ?? "")}`);
+            // Engine.SetStage: the stage complete is a completion (write-back, inbox, notice).
+            if (b.stage === "complete") return completeWorkItem(fx, params.id ?? "", actorOfMeta(meta), b.reason ?? "");
             return setStage(fx, params.id ?? "", b.stage as Stage, actorOfMeta(meta), b.reason ?? "");
           });
         default:
@@ -1067,8 +1038,9 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
     });
     const pre = await provider.preflight(task);
     if (!pre.ok) {
-      const info = failureClass(pre.code);
-      if (info === "user") return { kind: "config_fault", grant: g, code: pre.code, message: pre.message };
+      // A user-class failure is a configuration fault; an unknown code is the platform's.
+      if (lookupFailure(pre.code)?.class === "user")
+        return { kind: "config_fault", grant: g, code: pre.code, message: pre.message };
       return { kind: "retry_later", grant: g, message: pre.message };
     }
     if (pre.resources) task.resources = pre.resources;
@@ -1236,26 +1208,18 @@ function createRunOnly(fx: Fx, r: NonNullable<CreateRunInput["run"]>, meta: Call
   );
 }
 
-/** ResolveInbox (T12): resolution, timeline and the answer message to the run in one transaction. */
+/** ResolveInbox of the REST API: the checks of the request, then answerInbox. */
 function resolveInbox(fx: Fx, id: string, body: unknown, meta: CallMeta): unknown {
   const it = fx.repo.getInbox(id);
   if (!it) throw notFound(`inbox item ${id}`);
   const b = (body ?? {}) as { resolution?: string; message?: string; via?: string; actor_label?: string };
   const resolution = (b.resolution ?? "").trim();
   if (!resolution) throw invalid("resolution is required");
-  const actor = meta.principal?.userId ?? meta.principal?.id ?? "api";
-  resolveInboxItem(fx, it, resolution, actor, b.via);
-  workItemEvent(fx, it.work_item_id, it.kind === "approval" ? "approval_decided" : "answer", it.run_id ?? "", actor, {
-    inbox_id: it.id,
-    resolution,
+  return answerInbox(fx, it, resolution, actorOfMeta(meta), {
+    ...(b.message ? { message: b.message } : {}),
+    ...(b.via ? { via: b.via } : {}),
+    ...(b.actor_label ? { label: b.actor_label } : {}),
   });
-  if (it.run_id && resumesRun(it)) {
-    const text = b.message ? `${resolution}\n\n${b.message}` : resolution;
-    const rec = sendMessage(fx, it.run_id, resolutionMessage(it, actorLabel(actor, b.actor_label), text), actor);
-    it.answer_message_id = rec.message_id;
-    fx.repo.putInbox(it);
-  }
-  return it;
 }
 
 /** UnresolveWindow (engine/inbox.go). */
@@ -1371,19 +1335,6 @@ function sessionView(sql: SqlStorage, s: RunSession): Record<string, unknown> {
 function isDevVersion(v: string): boolean {
   const major = v.replace(/^v/, "").split(".")[0] ?? "";
   return major === "" || !/^\d+$/.test(major);
-}
-
-function failureClass(code: FailureCode | string): "user" | "platform" {
-  const user = [
-    "invalid_configuration",
-    "environment_setup_failed",
-    "harness_auth_failed",
-    "external_authentication_required",
-    "integration_disabled",
-    "agent_failed",
-    "out_of_memory",
-  ];
-  return user.includes(code) ? "user" : "platform";
 }
 
 function providerOf(env: Env, team: string, backend: string, workerId?: string) {

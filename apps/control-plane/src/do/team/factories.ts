@@ -28,6 +28,7 @@ import { actorId, roleRank } from "../../auth/roles";
 import { bodyObject, optString, optStringArray, str, type JsonObject } from "../../lib/body";
 import { sha256Hex } from "../../lib/bytes";
 import { dest } from "../../lib/outbox/dest";
+import { API_NAME_RE } from "../../secrets/validate";
 import { listResponse, msOf, pageFrom, paginate, sqlPage } from "../../lib/page";
 import type { Migration } from "../../lib/sql/migrate";
 import { all, first } from "../../lib/sql/query";
@@ -293,10 +294,11 @@ export function registerPreflight(name: string, fn: PreflightCheck): void {
   if (!preflights.some((p) => p.name === name)) preflights.push({ name, fn });
 }
 
-const agentFile = (n: string) => `agents/${n}/agent.md`;
-const automationFile = (n: string) => `automations/${n}/automation.md`;
-const scorerFile = (n: string) => `scorers/${n}/scorer.md`;
-const webhookFile = (n: string) => `webhooks/${n}.yaml`;
+/** The definition file of an agent, automation, scorer or webhook (paths in preflight messages). */
+export const agentFile = (n: string) => `agents/${n}/agent.md`;
+export const automationFile = (n: string) => `automations/${n}/automation.md`;
+export const scorerFile = (n: string) => `scorers/${n}/scorer.md`;
+export const webhookFile = (n: string) => `webhooks/${n}.yaml`;
 
 interface DefRef {
   file: string;
@@ -594,14 +596,6 @@ function runtimeOf(versionId: string, def: CompiledDefinition): FactoryRuntime {
   return rt;
 }
 
-function defaultAlias(name: string): string {
-  return name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
 function replaceResources(kit: TeamKit, factoryId: string, m: Materialized): void {
   kit.sql.exec("DELETE FROM agents WHERE factory_id = ?", factoryId);
   kit.sql.exec("DELETE FROM automations WHERE factory_id = ?", factoryId);
@@ -747,7 +741,7 @@ export async function applyDefinition(kit: TeamKit, factoryId: string, input: Ap
     const nf: FactoryRecord = { ...f };
     if (def.name) nf.name = def.name;
     if (def.alias) nf.alias = def.alias;
-    else if (!nf.alias) nf.alias = defaultAlias(nf.name);
+    else if (!nf.alias) nf.alias = aliasFromName(nf.name);
     if (def.description) nf.description = def.description;
     else delete nf.description;
     nf.active_version_id = v.id;
@@ -1116,8 +1110,6 @@ function fillAgentSpec(s: AgentSpec, d: MdDoc): void {
   }
 }
 
-const SECRET_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
-
 function applyAgentSpec(d: MdDoc, u: JsonObject): void {
   const f = d.front;
   const s = (k: string) => str(u, k);
@@ -1155,7 +1147,7 @@ function applyAgentSpec(d: MdDoc, u: JsonObject): void {
   for (const raw of optStringArray(u, "secrets") ?? []) {
     const sn = raw.trim();
     if (sn === "" || secrets.includes(sn)) continue;
-    if (!SECRET_NAME_RE.test(sn)) throw new OfError("invalid_request", `invalid secret name ${JSON.stringify(sn)}`);
+    if (!API_NAME_RE.test(sn)) throw new OfError("invalid_request", `invalid secret name ${JSON.stringify(sn)}`);
     secrets.push(sn);
   }
   if (secrets.length) {
@@ -1254,7 +1246,7 @@ async function automationFiles(
 }
 
 /** applyFiles: apply edited files as a new version or answer the validation error. */
-async function applyFiles(
+export async function applyFiles(
   kit: TeamKit,
   c: OpCall,
   f: FactoryRecord,

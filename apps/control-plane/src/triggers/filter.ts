@@ -12,7 +12,7 @@ import {
 } from "./catalog";
 import { matchGlob, validateGlob } from "./glob";
 import { decodeJSON, isNum, isObj, kindOf, toJVal, validatePayloadPattern, type JVal } from "./payload";
-import { ProviderGitHub, ProviderSchedule } from "./attributes";
+import { EVENT_PROVIDER } from "@openfactory/core";
 
 export class InvalidFilterError extends Error {
   override readonly name = "InvalidFilterError";
@@ -69,14 +69,14 @@ export function parseFilter(provider: string, event: string, raw: unknown, mode:
   if (!es) throw filterErr(`unknown event ${goQ(event)} for provider ${goQ(provider)}`);
   if (mode === "author" && es.notAuthorable)
     throw filterErr(`event ${provider}.${event} is not available for authoring automations`);
-  const pf: ParsedFilter = { conds: [], skipBots: provider === ProviderGitHub ? SKIP_BOTS_ALL : "" };
+  const pf: ParsedFilter = { conds: [], skipBots: provider === EVENT_PROVIDER.GitHub ? SKIP_BOTS_ALL : "" };
   const v = filterValue(raw);
   let obj: { [k: string]: JVal } = {};
   if (!isNull(v)) {
     if (!isObj(v)) throw filterErr("filter must be an object");
     obj = v;
   }
-  if (provider === ProviderSchedule && mode === "author" && Object.keys(obj).length > 0)
+  if (provider === EVENT_PROVIDER.Schedule && mode === "author" && Object.keys(obj).length > 0)
     throw filterErr("schedule triggers accept no filter");
   const names = Object.keys(obj).sort(compareBytes);
   const seenNative = new Map<string, string>();

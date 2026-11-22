@@ -1,7 +1,6 @@
 // Linear name resolver: team, project, state names and issue numbers to IDs (port of linear/resolver.go).
-import { integrationActive } from "@openfactory/core";
+import { ApiError, integrationActive } from "@openfactory/core";
 import type { Integration } from "@openfactory/core";
-import { ApiError } from "../http";
 import { NameLists, addId, addName, sortIds, type NameMap } from "../namelist";
 import type { IntegrationDeps, NameResolver } from "../types";
 import { cfg, equalFold, integrationSecret } from "../util";

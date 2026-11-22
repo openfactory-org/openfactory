@@ -1,8 +1,10 @@
 // Handler and route types shared by src/http/routes.ts and the owner files in
 // src/api/, plus the helpers that forward a request to an owner DO.
-import { OfError, doName, notImplemented, problemResponse, toOfError, type ErrorCode } from "@openfactory/core";
+import { OfError, doName, isOfError, notImplemented, problemResponse, toOfError } from "@openfactory/core";
 import type { CallMeta, Principal, Role } from "../contracts/do-messages";
 import type { Env } from "../contracts/env";
+import { readTextCapped } from "../lib/body";
+import { isOpResponse, unwrapOp } from "../lib/rpc";
 
 /** Minimum role of a route ("public": no authentication; "worker": worker access token). */
 export type RouteRole = "public" | "worker" | Role;
@@ -54,12 +56,18 @@ export function json(body: unknown, status = 200, headers?: Record<string, strin
 /** maxBodyBytes of internal/api (definitions can be large). */
 export const MAX_BODY_BYTES = 8 << 20;
 
-/** decodeJSON: the JSON body, or undefined for an empty body when optional. */
+/**
+ * decodeJSON: the JSON body, or undefined for an empty body when optional.
+ * The limit counts UTF-8 bytes; the read stops after max bytes.
+ */
 export async function readJson(request: Request, optional = true, max = MAX_BODY_BYTES): Promise<unknown> {
-  const len = Number(request.headers.get("content-length") ?? "0");
-  if (len > max) throw new OfError("invalid_request", `request body exceeds ${max} bytes`);
-  const text = await request.text();
-  if (text.length > max) throw new OfError("invalid_request", `request body exceeds ${max} bytes`);
+  let text: string;
+  try {
+    text = await readTextCapped(request, max, "request body");
+  } catch (e) {
+    if (isOfError(e, "invalid_request")) throw new OfError("invalid_request", `request body exceeds ${max} bytes`);
+    throw new OfError("invalid_request", `reading body: ${(e as Error).message}`);
+  }
   if (text.trim() === "") {
     if (optional) return undefined;
     throw new OfError("invalid_request", "request body is required");
@@ -82,40 +90,10 @@ export function opParams(ctx: RouteContext): Record<string, string> {
   return out;
 }
 
-interface OpResponseLike {
-  $status: number;
-  body?: unknown;
-  headers?: Record<string, string>;
-}
-interface OpErrorLike {
-  $error: {
-    code: string;
-    detail: string;
-    reason?: string;
-    provider?: string;
-    authUrl?: string;
-    setupUrl?: string;
-    extra?: Record<string, unknown>;
-  };
-}
-
 /** Turns the result of a DO api() call into a Response (or throws its OfError). */
 export function opResult(out: unknown): Response {
-  if (typeof out === "object" && out !== null) {
-    const e = (out as OpErrorLike).$error;
-    if (e && typeof e === "object") {
-      throw new OfError(e.code as ErrorCode, e.detail, {
-        ...(e.reason ? { reason: e.reason } : {}),
-        ...(e.provider ? { provider: e.provider } : {}),
-        ...(e.authUrl ? { authUrl: e.authUrl } : {}),
-        ...(e.setupUrl ? { setupUrl: e.setupUrl } : {}),
-        ...(e.extra ? { extra: e.extra } : {}),
-      });
-    }
-    const r = out as OpResponseLike;
-    if (typeof r.$status === "number") return json(r.body ?? null, r.$status, r.headers);
-  }
-  return json(out ?? null);
+  if (isOpResponse(out)) return json(out.body ?? null, out.$status, out.headers);
+  return json(unwrapOp(out) ?? null);
 }
 
 /** The team of the request: the principal's team, else the default team. */

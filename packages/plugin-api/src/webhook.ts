@@ -1,8 +1,26 @@
 // Webhook intake helpers: body limits, signatures, and the rule that picks the
 // integration record of a delivery. Port of internal/forge/forgeutil/{webhook,select}.go.
 
-import { OfError } from "@openfactory/core";
+import {
+  OfError,
+  intakeVerified as intakeRecord,
+  ownerRule,
+  readTextCapped,
+  selectRecord,
+  type RecordRule,
+} from "@openfactory/core";
 import type { HostApi, IntegrationRecord } from "./types";
+
+export {
+  constantTimeEqual,
+  hmacSha256,
+  hmacSha256Hex,
+  repoOwner,
+  sha256Hex,
+  timingSafeEqual,
+  toHex,
+  verifyHmacSha256Hex,
+} from "@openfactory/core";
 
 /** At most this many bytes of a webhook body are read. */
 export const MAX_WEBHOOK_BODY = 10 << 20;
@@ -11,44 +29,18 @@ export class BodyTooLargeError extends Error {
   override readonly name = "BodyTooLargeError";
 }
 
+/**
+ * Reads a webhook body as text. It stops reading at max bytes and throws
+ * BodyTooLargeError when the body is longer, so a large or endless body is
+ * never buffered in full.
+ */
 export async function readBody(req: Request, max = MAX_WEBHOOK_BODY): Promise<string> {
-  const declared = Number(req.headers.get("content-length") ?? "0");
-  if (declared > max) throw new BodyTooLargeError("request body too large");
-  const buf = new Uint8Array(await req.arrayBuffer());
-  if (buf.byteLength > max) throw new BodyTooLargeError("request body too large");
-  return new TextDecoder().decode(buf);
-}
-
-/** Compares two secrets in time that depends on their length only. Empty values never match. */
-export function constantTimeEqual(a: string, b: string): boolean {
-  if (a === "" || b === "") return false;
-  const enc = new TextEncoder();
-  const x = enc.encode(a);
-  const y = enc.encode(b);
-  let diff = x.length ^ y.length;
-  const n = Math.max(x.length, y.length);
-  for (let i = 0; i < n; i++) diff |= (x[i] ?? 0) ^ (y[i] ?? 0);
-  return diff === 0;
-}
-
-function hex(buf: ArrayBuffer): string {
-  return Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-export async function hmacSha256Hex(secret: string, data: string): Promise<string> {
-  const enc = new TextEncoder();
-  const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, [
-    "sign",
-  ]);
-  return hex(await crypto.subtle.sign("HMAC", key, enc.encode(data)));
-}
-
-/** Verifies "sha256=<hex>" (or bare hex). An empty secret never verifies. */
-export async function verifyHmacSha256Hex(secret: string, body: string, sig: string): Promise<boolean> {
-  if (secret === "") return false;
-  const got = sig.trim().replace(/^sha256=/, "");
-  if (!/^[0-9a-fA-F]+$/.test(got)) return false;
-  return constantTimeEqual(await hmacSha256Hex(secret, body), got.toLowerCase());
+  try {
+    return await readTextCapped(req, max, "request body");
+  } catch (e) {
+    if (e instanceof OfError && e.code === "invalid_request") throw new BodyTooLargeError("request body too large");
+    throw e;
+  }
 }
 
 /** A JSON response for a webhook sender. */
@@ -83,27 +75,12 @@ export class DeliveryAmbiguousError extends Error {
   override readonly name = "DeliveryAmbiguousError";
 }
 
-/**
- * The owner (organization) a repository path belongs to: "acme/platform/api"
- * gives "acme" (GitLab, GitHub); Azure DevOps "org/project/repo" gives "org"
- * and "project/repo" gives "". "git" has no owner.
- */
-export function repoOwner(provider: string, repo: string): string {
-  const parts = repo
-    .trim()
-    .replace(/^\/+|\/+$/g, "")
-    .split("/");
-  switch (provider.toLowerCase()) {
-    case "git":
-      return "";
-    case "azure_devops":
-      return parts.length >= 3 ? (parts[0] ?? "") : "";
-  }
-  return parts.length < 2 ? "" : (parts[0] ?? "");
-}
-
-const sameOrg = (r: IntegrationRecord, owner: string) =>
-  (r.config["org"] ?? "").trim().toLowerCase() === owner.toLowerCase();
+const rule = (provider: string): RecordRule<IntegrationRecord> =>
+  ownerRule(
+    provider,
+    { id: (r) => r.id, team: (r) => r.teamId, factory: (r) => r.factoryId ?? "", org: (r) => r.config["org"] ?? "" },
+    noIntegration,
+  );
 
 /**
  * Picks the record for a repository. A record of the factory wins over a team
@@ -115,37 +92,7 @@ export function selectIntegration(
   factoryId: string,
   owner: string,
 ): IntegrationRecord {
-  const tier = (fac: string) => ints.filter((r) => (r.factoryId ?? "") === fac && (owner === "" || sameOrg(r, owner)));
-  const tiers = factoryId !== "" ? [tier(factoryId), tier("")] : [tier("")];
-  for (const t of tiers) {
-    if (t.length === 0) continue;
-    if (t.length === 1) return t[0]!;
-    const ids = t.map((r) => r.id).join(", ");
-    if (owner === "") {
-      throw noIntegration(
-        `${provider}: ${t.length} records (${ids}) can serve this repository: write the repository with its organization, or keep one record`,
-      );
-    }
-    throw noIntegration(`${provider}: ${t.length} records (${ids}) serve the owner "${owner}": keep one`);
-  }
-  if (owner === "") throw noIntegration(`no ${provider} integration record serves this repository`);
-  throw noIntegration(
-    `no ${provider} integration record for the owner "${owner}": add a record with config.org "${owner}"`,
-  );
-}
-
-class NoOwnerRecord extends Error {}
-
-function teamIntakeRecord(ints: IntegrationRecord[], provider: string, owner: string): IntegrationRecord {
-  const mine = ints.filter((r) => owner === "" || sameOrg(r, owner));
-  if (mine.length === 0) throw new NoOwnerRecord("no record for the owner");
-  try {
-    return selectIntegration(mine, provider, "", owner);
-  } catch (e) {
-    const fac = mine.filter((r) => (r.factoryId ?? "") !== "");
-    if (fac.length === 1) return fac[0]!;
-    throw e;
-  }
+  return selectRecord(ints, rule(provider), factoryId, owner);
 }
 
 /**
@@ -153,54 +100,17 @@ function teamIntakeRecord(ints: IntegrationRecord[], provider: string, owner: st
  * delivery, whatever the order of the teams. `all` is every record of the
  * provider (all teams).
  */
-export async function intakeVerified(
+export function intakeVerified(
   all: IntegrationRecord[],
   provider: string,
   owners: string[],
   verify: (r: IntegrationRecord) => Promise<boolean>,
 ): Promise<IntegrationRecord> {
-  const teams: string[] = [];
-  const byTeam = new Map<string, IntegrationRecord[]>();
-  for (const r of all) {
-    if (r.provider.toLowerCase() !== provider.toLowerCase()) continue;
-    if (!byTeam.has(r.teamId)) {
-      teams.push(r.teamId);
-      byTeam.set(r.teamId, []);
-    }
-    byTeam.get(r.teamId)!.push(r);
-  }
-  const cands: IntegrationRecord[] = [];
-  const skipped: string[] = [];
-  const seen = new Set<string>();
-  for (const owner of owners) {
-    for (const team of teams) {
-      try {
-        const r = teamIntakeRecord(byTeam.get(team) ?? [], provider, owner);
-        if (!seen.has(r.id)) {
-          seen.add(r.id);
-          cands.push(r);
-        }
-      } catch (e) {
-        if (!(e instanceof NoOwnerRecord)) skipped.push(`team ${team}: ${(e as Error).message}`);
-      }
-    }
-  }
-  const ok: IntegrationRecord[] = [];
-  for (const r of cands) if (await verify(r)) ok.push(r);
-  if (ok.length === 1) return ok[0]!;
-  if (ok.length > 1) {
-    const ids = ok.map((r) => `${r.id} (team ${r.teamId})`).join(", ");
-    throw new DeliveryAmbiguousError(
-      `${provider}: the records ${ids} verify the delivery: give each team its own webhook secret`,
-    );
-  }
-  const names = owners.join(", ");
-  if (cands.length === 0 && skipped.length === 0) {
-    throw new DeliveryUnverifiedError(`no ${provider} integration record for the owner "${names}"`);
-  }
-  let msg = `${provider}: ${cands.length} records can serve the owner "${names}" and none verifies the delivery`;
-  if (skipped.length > 0) msg += ": " + skipped.join("; ");
-  throw new DeliveryUnverifiedError(msg);
+  const recs = all.filter((r) => r.provider.toLowerCase() === provider.toLowerCase());
+  return intakeRecord(recs, rule(provider), provider, owners, verify, {
+    ambiguous: (msg) => new DeliveryAmbiguousError(msg),
+    unverified: (msg) => new DeliveryUnverifiedError(msg),
+  });
 }
 
 /**

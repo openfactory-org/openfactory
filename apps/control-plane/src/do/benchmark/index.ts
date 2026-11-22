@@ -49,7 +49,7 @@ import { workEngine, workRunsPort } from "../../scoring/clients";
 import { judgeAnswer, judgeRequest, treeUsage } from "../../scoring/judge";
 import { deterministicRunId } from "../../scoring/service";
 import { resolveLabel } from "../../scoring/sample";
-import { clip } from "../../scoring/text";
+import { clipBytes as clip } from "@openfactory/core";
 import {
   JUDGE_TRIAL,
   MAX_METADATA_VALUE,

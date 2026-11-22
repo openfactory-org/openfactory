@@ -6,8 +6,8 @@ import { providerLabel } from "./shared";
 import type { Prover } from "./prover";
 import type { EmailCandidate, IntegrationStore, LinkerLike, Logger } from "./types";
 import { consoleLogger } from "./types";
-import { b64urlDecode, b64urlEncode } from "./jwt";
-import { bytesEqual, hmacSha256 } from "./util";
+import { b64url, fromB64url, utf8 } from "@openfactory/core";
+import { hmacSha256, timingSafeEqual } from "./util";
 
 export const LINK_PATH = "/integrations/link/";
 export const LINK_START_PATH = "/integrations/link-start/";
@@ -93,11 +93,11 @@ export class Linker implements LinkerLike {
   }
 
   private async mac(kind: string, payload: string): Promise<string> {
-    return b64urlEncode(await hmacSha256(this.o.key, kind + ":" + payload));
+    return b64url(await hmacSha256(this.o.key, kind + ":" + payload));
   }
 
   private async seal(kind: string, v: unknown): Promise<string> {
-    const payload = b64urlEncode(JSON.stringify(v));
+    const payload = b64url(utf8(JSON.stringify(v)));
     return payload + "." + (await this.mac(kind, payload));
   }
 
@@ -108,9 +108,9 @@ export class Linker implements LinkerLike {
     const sig = tok.slice(i + 1);
     const want = await this.mac(kind, payload);
     const enc = new TextEncoder();
-    if (!bytesEqual(enc.encode(sig), enc.encode(want))) throw new Error("invalid link");
+    if (!timingSafeEqual(enc.encode(sig), enc.encode(want))) throw new Error("invalid link");
     try {
-      return JSON.parse(new TextDecoder().decode(b64urlDecode(payload))) as T;
+      return JSON.parse(new TextDecoder().decode(fromB64url(payload))) as T;
     } catch {
       throw new Error("invalid link");
     }
@@ -296,7 +296,7 @@ ${form}
       csrf = "";
     }
     const enc = new TextEncoder();
-    if (!bytesEqual(enc.encode(csrf), enc.encode(await this.csrf(user.id, tok)))) {
+    if (!timingSafeEqual(enc.encode(csrf), enc.encode(await this.csrf(user.id, tok)))) {
       return this.page(403, "Link failed", "The request is not valid. Open the link again.");
     }
     const p = await this.proverOf(claims.t, claims.p);
@@ -325,7 +325,7 @@ ${form}
 
   private async redirectToProvider(p: Prover, st: Omit<StateClaims, "n" | "e">): Promise<Response> {
     const n = crypto.getRandomValues(new Uint8Array(16));
-    const full: StateClaims = { ...st, n: b64urlEncode(n), e: this.nowS() + STATE_TTL_S };
+    const full: StateClaims = { ...st, n: b64url(n), e: this.nowS() + STATE_TTL_S };
     return new Response(null, {
       status: 303,
       headers: { Location: p.authUrl(await this.seal("state", full), this.redirectUri()) },

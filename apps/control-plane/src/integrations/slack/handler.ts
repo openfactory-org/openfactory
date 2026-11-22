@@ -7,7 +7,7 @@
 //   signing_secret_ref, link_by_email; secret_ref: the bot token (xoxb-).
 import { integrationWorkspace, newId } from "@openfactory/core";
 import type { Actor, Event, Integration, SourceRef } from "@openfactory/core";
-import { A, PROVIDER_SLACK } from "../eventattr";
+import { EVENT_ATTR as A, EVENT_PROVIDER } from "@openfactory/core";
 import { intake } from "../select";
 import { autoRespondToThreadReplies, member, openInboxItem, privateUrl } from "../shared";
 import type { IntegrationDeps, Logger, WebhookOutcome } from "../types";
@@ -26,7 +26,7 @@ import {
 import { SlackClient, respondUrl, textOfBlocks, type UserInfo } from "./client";
 import { ACTION_PREFIX, type ActionValue } from "./responder";
 
-export const PROVIDER = PROVIDER_SLACK;
+export const PROVIDER = EVENT_PROVIDER.Slack;
 export const EVENTS_PATH = "/integrations/slack/events";
 export const INTERACTIONS_PATH = "/integrations/slack/interactions";
 /** Bounds the age of signed requests (replay protection). */

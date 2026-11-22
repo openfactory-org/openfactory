@@ -2,12 +2,13 @@
 // github (client with a fetch fake, scope, events, webhook intake) and the
 // forge responder.
 import { beforeEach, describe, expect, it } from "vitest";
-import { OfError } from "@openfactory/core";
+import { ApiError, OfError } from "@openfactory/core";
 import { type Event, type Integration } from "@openfactory/core";
 import { b64, utf8 } from "../lib/bytes";
-import { extractMentions, hasMention, formatOutbound, splitRepo, truncate } from "./util/text";
+import { extractMentions, hasMention, formatOutbound, splitRepo, truncate } from "@openfactory/core";
 import { hmacSha256Hex, verifyHmacSha256Hex } from "./util/webhook";
-import { JWT, decodePEM, parseRSAPrivateKey, rsaPublicKey, signRS256, signHS256 } from "./util/jwt";
+import { decodePEM, parseRSAPrivateKey, signRS256 } from "./util/jwt";
+import { claimString, decodeUnverified, importRsaJwk, verifyJwt } from "../integrations/jwt";
 import {
   DeliveryAmbiguousError,
   DeliveryUnverifiedError,
@@ -31,7 +32,6 @@ import {
   sync,
   truncateDesc,
 } from "./defsync";
-import { ApiError } from "./util/http";
 import { noIntegration } from "./util/select";
 import { FakeForge, FakeResolver } from "../../test/fakes/forge";
 
@@ -101,18 +101,13 @@ describe("JWT", () => {
     const key = await parseRSAPrivateKey(pem);
     const exp = Math.floor(Date.now() / 1000) + 60;
     const tok = await signRS256(key, { iss: "x", aud: ["a", "b"], exp }, { kid: "k1" });
-    const j = JWT.parse(tok);
-    await j.verifyRS256(await rsaPublicKey({ kty: "RSA", kid: "k1", n: jwk.n!, e: jwk.e! }));
-    expect(j.hasAudience("b")).toBe(true);
-    expect(j.hasAudience("c")).toBe(false);
-    expect(j.headerString("kid")).toBe("k1");
-    expect(() => j.verifyTime(Date.now() + 120_000, 0)).toThrow(/expired/);
-  });
-  it("HS256", async () => {
-    const tok = await signHS256(utf8("k"), { exp: 1 });
-    await JWT.parse(tok).verifyHS256(utf8("k"));
-    await expect(JWT.parse(tok).verifyHS256(utf8("x"))).rejects.toThrow(/invalid signature/);
-    expect(() => JWT.parse("a.b")).toThrow(/malformed/);
+    const pub = await importRsaJwk({ kty: "RSA", kid: "k1", n: jwk.n!, e: jwk.e! });
+    const o = { alg: "RS256" as const, nowMs: Date.now(), skewMs: 0 };
+    expect(claimString(decodeUnverified(tok).header, "kid")).toBe("k1");
+    expect(claimString(decodeUnverified(tok).header, "typ")).toBe("JWT");
+    await expect(verifyJwt(tok, pub, { ...o, audience: ["b"] })).resolves.toMatchObject({ iss: "x" });
+    await expect(verifyJwt(tok, pub, { ...o, audience: ["c"] })).rejects.toThrow(/audience/);
+    await expect(verifyJwt(tok, pub, { ...o, nowMs: Date.now() + 120_000 })).rejects.toThrow(/expired/);
   });
   it("rejects garbage keys", async () => {
     await expect(parseRSAPrivateKey("nope")).rejects.toThrow(/no PEM block/);

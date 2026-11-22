@@ -7,7 +7,7 @@ import type { Principal, TeamRpc } from "../contracts/do-messages";
 import type { Env } from "../contracts/env";
 import { bearerToken } from "../auth/apikeys";
 import { apiKeyPrincipal, registerBearerAuthenticator } from "../auth/authenticate";
-import { isOpError } from "../do/workerhub/op";
+import { isOpError, opError } from "../lib/rpc";
 import type { WorkerRecord } from "../do/team/workers";
 import { WORKER_TOKEN_PREFIX, verifyWorkerToken } from "../do/workerhub/token";
 import { callMeta, callTeam, json, readJson, teamApi, teamOf, type Handler, type RouteContext } from "../http/handler";
@@ -168,7 +168,7 @@ export async function connectWorker(request: Request, env: Env, ctx: RouteContex
         { id: workerId },
         null,
       );
-      if (isOpError(r)) throw new OfError(r.$error.code as never, r.$error.detail);
+      if (isOpError(r)) throw opError(r.$error);
       mode = "apikey";
     }
     const headers = new Headers({

@@ -30,15 +30,25 @@ import {
   type RunMessage,
   type RunSession,
 } from "../engine/types";
-import { notImplementedHandler, type Handler, type RouteContext } from "../http/handler";
+import {
+  callMeta,
+  json,
+  notImplementedHandler,
+  readJson,
+  teamOf,
+  type Handler,
+  type RouteContext,
+} from "../http/handler";
 import { handleRunMcp, RUN_MCP_PREFIX } from "../orchestration/index";
 import { handleRunnerApi, RUNNER_PREFIX } from "../runner-api/index";
+import { isOpError, opError, unwrapOp } from "../lib/rpc";
 import { sseResponse, subscribe } from "../stream/index";
 import { checkAttachments } from "./attachments";
 import { dispatchAutomation, platformIntakeDeps } from "../do/ingress/intake";
 import { applyOverrides } from "../scoring/overrides";
 import { mergeMessages, readCompactedMessages } from "../compaction/compact";
 import type { Overrides } from "../scoring/types";
+import { API_NAME_RE } from "../secrets/validate";
 import type { ManualRunDispatcher } from "./schedules";
 
 /**
@@ -72,30 +82,13 @@ function teamOfEnv(): string {
 
 // ---------- helpers ----------
 
-export function teamOf(ctx: RouteContext): string {
-  return ctx.principal?.teamId || "default";
-}
-
-export function metaOf(ctx: RouteContext): CallMeta {
-  return { requestId: ctx.requestId, ...(ctx.principal ? { principal: ctx.principal } : {}) };
-}
-
 export function workFor(env: Env, ctx: RouteContext, id: string) {
   return env.WORK.getByName(doName.work(teamOf(ctx), partitionOf(id)));
 }
 
-export function json(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
-}
-
+/** The JSON body of a request; {} for an empty body. */
 async function body<T>(req: Request): Promise<T> {
-  const t = await req.text();
-  if (!t.trim()) return {} as T;
-  try {
-    return JSON.parse(t) as T;
-  } catch {
-    throw invalid("request body is not valid JSON");
-  }
+  return ((await readJson(req)) ?? {}) as T;
 }
 
 function publicUrl(env: Env): string {
@@ -103,7 +96,7 @@ function publicUrl(env: Env): string {
 }
 
 async function viewOf(env: Env, ctx: RouteContext, run: Run): Promise<Record<string, unknown>> {
-  const sessions = (await workFor(env, ctx, run.id).api(metaOf(ctx), "listRunSessions", { runId: run.id }, null)) as {
+  const sessions = (await workFor(env, ctx, run.id).api(callMeta(ctx), "listRunSessions", { runId: run.id }, null)) as {
     sessions: RunSession[];
   };
   return runView(run, { publicUrl: publicUrl(env), latest: sessions.sessions.at(-1) });
@@ -133,11 +126,9 @@ async function resolveAgent(env: Env, ctx: RouteContext, factoryRef: string, age
 /** An agent by its stable ID across the team's factories (agent_identity_uid without factory_id). */
 async function resolveAgentById(env: Env, ctx: RouteContext, agentId: string): Promise<Resolved> {
   const team = env.TEAM.getByName(doName.team(teamOf(ctx)));
-  const list = (await team.api(metaOf(ctx), "listFactories", { "?limit": "500" }, null)) as {
-    items?: { id: string }[];
-    $error?: { detail: string };
-  };
-  if (list.$error) throw new OfError("internal_error", list.$error.detail);
+  const list = unwrapOp<{ items?: { id: string }[] }>(
+    await team.api(callMeta(ctx), "listFactories", { "?limit": "500" }, null),
+  );
   for (const f of list.items ?? []) {
     const snap = (await team.configSnapshot(f.id)) as Snapshot | null;
     const agent = (snap?.agents ?? []).find((a) => a.id === agentId);
@@ -225,8 +216,6 @@ export function dispatchSource(b: DispatchBody, title: string): SourceRef {
   return src;
 }
 
-const SECRET_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
-
 /** normalizeHarness (internal/api/runs.go). */
 function normalizeHarness(h: NonNullable<RunConfigBody["harness"]>, workerHost: string): void {
   const t = String(h.type ?? "").toLowerCase();
@@ -295,7 +284,7 @@ function runConfigOverrides(cfgIn: RunConfigBody | null | undefined): Overrides 
   }
   validateMcpServers(cfgIn.mcp_servers);
   for (const sn of cfgIn.secrets ?? [])
-    if (!SECRET_NAME_RE.test(sn)) throw invalid(`invalid secret name ${JSON.stringify(sn)}`);
+    if (!API_NAME_RE.test(sn)) throw invalid(`invalid secret name ${JSON.stringify(sn)}`);
   const t = cfgIn.idle_timeout_minutes;
   if (t !== undefined && t !== null && (t < 0 || t > 60))
     throw invalid("idle_timeout_minutes must be between 0 and 60");
@@ -319,12 +308,15 @@ function runConfigOverrides(cfgIn: RunConfigBody | null | undefined): Overrides 
 
 /** CreateRun (internal/api/runs.go): config.environment_id must name an environment of the team. */
 async function checkEnvironment(env: Env, ctx: RouteContext, id: string): Promise<void> {
-  const out = (await env.TEAM.getByName(doName.team(teamOf(ctx))).api(metaOf(ctx), "getEnvironment", { id }, null)) as {
-    $error?: { code: string; detail: string };
-  };
-  if (!out?.$error) return;
+  const out: unknown = await env.TEAM.getByName(doName.team(teamOf(ctx))).api(
+    callMeta(ctx),
+    "getEnvironment",
+    { id },
+    null,
+  );
+  if (!isOpError(out)) return;
   if (out.$error.code === "resource_not_found") throw invalid(`environment ${id} does not exist`);
-  throw new OfError(out.$error.code as never, out.$error.detail);
+  throw opError(out.$error);
 }
 
 /** The creator and run_as of a run that an API caller starts: the caller for both (engine/principal.go). */
@@ -350,7 +342,7 @@ export const createRun: Handler = async (req, env, ctx) => {
   const factoryId = resolved.factoryId;
   const agent = applyOverrides(resolved.agent as never, ov, resolved.machines as never) as unknown as AgentConfig;
   const token = newToken("w");
-  const out = (await env.WORK.getByName(doName.work(teamOf(ctx), token)).runsCreate(metaOf(ctx), {
+  const out = (await env.WORK.getByName(doName.work(teamOf(ctx), token)).runsCreate(callMeta(ctx), {
     dispatch: {
       factoryId,
       config: agent,
@@ -364,7 +356,7 @@ export const createRun: Handler = async (req, env, ctx) => {
       ...callerPrincipals(ctx),
     },
   })) as { run: Run };
-  return json(201, runView(out.run, { publicUrl: publicUrl(env) }));
+  return json(runView(out.run, { publicUrl: publicUrl(env) }), 201);
 };
 
 /**
@@ -397,7 +389,7 @@ export const dispatchRun: Handler = async (req, env, ctx) => {
     token = r.token;
     workItemId = r.wiId;
   }
-  const out = (await env.WORK.getByName(doName.work(teamOf(ctx), token)).runsCreate(metaOf(ctx), {
+  const out = (await env.WORK.getByName(doName.work(teamOf(ctx), token)).runsCreate(callMeta(ctx), {
     dispatch: {
       factoryId,
       config: agent,
@@ -413,7 +405,7 @@ export const dispatchRun: Handler = async (req, env, ctx) => {
       ...callerPrincipals(ctx),
     },
   })) as { run: Run; workItemId?: string };
-  return json(201, { ...runView(out.run, { publicUrl: publicUrl(env) }), work_item_id: out.workItemId });
+  return json({ ...runView(out.run, { publicUrl: publicUrl(env) }), work_item_id: out.workItemId }, 201);
 };
 
 /** GET /api/v1/runs: IndexDO read model; a parent_run_id filter reads the run tree's WorkDO. */
@@ -421,29 +413,29 @@ export const listRuns: Handler = async (_req, env, ctx) => {
   const q = Object.fromEntries(ctx.url.searchParams);
   if (q.parent_run_id) {
     const res = (await workFor(env, ctx, q.parent_run_id).api(
-      metaOf(ctx),
+      callMeta(ctx),
       "listRunChildren",
       { runId: q.parent_run_id },
       null,
     )) as { runs: Run[] };
-    return json(200, {
+    return json({
       items: res.runs.map((r) => runView(r, { publicUrl: publicUrl(env) })),
       page_info: { has_next_page: false },
     });
   }
-  const res = await env.INDEX.getByName(doName.index(teamOf(ctx))).list(metaOf(ctx), "runs", q);
-  return json(200, res);
+  const res = await env.INDEX.getByName(doName.index(teamOf(ctx))).list(callMeta(ctx), "runs", q);
+  return json(res);
 };
 
 /** The run of the route, read through WorkDO.api so that WorkDO checks the caller's role for its factory. */
 async function authorizedRun(env: Env, ctx: RouteContext, runId: string): Promise<Run> {
-  return (await workFor(env, ctx, runId).api(metaOf(ctx), "getRun", { runId }, null)) as Run;
+  return (await workFor(env, ctx, runId).api(callMeta(ctx), "getRun", { runId }, null)) as Run;
 }
 
 /** GET /api/v1/runs/{runId} */
 export const getRun: Handler = async (_req, env, ctx) => {
   const run = await authorizedRun(env, ctx, ctx.params.runId ?? "");
-  return json(200, await viewOf(env, ctx, run));
+  return json(await viewOf(env, ctx, run));
 };
 
 /** A WorkDO list read as the openapi list shape {items, page_info} (one page: a run's lists are bounded). */
@@ -451,12 +443,12 @@ const workApi =
   (op: string, field: string): Handler =>
   async (_req, env, ctx) => {
     const out = (await workFor(env, ctx, ctx.params.runId ?? "").api(
-      metaOf(ctx),
+      callMeta(ctx),
       op,
       { ...Object.fromEntries(ctx.url.searchParams), ...ctx.params },
       null,
     )) as Record<string, unknown[]>;
-    return json(200, { items: out[field] ?? [], page_info: { has_next_page: false } });
+    return json({ items: out[field] ?? [], page_info: { has_next_page: false } });
   };
 
 /**
@@ -491,7 +483,7 @@ export const listRunMessages: Handler = async (_req, env, ctx) => {
   if (limit <= 0 || limit > 1000) limit = 1000;
   const stub = workFor(env, ctx, runId);
   const run = await authorizedRun(env, ctx, runId);
-  const all = await readRunMessages(env, stub, metaOf(ctx), runId, after);
+  const all = await readRunMessages(env, stub, callMeta(ctx), runId, after);
   const roles = q
     .getAll("role")
     .flatMap((r) => r.split(","))
@@ -505,7 +497,7 @@ export const listRunMessages: Handler = async (_req, env, ctx) => {
     out.has_more = true;
   } else out.has_more = false;
   out.messages = msgs;
-  return json(200, out);
+  return json(out);
 };
 
 /** POST /api/v1/runs/{runId}/messages */
@@ -514,12 +506,12 @@ export const postRunMessage: Handler = async (req, env, ctx) => {
   const message = b.message ?? b.content ?? "";
   if (!message.trim()) throw invalid("message is required");
   if (b.attachments?.length) await checkAttachments(env, teamOf(ctx), b.attachments);
-  const rec = await workFor(env, ctx, ctx.params.runId ?? "").runsMessage(metaOf(ctx), ctx.params.runId ?? "", {
+  const rec = await workFor(env, ctx, ctx.params.runId ?? "").runsMessage(callMeta(ctx), ctx.params.runId ?? "", {
     message,
     actor: actorOf(ctx),
     ...(b.attachments ? { attachments: b.attachments } : {}),
   });
-  return json(202, { run_id: ctx.params.runId ?? "", ...rec });
+  return json({ run_id: ctx.params.runId ?? "", ...rec }, 202);
 };
 
 /** POST /api/v1/runs/{runId}/followups */
@@ -529,7 +521,7 @@ export const followUpRun: Handler = postRunMessage;
 export const cancelRun: Handler = async (req, env, ctx) => {
   const b = await body<{ cascade?: boolean }>(req);
   const res = (await workFor(env, ctx, ctx.params.runId ?? "").runsCancel(
-    metaOf(ctx),
+    callMeta(ctx),
     ctx.params.runId ?? "",
     b.cascade !== false,
   )) as {
@@ -537,13 +529,13 @@ export const cancelRun: Handler = async (req, env, ctx) => {
     run: Run;
   };
   void res;
-  return json(200, { run_id: ctx.params.runId ?? "" });
+  return json({ run_id: ctx.params.runId ?? "" });
 };
 
 /** POST /api/v1/runs/{runId}/interrupt */
 export const interruptRun: Handler = async (_req, env, ctx) => {
-  await workFor(env, ctx, ctx.params.runId ?? "").runsInterrupt(metaOf(ctx), ctx.params.runId ?? "");
-  return json(202, { interrupted: true });
+  await workFor(env, ctx, ctx.params.runId ?? "").runsInterrupt(callMeta(ctx), ctx.params.runId ?? "");
+  return json({ interrupted: true }, 202);
 };
 
 /** GET /api/v1/runs/{runId}/events: SSE of run messages, woken by the WorkDO socket. */
@@ -565,7 +557,7 @@ export const streamRunEvents: Handler = async (req, env, ctx) => {
         lastState = run.state;
         events.push({ event: "run", data: view });
       }
-      const msgs = await readRunMessages(env, stub, metaOf(ctx), runId, Number(cursor) || 0);
+      const msgs = await readRunMessages(env, stub, callMeta(ctx), runId, Number(cursor) || 0);
       for (const m of msgs) events.push({ id: String(m.seq), event: "message", data: m });
       const next = msgs.at(-1) ? String(msgs.at(-1)!.seq) : cursor;
       const finished = isTerminal(run.state) || (stopOnIdle && waitsForInput(run.state));
@@ -596,8 +588,8 @@ export const listRunSessions: Handler = workApi("listRunSessions", "sessions");
 /** GET /api/v1/runs/{runId}/conversation */
 export const getRunConversation: Handler = async (_req, env, ctx) => {
   const runId = ctx.params.runId ?? "";
-  const items = await readRunMessages(env, workFor(env, ctx, runId), metaOf(ctx), runId, 0);
-  return json(200, { run_id: runId, items });
+  const items = await readRunMessages(env, workFor(env, ctx, runId), callMeta(ctx), runId, 0);
+  return json({ run_id: runId, items });
 };
 
 export { OfError };

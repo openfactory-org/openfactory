@@ -1,6 +1,7 @@
 // The state machine of one task sandbox (OfTaskSandbox, 02 §5.2–§5.4).
 // Platform objects are injected, so tests run it with a fake container.
 
+import { sha256Hex } from "@openfactory/core";
 import { INTERCEPT_CA, REPORT_URL, recordBlocked, type BlockedHost, type EgressProps } from "./egress";
 import {
   ProviderError,
@@ -14,8 +15,8 @@ import {
   type SandboxTask,
   type TaskStatus,
 } from "@openfactory/sandbox";
+import { BOOTSTRAP_ENTRYPOINT, exitedStatus, parseExitCode } from "@openfactory/sandbox/provider-kit";
 
-export const ENTRYPOINT = ["/usr/bin/tini", "-g", "--", "/opt/openfactory/bootstrap.sh"];
 export const KEEPALIVE_MS = 60_000;
 /** The largest inactivity timeout the platform allows. */
 export const INACTIVITY_TIMEOUT_MS = 6 * 3600 * 1000;
@@ -88,15 +89,13 @@ const K_BLOCKED = "blocked";
 
 /** Short label value for the platform (labels are at most 64 bytes). */
 async function shortHash(s: string): Promise<string> {
-  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
-  return [...new Uint8Array(d).slice(0, 8)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return (await sha256Hex(s)).slice(0, 16);
 }
 
 function exitCodeOf(e: unknown): number | undefined {
   const c = (e as { exitCode?: unknown })?.exitCode;
   if (typeof c === "number") return c;
-  const m = /exit(?:ed)?(?: with)?(?: code| status)?[:= ]+(\d{1,3})/i.exec(String((e as Error)?.message ?? e));
-  return m ? Number(m[1]) : undefined;
+  return parseExitCode(String((e as Error)?.message ?? e));
 }
 
 function hostOf(url: string | undefined): string | undefined {
@@ -175,7 +174,7 @@ export class TaskSandbox {
     try {
       this.d.container.start({
         image,
-        entrypoint: ENTRYPOINT,
+        entrypoint: [...BOOTSTRAP_ENTRYPOINT],
         env,
         enableInternet: false,
         instance:
@@ -237,13 +236,9 @@ export class TaskSandbox {
       sandboxId: r.task.taskId,
       startedAt: new Date(r.startedAt).toISOString(),
     };
-    const exited = (reason: SandboxReason, message?: string, exitCode?: number): TaskStatus => {
-      const s: TaskStatus = { ...st, state: "exited", reason };
-      if (message) s.message = message;
-      if (exitCode !== undefined) s.exitCode = exitCode;
-      if (r.endedAt) s.endedAt = new Date(r.endedAt).toISOString();
-      return s;
-    };
+    const endedAt = r.endedAt ? new Date(r.endedAt).toISOString() : undefined;
+    const exited = (reason: SandboxReason, message?: string, exitCode?: number): TaskStatus =>
+      exitedStatus(st, reason, { message, exitCode, endedAt });
     const o = r.outcome;
     if (o) {
       st.providerState = o.kind;

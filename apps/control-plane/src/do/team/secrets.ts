@@ -8,6 +8,7 @@
 import { OfError, newId } from "@openfactory/core";
 import type { CallMeta } from "../../contracts/do-messages";
 import { bodyObject, optString, str } from "../../lib/body";
+import { timingSafeEqual, utf8 } from "../../lib/bytes";
 import { listResponse, msOf } from "../../lib/page";
 import type { Migration } from "../../lib/sql/migrate";
 import { all, first } from "../../lib/sql/query";
@@ -58,7 +59,7 @@ const ACCESS_RETENTION_MS = 30 * 24 * 3600_000;
 /** Seals a value with the team's envelope key. Async: call before the write transaction. */
 export async function sealValue(kit: TeamKit, id: SecretIdentity, value: string | Uint8Array): Promise<Uint8Array> {
   const e = await envelopes(kit.env);
-  return e.encrypt(id, typeof value === "string" ? new TextEncoder().encode(value) : value);
+  return e.encrypt(id, typeof value === "string" ? utf8(value) : value);
 }
 
 /** Opens a value sealed by sealValue (or a secret envelope). Throws on a wrong key or tampering. */
@@ -245,8 +246,6 @@ export async function rewrapAll(
   return res;
 }
 
-const eqBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
-
 const secretSource: RewrapSource = {
   name: "secret",
   list: (kit) =>
@@ -260,7 +259,7 @@ const secretSource: RewrapSource = {
     })),
   replace: (kit, key, old, next) => {
     const r = first<{ ciphertext: ArrayBuffer }>(kit.sql, "SELECT ciphertext FROM secrets WHERE id = ?", key);
-    if (!r || !eqBytes(new Uint8Array(r.ciphertext), old)) return false;
+    if (!r || !timingSafeEqual(new Uint8Array(r.ciphertext), old)) return false;
     kit.sql.exec("UPDATE secrets SET ciphertext = ?, key_id = ? WHERE id = ?", next, Envelopes.versionOf(next), key);
     return true;
   },

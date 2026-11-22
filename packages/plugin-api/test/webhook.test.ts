@@ -51,6 +51,17 @@ describe("signatures", () => {
       BodyTooLargeError,
     );
   });
+
+  it("stops reading a streamed body at the limit", async () => {
+    // An endless body without Content-Length: a full read never ends.
+    const endless = new ReadableStream<Uint8Array>({
+      pull(c) {
+        c.enqueue(new Uint8Array(1024));
+      },
+    });
+    const req = new Request("https://x", { method: "POST", body: endless, duplex: "half" } as RequestInit);
+    await expect(readBody(req, 4096)).rejects.toBeInstanceOf(BodyTooLargeError);
+  });
 });
 
 describe("repoOwner", () => {

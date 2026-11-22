@@ -5,12 +5,19 @@
 // 11) and arrive here one at a time: deliverNotice makes one attempt. A
 // transient error throws, so the outbox retries with backoff; a permanent
 // error is logged, reported through the failure hook, and not retried.
-import { OfError, isTrackerOperation, toOfError, type OutboundMessage } from "@openfactory/core";
+import {
+  ApiError,
+  OfError,
+  isTrackerOperation,
+  toOfError,
+  type OutboundMessage,
+  type Responder,
+} from "@openfactory/core";
 import type { OutboxEnvelope } from "../contracts/do-messages";
 import type { Env } from "../contracts/env";
 import { resolverFor } from "../forges/env";
-import { forgeResponders, type Responder } from "../forges/registry";
-import { ApiError } from "../forges/util/http";
+import { forgeResponders } from "../forges/registry";
+import { teamOfDoName } from "../lib/outbox/dest";
 
 export type { Responder };
 
@@ -45,7 +52,7 @@ export function permanent(err: unknown): boolean {
       "authentication_required",
     ].includes(error.code);
   }
-  if (err instanceof ApiError) return !err.temporary();
+  if (err instanceof ApiError) return !err.temporary;
   const cause = (err as { cause?: unknown } | null)?.cause;
   if (cause) return permanent(cause);
   return false;
@@ -129,11 +136,7 @@ export function routerFor(env: Env): Router {
   return r;
 }
 
-/** The team of an outbox origin ("team:<id>|..."). */
-export function teamOfOrigin(origin: string): string {
-  const m = /^team:([^|]*)/.exec(origin);
-  return m ? m[1]! : "";
-}
+/** The team of an outbox origin ("team:<id>|..."): the DO name of the sender. */
 
 type NoticeKind = "notice.forge" | "notice.responder" | "notice.tracker";
 
@@ -148,7 +151,7 @@ export async function deliverNotice(env: Env, envelope: OutboxEnvelope<NoticeKin
     console.warn("notify: notice without a message", envelope.msgId);
     return;
   }
-  const teamId = teamOfOrigin(envelope.origin);
+  const teamId = teamOfDoName(envelope.origin);
   try {
     await routerFor(env).deliverOnce(teamId, msg);
   } catch (e) {

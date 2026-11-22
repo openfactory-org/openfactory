@@ -4,6 +4,10 @@
 // hex(SHA-256(key)[:4]). TTL 1 h, clock skew 60 s, max length 4096. Verify
 // against the received payload bytes, never re-encode.
 
+import { b64url, fromUtf8, hmacSha256, sha256, timingSafeEqual, toHex, tryFromB64url, utf8 } from "../lib/bytes";
+
+export { sha256Hex } from "../lib/bytes";
+
 export const SESSION_PREFIX = "ofs_";
 export const SESSION_TTL_S = 3600;
 const MAX_LEN = 4096;
@@ -21,29 +25,6 @@ export interface SessionClaims {
   exp: number;
 }
 
-const enc = new TextEncoder();
-
-function b64url(bytes: Uint8Array): string {
-  let s = "";
-  for (const b of bytes) s += String.fromCharCode(b);
-  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-function unb64url(s: string): Uint8Array | undefined {
-  if (!/^[A-Za-z0-9_-]*$/.test(s)) return undefined;
-  try {
-    const bin = atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4));
-    return Uint8Array.from(bin, (c) => c.charCodeAt(0));
-  } catch {
-    return undefined;
-  }
-}
-
-async function hmac(key: Uint8Array, data: string): Promise<Uint8Array> {
-  const k = await crypto.subtle.importKey("raw", key, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  return new Uint8Array(await crypto.subtle.sign("HMAC", k, enc.encode(data)));
-}
-
 export interface RunnerKey {
   kid: string;
   key: Uint8Array;
@@ -51,9 +32,8 @@ export interface RunnerKey {
 
 /** Derives the runner token key from a signing key secret. */
 export async function deriveRunnerKey(signingKey: string): Promise<RunnerKey> {
-  const key = await hmac(enc.encode(signingKey), LABEL);
-  const sum = new Uint8Array(await crypto.subtle.digest("SHA-256", key));
-  const kid = [...sum.slice(0, 4)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const key = await hmacSha256(signingKey, LABEL);
+  const kid = toHex((await sha256(key)).subarray(0, 4));
   return { kid, key };
 }
 
@@ -84,8 +64,8 @@ export async function mintSessionToken(
     iat,
     exp: iat + SESSION_TTL_S,
   };
-  const p = b64url(enc.encode(JSON.stringify(claims)));
-  const s = b64url(await hmac(k.key, p));
+  const p = b64url(utf8(JSON.stringify(claims)));
+  const s = b64url(await hmacSha256(k.key, p));
   return { token: SESSION_PREFIX + p + "." + s, expiresAt: new Date(claims.exp * 1000).toISOString() };
 }
 
@@ -102,30 +82,21 @@ export async function verifySessionToken(
   const p = rest.slice(0, dot);
   const s = rest.slice(dot + 1);
   if (!s || s.includes(".")) return undefined;
-  const raw = unb64url(p);
-  const sig = unb64url(s);
+  const raw = tryFromB64url(p);
+  const sig = tryFromB64url(s);
   if (!raw || !sig) return undefined;
   let c: SessionClaims;
   try {
-    c = JSON.parse(new TextDecoder().decode(raw)) as SessionClaims;
+    c = JSON.parse(fromUtf8(raw)) as SessionClaims;
   } catch {
     return undefined;
   }
   if (c.v !== 1) return undefined;
   const k = keys.find((x) => x.kid === c.kid);
   if (!k) return undefined;
-  const want = await hmac(k.key, p);
-  if (want.length !== sig.length) return undefined;
-  let diff = 0;
-  for (let i = 0; i < want.length; i++) diff |= want[i]! ^ sig[i]!;
-  if (diff !== 0) return undefined;
+  if (!timingSafeEqual(await hmacSha256(k.key, p), sig)) return undefined;
   const now = Math.floor(nowMs / 1000);
   if (now > c.exp + SKEW_S || now + SKEW_S < c.iat) return undefined;
   if (!c.team || !c.run || !(c.ses >= 1)) return undefined;
   return c;
-}
-
-export async function sha256Hex(s: string): Promise<string> {
-  const d = await crypto.subtle.digest("SHA-256", enc.encode(s));
-  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }

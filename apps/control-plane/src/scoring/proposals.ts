@@ -2,7 +2,8 @@
 // cleaning, merge onto the active tree, diff, review item body).
 import { OfError, type ValidationError } from "@openfactory/core";
 import { definitionRoot } from "./improve";
-import { oneLine, truncate } from "./text";
+import { oneLine } from "@openfactory/core";
+import { truncate } from "./text";
 
 export const MAX_PROPOSAL_FILES = 200;
 export const MAX_PROPOSAL_BYTES = 2 << 20;

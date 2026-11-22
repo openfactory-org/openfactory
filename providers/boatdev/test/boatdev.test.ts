@@ -1,14 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { FetchMock, describeProviderConformance, sampleTask } from "@openfactory/sandbox/testing";
-import {
-  BoatdevProvider,
-  exitCodeFromSetupError,
-  mapBoatSandbox,
-  setupScript,
-  type BoatSandbox,
-  type RateLimitInfo,
-} from "../src/index";
+import { BoatdevProvider, mapBoatSandbox, setupScript, type BoatSandbox, type RateLimitInfo } from "../src/index";
 import { parseProviderError, type TaskNetworkPolicy } from "@openfactory/sandbox";
 import { FAKE_BASE, FAKE_KEY, fakeBoat } from "./fake-boat";
 
@@ -258,10 +251,14 @@ describe("state mapping (02 §3.4)", () => {
     expect(s).toMatchObject({ state: "running", message: "agent unreachable" });
   });
 
-  it("reads exit codes from setupError", () => {
-    expect(exitCodeFromSetupError("Exited with status 75")).toBe(75);
-    expect(exitCodeFromSetupError("exit code: 2")).toBe(2);
-    expect(exitCodeFromSetupError(null)).toBeUndefined();
+  it("reads the exit code from setupError", () => {
+    const s = mapBoatSandbox("t", {
+      id: "b",
+      state: "ready",
+      setupStatus: "failed",
+      setupError: "Exited with status 75",
+    });
+    expect(s).toMatchObject({ state: "exited", reason: "network_policy_timeout", exitCode: 75 });
   });
 });
 

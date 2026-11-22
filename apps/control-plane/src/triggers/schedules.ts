@@ -2,6 +2,7 @@
 // keys and IDs, the deterministic event of a slot, the manual-run event and
 // the follower slot rule. Port of internal/triggers/{schedules,scheduler}.go.
 import { newId, sha256Hex, type Actor, type Automation, type Event } from "@openfactory/core";
+import { EVENT_ATTR, EVENT_PROVIDER } from "@openfactory/core";
 import * as T from "./attributes";
 import type { CronSchedule } from "./cron";
 
@@ -40,15 +41,15 @@ export async function scheduleEvent(s: SlotInput): Promise<Event> {
     id: await scheduleEventId(s.key, s.slotMs),
     team_id: s.teamId,
     factory_id: s.factoryId,
-    provider: T.ProviderSchedule,
+    provider: EVENT_PROVIDER.Schedule,
     type: T.EventCronFired,
     delivery_id: `${s.key}@${Math.floor(s.slotMs / 1000)}`,
-    actor: { provider: T.ProviderSchedule, external_id: "", handle: "schedule", is_bot: false },
-    source: { provider: T.ProviderSchedule, kind: "schedule", title: s.automationName },
+    actor: { provider: EVENT_PROVIDER.Schedule, external_id: "", handle: "schedule", is_bot: false },
+    source: { provider: EVENT_PROVIDER.Schedule, kind: "schedule", title: s.automationName },
     attributes: {
-      [T.AttrAutomationID]: s.automationId,
-      [T.AttrScheduleName]: s.name,
-      [T.AttrScheduledAt]: rfc3339(s.slotMs),
+      [EVENT_ATTR.AutomationID]: s.automationId,
+      [EVENT_ATTR.ScheduleName]: s.name,
+      [EVENT_ATTR.ScheduledAt]: rfc3339(s.slotMs),
     },
     received_at: new Date(s.nowMs).toISOString(),
   };
@@ -71,7 +72,7 @@ export function manualEvent(
     delivery_id: `manual:${a.id}@${BigInt(nowMs) * 1_000_000n}`,
     actor,
     source: { provider: "factory", kind: "manual", title: a.name, external_id: id },
-    attributes: { [T.AttrAutomationID]: a.id },
+    attributes: { [EVENT_ATTR.AutomationID]: a.id },
     received_at: new Date(nowMs).toISOString(),
   };
 }

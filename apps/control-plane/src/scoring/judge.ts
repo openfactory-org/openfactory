@@ -10,7 +10,8 @@ import {
 } from "@openfactory/core";
 import { buildTranscript } from "./transcript";
 import { parseJudgeAnswer } from "./sample";
-import { clip, f2, oneLine } from "./text";
+import { clipBytes as clip, oneLine } from "@openfactory/core";
+import { f2 } from "./text";
 import {
   DEFAULT_MAX_JUDGE_FILE_BYTES,
   MAX_DESCENDANTS,

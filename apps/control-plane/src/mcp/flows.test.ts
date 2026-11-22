@@ -11,7 +11,7 @@ import type { Env } from "../contracts/env";
 import { issueSessionCookie } from "../auth/session";
 import { b64url, sha256 } from "../lib/bytes";
 import { handleMcpRequest, resetMcpBackends, setMcpBackends, setMcpRuntime } from "./index";
-import { localEncrypter } from "./envelope";
+import { localEncrypter } from "../secrets/envelope";
 import { REFUSAL_TEXT } from "./mergeguard";
 import type { IntegrationBackend, IntegrationRecord } from "./registry/builtin";
 import type { McpRunBackend, RunView } from "./run";

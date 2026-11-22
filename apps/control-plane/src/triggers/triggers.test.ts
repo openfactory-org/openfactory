@@ -1,7 +1,7 @@
 // Ports internal/triggers match_test.go, payload_test.go and cron/glob checks.
 import { describe, expect, it } from "vitest";
 import type { Event, Trigger } from "@openfactory/core";
-import * as T from "./attributes";
+import { EVENT_ATTR } from "@openfactory/core";
 import { matchTrigger, match, validateTrigger, validateTriggers } from "./match";
 import { matchPayload, validatePayloadPattern } from "./payload";
 import { parseCron, validateCron } from "./cron";
@@ -19,34 +19,38 @@ const mkEvent = (provider: string, type: string, a?: Attrs): Ev => ({
 });
 const withText = (ev: Ev, s: string): Ev => ({ ...ev, text: s });
 const prAttrs = (extra?: Attrs): Attrs => ({
-  [T.AttrRepo]: "acme/api",
-  [T.AttrBaseBranch]: "main",
-  [T.AttrPRNumber]: 42,
-  [T.AttrLabels]: ["bug", "Factory-Ready"],
-  [T.AttrAuthor]: "alex",
-  [T.AttrAssignees]: ["sam"],
-  [T.AttrPaths]: ["src/app/main.go", "docs/readme.md"],
+  [EVENT_ATTR.Repo]: "acme/api",
+  [EVENT_ATTR.BaseBranch]: "main",
+  [EVENT_ATTR.PRNumber]: 42,
+  [EVENT_ATTR.Labels]: ["bug", "Factory-Ready"],
+  [EVENT_ATTR.Author]: "alex",
+  [EVENT_ATTR.Assignees]: ["sam"],
+  [EVENT_ATTR.Paths]: ["src/app/main.go", "docs/readme.md"],
   ...extra,
 });
 const pr = (extra?: Attrs) => mkEvent("github", "pull_request_opened", prAttrs(extra));
 const bot = { ...pr(), actor: { provider: "github", external_id: "", handle: "", is_bot: true } };
-const self = pr({ [T.AttrActorIsSelf]: true });
+const self = pr({ [EVENT_ATTR.ActorIsSelf]: true });
 const labeled = (added: string[], current: string[]) =>
-  mkEvent("github", "issue_labeled", { [T.AttrRepo]: "acme/api", [T.AttrAddedLabels]: added, [T.AttrLabels]: current });
+  mkEvent("github", "issue_labeled", {
+    [EVENT_ATTR.Repo]: "acme/api",
+    [EVENT_ATTR.AddedLabels]: added,
+    [EVENT_ATTR.Labels]: current,
+  });
 const base = {
-  [T.AttrChannelID]: "C0123456789",
-  [T.AttrChannelName]: "incidents",
-  [T.AttrUserID]: "U1",
-  [T.AttrUserName]: "alex",
-  [T.AttrUserEmail]: "alex@example.com",
+  [EVENT_ATTR.ChannelID]: "C0123456789",
+  [EVENT_ATTR.ChannelName]: "incidents",
+  [EVENT_ATTR.UserID]: "U1",
+  [EVENT_ATTR.UserName]: "alex",
+  [EVENT_ATTR.UserEmail]: "alex@example.com",
 };
 const reaction = {
-  [T.AttrChannelID]: "C1",
-  [T.AttrChannelName]: "engineering",
-  [T.AttrUserID]: "U2",
-  [T.AttrEmoji]: ":eyes::skin-tone-3:",
-  [T.AttrItemUserID]: "U9",
-  [T.AttrItemUserName]: "pat",
+  [EVENT_ATTR.ChannelID]: "C1",
+  [EVENT_ATTR.ChannelName]: "engineering",
+  [EVENT_ATTR.UserID]: "U2",
+  [EVENT_ATTR.Emoji]: ":eyes::skin-tone-3:",
+  [EVENT_ATTR.ItemUserID]: "U9",
+  [EVENT_ATTR.ItemUserName]: "pat",
 };
 const msg = (typ: string, a: Attrs) => mkEvent("slack", typ, a);
 
@@ -142,7 +146,7 @@ const CASES: [string, string, string, string | undefined, () => Ev, boolean, boo
     "github",
     "pull_request_opened",
     '{"pr_numbers":[42]}',
-    () => pr({ [T.AttrPRNumber]: 42 }),
+    () => pr({ [EVENT_ATTR.PRNumber]: 42 }),
     true,
     false,
   ],
@@ -211,7 +215,7 @@ const CASES: [string, string, string, string | undefined, () => Ev, boolean, boo
     "github",
     "pull_request_opened",
     '{"keywords":["retest"]}',
-    () => pr({ [T.AttrText]: "Retest pls" }),
+    () => pr({ [EVENT_ATTR.Text]: "Retest pls" }),
     true,
     false,
   ],
@@ -248,7 +252,7 @@ const CASES: [string, string, string, string | undefined, () => Ev, boolean, boo
     "github",
     "pull_request_opened",
     undefined,
-    () => pr({ [T.AttrActorIsBot]: true }),
+    () => pr({ [EVENT_ATTR.ActorIsBot]: true }),
     false,
     false,
   ],
@@ -302,7 +306,7 @@ const CASES: [string, string, string, string | undefined, () => Ev, boolean, boo
     "github",
     "pull_request_opened",
     '{"repos":["acme/api"]}',
-    () => pr({ [T.AttrRepo]: { x: 1 } }),
+    () => pr({ [EVENT_ATTR.Repo]: { x: 1 } }),
     false,
     true,
   ],
@@ -338,7 +342,7 @@ const CASES: [string, string, string, string | undefined, () => Ev, boolean, boo
     "github",
     "commit_status",
     '{"states":["FAILURE","success"]}',
-    () => mkEvent("github", "commit_status", { [T.AttrCommitState]: "success", [T.AttrContext]: "ci/build" }),
+    () => mkEvent("github", "commit_status", { [EVENT_ATTR.CommitState]: "success", [EVENT_ATTR.Context]: "ci/build" }),
     true,
     false,
   ],
@@ -347,7 +351,7 @@ const CASES: [string, string, string, string | undefined, () => Ev, boolean, boo
     "github",
     "commit_status",
     undefined,
-    () => mkEvent("github", "commit_status", { [T.AttrCommitState]: "pending" }),
+    () => mkEvent("github", "commit_status", { [EVENT_ATTR.CommitState]: "pending" }),
     false,
     false,
   ],
@@ -356,7 +360,7 @@ const CASES: [string, string, string, string | undefined, () => Ev, boolean, boo
     "github",
     "commit_status",
     '{"contexts":["CI/Build"]}',
-    () => mkEvent("github", "commit_status", { [T.AttrCommitState]: "failure", [T.AttrContext]: "ci/build" }),
+    () => mkEvent("github", "commit_status", { [EVENT_ATTR.CommitState]: "failure", [EVENT_ATTR.Context]: "ci/build" }),
     true,
     false,
   ],
@@ -365,7 +369,7 @@ const CASES: [string, string, string, string | undefined, () => Ev, boolean, boo
     "github",
     "commit_status",
     '{"states":["pending"]}',
-    () => mkEvent("github", "commit_status", { [T.AttrCommitState]: "failure" }),
+    () => mkEvent("github", "commit_status", { [EVENT_ATTR.CommitState]: "failure" }),
     false,
     true,
   ],
@@ -449,7 +453,7 @@ const CASES: [string, string, string, string | undefined, () => Ev, boolean, boo
     "slack",
     "app_mention",
     undefined,
-    () => msg("app_mention", { [T.AttrActorIsSelf]: true }),
+    () => msg("app_mention", { [EVENT_ATTR.ActorIsSelf]: true }),
     false,
     false,
   ],
@@ -541,9 +545,9 @@ describe("matchTrigger (match_test.go)", () => {
       prompt: "",
       triggers: [{ provider: "schedule", event: "cron_fired", schedule: { name: "", cron: "@daily" } }],
     };
-    const e = mkEvent("schedule", "cron_fired", { [T.AttrAutomationID]: "aut_1", [T.AttrScheduleName]: "" });
+    const e = mkEvent("schedule", "cron_fired", { [EVENT_ATTR.AutomationID]: "aut_1", [EVENT_ATTR.ScheduleName]: "" });
     expect(match(e, a)).toBe(true);
-    expect(match(mkEvent("schedule", "cron_fired", { [T.AttrAutomationID]: "aut_2" }), a)).toBe(false);
+    expect(match(mkEvent("schedule", "cron_fired", { [EVENT_ATTR.AutomationID]: "aut_2" }), a)).toBe(false);
     expect(match(e, { ...a, enabled: false })).toBe(false);
   });
 
@@ -554,7 +558,7 @@ describe("matchTrigger (match_test.go)", () => {
       filter: '{"webhook_ids":["whk_1"],"payload":{"id":[12345678901234567890]}}',
     };
     const e = {
-      ...mkEvent("webhook", "received", { [T.AttrWebhookID]: "whk_1" }),
+      ...mkEvent("webhook", "received", { [EVENT_ATTR.WebhookID]: "whk_1" }),
       payload: '{"id":12345678901234567890}',
     };
     expect(matchTrigger(e, t)).toBe(true);

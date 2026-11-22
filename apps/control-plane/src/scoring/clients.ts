@@ -9,7 +9,6 @@
 // CreateRunInput.run.startingRepoRefs.
 import {
   DEFAULT_TEAM,
-  OfError,
   doName,
   hashToken,
   isOfError,
@@ -26,6 +25,7 @@ import {
 import type { CallMeta, Principal } from "../contracts/do-messages";
 import type { Env } from "../contracts/env";
 import { readCompactedMessages } from "../compaction/compact";
+import { unwrapOp } from "../lib/rpc";
 import { applyOverrides, judgeConfig, resolveAgent, withFactoryWide, type FactoryRuntimeLike } from "./overrides";
 import type {
   DispatchRequest,
@@ -46,22 +46,8 @@ export function systemMeta(teamId: string, requestId = `scoring-${crypto.randomU
   return { requestId, principal: systemPrincipal(teamId) };
 }
 
-/** Throws the OfError of a `$error` result of a DO api() call, else returns the body. */
-export function unwrapOp<T = unknown>(out: unknown): T {
-  if (typeof out === "object" && out !== null) {
-    const e = (out as { $error?: { code: string; detail: string; reason?: string; extra?: Record<string, unknown> } })
-      .$error;
-    if (e && typeof e === "object") {
-      throw new OfError(e.code as never, e.detail, {
-        ...(e.reason ? { reason: e.reason } : {}),
-        ...(e.extra ? { extra: e.extra } : {}),
-      });
-    }
-    const r = out as { $status?: number; body?: unknown };
-    if (typeof r.$status === "number") return r.body as T;
-  }
-  return out as T;
-}
+/** Re-exported for the callers that import it from here. */
+export { unwrapOp };
 
 const notFoundToNull = async <T>(p: Promise<T>): Promise<T | null> => {
   try {

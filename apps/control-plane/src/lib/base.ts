@@ -108,6 +108,20 @@ export abstract class BaseDO extends DurableObject<Env> implements OutboxReceive
     return teamOfDoName(this.doName()) || "default";
   }
 
+  // ---------- hibernated WebSockets ----------
+
+  /** Live subscribers never send; a DO with a client protocol overrides it. */
+  override async webSocketMessage(_ws: WebSocket, _message: string | ArrayBuffer): Promise<void> {}
+
+  /** Answers the close of a subscriber (code 1005 "no status" becomes 1000). */
+  override async webSocketClose(ws: WebSocket, code: number, _reason?: string, _wasClean?: boolean): Promise<void> {
+    try {
+      ws.close(code === 1005 ? 1000 : code, "bye");
+    } catch {
+      /* already closed */
+    }
+  }
+
   // ---------- transactions ----------
 
   /** One transactionSync, then re-arms the alarm when timers or outbox changed. */

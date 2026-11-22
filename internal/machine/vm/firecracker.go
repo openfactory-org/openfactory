@@ -19,6 +19,7 @@ import (
 
 	"github.com/openfactory-org/openfactory/internal/machine/ctlstream"
 	"github.com/openfactory-org/openfactory/internal/machine/mmds"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 )
 
 // TemplateMAC is the MAC of every VM restored from a snapshot template.
@@ -157,26 +158,6 @@ func (f *Firecracker) listen(s Spec, root string) (net.Listener, error) {
 	return ln, nil
 }
 
-func waitSocket(ctx context.Context, path string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for {
-		d := net.Dialer{Timeout: 200 * time.Millisecond}
-		c, err := d.DialContext(ctx, "unix", path)
-		if err == nil {
-			_ = c.Close()
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("firecracker API socket did not appear: %w", err)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(20 * time.Millisecond):
-		}
-	}
-}
-
 // Start boots or restores a VM.
 func (f *Firecracker) Start(ctx context.Context, s Spec) (VM, error) {
 	if err := s.Validate(); err != nil {
@@ -210,8 +191,8 @@ func (f *Firecracker) Start(ctx context.Context, s Spec) (VM, error) {
 	if st <= 0 {
 		st = 5 * time.Second
 	}
-	if err := waitSocket(ctx, sock, st); err != nil {
-		return fail(err)
+	if err := rtcore.WaitDial(ctx, "unix", sock, st); err != nil {
+		return fail(fmt.Errorf("firecracker API socket did not appear: %w", err))
 	}
 	v.api = f.api(sock)
 	if s.Snapshot != nil {

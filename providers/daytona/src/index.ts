@@ -29,7 +29,6 @@ import {
   resolveInstanceType,
   sandboxEnv,
   sandboxLabels,
-  sanitizeTaskId,
   taskIdFromLabel,
   type Egress,
   type PreflightResult,
@@ -39,17 +38,25 @@ import {
   type TaskNetworkPolicy,
   type TaskStatus,
 } from "@openfactory/sandbox";
+import {
+  BOOTSTRAP_ENTRYPOINT,
+  ProviderHttpClient,
+  RUNNER_TERM_COMMAND,
+  TTL_GRACE_SECONDS,
+  exitedStatus,
+  paginateCursor,
+  sandboxName,
+  type HttpErrorInfo,
+} from "@openfactory/sandbox/provider-kit";
 
 export const PROVIDER_ID = "daytona";
 export const DEFAULT_API_URL = "https://app.daytona.io/api";
 export const DEFAULT_TOOLBOX_URL = "https://proxy.app.daytona.io/toolbox";
 export const MAX_DOMAIN_ALLOW_LIST = 100;
-export const TTL_GRACE_SECONDS = 900;
 /** Creates per minute by tier. */
 export const CREATE_RATE_BY_TIER: Record<number, number> = { 1: 300, 2: 400, 3: 500, 4: 600 };
 /** Port of the in-sandbox toolbox daemon (VERIFY with `ss -ltnp` in the live check). */
 export const DEFAULT_DAEMON_PORTS = [2280];
-export const ENTRYPOINT = ["/usr/bin/tini", "-g", "--", "/opt/openfactory/bootstrap.sh"];
 /**
  * Label that cancel() sets on the sandbox. The control plane builds a new
  * provider object for each call, so the cancel request must live on the
@@ -152,13 +159,8 @@ export function mapDaytonaSandbox(
 ): TaskStatus {
   const st: TaskStatus = { taskId, state: "starting", sandboxId: sb.id, providerState: sb.state };
   if (sb.createdAt) st.startedAt = sb.createdAt;
-  const exited = (reason: TaskStatus["reason"], message?: string | null, exitCode?: number): TaskStatus => {
-    const out: TaskStatus = { ...st, state: "exited", reason };
-    if (message) out.message = message;
-    if (exitCode !== undefined) out.exitCode = exitCode;
-    if (sb.updatedAt) out.endedAt = sb.updatedAt;
-    return out;
-  };
+  const exited = (reason: TaskStatus["reason"], message?: string | null, exitCode?: number): TaskStatus =>
+    exitedStatus(st, reason, { message, exitCode, endedAt: sb.updatedAt });
   const now = ctx.now ?? Date.now();
   if (sb.queueTimedOutAt) return exited("unschedulable", "the sandbox queue timed out");
   if (sb.state === "build_failed") return exited("image_pull", sb.errorReason);
@@ -188,16 +190,22 @@ const GiB = 1024;
 
 export class DaytonaProvider implements SandboxProvider {
   readonly id = PROVIDER_ID;
-  private readonly api: string;
+  private readonly http: ProviderHttpClient;
   private readonly toolbox: string;
-  private readonly f: typeof fetch;
 
   constructor(private readonly cfg: DaytonaConfig) {
     if (!cfg.apiKey) throw new ProviderError("invalid", "daytona: the API key is empty");
     if (!cfg.installId) throw new ProviderError("invalid", "daytona: the install ID is empty");
-    this.api = (cfg.apiUrl ?? DEFAULT_API_URL).replace(/\/$/, "");
+    this.http = new ProviderHttpClient({
+      provider: PROVIDER_ID,
+      baseUrl: cfg.apiUrl ?? DEFAULT_API_URL,
+      apiKey: cfg.apiKey,
+      ...(cfg.organizationId ? { headers: { "x-daytona-organization-id": cfg.organizationId } } : {}),
+      ...(cfg.fetch ? { fetch: cfg.fetch } : {}),
+      retryAfterHeaders: ["retry-after-sandbox-create", "retry-after"],
+      toError: daytonaError,
+    });
     this.toolbox = (cfg.toolboxUrl ?? DEFAULT_TOOLBOX_URL).replace(/\/$/, "");
-    this.f = cfg.fetch ?? ((i, init) => fetch(i, init));
   }
 
   private get tierOk(): boolean {
@@ -255,61 +263,10 @@ export class DaytonaProvider implements SandboxProvider {
 
   // ---------- HTTP ----------
 
-  private headers(): Record<string, string> {
-    const h: Record<string, string> = { authorization: `Bearer ${this.cfg.apiKey}`, accept: "application/json" };
-    if (this.cfg.organizationId) h["x-daytona-organization-id"] = this.cfg.organizationId;
-    return h;
-  }
-
-  private async call(method: string, url: string, body?: unknown): Promise<Response> {
-    const init: RequestInit = { method, headers: this.headers() };
-    if (body !== undefined) {
-      init.body = JSON.stringify(body);
-      (init.headers as Record<string, string>)["content-type"] = "application/json";
-    }
-    try {
-      return await this.f(url, init);
-    } catch (e) {
-      throw new ProviderError("unavailable", `daytona ${method} ${new URL(url).pathname}: ${(e as Error).message}`);
-    }
-  }
-
-  private async toError(res: Response, what: string): Promise<ProviderError> {
-    let message = res.statusText;
-    try {
-      const b = (await res.json()) as { message?: string | string[]; error?: string };
-      message = (Array.isArray(b.message) ? b.message.join("; ") : b.message) ?? b.error ?? message;
-    } catch {
-      /* not JSON */
-    }
-    const msg = `daytona ${what}: ${res.status} ${message}`;
-    const retry = parseRetryAfter(res.headers.get("retry-after-sandbox-create") ?? res.headers.get("retry-after"));
-    if (res.status === 429) return new ProviderError("rate_limited", msg, retry);
-    if ((res.status === 403 || res.status === 400) && /quota exceeded/i.test(message))
-      return new ProviderError("at_capacity", msg, retry);
-    if (res.status === 404) return new ProviderError("not_found", msg);
-    if (res.status === 409) return new ProviderError("conflict", msg);
-    if (res.status === 400 || res.status === 401 || res.status === 403 || res.status === 422)
-      return new ProviderError("invalid", msg);
-    return new ProviderError("unavailable", msg, retry);
-  }
-
-  private async json<T>(res: Response, what: string): Promise<T> {
-    if (!res.ok) throw await this.toError(res, what);
-    return (await res.json()) as T;
-  }
-
-  static sandboxName(taskId: string): string {
-    return `of-${sanitizeTaskId(taskId)}`.slice(0, 63);
-  }
-
   private async getSandbox(taskId: string): Promise<DaytonaSandbox | undefined> {
-    const res = await this.call(
-      "GET",
-      `${this.api}/sandbox/${encodeURIComponent(DaytonaProvider.sandboxName(taskId))}`,
-    );
+    const res = await this.http.call("GET", `/sandbox/${encodeURIComponent(sandboxName(taskId))}`);
     if (res.status === 404) return undefined;
-    const sb = await this.json<DaytonaSandbox>(res, "status");
+    const sb = await this.http.json<DaytonaSandbox>(res, "status");
     // A name of another install never matches this task.
     if (sb.labels?.["of-install"] && sb.labels["of-install"] !== this.cfg.installId) return undefined;
     return sb;
@@ -320,9 +277,9 @@ export class DaytonaProvider implements SandboxProvider {
   }
 
   private async entrypointExitCode(sb: DaytonaSandbox): Promise<number | null | undefined> {
-    const res = await this.call("GET", `${this.toolboxBase(sb)}/process/session/entrypoint`);
+    const res = await this.http.call("GET", `${this.toolboxBase(sb)}/process/session/entrypoint`);
     if (res.status === 404) return undefined;
-    const s = await this.json<EntrypointSession>(res, "entrypoint");
+    const s = await this.http.json<EntrypointSession>(res, "entrypoint");
     const last = s.commands?.at(-1);
     return last?.exitCode ?? undefined;
   }
@@ -362,15 +319,15 @@ export class DaytonaProvider implements SandboxProvider {
 
   /** Reactivates an inactive snapshot (snapshots go inactive after 2 weeks unused). */
   async ensureSnapshotActive(name: string): Promise<string> {
-    const res = await this.call("GET", `${this.api}/snapshots/${encodeURIComponent(name)}`);
+    const res = await this.http.call("GET", `/snapshots/${encodeURIComponent(name)}`);
     if (res.status === 404) throw new ProviderError("invalid", `daytona: snapshot ${name} does not exist`);
-    const s = await this.json<{ id: string; state: string; errorReason?: string }>(res, "snapshot");
+    const s = await this.http.json<{ id: string; state: string; errorReason?: string }>(res, "snapshot");
     switch (s.state) {
       case "active":
         return s.state;
       case "inactive": {
-        await this.json(
-          await this.call("POST", `${this.api}/snapshots/${encodeURIComponent(s.id)}/activate`),
+        await this.http.json(
+          await this.http.call("POST", `/snapshots/${encodeURIComponent(s.id)}/activate`),
           "activate snapshot",
         );
         return "activating";
@@ -395,19 +352,19 @@ export class DaytonaProvider implements SandboxProvider {
     diskGiB?: number;
     sandboxClass?: "container" | "linux-vm";
   }): Promise<void> {
-    const res = await this.call("GET", `${this.api}/snapshots/${encodeURIComponent(opts.name)}`);
+    const res = await this.http.call("GET", `/snapshots/${encodeURIComponent(opts.name)}`);
     if (res.ok) return;
-    if (res.status !== 404) throw await this.toError(res, "snapshot");
+    if (res.status !== 404) throw await this.http.error(res, "snapshot");
     const body: Record<string, unknown> = {
       name: opts.name,
       imageName: opts.imageName,
-      entrypoint: ENTRYPOINT,
+      entrypoint: [...BOOTSTRAP_ENTRYPOINT],
       sandboxClass: opts.sandboxClass ?? "container",
     };
     if (opts.vcpus) body.cpu = opts.vcpus;
     if (opts.memoryGiB) body.memory = opts.memoryGiB;
     if (opts.diskGiB) body.disk = opts.diskGiB;
-    await this.json(await this.call("POST", `${this.api}/snapshots`, body), "create snapshot");
+    await this.http.json(await this.http.call("POST", "/snapshots", body), "create snapshot");
   }
 
   /** The create body for one task (02 §4.3). */
@@ -416,7 +373,7 @@ export class DaytonaProvider implements SandboxProvider {
     const type = resolveInstanceType(caps, task.resources);
     const plan = this.planEgress(task.networkPolicy);
     const body: Record<string, unknown> = {
-      name: DaytonaProvider.sandboxName(task.taskId),
+      name: sandboxName(task.taskId),
       snapshot: task.image,
       user: "root",
       target: this.cfg.target ?? "eu",
@@ -443,7 +400,7 @@ export class DaytonaProvider implements SandboxProvider {
     const existing = await this.getSandbox(task.taskId);
     if (existing) return this.statusOf(task.taskId, existing);
     const body = await this.createBody(task);
-    const res = await this.call("POST", `${this.api}/sandbox`, body);
+    const res = await this.http.call("POST", "/sandbox", body);
     this.reportRate(res);
     if (res.ok) {
       const sb = (await res.json()) as DaytonaSandbox;
@@ -452,7 +409,7 @@ export class DaytonaProvider implements SandboxProvider {
         nativeEgress: this.nativeFor(task),
       });
     }
-    const err = await this.toError(res, "start");
+    const err = await this.http.error(res, "start");
     // The name is the idempotency key: a concurrent create with the same name wins.
     if (err.kind === "conflict" || /already exists/i.test(err.detail)) {
       const sb = await this.getSandbox(task.taskId);
@@ -501,12 +458,12 @@ export class DaytonaProvider implements SandboxProvider {
     if (!sb) return;
     await this.markCancelled(sb);
     if (sb.state !== "started") return;
-    const res = await this.call("POST", `${this.toolboxBase(sb)}/process/execute`, {
-      command: "kill -TERM $(cat /run/openfactory/runner.pid)",
+    const res = await this.http.call("POST", `${this.toolboxBase(sb)}/process/execute`, {
+      command: RUNNER_TERM_COMMAND,
       timeout: 10,
     });
     if (res.status === 404) return;
-    await this.json(res, "cancel");
+    await this.http.json(res, "cancel");
   }
 
   /**
@@ -517,49 +474,55 @@ export class DaytonaProvider implements SandboxProvider {
   private async markCancelled(sb: DaytonaSandbox): Promise<void> {
     if (cancelRequested(sb)) return;
     const labels = { ...(sb.labels ?? {}), [CANCEL_LABEL]: "1" };
-    const res = await this.call("PUT", `${this.api}/sandbox/${encodeURIComponent(sb.id)}/labels`, { labels });
+    const res = await this.http.call("PUT", `/sandbox/${encodeURIComponent(sb.id)}/labels`, { labels });
     if (res.status === 404) return;
-    if (!res.ok) throw await this.toError(res, "cancel label");
+    if (!res.ok) throw await this.http.error(res, "cancel label");
     sb.labels = labels;
   }
 
   async destroy(taskId: string): Promise<void> {
-    const res = await this.call(
-      "DELETE",
-      `${this.api}/sandbox/${encodeURIComponent(DaytonaProvider.sandboxName(taskId))}`,
-    );
+    const res = await this.http.call("DELETE", `/sandbox/${encodeURIComponent(sandboxName(taskId))}`);
     if (res.status === 404 || res.ok) return;
-    throw await this.toError(res, "destroy");
+    throw await this.http.error(res, "destroy");
   }
 
   async list(): Promise<TaskStatus[]> {
     const out: TaskStatus[] = [];
-    let cursor: string | undefined;
-    for (let page = 0; page < 1000; page++) {
+    const pages = paginateCursor(async (cursor) => {
       const q = new URLSearchParams({
         labels: JSON.stringify({ "of-install": this.cfg.installId }),
         includeErroredDeleted: "false",
         limit: "200",
       });
       if (cursor) q.set("cursor", cursor);
-      const b = await this.json<DaytonaSandbox[] | { items?: DaytonaSandbox[]; nextCursor?: string | null }>(
-        await this.call("GET", `${this.api}/sandbox?${q}`),
+      const b = await this.http.json<DaytonaSandbox[] | { items?: DaytonaSandbox[]; nextCursor?: string | null }>(
+        await this.http.call("GET", `/sandbox?${q}`),
         "list",
       );
-      const items = Array.isArray(b) ? b : (b.items ?? []);
-      for (const sb of items) {
-        if (sb.labels?.["of-install"] !== this.cfg.installId) continue;
-        const label = sb.labels?.["of-task"];
-        if (!label) continue;
-        const taskId = taskIdFromLabel(label);
-        // The list skips the toolbox call: the orphan sweep needs presence and state only.
-        out.push(mapDaytonaSandbox(taskId, sb, { cancelRequested: cancelRequested(sb) }));
-      }
-      cursor = Array.isArray(b) ? undefined : (b.nextCursor ?? undefined);
-      if (!cursor) break;
+      return Array.isArray(b) ? { items: b } : { items: b.items ?? [], cursor: b.nextCursor };
+    });
+    for await (const sb of pages) {
+      if (sb.labels?.["of-install"] !== this.cfg.installId) continue;
+      const label = sb.labels?.["of-task"];
+      if (!label) continue;
+      // The list skips the toolbox call: the orphan sweep needs presence and state only.
+      out.push(mapDaytonaSandbox(taskIdFromLabel(label), sb, { cancelRequested: cancelRequested(sb) }));
     }
     return out;
   }
+}
+
+/** Maps a failed Daytona response to a ProviderError. */
+function daytonaError(e: HttpErrorInfo, what: string): ProviderError {
+  const msg = `daytona ${what}: ${e.status} ${e.message}`;
+  if (e.status === 429) return new ProviderError("rate_limited", msg, e.retryAfter);
+  if ((e.status === 403 || e.status === 400) && /quota exceeded/i.test(e.message))
+    return new ProviderError("at_capacity", msg, e.retryAfter);
+  if (e.status === 404) return new ProviderError("not_found", msg);
+  if (e.status === 409) return new ProviderError("conflict", msg);
+  if (e.status === 400 || e.status === 401 || e.status === 403 || e.status === 422)
+    return new ProviderError("invalid", msg);
+  return new ProviderError("unavailable", msg, e.retryAfter);
 }
 
 function cancelRequested(sb: DaytonaSandbox): boolean {

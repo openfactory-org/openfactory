@@ -3,6 +3,7 @@
 // and cached per isolate.
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
 import type { Env } from "../contracts/env";
+import { readTextCapped } from "@openfactory/core";
 import { b64url, randomToken, sha256, timingSafeEqual, utf8 } from "../lib/bytes";
 import type { Identity } from "../do/team/auth";
 import { normalizeRole, validRole } from "./roles";
@@ -133,6 +134,9 @@ interface Discovery {
   jwks_uri: string;
 }
 
+/** Most bytes of a discovery document or token response that are read. */
+export const OIDC_MAX_RESPONSE_BYTES = 1 << 20;
+
 const discoveries = new Map<string, Promise<{ d: Discovery; jwks: ReturnType<typeof createRemoteJWKSet> }>>();
 
 export function discover(issuer: string, fetcher: typeof fetch = fetch) {
@@ -143,7 +147,7 @@ export function discover(issuer: string, fetcher: typeof fetch = fetch) {
         signal: AbortSignal.timeout(15_000),
       });
       if (!res.ok) throw new Error(`oidc discovery: ${res.status}`);
-      const d = (await res.json()) as Discovery;
+      const d = JSON.parse(await readTextCapped(res, OIDC_MAX_RESPONSE_BYTES, "oidc discovery document")) as Discovery;
       if (d.issuer !== issuer)
         throw new Error(
           `oidc: issuer did not match the issuer returned by provider, expected "${issuer}" got "${d.issuer}"`,
@@ -225,7 +229,12 @@ export async function finishLogin(
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) throw new LoginFailure("provider_error", `token exchange: ${res.status}`);
-  const tok = (await res.json()) as { id_token?: string; access_token?: string };
+  let tok: { id_token?: string; access_token?: string };
+  try {
+    tok = JSON.parse(await readTextCapped(res, OIDC_MAX_RESPONSE_BYTES, "token response")) as typeof tok;
+  } catch (e) {
+    throw new LoginFailure("provider_error", `token exchange: ${(e as Error).message}`);
+  }
   if (!tok.id_token) throw new LoginFailure("provider_error", "token response without id_token");
   let payload: JWTPayload;
   try {

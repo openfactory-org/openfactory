@@ -4,7 +4,7 @@ import { OfError, doName } from "@openfactory/core";
 import type { Scorer } from "@openfactory/core";
 import type { Env } from "../contracts/env";
 import { callMeta, teamOf, type RouteContext } from "../http/handler";
-import { unwrapOp } from "../scoring/clients";
+import { unwrapOp } from "../lib/rpc";
 import { requireRole } from "../auth/roles";
 
 export interface FactoryAccess {

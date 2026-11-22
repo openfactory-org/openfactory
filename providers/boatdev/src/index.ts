@@ -11,6 +11,7 @@
 // - `ttlSeconds` = max session + grace, as a leak bound. Label `of-task=<id>`.
 // - EU only. x86_64 only. No network API: egress is the in-sandbox lock.
 
+import { sha256Hex } from "@openfactory/core";
 import {
   ProviderError,
   TASK_ENV,
@@ -32,12 +33,22 @@ import {
   type SandboxTask,
   type TaskStatus,
 } from "@openfactory/sandbox";
+import {
+  BOOTSTRAP_ENTRYPOINT,
+  ProviderHttpClient,
+  RUNNER_TERM_COMMAND,
+  RUNTIME_DIR,
+  TTL_GRACE_SECONDS,
+  exitedStatus,
+  paginateCursor,
+  parseExitCode,
+  sandboxName,
+  type HttpErrorInfo,
+} from "@openfactory/sandbox/provider-kit";
 
 export const PROVIDER_ID = "boatdev";
 export const DEFAULT_BASE_URL = "https://boat.dev/api/v1";
 
-/** Grace added to maxSessionSeconds for the boat auto-stop (leak bound). */
-export const TTL_GRACE_SECONDS = 900;
 export const MAX_TTL_SECONDS = 2_592_000;
 
 /** $20 plan. */
@@ -64,7 +75,7 @@ function range(a: number, b: number): number[] {
 }
 
 /** Root-only file with the runner env. bootstrap.sh reads it (OF_ENV_FILE). */
-export const RUNNER_ENV_FILE = "/run/openfactory/runner.env";
+export const RUNNER_ENV_FILE = `${RUNTIME_DIR}/runner.env`;
 
 export interface RateLimitInfo {
   provider: string;
@@ -113,18 +124,13 @@ export function setupScript(envKeys: readonly string[]): string {
   const keys = [...envKeys].filter((k) => /^[A-Z_][A-Z0-9_]*$/.test(k)).sort();
   return [
     "set -eu",
-    `sudo -n /bin/sh -c 'umask 077; mkdir -p /run/openfactory; : > ${RUNNER_ENV_FILE}'`,
+    `sudo -n /bin/sh -c 'umask 077; mkdir -p ${RUNTIME_DIR}; : > ${RUNNER_ENV_FILE}'`,
     `for v in ${keys.join(" ")}; do`,
     String.raw`  eval "val=\${$v-}"`,
     String.raw`  printf "export %s='%s'\n" "$v" "$(printf '%s' "$val" | sed "s/'/'\\\\''/g")"`,
     `done | sudo -n tee ${RUNNER_ENV_FILE} >/dev/null`,
-    "exec sudo -n /usr/bin/tini -g -- /opt/openfactory/bootstrap.sh",
+    `exec sudo -n ${BOOTSTRAP_ENTRYPOINT.join(" ")}`,
   ].join("\n");
-}
-
-async function sha256Hex(s: string): Promise<string> {
-  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
-  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 interface Ctx {
@@ -140,24 +146,13 @@ function errText(e: BoatSandbox["error"]): string | undefined {
   return typeof e === "string" ? e : e.message;
 }
 
-/** Exit code named in a setupError, for example "exit status 75" or "exited with code 64". */
-export function exitCodeFromSetupError(s: string | null | undefined): number | undefined {
-  const m = /exit(?:ed)?(?:\s+with)?(?:\s+(?:status|code))?\s*[:=]?\s*(\d{1,3})/i.exec(s ?? "");
-  return m ? Number(m[1]) : undefined;
-}
-
 /** Maps a boat sandbox to a TaskStatus (02 §3.4, evaluated in order). */
 export function mapBoatSandbox(taskId: string, sb: BoatSandbox, ctx: Ctx = { cancelRequested: false }): TaskStatus {
   const st: TaskStatus = { taskId, state: "starting", sandboxId: sb.id, providerState: sb.state };
   const startedAt = sb.readyAt ?? sb.createdAt;
   if (startedAt) st.startedAt = startedAt;
-  const exited = (reason: TaskStatus["reason"], message?: string, exitCode?: number): TaskStatus => {
-    const out: TaskStatus = { ...st, state: "exited", reason };
-    if (message) out.message = message;
-    if (exitCode !== undefined) out.exitCode = exitCode;
-    if (sb.stoppedAt) out.endedAt = sb.stoppedAt;
-    return out;
-  };
+  const exited = (reason: TaskStatus["reason"], message?: string, exitCode?: number): TaskStatus =>
+    exitedStatus(st, reason, { message, exitCode, endedAt: sb.stoppedAt ?? undefined });
   if (sb.health === "degraded" && sb.healthReason) st.message = sb.healthReason;
 
   if (sb.state === "cancelled")
@@ -180,7 +175,7 @@ export function mapBoatSandbox(taskId: string, sb: BoatSandbox, ctx: Ctx = { can
       case "done":
         return exited("completed", undefined, 0);
       case "failed": {
-        const code = exitCodeFromSetupError(sb.setupError);
+        const code = parseExitCode(sb.setupError);
         if (ctx.cancelRequested) return exited("cancelled", sb.setupError ?? undefined, code);
         return exited(
           code === undefined ? "process_failed" : reasonForExitCode(code),
@@ -195,17 +190,9 @@ export function mapBoatSandbox(taskId: string, sb: BoatSandbox, ctx: Ctx = { can
   return { ...st, state: "running" };
 }
 
-interface BoatError {
-  status: number;
-  code: string;
-  message: string;
-  retryAfter?: number;
-}
-
 export class BoatdevProvider implements SandboxProvider {
   readonly id = PROVIDER_ID;
-  private readonly base: string;
-  private readonly f: typeof fetch;
+  private readonly http: ProviderHttpClient;
   /**
    * taskId → sandbox ID, a cache for the life of this object only. The control
    * plane builds a new provider object for each call, so every lookup must also
@@ -216,8 +203,13 @@ export class BoatdevProvider implements SandboxProvider {
   constructor(private readonly cfg: BoatdevConfig) {
     if (!cfg.apiKey) throw new ProviderError("invalid", "boatdev: the API key is empty");
     if (!cfg.installId) throw new ProviderError("invalid", "boatdev: the install ID is empty");
-    this.base = (cfg.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
-    this.f = cfg.fetch ?? ((i, init) => fetch(i, init));
+    this.http = new ProviderHttpClient({
+      provider: PROVIDER_ID,
+      baseUrl: cfg.baseUrl ?? DEFAULT_BASE_URL,
+      apiKey: cfg.apiKey,
+      ...(cfg.fetch ? { fetch: cfg.fetch } : {}),
+      toError: boatError,
+    });
   }
 
   async capabilities(): Promise<ProviderCapabilities> {
@@ -237,72 +229,6 @@ export class BoatdevProvider implements SandboxProvider {
   }
 
   // ---------- HTTP ----------
-
-  private async call(
-    method: string,
-    path: string,
-    body?: unknown,
-    headers: Record<string, string> = {},
-  ): Promise<Response> {
-    const init: RequestInit = {
-      method,
-      headers: { authorization: `Bearer ${this.cfg.apiKey}`, accept: "application/json", ...headers },
-    };
-    if (body !== undefined) {
-      init.body = JSON.stringify(body);
-      (init.headers as Record<string, string>)["content-type"] = "application/json";
-    }
-    try {
-      return await this.f(`${this.base}${path}`, init);
-    } catch (e) {
-      throw new ProviderError("unavailable", `boatdev ${method} ${path}: ${(e as Error).message}`);
-    }
-  }
-
-  private async readError(res: Response): Promise<BoatError> {
-    let code = "";
-    let message = res.statusText;
-    try {
-      const b = (await res.json()) as {
-        code?: string;
-        message?: string;
-        error?: { code?: string; message?: string; details?: unknown };
-      };
-      code = b.code ?? b.error?.code ?? "";
-      message = b.error?.message ?? b.message ?? (code || message);
-    } catch {
-      /* not JSON */
-    }
-    const out: BoatError = { status: res.status, code, message };
-    const ra = parseRetryAfter(res.headers.get("retry-after"));
-    if (ra !== undefined) out.retryAfter = ra;
-    return out;
-  }
-
-  private toProviderError(e: BoatError, what: string): ProviderError {
-    const msg = `boatdev ${what}: ${e.status} ${e.code || ""} ${e.message}`.replace(/\s+/g, " ").trim();
-    if (e.status === 429 && e.code === "limit_reached")
-      return new ProviderError("at_capacity", msg, e.retryAfter, e.code);
-    if (e.status === 429) return new ProviderError("rate_limited", msg, e.retryAfter, e.code || "rate_limited");
-    if (e.status === 503 && e.code === "no_ready_machine")
-      return new ProviderError("at_capacity", msg, e.retryAfter ?? 30, e.code);
-    if (e.status === 402) return new ProviderError("unavailable", msg, undefined, e.code || "billing_required");
-    if (e.status === 401) return new ProviderError("invalid", msg, undefined, e.code || "unauthorized");
-    if (e.status === 403) return new ProviderError("invalid", msg, undefined, e.code);
-    if (e.status === 404) {
-      return e.code === "snapshot_not_found"
-        ? new ProviderError("invalid", msg, undefined, e.code)
-        : new ProviderError("not_found", msg, undefined, e.code);
-    }
-    if (e.status === 409) return new ProviderError("conflict", msg, undefined, e.code);
-    if (e.status === 400 || e.status === 422) return new ProviderError("invalid", msg, undefined, e.code);
-    return new ProviderError("unavailable", msg, e.retryAfter, e.code);
-  }
-
-  private async json<T>(res: Response, what: string): Promise<T> {
-    if (!res.ok) throw this.toProviderError(await this.readError(res), what);
-    return (await res.json()) as T;
-  }
 
   private reportRate(res: Response): void {
     const policy = res.headers.get("ratelimit-policy") ?? undefined;
@@ -328,8 +254,11 @@ export class BoatdevProvider implements SandboxProvider {
     q.append("label", `of-task=${sanitizeTaskId(taskId)}`);
     q.append("label", `of-install=${this.cfg.installId}`);
     q.set("limit", "200");
-    const res = await this.call("GET", `/sandboxes?${q}`);
-    const b = await this.json<{ sandboxes?: BoatSandbox[]; items?: BoatSandbox[]; data?: BoatSandbox[] }>(res, "list");
+    const res = await this.http.call("GET", `/sandboxes?${q}`);
+    const b = await this.http.json<{ sandboxes?: BoatSandbox[]; items?: BoatSandbox[]; data?: BoatSandbox[] }>(
+      res,
+      "list",
+    );
     // Repeated label= parameters may not combine with AND: check both labels here.
     const hit = (b.sandboxes ?? b.items ?? b.data ?? []).find(
       (s) =>
@@ -344,12 +273,12 @@ export class BoatdevProvider implements SandboxProvider {
   private async get(taskId: string): Promise<BoatSandbox | undefined> {
     const id = this.ids.get(taskId);
     if (id) {
-      const res = await this.call("GET", `/sandboxes/${encodeURIComponent(id)}`);
+      const res = await this.http.call("GET", `/sandboxes/${encodeURIComponent(id)}`);
       if (res.status === 404) {
         this.ids.delete(taskId);
         return undefined;
       }
-      return BoatdevProvider.unwrap(await this.json(res, "status"));
+      return BoatdevProvider.unwrap(await this.http.json(res, "status"));
     }
     return this.findByLabel(taskId);
   }
@@ -361,12 +290,12 @@ export class BoatdevProvider implements SandboxProvider {
     const shape = preflightTask(caps, task);
     if (!shape.ok) return shape;
     try {
-      await this.json(await this.call("GET", "/me"), "me");
-      const limits = await this.json<{
+      await this.http.json(await this.http.call("GET", "/me"), "me");
+      const limits = await this.http.json<{
         canStart?: boolean;
         machineTypes?: string[];
         limits?: { canStart?: boolean; machineTypes?: string[] };
-      }>(await this.call("GET", "/limits"), "limits");
+      }>(await this.http.call("GET", "/limits"), "limits");
       const l = limits.limits ?? limits;
       const type = shape.resources?.instanceType;
       if (type && Array.isArray(l.machineTypes) && !l.machineTypes.includes(type)) {
@@ -378,14 +307,14 @@ export class BoatdevProvider implements SandboxProvider {
       }
       if (l.canStart === false)
         return { ok: false, code: "resource_unavailable", message: "boatdev: the account cannot start a sandbox now" };
-      const snap = await this.call("GET", `/saved-snapshots/${encodeURIComponent(task.image)}`);
+      const snap = await this.http.call("GET", `/saved-snapshots/${encodeURIComponent(task.image)}`);
       if (snap.status === 404)
         return {
           ok: false,
           code: "invalid_configuration",
           message: `boatdev: saved snapshot ${task.image} does not exist`,
         };
-      const s = await this.json<{ status?: string; snapshot?: { status?: string } }>(snap, "snapshot");
+      const s = await this.http.json<{ status?: string; snapshot?: { status?: string } }>(snap, "snapshot");
       const status = s.snapshot?.status ?? s.status;
       if (status && status !== "ready") {
         return {
@@ -413,7 +342,7 @@ export class BoatdevProvider implements SandboxProvider {
     const env = sandboxEnv(task, egressLockFor(egress, task.networkPolicy), caps.loopbackDaemonPorts);
     env.OF_ENV_FILE = RUNNER_ENV_FILE;
     return {
-      name: `of-${sanitizeTaskId(task.taskId)}`.slice(0, 63),
+      name: sandboxName(task.taskId),
       from: task.image,
       type: type.name,
       ttlSeconds: Math.min(MAX_TTL_SECONDS, task.maxSessionSeconds + TTL_GRACE_SECONDS),
@@ -434,7 +363,7 @@ export class BoatdevProvider implements SandboxProvider {
     if (!task.env[TASK_ENV.bootstrapToken])
       throw new ProviderError("invalid", "boatdev: the task has no bootstrap token");
     const body = await this.createBody(task);
-    const res = await this.call("POST", "/sandboxes", body, {
+    const res = await this.http.call("POST", "/sandboxes", body, {
       "idempotency-key": await this.idempotencyKey(task.taskId),
     });
     this.reportRate(res);
@@ -443,13 +372,13 @@ export class BoatdevProvider implements SandboxProvider {
       this.ids.set(task.taskId, sb.id);
       return mapBoatSandbox(task.taskId, sb);
     }
-    const err = await this.readError(res);
+    const err = await this.http.readError(res);
     if (err.status === 409 && (err.code === "idempotency_key_reused" || err.code === "idempotency_in_progress")) {
       const sb = await this.findByLabel(task.taskId);
       if (sb) return mapBoatSandbox(task.taskId, sb);
       if (err.code === "idempotency_in_progress") return { taskId: task.taskId, state: "accepted" };
     }
-    throw this.toProviderError(err, "start");
+    throw boatError(err, "start");
   }
 
   async status(taskId: string): Promise<TaskStatus> {
@@ -467,49 +396,67 @@ export class BoatdevProvider implements SandboxProvider {
   async cancel(taskId: string, graceSeconds: number): Promise<void> {
     const sb = await this.get(taskId);
     if (!sb) return;
-    const res = await this.call("POST", `/sandboxes/${encodeURIComponent(sb.id)}/commands`, {
-      command: "sudo -n kill -TERM $(cat /run/openfactory/runner.pid)",
+    const res = await this.http.call("POST", `/sandboxes/${encodeURIComponent(sb.id)}/commands`, {
+      command: `sudo -n ${RUNNER_TERM_COMMAND}`,
       timeoutSeconds: Math.max(1, Math.min(15, Math.round(graceSeconds))),
     });
     if (res.status === 404) return;
-    await this.json(res, "cancel");
+    await this.http.json(res, "cancel");
   }
 
   async destroy(taskId: string): Promise<void> {
     const sb = await this.get(taskId);
     if (!sb) return;
-    const res = await this.call("DELETE", `/sandboxes/${encodeURIComponent(sb.id)}`, undefined, {
+    const res = await this.http.call("DELETE", `/sandboxes/${encodeURIComponent(sb.id)}`, undefined, {
       "x-ascii-confirm-delete": sb.id,
     });
     this.ids.delete(taskId);
     if (res.status === 404) return;
-    if (!res.ok) throw this.toProviderError(await this.readError(res), "destroy");
+    if (!res.ok) throw await this.http.error(res, "destroy");
   }
 
   async list(): Promise<TaskStatus[]> {
     const out: TaskStatus[] = [];
-    let cursor: string | undefined;
-    for (let page = 0; page < 1000; page++) {
+    const pages = paginateCursor(async (cursor) => {
       const q = new URLSearchParams({ label: `of-install=${this.cfg.installId}`, limit: "200" });
       if (cursor) q.set("cursor", cursor);
-      const b = await this.json<{
+      const b = await this.http.json<{
         sandboxes?: BoatSandbox[];
         items?: BoatSandbox[];
         data?: BoatSandbox[];
         pageInfo?: { nextCursor?: string | null };
-      }>(await this.call("GET", `/sandboxes?${q}`), "list");
-      for (const sb of b.sandboxes ?? b.items ?? b.data ?? []) {
-        if (sb.labels?.["of-install"] !== this.cfg.installId || sb.state === "cancelled") continue;
-        const label = sb.labels?.["of-task"];
-        if (!label) continue;
-        const taskId = taskIdFromLabel(label);
-        out.push(mapBoatSandbox(taskId, sb));
-      }
-      cursor = b.pageInfo?.nextCursor ?? undefined;
-      if (!cursor) break;
+      }>(await this.http.call("GET", `/sandboxes?${q}`), "list");
+      return { items: b.sandboxes ?? b.items ?? b.data ?? [], cursor: b.pageInfo?.nextCursor };
+    });
+    for await (const sb of pages) {
+      if (sb.labels?.["of-install"] !== this.cfg.installId || sb.state === "cancelled") continue;
+      const label = sb.labels?.["of-task"];
+      if (!label) continue;
+      out.push(mapBoatSandbox(taskIdFromLabel(label), sb));
     }
     return out;
   }
+}
+
+/** Maps a failed boat response to a ProviderError. */
+function boatError(e: HttpErrorInfo, what: string): ProviderError {
+  const msg = `boatdev ${what}: ${e.status} ${e.code || ""} ${e.message}`.replace(/\s+/g, " ").trim();
+  if (e.status === 429 && e.code === "limit_reached")
+    return new ProviderError("at_capacity", msg, e.retryAfter, e.code);
+  if (e.status === 429) return new ProviderError("rate_limited", msg, e.retryAfter, e.code || "rate_limited");
+  if (e.status === 503 && e.code === "no_ready_machine")
+    return new ProviderError("at_capacity", msg, e.retryAfter ?? 30, e.code);
+  if (e.status === 402) return new ProviderError("unavailable", msg, undefined, e.code || "billing_required");
+  if (e.status === 401) return new ProviderError("invalid", msg, undefined, e.code || "unauthorized");
+  if (e.status === 403) return new ProviderError("invalid", msg, undefined, e.code);
+  if (e.status === 404) {
+    return e.code === "snapshot_not_found"
+      ? new ProviderError("invalid", msg, undefined, e.code)
+      : new ProviderError("not_found", msg, undefined, e.code);
+  }
+  if (e.status === 409) return new ProviderError("conflict", msg, undefined, e.code);
+  if (e.status === 400 || e.status === 422) return new ProviderError("invalid", msg, undefined, e.code);
+  return new ProviderError("unavailable", msg, e.retryAfter, e.code);
 }
 
 export function createBoatdevProvider(cfg: BoatdevConfig): BoatdevProvider {
