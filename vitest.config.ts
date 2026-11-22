@@ -6,6 +6,19 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
+    // The Workers pool runs all files of a project in one runtime. A Durable
+    // Object alarm or outbox delivery that one file started can run while the
+    // worker of another file closes; the pool then loads the worker module for
+    // that request and vitest reports EnvironmentTeardownError ("Closing rpc
+    // while ... was pending"). It is not a test failure: the tests of the file
+    // finished. Other unhandled errors still fail the run.
+    onUnhandledError(error) {
+      if (
+        error.name === "EnvironmentTeardownError" &&
+        /^\[vitest-worker\]: Closing rpc while "\w+" was pending/.test(error.message)
+      )
+        return false;
+    },
     projects: [
       "packages/*/vitest.config.ts",
       "apps/*/vitest.config.ts",

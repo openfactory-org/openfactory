@@ -17,6 +17,9 @@ import { registeredProviders } from "../dispatch/providers";
 import { registerPreflight, type DefinitionCheck } from "./factories";
 import { created, noContent, type OpCall, type TeamKit, type TeamOp } from "./index";
 import type { CompiledDefinition } from "@openfactory/definition";
+// A static import: a dynamic import() from a DO op can still wait for module
+// resolution when a test file ends (vitest EnvironmentTeardownError).
+import * as factoriesModule from "./factories";
 
 // ---------- schema ----------
 
@@ -721,7 +724,7 @@ export function setFactoryAccess(a: Partial<FactoryAccess> | null): void {
 
 async function factoryAccessOf(): Promise<Partial<FactoryAccess>> {
   if (factoryAccess) return factoryAccess;
-  return (await import("./factories")) as unknown as Partial<FactoryAccess>;
+  return factoriesModule as unknown as Partial<FactoryAccess>;
 }
 
 /** Port of handleListMachines (internal/api/platform.go). */
@@ -730,7 +733,7 @@ async function listMachines(kit: TeamKit, call: OpCall): Promise<unknown> {
   const fid = call.query.factory_id ?? "";
   let fs: { id: string; name: string }[];
   if (fid !== "") {
-    const { findFactory } = await import("./factories");
+    const { findFactory } = factoriesModule;
     const f = findFactory(kit, fid);
     call.authorize(f?.id ?? "");
     if (!f) throw notFound(`factory ${fid}`);

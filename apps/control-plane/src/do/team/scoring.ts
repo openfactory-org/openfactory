@@ -41,6 +41,7 @@ import {
 } from "./factories";
 import type { DefinitionVersion } from "./factories";
 import type { OpCall, TeamKit, TeamOp } from "./index";
+import { scoringSweep } from "../../scoring/sweep";
 
 void _unused;
 
@@ -468,7 +469,6 @@ export const ops: Record<string, TeamOp> = scoringOps;
 export function setup(kit: TeamKit): void {
   // The scheduled self-improvement check of every factory with failed scores.
   kit.onTimerAsync("scoring.sweep", async () => {
-    const { scoringSweep } = await import("../../scoring/sweep");
     const ids = all<{ factory_id: string }>(
       kit.sql,
       "SELECT DISTINCT factory_id FROM scoring_scores WHERE passed = 0 AND improvement_run_id = ''",

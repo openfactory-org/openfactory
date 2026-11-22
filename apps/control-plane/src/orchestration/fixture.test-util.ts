@@ -29,13 +29,21 @@ export function workStub(token: string): WorkDO {
 
 const built: string[] = [];
 
-/** Delivers the outbox rows of the built WorkDOs, so that no delivery is in flight when a test ends. */
+/**
+ * Delivers the outbox rows of the built WorkDOs and clears their alarms, so
+ * that no delivery or timer runs after the test. A DO request after the last
+ * test of a file loads the worker module through vitest and fails the run
+ * (EnvironmentTeardownError: "resolve" was pending).
+ */
 export async function settle(): Promise<void> {
   for (const token of built.splice(0)) {
     for (let i = 0; i < 3; i++) {
       await workStub(token).pump();
       await (env.DISPATCH.getByName(doName.dispatch(TEAM)) as unknown as { pump(): Promise<void> }).pump();
     }
+    await runInDurableObject(workStub(token) as unknown as DurableObjectStub, (_inst, state) =>
+      state.storage.deleteAlarm(),
+    );
   }
 }
 

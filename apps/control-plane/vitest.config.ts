@@ -54,5 +54,10 @@ export default defineProject({
   test: {
     name: "control-plane",
     include: ["src/**/*.test.ts", "test/**/*.test.ts"],
+    setupFiles: ["./test/setup.ts"],
+    // The first test of a file starts Durable Objects and loads modules in a
+    // cold isolate; under a full workspace run that can take more than 5 s.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
   },
 });

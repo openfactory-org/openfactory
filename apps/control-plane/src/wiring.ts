@@ -27,6 +27,8 @@ import {
 } from "@openfactory/core";
 import { createBoatdevProvider } from "@openfactory/boatdev";
 import { createDaytonaProvider } from "@openfactory/daytona";
+import { manualRunDispatcher } from "./api/runs";
+import { setManualRunDispatcher } from "./api/schedules";
 import { routeWebhookIngress } from "./api/webhooks";
 import { authenticate } from "./auth/authenticate";
 import { registerCronHook, registerServerRoute } from "./builder";
@@ -358,6 +360,10 @@ setScheduleActiveRunCheck(async (kit, factoryId, automationId) => {
   }
   return "";
 });
+
+// ---------- manual automation runs ----------
+
+setManualRunDispatcher(manualRunDispatcher);
 
 // ---------- definition preflight: names in automation filters ----------
 

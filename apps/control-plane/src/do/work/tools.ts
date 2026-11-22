@@ -301,14 +301,46 @@ function dispatchTool(fx: Fx, caller: Run, call: ToolCall): ToolResult {
       return text({ inbox_id: it.id, status: "waiting" });
     }
     case "post_update": {
-      const wi = caller.work_item_id ? fx.repo.getWorkItem(caller.work_item_id) : undefined;
-      if (!wi) throw invalid("the run has no work item");
       // postUpdate (server.go) and Engine.PostUpdate.
+      const wi = caller.work_item_id ? fx.repo.getWorkItem(caller.work_item_id) : undefined;
       const kind = s(input.kind).trim().toLowerCase() || "update";
       if (!["update", "handoff", "error"].includes(kind))
         throw invalid(`unknown kind ${JSON.stringify(s(input.kind))} (want update, handoff or error)`);
       const body = s(input.text).trim();
       if (!body) throw invalid("text is required");
+      if (kind === "handoff") {
+        // RequestHuman with InboxHandoff: an inbox item, its notice, and the stage handoff.
+        if (caller.state === "cancelled") throw conflict("run was cancelled");
+        const title = "Ready for your review";
+        const it: InboxItem = {
+          id: newRoutedId("inb", fx.token),
+          factory_id: caller.factory_id,
+          ...(wi ? { work_item_id: wi.id } : {}),
+          run_id: caller.id,
+          kind: "handoff",
+          title,
+          body,
+          ...(recipientsOf(wi) ? { recipients: recipientsOf(wi) } : {}),
+          resolved: false,
+          created_at: iso(fx.now()),
+          version: 0,
+        };
+        fx.repo.createInbox(it);
+        projectInbox(fx, it);
+        if (wi) {
+          workItemEvent(fx, wi.id, "note", caller.id, actor, {
+            inbox_id: it.id,
+            kind: "handoff",
+            title,
+            body: truncate(body, 4000),
+          });
+          notify(fx, wi, "handoff", `**${title}**\n\n${body}`, it.id);
+          if (!stageTerminal(wi.stage)) setStage(fx, wi.id, "handoff", actor, title);
+        }
+        return text({ posted: true, inbox_id: it.id, stage: "handoff" });
+      }
+      // A run without a work item has nowhere to post.
+      if (!wi) return text({ posted: false });
       workItemEvent(fx, wi.id, "message_out", caller.id, actor, { text: truncate(body, 8000), kind });
       notify(fx, wi, kind, body);
       return text({ posted: true });

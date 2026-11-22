@@ -119,6 +119,37 @@ describe("inbox", () => {
     expect(await inputs(w, run.id)).toHaveLength(before);
   });
 
+  it("a handoff update creates a handoff item and moves the stage (TestPostUpdateHandoff)", async () => {
+    const token = newToken("w");
+    const { run, wiId } = await creatorRun(token);
+    const out = await runInDurableObject(env.WORK.getByName(doName.work(TEAM, token)), async (inst, state) => {
+      const w = inst as unknown as WorkDO;
+      const call = (input: Record<string, unknown>) =>
+        w.toolCall({ runId: run.id, tool: "post_update", input, key: "", turnId: "" });
+      const a = await call({ text: "Triage done" });
+      const b = await call({ text: "PR ready: https://github.com/acme/api/pull/42", kind: "handoff" });
+      const empty = await call({ text: "" });
+      const kinds = state.storage.sql
+        .exec<{ payload: string }>("SELECT payload FROM outbox WHERE kind = 'notice.responder' ORDER BY rowid")
+        .toArray()
+        .map((r) => {
+          const p = JSON.parse(r.payload) as { message?: { kind: string }; payload?: { message: { kind: string } } };
+          return (p.message ?? p.payload?.message)!.kind;
+        });
+      return { a, b, empty, kinds };
+    });
+    expect(out.a.isError).toBeFalsy();
+    expect(out.b.isError, out.b.content[0]?.text).toBeFalsy();
+    expect(out.empty.isError).toBe(true);
+    expect(out.kinds).toEqual(["update", "handoff"]);
+    const w = workStub(TEAM, token);
+    const wi = (await w.api(meta, "getWorkItem", { id: wiId }, null)) as { stage: string };
+    expect(wi.stage).toBe("handoff");
+    const items = (await w.api(meta, "listWorkItemInbox", { id: wiId }, null)) as { items: InboxItem[] };
+    expect(items.items.map((i) => i.kind)).toEqual(["handoff"]);
+    expect(items.items[0]).toMatchObject({ title: "Ready for your review", recipients: ["usr_dana"] });
+  });
+
   it("question and approval bodies (TestHumanAndWorkItemTools)", async () => {
     const token = newToken("w");
     const { w, run } = await creatorRun(token);

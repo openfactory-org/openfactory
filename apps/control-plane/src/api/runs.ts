@@ -39,22 +39,24 @@ import { dispatchAutomation, platformIntakeDeps } from "../do/ingress/intake";
 import { applyOverrides } from "../scoring/overrides";
 import { mergeMessages, readCompactedMessages } from "../compaction/compact";
 import type { Overrides } from "../scoring/types";
+import type { ManualRunDispatcher } from "./schedules";
 
-// Registered lazily: a static import of ./schedules closes a module cycle
-// through the TeamDO modules at load time.
-void import("./schedules").then(({ setManualRunDispatcher }) =>
-  setManualRunDispatcher(async (env, input) => {
-    const out = await dispatchAutomation(
-      platformIntakeDeps(env, input.teamId),
-      input.factoryId,
-      input.automation,
-      input.event as unknown as CoreEvent,
-    );
-    if (!out.runId) throw new OfError("internal_error", "the automation started no run");
-    const run = (await env.WORK.getByName(doName.work(input.teamId, partitionOf(out.runId))).getRun(out.runId)) as Run;
-    return runView(run, { publicUrl: (env.OF_PUBLIC_URL ?? "").replace(/\/+$/, "") });
-  }),
-);
+/**
+ * The dispatcher of POST /automations/{id}/run (setManualRunDispatcher in
+ * ./schedules). wiring.ts registers it: a static import of ./schedules here
+ * closes a module cycle through the TeamDO modules at load time.
+ */
+export const manualRunDispatcher: ManualRunDispatcher = async (env, input) => {
+  const out = await dispatchAutomation(
+    platformIntakeDeps(env, input.teamId),
+    input.factoryId,
+    input.automation,
+    input.event as unknown as CoreEvent,
+  );
+  if (!out.runId) throw new OfError("internal_error", "the automation started no run");
+  const run = (await env.WORK.getByName(doName.work(input.teamId, partitionOf(out.runId))).getRun(out.runId)) as Run;
+  return runView(run, { publicUrl: (env.OF_PUBLIC_URL ?? "").replace(/\/+$/, "") });
+};
 
 // ---------- server routes and cron owned by WS5 ----------
 
