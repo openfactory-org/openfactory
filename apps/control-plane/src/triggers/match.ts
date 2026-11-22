@@ -1,7 +1,14 @@
 // Event → automation matching. Port of internal/triggers/match.go.
 import type { Automation, Event, Trigger } from "@openfactory/core";
 import * as T from "./attributes";
-import { CATALOG, GITHUB_CI_EVENTS, SELF_IGNORED_PROVIDERS, SKIP_BOTS_ALL, SKIP_BOTS_SELF, canonicalProvider } from "./catalog";
+import {
+  CATALOG,
+  GITHUB_CI_EVENTS,
+  SELF_IGNORED_PROVIDERS,
+  SKIP_BOTS_ALL,
+  SKIP_BOTS_SELF,
+  canonicalProvider,
+} from "./catalog";
 import { validateCron } from "./cron";
 import { InvalidFilterError, attrBool, collect, evalCondition, parseFilter } from "./filter";
 import { matchPayload } from "./payload";
@@ -25,7 +32,15 @@ export function match(ev: MatchEvent | null | undefined, a: Automation): boolean
     try {
       if (matchTrigger(ev, t)) return true;
     } catch (e) {
-      console.warn("trigger evaluation failed; not matching", a.id, a.name, i, t.provider, t.event, (e as Error).message);
+      console.warn(
+        "trigger evaluation failed; not matching",
+        a.id,
+        a.name,
+        i,
+        t.provider,
+        t.event,
+        (e as Error).message,
+      );
     }
   }
   return false;
@@ -90,7 +105,8 @@ export function validateTrigger(t: Trigger): void {
     throw new InvalidFilterError(`unknown provider "${t.provider}"`);
   }
   if (!t.event) throw new InvalidFilterError("event is required");
-  if (t.event.includes(".")) throw new InvalidFilterError(`event "${t.event}" must not be dotted; set provider and event separately`);
+  if (t.event.includes("."))
+    throw new InvalidFilterError(`event "${t.event}" must not be dotted; set provider and event separately`);
   if (t.provider === T.ProviderSchedule) {
     if (!t.schedule) throw new InvalidFilterError(`schedule is required for schedule.${t.event}`);
     const err = validateCron(t.schedule.cron);

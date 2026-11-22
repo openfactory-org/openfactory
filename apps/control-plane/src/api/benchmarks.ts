@@ -1,7 +1,17 @@
 // REST handlers: benchmarks. Owner: WS13.
 import { newRoutedId, newToken, doName, type BenchmarkRun } from "@openfactory/core";
 import { requireRole } from "../auth/roles";
-import { callMeta, callTeam, errorResponse, json, opParams, readJson, teamApi, teamOf, type Handler } from "../http/handler";
+import {
+  callMeta,
+  callTeam,
+  errorResponse,
+  json,
+  opParams,
+  readJson,
+  teamApi,
+  teamOf,
+  type Handler,
+} from "../http/handler";
 import { bodyObject, optString, str } from "../lib/body";
 import { makeTaskFromRun } from "../scoring/benchmark-tasks";
 import { unwrapOp, workEngine, workRunsPort } from "../scoring/clients";
@@ -59,7 +69,9 @@ export const getBenchmarkRun: Handler = async (_r, env, ctx) => {
 /** POST /api/v1/benchmark-runs/{id}/cancel. */
 export const cancelBenchmarkRun: Handler = async (_r, env, ctx) => {
   try {
-    return json(await env.BENCHMARK.getByName(benchmarkDoName(teamOf(ctx), ctx.params["id"] ?? "")).cancel(callMeta(ctx)));
+    return json(
+      await env.BENCHMARK.getByName(benchmarkDoName(teamOf(ctx), ctx.params["id"] ?? "")).cancel(callMeta(ctx)),
+    );
   } catch (e) {
     return errorResponse(e, { instance: ctx.url.pathname, requestId: ctx.requestId });
   }
@@ -71,23 +83,34 @@ export const createBenchmarkTaskFromRun: Handler = async (req, env, ctx) => {
     const b = bodyObject(await readJson(req, false));
     const teamId = teamOf(ctx);
     const meta = callMeta(ctx);
-    const info = unwrapOp<{ factory: { id: string; source: string }; definition: { benchmarks?: never } | null; files: Record<string, string> }>(
-      await env.TEAM.getByName(doName.team(teamId)).api(meta, "scoringTaskContext", opParams(ctx), undefined),
-    );
+    const info = unwrapOp<{
+      factory: { id: string; source: string };
+      definition: { benchmarks?: never } | null;
+      files: Record<string, string>;
+    }>(await env.TEAM.getByName(doName.team(teamId)).api(meta, "scoringTaskContext", opParams(ctx), undefined));
     requireRole(ctx.principal, info.factory.id, "editor");
     const runId = str(b, "from_run_id");
-    const task = await makeTaskFromRun(workRunsPort(env, teamId), info.definition ? { definition: info.definition, files: info.files } : null, {
-      factoryId: info.factory.id,
-      suite: ctx.params["suite"] ?? "",
-      runId,
-      ...(optString(b, "slug") ? { slug: optString(b, "slug")! } : {}),
-      ...(optString(b, "title") ? { title: optString(b, "title")! } : {}),
-      successCriteria: optString(b, "success_criteria") ?? "",
-      ...(Array.isArray(b["tags"]) ? { tags: b["tags"] as string[] } : {}),
-    });
+    const task = await makeTaskFromRun(
+      workRunsPort(env, teamId),
+      info.definition ? { definition: info.definition, files: info.files } : null,
+      {
+        factoryId: info.factory.id,
+        suite: ctx.params["suite"] ?? "",
+        runId,
+        ...(optString(b, "slug") ? { slug: optString(b, "slug")! } : {}),
+        ...(optString(b, "title") ? { title: optString(b, "title")! } : {}),
+        successCriteria: optString(b, "success_criteria") ?? "",
+        ...(Array.isArray(b["tags"]) ? { tags: b["tags"] as string[] } : {}),
+      },
+    );
     const out: Record<string, unknown> = { task: task.task, files: task.files, applied: false };
     if (info.factory.source !== "git") {
-      const v = await workEngine(env, teamId).applyDefinition(info.factory.id, task.definition, meta.principal?.userId ? "user:" + meta.principal.userId : "api", `Add a benchmark task from run ${runId}`);
+      const v = await workEngine(env, teamId).applyDefinition(
+        info.factory.id,
+        task.definition,
+        meta.principal?.userId ? "user:" + meta.principal.userId : "api",
+        `Add a benchmark task from run ${runId}`,
+      );
       out["applied"] = true;
       out["version_id"] = v.id;
     }

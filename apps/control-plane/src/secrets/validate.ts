@@ -1,12 +1,18 @@
 // Secret names, types and values. Port of internal/secrets/validate.go and
-// the API checks of internal/api/platform.go. The AWS types
-// (anthropic_bedrock_*, aws_ecr_credential) are removed (plan: no AWS).
+// the API checks of internal/api/platform.go. Only the secret types of the
+// supported harnesses and forges remain.
 import { OfError } from "@openfactory/core";
 
 export const MAX_NAME_LENGTH = 128;
 /** NAME=value plus the NUL byte must fit in 128 KiB. */
 export const MAX_ENV_ENTRY = 128 << 10;
-export const SECRET_TYPES = ["generic", "anthropic_api_key", "anthropic_oauth_token", "openai_api_key", "docker_registry"] as const;
+export const SECRET_TYPES = [
+  "generic",
+  "anthropic_api_key",
+  "anthropic_oauth_token",
+  "openai_api_key",
+  "docker_registry",
+] as const;
 export type SecretType = (typeof SECRET_TYPES)[number];
 export const RESERVED_PREFIXES = ["OF_"];
 
@@ -23,7 +29,8 @@ export function isSecretType(t: string): t is SecretType {
 /** ValidateName: UPPER_SNAKE_CASE, 1-128 characters, no reserved prefix. */
 export function validateName(name: string): void {
   if (name === "") throw new OfError("invalid_request", "secret name is required");
-  if (name.length > MAX_NAME_LENGTH) throw new OfError("invalid_request", `secret name exceeds ${MAX_NAME_LENGTH} characters`);
+  if (name.length > MAX_NAME_LENGTH)
+    throw new OfError("invalid_request", `secret name exceeds ${MAX_NAME_LENGTH} characters`);
   if (!NAME_RE.test(name)) {
     throw new OfError(
       "invalid_request",
@@ -31,7 +38,8 @@ export function validateName(name: string): void {
     );
   }
   for (const p of RESERVED_PREFIXES) {
-    if (name.startsWith(p)) throw new OfError("invalid_request", `secret name ${JSON.stringify(name)} uses the reserved prefix ${p}`);
+    if (name.startsWith(p))
+      throw new OfError("invalid_request", `secret name ${JSON.stringify(name)} uses the reserved prefix ${p}`);
   }
 }
 
@@ -46,12 +54,15 @@ function normalizeRegistry(r: string): string {
     if (!h) throw new OfError("invalid_request", `invalid registry ${JSON.stringify(r)}`);
   }
   h = h.replace(/\/$/, "");
-  if (h === "" || /[/ ]/.test(h)) throw new OfError("invalid_request", "registry must be a host name such as registry.example.com");
+  if (h === "" || /[/ ]/.test(h))
+    throw new OfError("invalid_request", "registry must be a host name such as registry.example.com");
   return canonicalRegistry(h);
 }
 
 export function canonicalRegistry(h: string): string {
-  return ["index.docker.io", "registry-1.docker.io", "registry.hub.docker.com", "docker.io"].includes(h) ? "docker.io" : h;
+  return ["index.docker.io", "registry-1.docker.io", "registry.hub.docker.com", "docker.io"].includes(h)
+    ? "docker.io"
+    : h;
 }
 
 /** ParseDockerRegistry: strict JSON {registry, username, password}. */
@@ -60,9 +71,13 @@ export function parseDockerRegistry(value: string): { registry: string; username
   try {
     v = JSON.parse(value) as Record<string, unknown>;
     if (typeof v !== "object" || v === null || Array.isArray(v)) throw new Error("not an object");
-    for (const k of Object.keys(v)) if (!["registry", "username", "password"].includes(k)) throw new Error(`json: unknown field "${k}"`);
+    for (const k of Object.keys(v))
+      if (!["registry", "username", "password"].includes(k)) throw new Error(`json: unknown field "${k}"`);
   } catch (e) {
-    throw new OfError("invalid_request", `docker_registry must be JSON {registry, username, password}: ${(e as Error).message}`);
+    throw new OfError(
+      "invalid_request",
+      `docker_registry must be JSON {registry, username, password}: ${(e as Error).message}`,
+    );
   }
   const s = (k: string) => (typeof v[k] === "string" ? (v[k] as string) : "");
   if (!s("registry") || !s("username") || !s("password")) {

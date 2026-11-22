@@ -43,7 +43,16 @@ describe("providers", () => {
 describe("integration events", () => {
   it("events of one thread share a partition; other threads do not", async () => {
     const ev = (thread: string) =>
-      ({ id: "e", team_id: "default", provider: "slack", type: "message", actor: {}, attributes: null, received_at: "", source: { provider: "slack", kind: "thread", channel: "C1", thread_id: thread } }) as never;
+      ({
+        id: "e",
+        team_id: "default",
+        provider: "slack",
+        type: "message",
+        actor: {},
+        attributes: null,
+        received_at: "",
+        source: { provider: "slack", kind: "thread", channel: "C1", thread_id: thread },
+      }) as never;
     expect(await integrationPartition(ev("1"))).toBe(await integrationPartition(ev("1")));
     expect(await integrationPartition(ev("1"))).not.toBe(await integrationPartition(ev("2")));
   });

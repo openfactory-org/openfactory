@@ -28,7 +28,8 @@ export function validateKey(key: string): void {
   if (key.startsWith("/") || key.endsWith("/")) throw bad(`${JSON.stringify(key)} has a leading or trailing slash`);
   for (const ch of key) {
     const c = ch.codePointAt(0)!;
-    if (c < 0x20 || c === 0x7f || ch === "\\") throw bad(`${JSON.stringify(key)} contains a control character or backslash`);
+    if (c < 0x20 || c === 0x7f || ch === "\\")
+      throw bad(`${JSON.stringify(key)} contains a control character or backslash`);
   }
   for (const seg of key.split("/")) {
     if (seg === "") throw bad(`${JSON.stringify(key)} has an empty segment`);
@@ -37,7 +38,8 @@ export function validateKey(key: string): void {
 }
 
 function checkRunId(runId: string): void {
-  if (runId === "" || /[/\\]/.test(runId)) throw new OfError("invalid_request", `invalid object key: bad run id ${JSON.stringify(runId)}`);
+  if (runId === "" || /[/\\]/.test(runId))
+    throw new OfError("invalid_request", `invalid object key: bad run id ${JSON.stringify(runId)}`);
   validateKey(runId);
 }
 
@@ -92,13 +94,23 @@ export class RunData {
     return this.env.DATA;
   }
 
-  async putHarnessTranscript(runId: string, session: number, body: ReadableStream | ArrayBuffer | string): Promise<string> {
+  async putHarnessTranscript(
+    runId: string,
+    session: number,
+    body: ReadableStream | ArrayBuffer | string,
+  ): Promise<string> {
     const key = harnessTranscriptKey(runId, session);
     await this.bucket.put(key, body, { httpMetadata: { contentType: "application/x-ndjson" } });
     return key;
   }
 
-  private async put(dir: "artifacts" | "attachments", runId: string, name: string, body: ReadableStream | ArrayBuffer | string, contentType?: string) {
+  private async put(
+    dir: "artifacts" | "attachments",
+    runId: string,
+    name: string,
+    body: ReadableStream | ArrayBuffer | string,
+    contentType?: string,
+  ) {
     const key = namedKey(runId, dir, name);
     await this.bucket.put(key, body, contentType ? { httpMetadata: { contentType } } : undefined);
     return key;
@@ -126,7 +138,11 @@ export class RunData {
     return this.listDir("artifacts", runId);
   }
   artifactUrl(runId: string, name: string, ttlSeconds?: number) {
-    return presignR2(this.env, { method: "GET", key: namedKey(runId, "artifacts", name), ...(ttlSeconds ? { expiresSeconds: ttlSeconds } : {}) });
+    return presignR2(this.env, {
+      method: "GET",
+      key: namedKey(runId, "artifacts", name),
+      ...(ttlSeconds ? { expiresSeconds: ttlSeconds } : {}),
+    });
   }
 
   putAttachment(runId: string, name: string, body: ReadableStream | ArrayBuffer | string, contentType?: string) {
@@ -139,7 +155,11 @@ export class RunData {
     return this.listDir("attachments", runId);
   }
   attachmentUrl(runId: string, name: string, ttlSeconds?: number) {
-    return presignR2(this.env, { method: "GET", key: namedKey(runId, "attachments", name), ...(ttlSeconds ? { expiresSeconds: ttlSeconds } : {}) });
+    return presignR2(this.env, {
+      method: "GET",
+      key: namedKey(runId, "attachments", name),
+      ...(ttlSeconds ? { expiresSeconds: ttlSeconds } : {}),
+    });
   }
   /** Presigned PUT; the client sends Content-Type: contentType. */
   attachmentUploadUrl(runId: string, name: string, contentType: string, ttlSeconds?: number) {

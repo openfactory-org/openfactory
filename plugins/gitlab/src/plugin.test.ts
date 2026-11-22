@@ -20,7 +20,13 @@ afterEach(() => vi.unstubAllGlobals());
 describe("Plugin", () => {
   it("reports its info and passes the version check", async () => {
     const info = await plugin({ PLUGIN_VERSION: "1.2.3" }).info();
-    expect(info).toMatchObject({ name: "gitlab", version: "1.2.3", apiVersion: PLUGIN_API_VERSION, roles: ["forge", "ingress"], forgeProviders: ["gitlab"] });
+    expect(info).toMatchObject({
+      name: "gitlab",
+      version: "1.2.3",
+      apiVersion: PLUGIN_API_VERSION,
+      roles: ["forge", "ingress"],
+      forgeProviders: ["gitlab"],
+    });
     expect(checkPluginInfo(info)).toEqual({ ok: true });
     expect(() => JSON.parse(info.configSchema!)).not.toThrow();
     expect((await plugin().info()).version).toBe("0.0.0-dev");
@@ -58,19 +64,29 @@ describe("Plugin", () => {
     });
     vi.stubGlobal("fetch", m.fetch);
     expect(await plugin().defaultBranch(target, "acme", "api")).toBe("trunk");
-    const err = await plugin().getPullRequest(target, "acme", "api", 8).catch((e: unknown) => e);
+    const err = await plugin()
+      .getPullRequest(target, "acme", "api", 8)
+      .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(OfError);
     expect(toOfError(err).error.code).toBe("resource_not_found");
   });
 
   it("handles a webhook through the entrypoint", async () => {
     const host = new FakeHostApi({
-      integrations: [{ id: "i", teamId: "t", provider: "gitlab", name: "g", config: { org: "acme", webhook_secret_ref: "S" } }],
+      integrations: [
+        { id: "i", teamId: "t", provider: "gitlab", name: "g", config: { org: "acme", webhook_secret_ref: "S" } },
+      ],
       secrets: { t: { S: "tok" } },
     });
     const req = webhookRequest(
       "https://cp.test/plugins/gitlab/webhook",
-      { object_kind: "push", ref: "refs/heads/m", after: "abc", user_username: "a", project: { path_with_namespace: "acme/api" } },
+      {
+        object_kind: "push",
+        ref: "refs/heads/m",
+        after: "abc",
+        user_username: "a",
+        project: { path_with_namespace: "acme/api" },
+      },
       { "X-Gitlab-Token": "tok" },
     );
     const r = await plugin().handleWebhook(req, host);

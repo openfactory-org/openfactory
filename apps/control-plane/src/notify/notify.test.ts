@@ -56,7 +56,9 @@ describe("notify router", () => {
     expect(lin.calls).toEqual(["state:done"]);
     expect(await r.deliverOnce("t", msg("github", "issue_state", { issue_state: "done" }))).toBe("skipped");
     expect(gh.calls).toEqual([]);
-    await expect(new Router([new Rec("jira", undefined, true)]).deliverOnce("t", msg("jira", "attach_pull_request"))).resolves.toBe("skipped");
+    await expect(
+      new Router([new Rec("jira", undefined, true)]).deliverOnce("t", msg("jira", "attach_pull_request")),
+    ).resolves.toBe("skipped");
   });
   it("classifies errors", async () => {
     expect(permanent(new OfError("resource_not_found"))).toBe(true);
@@ -65,7 +67,9 @@ describe("notify router", () => {
     expect(permanent(new ApiError("POST", "u", 422, ""))).toBe(true);
     expect(permanent(new Error("x", { cause: new ApiError("GET", "u", 404, "") }))).toBe(true);
     expect(permanent(new Error("network"))).toBe(false);
-    await expect(new Router([new Rec("github", new Error("boom"))]).deliverOnce("t", msg("github"))).rejects.toThrow("boom");
+    await expect(new Router([new Rec("github", new Error("boom"))]).deliverOnce("t", msg("github"))).rejects.toThrow(
+      "boom",
+    );
     expect(teamOfOrigin("team:acme|work:w123")).toBe("acme");
   });
   it("lists notification routes", () => {
@@ -84,16 +88,48 @@ describe("notify router", () => {
 describe("mergeguard", () => {
   it("merge tool names (mergeguard_test.go)", () => {
     const merge = [
-      "merge_pull_request", "mergePullRequest", "forge.merge-pr", "merge_pr", "merge", "merge_merge_request", "accept_merge_request",
-      "acceptMergeRequest", "complete_pull_request", "pull_request_merge", "pr_merge", "squash_merge", "enable_auto_merge",
-      "enable_pull_request_automerge", "set_auto_merge", "merge_branch", "mcp__forge__merge_pull_request", "MergePR", "merge_and_close",
-      "add_to_merge_queue", "enqueue_pull_request", "merge_into", "rebase_merge",
+      "merge_pull_request",
+      "mergePullRequest",
+      "forge.merge-pr",
+      "merge_pr",
+      "merge",
+      "merge_merge_request",
+      "accept_merge_request",
+      "acceptMergeRequest",
+      "complete_pull_request",
+      "pull_request_merge",
+      "pr_merge",
+      "squash_merge",
+      "enable_auto_merge",
+      "enable_pull_request_automerge",
+      "set_auto_merge",
+      "merge_branch",
+      "mcp__forge__merge_pull_request",
+      "MergePR",
+      "merge_and_close",
+      "add_to_merge_queue",
+      "enqueue_pull_request",
+      "merge_into",
+      "rebase_merge",
     ];
     for (const n of merge) expect(isMergeTool(n), n).toBe(true);
     const other = [
-      "get_merge_request", "list_merge_requests", "create_merge_request", "create_pull_request", "get_pull_request", "merge_request_diff",
-      "get_merge_status", "list_merges_in_queue_status", "get_merge_base", "linear_get_issue", "comment_on_merge_request",
-      "update_merge_request", "emerge", "submerged_items", "", "merge_request",
+      "get_merge_request",
+      "list_merge_requests",
+      "create_merge_request",
+      "create_pull_request",
+      "get_pull_request",
+      "merge_request_diff",
+      "get_merge_status",
+      "list_merges_in_queue_status",
+      "get_merge_base",
+      "linear_get_issue",
+      "comment_on_merge_request",
+      "update_merge_request",
+      "emerge",
+      "submerged_items",
+      "",
+      "merge_request",
     ];
     for (const n of other) expect(isMergeTool(n), n).toBe(false);
     expect(words("getPR2Merge_now")).toEqual(["get", "pr2", "merge", "now"]);
@@ -114,8 +150,14 @@ describe("mergeguard", () => {
     expect(seen.length).toBe(1);
     const r = await post('{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"merge_pull_request"}}');
     expect(r.headers.get("x-of-merge-refused")).toBe("true");
-    expect(await r.json()).toEqual({ jsonrpc: "2.0", id: 2, result: { content: [{ type: "text", text: REFUSAL_TEXT }], isError: true } });
-    const b = await post('[{"jsonrpc":"2.0","id":3,"method":"tools/list"},{"jsonrpc":"2.0","method":"tools/call","params":{"name":"merge"}},{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"merge"}}]');
+    expect(await r.json()).toEqual({
+      jsonrpc: "2.0",
+      id: 2,
+      result: { content: [{ type: "text", text: REFUSAL_TEXT }], isError: true },
+    });
+    const b = await post(
+      '[{"jsonrpc":"2.0","id":3,"method":"tools/list"},{"jsonrpc":"2.0","method":"tools/call","params":{"name":"merge"}},{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"merge"}}]',
+    );
     const arr = (await b.json()) as { id: number; error?: unknown; result?: unknown }[];
     expect(arr.map((x) => [x.id, !!x.error, !!x.result])).toEqual([
       [3, true, false],
@@ -150,9 +192,17 @@ describe("eventctx", () => {
   const text = (f: ec.File) => new TextDecoder().decode(f.data);
   it("builds the envelope, payload and prompt section", async () => {
     const b = (await ec.build("msg/1", event(), true))!;
-    expect(b.files.map((f) => f.path)).toEqual([".openfactory/events/msg_1/envelope.json", ".openfactory/events/msg_1/payload.json"]);
+    expect(b.files.map((f) => f.path)).toEqual([
+      ".openfactory/events/msg_1/envelope.json",
+      ".openfactory/events/msg_1/payload.json",
+    ]);
     const env = JSON.parse(text(b.files[0]!)) as ec.Envelope;
-    expect(env).toMatchObject({ message_id: "msg/1", event_types: ["received"], webhook: { id: "whk_1", name: "deploys", delivery: "d1" }, payload_bytes: 7 });
+    expect(env).toMatchObject({
+      message_id: "msg/1",
+      event_types: ["received"],
+      webhook: { id: "whk_1", name: "deploys", delivery: "d1" },
+      payload_bytes: 7,
+    });
     const p = ec.promptSection(b);
     expect(p).toContain("`.openfactory/events/msg_1/`");
     expect(p).toContain("- Webhook: deploys, delivery d1");
@@ -163,7 +213,11 @@ describe("eventctx", () => {
     const builder: ec.Builder = {
       provider: () => "webhook",
       eventContext: async () => ({
-        files: [{ path: "../x/../ok.txt", data: new Uint8Array(3) }, { path: "..", data: new Uint8Array(1) }, ...Array.from({ length: 41 }, (_, i) => ({ path: `f${i}`, data: new Uint8Array(1) }))],
+        files: [
+          { path: "../x/../ok.txt", data: new Uint8Array(3) },
+          { path: "..", data: new Uint8Array(1) },
+          ...Array.from({ length: 41 }, (_, i) => ({ path: `f${i}`, data: new Uint8Array(1) })),
+        ],
         omitted: [{ name: "thread", reason: "private" }],
       }),
     };
@@ -172,12 +226,20 @@ describe("eventctx", () => {
     expect(b.files[1]!.data.length).toBeLessThanOrEqual(ec.MAX_PAYLOAD_BYTES);
     expect(b.envelope.context_files!.length).toBe(40);
     expect(b.envelope.context_files![0]).toBe("context/ok.txt");
-    expect(b.envelope.omitted!.map((o) => o.reason)).toEqual(["private", "bad file name", "the context size limit was reached", "the context size limit was reached"]);
+    expect(b.envelope.omitted!.map((o) => o.reason)).toEqual([
+      "private",
+      "bad file name",
+      "the context size limit was reached",
+      "the context size limit was reached",
+    ]);
   });
   it("payload builders: github review comment and jira issue", async () => {
     const gh = (await ec.build(
       "m",
-      event({ provider: "github", payload: { comment: { body: "nit", path: "a.go", diff_hunk: "@@ -1 +1 @@", line: 3, user: { login: "alex" } } } }),
+      event({
+        provider: "github",
+        payload: { comment: { body: "nit", path: "a.go", diff_hunk: "@@ -1 +1 @@", line: 3, user: { login: "alex" } } },
+      }),
       true,
     ))!;
     expect(gh.envelope.context_files).toEqual(["context/review_comment.json", "context/diff.patch"]);
@@ -186,7 +248,19 @@ describe("eventctx", () => {
       event({
         provider: "jira",
         source: { provider: "jira", kind: "issue", url: "https://j/ENG-1" },
-        payload: { issue: { key: "ENG-1", fields: { summary: "S", description: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Hello" }] }] }, labels: [] } } },
+        payload: {
+          issue: {
+            key: "ENG-1",
+            fields: {
+              summary: "S",
+              description: {
+                type: "doc",
+                content: [{ type: "paragraph", content: [{ type: "text", text: "Hello" }] }],
+              },
+              labels: [],
+            },
+          },
+        },
       }),
       true,
     ))!;
@@ -198,20 +272,26 @@ describe("eventctx", () => {
     const f = fr.forgeFor("GITHUB");
     f.threads["10"] = { ref: "10", path: "a.go", comments: [{ id: "10", body: "x" }] };
     f.diffs["a.go"] = { path: "a.go", patch: "@@ -1 +1 @@\n-a\n+b" };
-    const ev = event({ provider: "github", payload: undefined, source: { provider: "github", kind: "pull_request", repo: "acme/api", number: 7, thread_ref: "10" } });
+    const ev = event({
+      provider: "github",
+      payload: undefined,
+      source: { provider: "github", kind: "pull_request", repo: "acme/api", number: 7, thread_ref: "10" },
+    });
     const b = (await ec.build("m", ev, true, ec.reviewBuilders(fr)))!;
     expect(b.envelope.context_files).toEqual(["context/review_thread.json", "context/file_diff.patch"]);
     expect(fr.lookups[0]).toMatchObject({ codeForge: "GITHUB", repo: "acme/api", scope: ["acme/api"] });
     f.unsupported.add("fileDiff");
     const b2 = (await ec.build("m", ev, true, ec.reviewBuilders(fr)))!;
-    expect(b2.envelope.omitted).toEqual([{ name: "context/file_diff.patch", reason: "this forge cannot read the diff of a.go" }]);
+    expect(b2.envelope.omitted).toEqual([
+      { name: "context/file_diff.patch", reason: "this forge cannot read the diff of a.go" },
+    ]);
   });
   it("thread and diff limits", () => {
     const comments = Array.from({ length: 5 }, (_, i) => ({ id: String(i), body: "x".repeat(100_000) }));
     const { data, dropped } = ec.threadFile({ ref: "1", comments });
     expect(data.length).toBeLessThanOrEqual(ec.MAX_REVIEW_FILE_BYTES);
     expect(dropped).toBe(3);
-    const d = ec.diffFile("a", ("line\n").repeat(60_000));
+    const d = ec.diffFile("a", "line\n".repeat(60_000));
     expect(d.left).toBeGreaterThan(0);
     expect(new TextDecoder().decode(d.data).endsWith("\n")).toBe(true);
   });

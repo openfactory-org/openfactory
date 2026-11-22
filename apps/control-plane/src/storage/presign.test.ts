@@ -1,4 +1,4 @@
-// Port of internal/objectstore/sigv4_test.go (AWS SigV4 suite and S3 docs vectors).
+// Port of internal/objectstore/sigv4_test.go (SigV4 test suite and S3 docs vectors).
 import { describe, expect, it } from "vitest";
 import { awsUriEncode, EMPTY_PAYLOAD_HASH, SigV4 } from "./presign";
 import { snapshotRunId, validateKey } from "./rundata";
@@ -11,7 +11,7 @@ const s3Time = new Date(Date.UTC(2013, 4, 24, 0, 0, 0));
 describe("SigV4", () => {
   const cases = [
     {
-      name: "aws suite get-vanilla",
+      name: "sigv4 suite get-vanilla",
       s: new SigV4(suite, "us-east-1", "service"),
       method: "GET",
       url: "https://example.amazonaws.com/",
@@ -19,7 +19,7 @@ describe("SigV4", () => {
       want: "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, SignedHeaders=host;x-amz-date, Signature=5fa00fa31553b73ebf1942676e86291e8372ff2a2260956d9b8aae1d763fbf31",
     },
     {
-      name: "aws suite post-vanilla",
+      name: "sigv4 suite post-vanilla",
       s: new SigV4(suite, "us-east-1", "service"),
       method: "POST",
       url: "https://example.amazonaws.com/",
@@ -27,7 +27,7 @@ describe("SigV4", () => {
       want: "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, SignedHeaders=host;x-amz-date, Signature=5da7c1a2acd57cee7505fc6676e4e544621c30862966e37dddb68e92efbe5d6b",
     },
     {
-      name: "aws suite get-vanilla-query-order-key-case",
+      name: "sigv4 suite get-vanilla-query-order-key-case",
       s: new SigV4(suite, "us-east-1", "service"),
       method: "GET",
       url: "https://example.amazonaws.com/?Param2=value2&Param1=value1",
@@ -62,7 +62,13 @@ describe("SigV4", () => {
 
   it("presigns like the S3 query-parameter example", async () => {
     const s = new SigV4(s3doc, "us-east-1", "s3");
-    const got = await s.presign("GET", new URL("https://examplebucket.s3.amazonaws.com/test.txt"), undefined, s3Time, 86400);
+    const got = await s.presign(
+      "GET",
+      new URL("https://examplebucket.s3.amazonaws.com/test.txt"),
+      undefined,
+      s3Time,
+      86400,
+    );
     expect(got).toContain("X-Amz-Signature=aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404");
     for (const p of [
       "X-Amz-Algorithm=AWS4-HMAC-SHA256",
@@ -85,7 +91,8 @@ describe("SigV4", () => {
 describe("run data keys (objectstore ValidateKey)", () => {
   it("validates keys", () => {
     validateKey("runs/run_1/artifacts/a.txt");
-    for (const bad of ["", "/a", "a/", "a//b", "a/../b", "a\\b", "a\u0001b", "x".repeat(1025)]) expect(() => validateKey(bad), bad).toThrow();
+    for (const bad of ["", "/a", "a/", "a//b", "a/../b", "a\\b", "a\u0001b", "x".repeat(1025)])
+      expect(() => validateKey(bad), bad).toThrow();
     expect(snapshotRunId("snapshots/default/run_1/1/ws/a.tar")).toBe("run_1");
     expect(snapshotRunId("runs/run_1/x")).toBeUndefined();
   });

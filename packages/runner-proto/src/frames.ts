@@ -144,7 +144,11 @@ export function newEvent<T extends EventType>(
   data: EventDataMap[T],
   opts: { turnId?: string; at?: Date | string } = {},
 ): Event {
-  const ev: Event = { seq, type, at: opts.at === undefined ? new Date().toISOString() : new Date(opts.at).toISOString() };
+  const ev: Event = {
+    seq,
+    type,
+    at: opts.at === undefined ? new Date().toISOString() : new Date(opts.at).toISOString(),
+  };
   if (opts.turnId) ev.turn_id = opts.turnId;
   if (data !== undefined) ev.data = data;
   return ev;

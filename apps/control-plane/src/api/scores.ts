@@ -28,7 +28,10 @@ export const listScores: Handler = async (_req, env, ctx) => {
   const passed = q.get("passed");
   const agent = q.get("agent");
   const items = page.items.filter(
-    (s) => (passed === null || passed === "" || s.passed === (passed === "true")) && (!agent || s.agent_name === agent) && (since === undefined || Date.parse(s.created_at) >= since),
+    (s) =>
+      (passed === null || passed === "" || s.passed === (passed === "true")) &&
+      (!agent || s.agent_name === agent) &&
+      (since === undefined || Date.parse(s.created_at) >= since),
   );
   return json({ ...page, items });
 };
@@ -39,7 +42,9 @@ export const scoreRun: Handler = async (req, env, ctx) => {
     const body = bodyObject(await readJson(req, false));
     const scorer = str(body, "scorer_id");
     const teamId = teamOf(ctx);
-    const run = (await env.WORK.getByName(workDOName(teamId, ctx.params["runId"] ?? "")).getRun(ctx.params["runId"] ?? "")) as { id: string; factory_id: string };
+    const run = (await env.WORK.getByName(workDOName(teamId, ctx.params["runId"] ?? "")).getRun(
+      ctx.params["runId"] ?? "",
+    )) as { id: string; factory_id: string };
     requireRole(ctx.principal, run.factory_id, "editor");
     const score = await scoringService(env, teamId).scoreRun(scorer, run.id);
     return json(score, score.id === "" ? 202 : 200);

@@ -197,7 +197,11 @@ export class Outbox {
       }
       const ack = await this.d.deliver(envelope, row);
       if (ack && "retry" in ack && ack.retry) {
-        this.sql.exec("UPDATE outbox SET next_ms = ? WHERE id = ?", this.now() + Math.max(0, ack.afterMs ?? 1000), row.id);
+        this.sql.exec(
+          "UPDATE outbox SET next_ms = ? WHERE id = ?",
+          this.now() + Math.max(0, ack.afterMs ?? 1000),
+          row.id,
+        );
         res.retried++;
         return;
       }

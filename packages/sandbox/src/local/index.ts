@@ -57,7 +57,10 @@ export class LocalProvider implements SandboxProvider {
 
   async preflight(task: SandboxTask): Promise<PreflightResult> {
     const workers = (await this.dir.list()).filter((w) => w.online);
-    if (workers.length > 0 && !workers.some((w) => !w.arch || w.arch.length === 0 || w.arch.includes(task.platform.arch))) {
+    if (
+      workers.length > 0 &&
+      !workers.some((w) => !w.arch || w.arch.length === 0 || w.arch.includes(task.platform.arch))
+    ) {
       return { ok: false, code: "invalid_configuration", message: `no development worker runs ${task.platform.arch}` };
     }
     return { ok: true };

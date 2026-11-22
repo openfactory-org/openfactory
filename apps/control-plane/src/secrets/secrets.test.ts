@@ -47,7 +47,8 @@ describe("envelope", () => {
 describe("validate", () => {
   it("checks names", () => {
     validateName("METABASE_API_KEY");
-    for (const bad of ["", "lower", "1ABC", "OF_TOKEN", "A".repeat(129)]) expect(() => validateName(bad), bad).toThrow();
+    for (const bad of ["", "lower", "1ABC", "OF_TOKEN", "A".repeat(129)])
+      expect(() => validateName(bad), bad).toThrow();
   });
   it("checks values by type", () => {
     validateValue("A", "generic", "x y");
@@ -55,8 +56,14 @@ describe("validate", () => {
     expect(() => validateValue("A", "generic", "")).toThrow(/required/);
     expect(() => validateValue("A", "generic", "a\0b")).toThrow(/NUL/);
     expect(() => validateValue("A", "generic", "x".repeat(128 << 10))).toThrow(/too large/);
-    validateValue("A", "docker_registry", JSON.stringify({ registry: "https://Index.Docker.io/", username: "u", password: "p" }));
-    expect(() => validateValue("A", "docker_registry", JSON.stringify({ registry: "r", username: "u", password: "p", x: 1 }))).toThrow(/unknown field/);
+    validateValue(
+      "A",
+      "docker_registry",
+      JSON.stringify({ registry: "https://Index.Docker.io/", username: "u", password: "p" }),
+    );
+    expect(() =>
+      validateValue("A", "docker_registry", JSON.stringify({ registry: "r", username: "u", password: "p", x: 1 })),
+    ).toThrow(/unknown field/);
     expect(() => validateValue("A", "aws_ecr_credential", "{}")).toThrow(/unknown secret type/);
   });
   it("finds image hosts", () => {

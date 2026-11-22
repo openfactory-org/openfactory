@@ -8,9 +8,6 @@
   "bin": {
     "openfactory": "./dist/index.js"
   },
-  "exports": {
-    ".": "./src/index.ts"
-  },
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "vitest run",
@@ -18,9 +15,13 @@
   },
   "files": [
     "dist/index.js",
-    "dist/index.js.map"
+    "dist/index.js.map",
+    "README.md"
   ],
   "publishConfig": {
     "access": "public"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

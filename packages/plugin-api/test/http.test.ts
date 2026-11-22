@@ -5,7 +5,15 @@ import { mockFetch } from "../src/testing";
 
 const client = (routes: Parameters<typeof mockFetch>[0]) => {
   const m = mockFetch(routes);
-  return { api: new ApiClient({ baseUrl: "https://x.test/base/", userAgent: "ua", fetch: m.fetch, authorize: (h) => h.set("X-Auth", "1") }), calls: m.calls };
+  return {
+    api: new ApiClient({
+      baseUrl: "https://x.test/base/",
+      userAgent: "ua",
+      fetch: m.fetch,
+      authorize: (h) => h.set("X-Auth", "1"),
+    }),
+    calls: m.calls,
+  };
 };
 
 describe("ApiClient", () => {

@@ -2,7 +2,14 @@
 // version. A plugin is any service binding named PLUGIN_<NAME> whose entrypoint
 // answers info() (wrangler.jsonc "services", entrypoint "Plugin").
 
-import type { ForgePlugin, IngressPlugin, PluginInfo, PluginRole, ResponderPlugin, SandboxPlugin } from "@openfactory/plugin-api";
+import type {
+  ForgePlugin,
+  IngressPlugin,
+  PluginInfo,
+  PluginRole,
+  ResponderPlugin,
+  SandboxPlugin,
+} from "@openfactory/plugin-api";
 import { PLUGIN_API_VERSION, checkPluginInfo, isNotSupported } from "@openfactory/plugin-api";
 
 /** The binding name prefix of plugin Workers. */

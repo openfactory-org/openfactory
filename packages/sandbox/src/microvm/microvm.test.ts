@@ -23,7 +23,12 @@ function task(over: Partial<SandboxTask> = {}): SandboxTask {
     platform: { os: "linux", arch: "amd64" },
     resources: { vcpus: 2, memoryMiB: 4096 },
     env: { OF_CONTROL_URL: "https://cp.example.test", OF_RUN_ID: "r", OF_SESSION: "1", OF_BOOTSTRAP_TOKEN: "ofb_fake" },
-    networkPolicy: { mode: "restricted", allowedHosts: ["api.example.test"], deniedHosts: [], alwaysAllow: ["cp.example.test"] },
+    networkPolicy: {
+      mode: "restricted",
+      allowedHosts: ["api.example.test"],
+      deniedHosts: [],
+      alwaysAllow: ["cp.example.test"],
+    },
     maxSessionSeconds: 3600,
     failureRetentionSeconds: 0,
     labels: { "of-task": "x" },
@@ -52,13 +57,23 @@ describe("wire conversions", () => {
     const w = toWireTask(task());
     expect(w.task_id).toBe("run_wabcdefghijklmnoabcdefghijkl.1");
     expect(w.resources).toEqual({ cpu: "2", memory: "4096Mi" });
-    expect(w.network_policy).toEqual({ mode: "restricted", allowed_hosts: ["api.example.test", "cp.example.test"], denied_hosts: [] });
+    expect(w.network_policy).toEqual({
+      mode: "restricted",
+      allowed_hosts: ["api.example.test", "cp.example.test"],
+      denied_hosts: [],
+    });
     expect(w.platform).toEqual({ os: "linux", arch: "amd64" });
     expect(w.env.OF_BOOTSTRAP_TOKEN).toBe("ofb_fake");
   });
 
   it("round-trips a status and rejects unknown states", () => {
-    const s: TaskStatus = { taskId: "r.1", state: "exited", reason: "container_oom", exitCode: 137, endedAt: "2026-11-22T00:00:00Z" };
+    const s: TaskStatus = {
+      taskId: "r.1",
+      state: "exited",
+      reason: "container_oom",
+      exitCode: 137,
+      endedAt: "2026-11-22T00:00:00Z",
+    };
     expect(fromWireStatus(toWireStatus(s))).toEqual(s);
     expect(fromWireStatus({ task_id: "r.1", state: "gone" })).toBeNull();
     expect(fromWireStatus({ task_id: "r.1", state: "exited" })?.reason).toBe("unknown");
@@ -80,7 +95,11 @@ describe("wire conversions", () => {
 });
 
 describe("failure mapping", () => {
-  const end = (reason: TaskStatus["reason"]): TaskStatus => ({ taskId: "r.1", state: "exited", ...(reason ? { reason } : {}) });
+  const end = (reason: TaskStatus["reason"]): TaskStatus => ({
+    taskId: "r.1",
+    state: "exited",
+    ...(reason ? { reason } : {}),
+  });
   it.each([
     ["image_pull", "sandbox_create_failed"],
     ["container_oom", "out_of_memory"],
@@ -122,8 +141,14 @@ describe("MicroVMProvider", () => {
   it("refuses a machine larger than the slot and a foreign arch", async () => {
     const p = new MicroVMProvider(new FakeHub(), () => shape);
     expect(await p.preflight(task())).toMatchObject({ ok: true });
-    expect(await p.preflight(task({ resources: { vcpus: 4 } }))).toMatchObject({ ok: false, code: "invalid_configuration" });
-    expect(await p.preflight(task({ resources: { memoryMiB: 8192 } }))).toMatchObject({ ok: false, code: "invalid_configuration" });
+    expect(await p.preflight(task({ resources: { vcpus: 4 } }))).toMatchObject({
+      ok: false,
+      code: "invalid_configuration",
+    });
+    expect(await p.preflight(task({ resources: { memoryMiB: 8192 } }))).toMatchObject({
+      ok: false,
+      code: "invalid_configuration",
+    });
     expect(await p.preflight(task({ platform: { os: "linux", arch: "arm64" } }))).toMatchObject({ ok: false });
   });
 

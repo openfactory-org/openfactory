@@ -33,7 +33,12 @@ export async function teamOp<T = unknown>(
   body: unknown,
   opts: { meta?: CallMeta; params?: Record<string, string>; teamId?: string } = {},
 ): Promise<T> {
-  const out = (await teamStub(env, opts.teamId).api(opts.meta ?? { requestId: "mcp" }, op, opts.params ?? {}, body)) as unknown;
+  const out = (await teamStub(env, opts.teamId).api(
+    opts.meta ?? { requestId: "mcp" },
+    op,
+    opts.params ?? {},
+    body,
+  )) as unknown;
   if (typeof out === "object" && out !== null) {
     const e = (out as { $error?: { code: string; detail: string; extra?: Record<string, unknown> } }).$error;
     if (e) throw new OfError(e.code as ErrorCode, e.detail, e.extra ? { extra: e.extra } : {});

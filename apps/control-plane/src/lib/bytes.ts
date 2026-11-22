@@ -98,7 +98,13 @@ export async function sha256Hex(data: Uint8Array | string): Promise<string> {
 }
 
 export async function hmacSha256(key: Uint8Array, data: Uint8Array | string): Promise<Uint8Array<ArrayBuffer>> {
-  const k = await crypto.subtle.importKey("raw", key as Uint8Array<ArrayBuffer>, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const k = await crypto.subtle.importKey(
+    "raw",
+    key as Uint8Array<ArrayBuffer>,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
   const d = typeof data === "string" ? utf8(data) : data;
   return new Uint8Array(await crypto.subtle.sign("HMAC", k, d as Uint8Array<ArrayBuffer>));
 }
@@ -108,7 +114,9 @@ export function timingSafeEqual(a: Uint8Array | string, b: Uint8Array | string):
   const x = typeof a === "string" ? utf8(a) : a;
   const y = typeof b === "string" ? utf8(b) : b;
   if (x.length !== y.length) return false;
-  const subtle = crypto.subtle as SubtleCrypto & { timingSafeEqual?: (a: ArrayBufferView, b: ArrayBufferView) => boolean };
+  const subtle = crypto.subtle as SubtleCrypto & {
+    timingSafeEqual?: (a: ArrayBufferView, b: ArrayBufferView) => boolean;
+  };
   if (typeof subtle.timingSafeEqual === "function") return subtle.timingSafeEqual(x, y);
   let r = 0;
   for (let i = 0; i < x.length; i++) r |= x[i]! ^ y[i]!;

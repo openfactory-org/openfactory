@@ -96,7 +96,8 @@ export function fitThread(entries: ThreadEntry[]): { data: Uint8Array; left: num
   const enc = new TextEncoder();
   for (;;) {
     const b = enc.encode(JSON.stringify(keep, null, 2));
-    if (b.length <= EVENT_CONTEXT_MAX_PAYLOAD_BYTES || keep.length <= 1) return { data: b, left: entries.length - keep.length };
+    if (b.length <= EVENT_CONTEXT_MAX_PAYLOAD_BYTES || keep.length <= 1)
+      return { data: b, left: entries.length - keep.length };
     // Drop the oldest reply, in steps that grow with the size.
     let drop = 1 + Math.floor(keep.length / 20);
     if (drop > keep.length - 1) drop = keep.length - 1;

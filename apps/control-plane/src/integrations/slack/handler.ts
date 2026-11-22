@@ -120,7 +120,7 @@ export class SlackHandler {
 
   /** Checks the request against the secret of the matching record, or (no record, such as url_verification) of every Slack record. */
   private async verify(req: Request, body: string, integ: Integration | null): Promise<boolean> {
-    let cands: Integration[] = [];
+    let cands: Integration[];
     if (integ) cands = [integ];
     else {
       try {
@@ -175,7 +175,9 @@ export class SlackHandler {
       return { response: errorResponse(401, "invalid_signature", "Slack request signature verification failed") };
     }
     if (env.type === "url_verification") {
-      return { response: new Response(env.challenge ?? "", { status: 200, headers: { "Content-Type": "text/plain" } }) };
+      return {
+        response: new Response(env.challenge ?? "", { status: 200, headers: { "Content-Type": "text/plain" } }),
+      };
     }
     if (env.type !== "event_callback") return { response: new Response(null, { status: 200 }) };
     if (found.error || !found.integration) {
@@ -252,10 +254,13 @@ export class SlackHandler {
     try {
       c = await this.client(in_);
     } catch (e) {
-      this.log.warn("slack bot token unavailable; continuing without Web API enrichment", { integration: in_.id, err: errMessage(e) });
+      this.log.warn("slack bot token unavailable; continuing without Web API enrichment", {
+        integration: in_.id,
+        err: errMessage(e),
+      });
     }
     const factoryId = in_.factory_id ?? "";
-    let typ = "";
+    let typ: string;
     let requireLink = false;
     let channel = ev.channel ?? "";
     let threadTs = ev.thread_ts || ev.ts || "";
@@ -368,7 +373,13 @@ export class SlackHandler {
       workspace: ws,
     };
     if (typ === "member_joined_channel") {
-      source = { provider: PROVIDER, kind: "channel", channel, external_id: `${channel}:${actorId}:${ev.event_ts ?? ""}`, workspace: ws };
+      source = {
+        provider: PROVIDER,
+        kind: "channel",
+        channel,
+        external_id: `${channel}:${actorId}:${ev.event_ts ?? ""}`,
+        workspace: ws,
+      };
     }
     attrs[A.ChannelID] = channel;
     attrs[A.ChannelType] = ev.channel_type ?? "";
@@ -412,14 +423,27 @@ export class SlackHandler {
     }
   }
 
-  private async promptLink(c: SlackClient | null, in_: Integration, channel: string, ev: SlackEvent, actor: Actor): Promise<void> {
+  private async promptLink(
+    c: SlackClient | null,
+    in_: Integration,
+    channel: string,
+    ev: SlackEvent,
+    actor: Actor,
+  ): Promise<void> {
     if (!c) return;
-    let msg = "To start work from Slack, link your Slack account to an active member of this factory's Open Factory team, then send your request again.";
+    let msg =
+      "To start work from Slack, link your Slack account to an active member of this factory's Open Factory team, then send your request again.";
     // An ephemeral message is private to the user, so it can carry the URL.
     const u = await privateUrl(this.deps.linker, in_.team_id, PROVIDER, actor.external_id, actor.handle);
-    if (u !== "") msg = `To start work from Slack, <${u}|link your Slack account> to your Open Factory account, then send your request again.`;
+    if (u !== "")
+      msg = `To start work from Slack, <${u}|link your Slack account> to your Open Factory account, then send your request again.`;
     try {
-      await c.postEphemeral({ channel, user: actor.external_id, text: msg, ...(ev.thread_ts ? { thread_ts: ev.thread_ts } : {}) });
+      await c.postEphemeral({
+        channel,
+        user: actor.external_id,
+        text: msg,
+        ...(ev.thread_ts ? { thread_ts: ev.thread_ts } : {}),
+      });
     } catch (e) {
       this.log.warn("post link prompt", { err: errMessage(e) });
     }
@@ -482,7 +506,8 @@ export class SlackHandler {
     if (!mem) {
       let msg = "Only linked members of this factory's team can answer. Link your Slack account and try again.";
       const u = await privateUrl(this.deps.linker, teamId, PROVIDER, userId, in_.user?.username ?? "");
-      if (u !== "") msg = `Only linked members of this factory's team can answer. <${u}|Link your Slack account> and try again.`;
+      if (u !== "")
+        msg = `Only linked members of this factory's team can answer. <${u}|Link your Slack account> and try again.`;
       await this.respond(url, { response_type: "ephemeral", replace_original: false, text: msg });
       return;
     }

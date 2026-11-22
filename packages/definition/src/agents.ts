@@ -1,14 +1,32 @@
 // Agent parser and resolution. Port of internal/definition/agents.go.
 
-import { applyHarness, dedupe, emptyExec, type ExecSettings, type HarnessOverride, parseExec, parseNetworkPolicy } from './common.ts';
-import { type Compiler, machineRef, sortedNames } from './compile.ts';
-import { agentSkills } from './extras.ts';
-import { goQuote, goTrimSpace } from './gofmt.ts';
-import { mergePolicies } from './networkpolicy.ts';
-import type { AgentConfig, AgentType, HarnessConfig, MCPServer, NetworkPolicy } from './types.ts';
-import { type Diag, Doc, indexPath, isNull, type Mapping, put, resolve, splitFrontmatter, type YNode } from './yamlnode.ts';
+import {
+  applyHarness,
+  dedupe,
+  emptyExec,
+  type ExecSettings,
+  type HarnessOverride,
+  parseExec,
+  parseNetworkPolicy,
+} from "./common.ts";
+import { type Compiler, machineRef, sortedNames } from "./compile.ts";
+import { agentSkills } from "./extras.ts";
+import { goQuote, goTrimSpace } from "./gofmt.ts";
+import { mergePolicies } from "./networkpolicy.ts";
+import type { AgentConfig, AgentType, HarnessConfig, MCPServer, NetworkPolicy } from "./types.ts";
+import {
+  type Diag,
+  Doc,
+  indexPath,
+  isNull,
+  type Mapping,
+  put,
+  resolve,
+  splitFrontmatter,
+  type YNode,
+} from "./yamlnode.ts";
 
-export const agentTypes = ['CUSTOM', 'FOREMAN', 'MAIN', 'TRIAGE', 'SPEC', 'IMPLEMENT', 'REVIEW', 'VERIFY'];
+export const agentTypes = ["CUSTOM", "FOREMAN", "MAIN", "TRIAGE", "SPEC", "IMPLEMENT", "REVIEW", "VERIFY"];
 
 interface AgentSpec {
   name: string;
@@ -41,19 +59,19 @@ export function parseMarkdown(d: Diag, file: string, content: string, requireFM:
   const fm = splitFrontmatter(content);
   const c = new Doc(d, file, fm.offset);
   if (fm.error !== null) {
-    d.add(file, 1, '', fm.error);
-    return { c, m: null, body: '', ok: false };
+    d.add(file, 1, "", fm.error);
+    return { c, m: null, body: "", ok: false };
   }
   if (!fm.hasFM) {
     if (requireFM) {
-      d.add(file, 1, '', 'file must start with YAML frontmatter delimited by --- lines');
+      d.add(file, 1, "", "file must start with YAML frontmatter delimited by --- lines");
       return { c, m: null, body: fm.body, ok: false };
     }
     return { c, m: null, body: fm.body, ok: true };
   }
   const root = c.parse(fm.fm);
   if (root === null) return { c, m: null, body: fm.body, ok: false };
-  const m = c.mapping(root, '');
+  const m = c.mapping(root, "");
   if (m === null) return { c, m: null, body: fm.body, ok: false };
   return { c, m, body: fm.body, ok: true };
 }
@@ -66,10 +84,10 @@ function parseAgent(d: Diag, file: string, name: string, content: string): Agent
     file,
     c,
     node: null,
-    description: '',
-    typ: 'CUSTOM',
+    description: "",
+    typ: "CUSTOM",
     typeNode: null,
-    credential: '',
+    credential: "",
     snapshot: null,
     spawnSet: false,
     spawn: [],
@@ -82,28 +100,29 @@ function parseAgent(d: Diag, file: string, name: string, content: string): Agent
   if (m === null) return a;
   try {
     a.node = m.node;
-    let v = m.get('description');
-    if (v !== null && !isNull(v)) a.description = c.str(v, 'description')[0];
-    v = m.get('agentType');
+    let v = m.get("description");
+    if (v !== null && !isNull(v)) a.description = c.str(v, "description")[0];
+    v = m.get("agentType");
     if (v !== null && !isNull(v)) {
-      let [s, good] = c.enum(v, 'agentType', ...agentTypes);
+      const [s0, good] = c.enum(v, "agentType", ...agentTypes);
+      let s = s0;
       if (good) {
-        if (s === 'MAIN') s = 'FOREMAN';
+        if (s === "MAIN") s = "FOREMAN";
         a.typ = s as AgentType;
         a.typeNode = v;
       }
     }
-    v = m.get('credentialStrategy');
-    if (v !== null && !isNull(v)) a.credential = c.enum(v, 'credentialStrategy', 'EXECUTOR', 'CREATOR')[0];
-    v = m.get('snapshot');
+    v = m.get("credentialStrategy");
+    if (v !== null && !isNull(v)) a.credential = c.enum(v, "credentialStrategy", "EXECUTOR", "CREATOR")[0];
+    v = m.get("snapshot");
     if (v !== null && !isNull(v)) {
-      const [b, good] = c.boolean(v, 'snapshot');
+      const [b, good] = c.boolean(v, "snapshot");
       if (good) a.snapshot = b;
     }
-    if (m.has('spawnableBy')) {
-      const sv = m.get('spawnableBy');
+    if (m.has("spawnableBy")) {
+      const sv = m.get("spawnableBy");
       if (!isNull(sv)) {
-        const [list, good] = c.uniqueStrList(sv, 'spawnableBy');
+        const [list, good] = c.uniqueStrList(sv, "spawnableBy");
         if (good && list !== null) {
           a.spawnSet = true;
           a.spawn = list;
@@ -111,9 +130,9 @@ function parseAgent(d: Diag, file: string, name: string, content: string): Agent
         }
       }
     }
-    if (m.has('networkPolicy')) {
-      a.npNode = m.get('networkPolicy');
-      a.np = parseNetworkPolicy(c, a.npNode, 'networkPolicy')[0];
+    if (m.has("networkPolicy")) {
+      a.npNode = m.get("networkPolicy");
+      a.np = parseNetworkPolicy(c, a.npNode, "networkPolicy")[0];
     }
     a.exec = parseExec(c, m, false, true);
     return a;
@@ -125,21 +144,22 @@ function parseAgent(d: Diag, file: string, name: string, content: string): Agent
 export function compileAgents(c: Compiler): void {
   const t = c.t;
   if (t.agents.size === 0) {
-    c.d.add('agents', 0, '', 'a definition must include at least one agents/<name>/agent.md');
+    c.d.add("agents", 0, "", "a definition must include at least one agents/<name>/agent.md");
     return;
   }
   const specs: AgentSpec[] = [];
   for (const name of sortedNames(t.agents)) {
     const p = t.agents.get(name)!;
-    const a = parseAgent(c.d, p, name, t.files.get(p) ?? '');
+    const a = parseAgent(c.d, p, name, t.files.get(p) ?? "");
     if (a !== null) specs.push(a);
   }
-  const foremen = specs.filter((a) => a.typ === 'FOREMAN');
+  const foremen = specs.filter((a) => a.typ === "FOREMAN");
   if (foremen.length === 0 && specs.length === t.agents.size) {
-    c.d.add('agents', 0, 'agentType', 'exactly one agent must have agentType FOREMAN (alias MAIN); none does');
+    c.d.add("agents", 0, "agentType", "exactly one agent must have agentType FOREMAN (alias MAIN); none does");
   } else if (foremen.length > 1) {
     const names = foremen.map((a) => a.name);
-    for (const a of foremen.slice(1)) a.c.errf(a.typeNode, 'agentType', `exactly one agent can be the foreman; found ${names.join(', ')}`);
+    for (const a of foremen.slice(1))
+      a.c.errf(a.typeNode, "agentType", `exactly one agent can be the foreman; found ${names.join(", ")}`);
   }
   if (foremen.length >= 1) c.foreman = foremen[0]!.name;
 
@@ -148,7 +168,8 @@ export function compileAgents(c: Compiler): void {
     if (!a.spawnSet) continue;
     const items = resolve(a.spawnNode)!.content;
     a.spawn.forEach((n, i) => {
-      if (!t.agents.has(n)) a.c.errf(items[i], indexPath('spawnableBy', i), `spawnableBy names unknown agent ${goQuote(n)}`);
+      if (!t.agents.has(n))
+        a.c.errf(items[i], indexPath("spawnableBy", i), `spawnableBy names unknown agent ${goQuote(n)}`);
     });
   }
   for (const n of sortedNames(c.agents)) c.def.agents!.push(c.agents.get(n)!);
@@ -159,33 +180,33 @@ function resolveAgent(c: Compiler, a: AgentSpec): AgentConfig {
   const e = a.exec;
   const dc = a.c;
   const cfg: AgentConfig = {
-    id: '',
-    factory_id: '',
+    id: "",
+    factory_id: "",
     name: a.name,
     description: a.description,
     type: a.typ,
     instructions: a.instructions,
-    harness: { type: '', model: '' },
+    harness: { type: "", model: "" },
     network_policy: { restricted: false, allowed_hosts: null, denied_hosts: null },
     spawnable_by: null,
-    credential_strategy: f.def.credentialStrategy ?? '',
+    credential_strategy: f.def.credentialStrategy ?? "",
     idle_timeout_minutes: 0,
   };
-  if (a.credential !== '') cfg.credential_strategy = a.credential;
+  if (a.credential !== "") cfg.credential_strategy = a.credential;
   if (f.harnessOK) cfg.harness = applyHarness(f.defaultHarness, e.model, e.harness);
   cfg.worker_host = f.defaults.worker;
   if (e.workerSet) cfg.worker_host = e.worker;
-  checkEffectiveHarness(dc, '', cfg.harness, e.harness, cfg.worker_host, e.model !== null || e.harness !== null);
+  checkEffectiveHarness(dc, "", cfg.harness, e.harness, cfg.worker_host, e.model !== null || e.harness !== null);
 
   let machine = f.defaults.machine;
   let machineDoc = f.c;
   let machineNode = f.defaults.machineNode;
-  let machineField = 'agentDefaults.machine';
+  let machineField = "agentDefaults.machine";
   if (e.machine !== null) {
     machine = e.machine;
     machineDoc = dc;
     machineNode = e.machineNode;
-    machineField = 'machine';
+    machineField = "machine";
   }
   if (machine !== null) {
     const spec = machineRef(c, machineDoc, machine, machineField, machineDoc.line(machineNode));
@@ -199,7 +220,7 @@ function resolveAgent(c: Compiler, a: AgentSpec): AgentConfig {
   let mcpBase = f.defaults.mcp;
   if (e.mcpSet) {
     mcpBase = e.mcp;
-    checkMCPConflicts(c, dc, 'mcpServers', e.mcpNode, e.mcp);
+    checkMCPConflicts(c, dc, "mcpServers", e.mcpNode, e.mcp);
   }
   const mcp = mergeMCP(mcpBase, f.mcp);
   if (mcp !== null) cfg.mcp_servers = mcp;
@@ -219,8 +240,8 @@ function resolveAgent(c: Compiler, a: AgentSpec): AgentConfig {
 }
 
 function kindOf(prefix: string): string {
-  if (prefix === '') return 'file';
-  return prefix.endsWith('.') ? prefix.slice(0, -1) : prefix;
+  if (prefix === "") return "file";
+  return prefix.endsWith(".") ? prefix.slice(0, -1) : prefix;
 }
 
 /** checkEffectiveHarness checks that workerEnvironment auth has a worker host. */
@@ -233,26 +254,36 @@ export function checkEffectiveHarness(
   overridden: boolean,
 ): void {
   if (!overridden && ov === null) {
-    if (h.auth && h.auth.source === 'workerEnvironment' && workerHost === '') {
+    if (h.auth && h.auth.source === "workerEnvironment" && workerHost === "") {
       dc.errf(
         null,
-        prefix + 'workerHost',
+        prefix + "workerHost",
         `the inherited harness uses auth.source workerEnvironment, which requires a self-hosted workerHost; this ${kindOf(prefix)} clears it`,
       );
     }
     return;
   }
   let node: YNode | null = ov !== null ? ov.node : null;
-  if (h.auth && h.auth.source === 'workerEnvironment' && workerHost === '') {
+  if (h.auth && h.auth.source === "workerEnvironment" && workerHost === "") {
     if (ov !== null && ov.authNode !== null) node = ov.authNode;
-    dc.errf(node, prefix + 'harness.auth.source', 'auth.source workerEnvironment requires a self-hosted workerHost');
+    dc.errf(node, prefix + "harness.auth.source", "auth.source workerEnvironment requires a self-hosted workerHost");
   }
 }
 
-export function checkMCPConflicts(c: Compiler, dc: Doc, field: string, node: YNode | null, m: Record<string, MCPServer> | null): void {
+export function checkMCPConflicts(
+  c: Compiler,
+  dc: Doc,
+  field: string,
+  node: YNode | null,
+  m: Record<string, MCPServer> | null,
+): void {
   for (const name of Object.keys(m ?? {})) {
     if (c.f.mcp !== null && Object.hasOwn(c.f.mcp, name)) {
-      dc.errf(node, field + '.' + name, `MCP server ${goQuote(name)} is already granted factory-wide by factory.yaml mcpServers`);
+      dc.errf(
+        node,
+        field + "." + name,
+        `MCP server ${goQuote(name)} is already granted factory-wide by factory.yaml mcpServers`,
+      );
     }
   }
 }

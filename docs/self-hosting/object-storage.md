@@ -49,7 +49,7 @@ Snapshots can contain every workspace file, including files with secrets. Do not
 
 ## Retention
 
-Run data is kept until an admin sets a retention time in the team settings. The retention job then deletes the objects of runs that are older than the limit, and attachments that were uploaded longer ago than the limit. In a long-lived run, an attachment can be deleted before the message that uses it. The link then returns `404`.
+Run data is kept until you set the Worker variable `OF_OBJECT_STORE_RETENTION` to a duration, for example `720h`. `0` or empty keeps run data forever. The retention job then deletes the objects of runs that are older than the limit, and attachments that were uploaded longer ago than the limit. In a long-lived run, an attachment can be deleted before the message that uses it. The link then returns `404`.
 
 ## Change the bucket
 

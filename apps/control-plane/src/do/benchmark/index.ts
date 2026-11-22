@@ -28,7 +28,6 @@ import type { Migration } from "../../lib/sql/migrate";
 import { all, first } from "../../lib/sql/query";
 import {
   BENCHMARK_CANCELLED,
-  BENCHMARK_COMPLETE,
   BENCHMARK_FAILED,
   BENCHMARK_RUNNING,
   aggregate,
@@ -59,7 +58,6 @@ import {
   META_JUDGE_KEY,
   META_JUDGE_SCORED_RUN,
   META_JUDGE_TRIAL,
-  TRIGGERED_BY_SCORER,
   finishedForScoring,
   isTerminalState,
   waitsForInput,
@@ -172,9 +170,10 @@ export class BenchmarkDO extends BaseDO implements BenchmarkRpc {
   // ---------- storage ----------
 
   private benchRow(): BenchRow | undefined {
-    return first<BenchRow & Record<string, never>>(this.sql, "SELECT id, factory_id, suite, state, version, created_ms, finished_ms, data FROM bench WHERE k = 1") as
-      | BenchRow
-      | undefined;
+    return first<BenchRow & Record<string, never>>(
+      this.sql,
+      "SELECT id, factory_id, suite, state, version, created_ms, finished_ms, data FROM bench WHERE k = 1",
+    ) as BenchRow | undefined;
   }
 
   private mustBench(): { row: BenchRow; plan: BenchmarkPlan } {
@@ -184,7 +183,9 @@ export class BenchmarkDO extends BaseDO implements BenchmarkRpc {
   }
 
   private loadTrials(): Trial[] {
-    return all<{ data: string }>(this.sql, "SELECT data FROM trials ORDER BY ord").map((r) => JSON.parse(r.data) as Trial);
+    return all<{ data: string }>(this.sql, "SELECT data FROM trials ORDER BY ord").map(
+      (r) => JSON.parse(r.data) as Trial,
+    );
   }
 
   private view(row: BenchRow, plan: BenchmarkPlan, trials: Trial[]): BenchmarkRunJson {
@@ -204,7 +205,14 @@ export class BenchmarkDO extends BaseDO implements BenchmarkRpc {
       judge_cost_usd: agg.summary.reduce((n, r) => n + r.judge_cost_usd, 0),
       ...(plan.cancelled_by ? { cancelled_by: plan.cancelled_by } : {}),
     };
-    const out: BenchmarkRunJson = { id: row.id, factory_id: row.factory_id, suite: row.suite, state: row.state, results, created_at: iso(row.created_ms) };
+    const out: BenchmarkRunJson = {
+      id: row.id,
+      factory_id: row.factory_id,
+      suite: row.suite,
+      state: row.state,
+      results,
+      created_at: iso(row.created_ms),
+    };
     if (row.finished_ms) out.finished_at = iso(row.finished_ms);
     return out;
   }
@@ -237,7 +245,10 @@ export class BenchmarkDO extends BaseDO implements BenchmarkRpc {
    * Writes the changed trials and the state of the run in one transaction and
    * projects the run to IndexDO. `state` forces a state; else it follows the trials.
    */
-  private persist(changed: readonly Trial[], opts: { state?: string; plan?: BenchmarkPlan; extra?: () => void } = {}): BenchmarkRunJson {
+  private persist(
+    changed: readonly Trial[],
+    opts: { state?: string; plan?: BenchmarkPlan; extra?: () => void } = {},
+  ): BenchmarkRunJson {
     return this.tx(() => {
       const { row, plan: oldPlan } = this.mustBench();
       const plan = opts.plan ?? oldPlan;
@@ -293,7 +304,8 @@ export class BenchmarkDO extends BaseDO implements BenchmarkRpc {
         const existing = this.benchRow();
         if (existing) return this.view(existing, JSON.parse(existing.data) as BenchmarkPlan, this.loadTrials());
         const plan = inp.plan;
-        if (!plan?.suite?.tasks || plan.suite.tasks.length === 0) throw new OfError("invalid_request", `benchmark suite ${JSON.stringify(plan?.suite?.slug)} has no tasks`);
+        if (!plan?.suite?.tasks || plan.suite.tasks.length === 0)
+          throw new OfError("invalid_request", `benchmark suite ${JSON.stringify(plan?.suite?.slug)} has no tasks`);
         const token = this.token();
         const now = this.clock();
         const trials: Trial[] = [];
@@ -328,7 +340,15 @@ export class BenchmarkDO extends BaseDO implements BenchmarkRpc {
             now,
             JSON.stringify(plan),
           );
-          trials.forEach((t, i) => this.sql.exec("INSERT INTO trials (id, ord, state, data) VALUES (?, ?, ?, ?)", t.id, i, t.status, JSON.stringify(t)));
+          trials.forEach((t, i) =>
+            this.sql.exec(
+              "INSERT INTO trials (id, ord, state, data) VALUES (?, ?, ?, ?)",
+              t.id,
+              i,
+              t.status,
+              JSON.stringify(t),
+            ),
+          );
           this.sql.exec("INSERT INTO cursor (k, next_trial) VALUES (1, 0)");
           this.setTimer(T_DISPATCH, T_DISPATCH, now);
           this.setTimer(T_RECONCILE, T_RECONCILE, now + RECONCILE_EVERY_MS);
@@ -389,7 +409,8 @@ export class BenchmarkDO extends BaseDO implements BenchmarkRpc {
           state: BENCHMARK_CANCELLED,
           plan: { ...plan, cancelled_by: actor },
           extra: () => {
-            for (const id of queue) this.sql.exec("INSERT OR IGNORE INTO cancel_queue (run_id, actor) VALUES (?, ?)", id, actor);
+            for (const id of queue)
+              this.sql.exec("INSERT OR IGNORE INTO cancel_queue (run_id, actor) VALUES (?, ?)", id, actor);
             if (queue.length > 0) this.setTimer(T_CANCEL, T_CANCEL, this.clock());
             this.clearTimer(T_DISPATCH);
             this.clearTimer(T_RECONCILE);
@@ -415,16 +436,26 @@ export class BenchmarkDO extends BaseDO implements BenchmarkRpc {
     const row = this.benchRow();
     if (!row || benchmarkTerminal(row.state)) return;
     const plan = JSON.parse(row.data) as BenchmarkPlan;
-    const pending = all<{ data: string }>(this.sql, "SELECT data FROM trials WHERE state = 'pending' ORDER BY ord LIMIT ?", DISPATCH_CHUNK).map(
-      (r) => JSON.parse(r.data) as Trial,
-    );
+    const pending = all<{ data: string }>(
+      this.sql,
+      "SELECT data FROM trials WHERE state = 'pending' ORDER BY ord LIMIT ?",
+      DISPATCH_CHUNK,
+    ).map((r) => JSON.parse(r.data) as Trial);
     const { engine } = this.port();
     const cfgByName = new Map(plan.configurations.map((c) => [c.name, c]));
     const taskBySlug = new Map((plan.suite.tasks ?? []).map((t) => [t.slug, t]));
     const results = await Promise.all(
       pending.map(async (t) => {
         try {
-          const req = trialDispatch({ id: row.id, factoryId: row.factory_id }, plan.suite, cfgByName.get(t.configuration)!, taskBySlug.get(t.task)!, t, plan.repetitions, plan.agents);
+          const req = trialDispatch(
+            { id: row.id, factoryId: row.factory_id },
+            plan.suite,
+            cfgByName.get(t.configuration)!,
+            taskBySlug.get(t.task)!,
+            t,
+            plan.repetitions,
+            plan.agents,
+          );
           // Idempotent on the trial ID: a reset between the dispatch and the commit repeats nothing.
           return { t, out: await engine.dispatch(req, t.id) } as const;
         } catch (e) {
@@ -456,9 +487,17 @@ export class BenchmarkDO extends BaseDO implements BenchmarkRpc {
             t.started_at = iso(now);
           }
         }
-        this.sql.exec("UPDATE trials SET state = ?, run_id = ?, work_item_id = ?, data = ? WHERE id = ?", t.status, t.run_id ?? "", t.work_item_id ?? "", JSON.stringify(t), t.id);
+        this.sql.exec(
+          "UPDATE trials SET state = ?, run_id = ?, work_item_id = ?, data = ? WHERE id = ?",
+          t.status,
+          t.run_id ?? "",
+          t.work_item_id ?? "",
+          JSON.stringify(t),
+          t.id,
+        );
       }
-      for (const id of cancelRuns) this.sql.exec("INSERT OR IGNORE INTO cancel_queue (run_id, actor) VALUES (?, 'benchmark')", id);
+      for (const id of cancelRuns)
+        this.sql.exec("INSERT OR IGNORE INTO cancel_queue (run_id, actor) VALUES (?, 'benchmark')", id);
       if (cancelRuns.length > 0) this.setTimer(T_CANCEL, T_CANCEL, now);
       if (cancelled) return;
       const left = first(this.sql, "SELECT 1 FROM trials WHERE state = 'pending' LIMIT 1");
@@ -483,7 +522,11 @@ export class BenchmarkDO extends BaseDO implements BenchmarkRpc {
   // ---------- cancel in chunks ----------
 
   private async cancelStep(): Promise<void> {
-    const rows = all<{ run_id: string; actor: string }>(this.sql, "SELECT run_id, actor FROM cancel_queue LIMIT ?", CANCEL_CHUNK);
+    const rows = all<{ run_id: string; actor: string }>(
+      this.sql,
+      "SELECT run_id, actor FROM cancel_queue LIMIT ?",
+      CANCEL_CHUNK,
+    );
     if (rows.length === 0) return;
     const { engine } = this.port();
     await Promise.all(
@@ -491,7 +534,8 @@ export class BenchmarkDO extends BaseDO implements BenchmarkRpc {
         try {
           await engine.cancel(r.run_id, r.actor);
         } catch (e) {
-          if (toOfError(e).error.code !== "resource_not_found") console.warn(`BenchmarkDO: cancel ${r.run_id} failed`, e);
+          if (toOfError(e).error.code !== "resource_not_found")
+            console.warn(`BenchmarkDO: cancel ${r.run_id} failed`, e);
         }
       }),
     );
@@ -552,7 +596,8 @@ export class BenchmarkDO extends BaseDO implements BenchmarkRpc {
       case "blocked": {
         t.status = "finished";
         const items = await runs.listOpenInbox(factoryId);
-        if (items.some((it) => it.run_id === run.id || (t.work_item_id && it.work_item_id === t.work_item_id))) t.status = "blocked";
+        if (items.some((it) => it.run_id === run.id || (t.work_item_id && it.work_item_id === t.work_item_id)))
+          t.status = "blocked";
         break;
       }
       default:
@@ -582,7 +627,12 @@ export class BenchmarkDO extends BaseDO implements BenchmarkRpc {
     const { runs, engine } = this.port();
     const run = await runs.getRun(t.run_id);
     if (!run) throw new OfError("resource_not_found", `trial run ${t.run_id} not found`);
-    let refs = (await runs.loadStartCommits(run.id)).map((s) => ({ codeForge: s.codeForge, owner: s.owner, repo: s.repo, ref: s.ref }));
+    let refs = (await runs.loadStartCommits(run.id)).map((s) => ({
+      codeForge: s.codeForge,
+      owner: s.owner,
+      repo: s.repo,
+      ref: s.ref,
+    }));
     if (refs.length === 0) refs = t.starting_repo_refs ?? [];
     let changed = false;
     for (const sc of trialScorers(plan, t)) {
@@ -675,7 +725,8 @@ export class BenchmarkDO extends BaseDO implements BenchmarkRpc {
       try {
         await engine.cancel(judge.id, "scoring");
       } catch (e) {
-        if (toOfError(e).error.code !== "resource_not_found") console.warn(`BenchmarkDO: stop judge ${judge.id} failed`, e);
+        if (toOfError(e).error.code !== "resource_not_found")
+          console.warn(`BenchmarkDO: stop judge ${judge.id} failed`, e);
       }
     }
     const sc: BenchmarkScorer | undefined = trialScorers(plan, t).find((x) => x.key === ts.scorer);
@@ -731,7 +782,8 @@ export class BenchmarkDO extends BaseDO implements BenchmarkRpc {
       const trials = this.loadTrials();
       if (benchmarkState(trials) !== cur.state) this.persist([]);
       const after = this.benchRow();
-      if (after && !benchmarkTerminal(after.state)) this.setTimer(T_RECONCILE, T_RECONCILE, this.clock() + RECONCILE_EVERY_MS);
+      if (after && !benchmarkTerminal(after.state))
+        this.setTimer(T_RECONCILE, T_RECONCILE, this.clock() + RECONCILE_EVERY_MS);
     }
     if (errs.length > 0) throw errs[0];
   }

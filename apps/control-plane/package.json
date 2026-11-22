@@ -5,14 +5,25 @@
   "description": "Open Factory control plane: Worker, Durable Objects, wrangler.jsonc.",
   "license": "Apache-2.0",
   "type": "module",
+  "types": "./dist/dts/src/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/dts/src/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./builder": {
+      "types": "./dist/dts/src/builder.d.ts",
+      "default": "./dist/builder.js"
+    }
   },
   "files": [
-    "src",
-    "!src/**/*.test.ts",
+    "dist/index.js",
+    "dist/index.js.map",
+    "dist/builder.js",
+    "dist/builder.js.map",
+    "dist/chunks",
+    "dist/dts",
     "wrangler.jsonc",
-    "tsconfig.json",
     "README.md"
   ],
   "publishConfig": {
@@ -22,7 +33,14 @@
     "test": "vitest run",
     "typecheck": "tsc -b",
     "cf-types": "wrangler types --include-runtime=false --env-interface WranglerEnv worker-configuration.d.ts",
-    "build": "wrangler deploy --dry-run --outdir dist",
+    "build": "node scripts/build.mjs && wrangler deploy --dry-run --outdir .wrangler/dry-run",
     "dev": "wrangler dev"
+  },
+  "dependencies": {
+    "@cfworker/json-schema": "4.1.6",
+    "@noble/curves": "2.4.0",
+    "jose": "6.2.18",
+    "lossless-json": "4.3.4",
+    "yaml": "2.9.1"
   }
 }

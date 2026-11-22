@@ -130,7 +130,13 @@ export function typeOf(kit: TeamKit, factoryId: string, name: string): string {
 }
 
 /** Put: validates, seals and stores; an existing name in the scope keeps its ID. */
-export async function putSecret(kit: TeamKit, factoryId: string, name: string, type: string, value: string): Promise<Secret> {
+export async function putSecret(
+  kit: TeamKit,
+  factoryId: string,
+  name: string,
+  type: string,
+  value: string,
+): Promise<Secret> {
   const typ = type || "generic";
   validateName(name);
   validateValue(name, typ, value);
@@ -197,7 +203,10 @@ export async function resolve(
 }
 
 /** Rewrap every secret and every registered source. Each write is a compare-and-swap. */
-export async function rewrapAll(kit: TeamKit, _meta: CallMeta): Promise<{ rewrapped: number; skipped: number; key_id: string; failed?: number; errors?: string[] }> {
+export async function rewrapAll(
+  kit: TeamKit,
+  _meta: CallMeta,
+): Promise<{ rewrapped: number; skipped: number; key_id: string; failed?: number; errors?: string[] }> {
   const env = await envelopes(kit.env);
   let rewrapped = 0;
   let skipped = 0;
@@ -234,9 +243,14 @@ const eqBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.eve
 const secretSource: RewrapSource = {
   name: "secret",
   list: (kit) =>
-    all<SecretRow & Record<string, SqlStorageValue>>(kit.sql, "SELECT id, factory_id, name, type, ciphertext, data FROM secrets").map(
-      (r) => ({ key: r.id, id: identityOf(kit, r.factory_id, r.name, r.type), envelope: new Uint8Array(r.ciphertext) }),
-    ),
+    all<SecretRow & Record<string, SqlStorageValue>>(
+      kit.sql,
+      "SELECT id, factory_id, name, type, ciphertext, data FROM secrets",
+    ).map((r) => ({
+      key: r.id,
+      id: identityOf(kit, r.factory_id, r.name, r.type),
+      envelope: new Uint8Array(r.ciphertext),
+    })),
   replace: (kit, key, old, next) => {
     const r = first<{ ciphertext: ArrayBuffer }>(kit.sql, "SELECT ciphertext FROM secrets WHERE id = ?", key);
     if (!r || !eqBytes(new Uint8Array(r.ciphertext), old)) return false;
@@ -269,14 +283,18 @@ export const ops: Record<string, TeamOp> = {
     const b = bodyObject(c.body);
     const name = str(b, "name");
     if (!API_NAME_RE.test(name)) {
-      throw new OfError("invalid_request", "name must start with a letter or '_' and contain only letters, digits and '_' (max 128)");
+      throw new OfError(
+        "invalid_request",
+        "name must start with a letter or '_' and contain only letters, digits and '_' (max 128)",
+      );
     }
     const type = str(b, "type") || "generic";
     if (!isSecretType(type)) throw new OfError("invalid_request", `unknown secret type ${JSON.stringify(type)}`);
     const value = str(b, "value");
     validateApiValue(name, value);
     const fid = scopeOf(kit, c, str(b, "factory_id"));
-    if (rowOf(kit, fid, name)) throw new OfError("conflict", `secret ${JSON.stringify(name)} already exists; use PUT to update its value`);
+    if (rowOf(kit, fid, name))
+      throw new OfError("conflict", `secret ${JSON.stringify(name)} already exists; use PUT to update its value`);
     return created(await putSecret(kit, fid, name, type, value));
   },
 

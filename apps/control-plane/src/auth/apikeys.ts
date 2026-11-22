@@ -31,7 +31,9 @@ export interface GeneratedKey {
   hash: string;
 }
 
-export async function generateKey(kind: typeof KEY_PREFIX | typeof SERVICE_ACCOUNT_KEY_PREFIX = KEY_PREFIX): Promise<GeneratedKey> {
+export async function generateKey(
+  kind: typeof KEY_PREFIX | typeof SERVICE_ACCOUNT_KEY_PREFIX = KEY_PREFIX,
+): Promise<GeneratedKey> {
   const prefix = randomString(LOWER_ALNUM, PREFIX_LEN);
   const key = `${kind}${prefix}_${randomString(ALNUM, SECRET_LEN)}`;
   return { key, prefix, hash: await hashKey(key) };

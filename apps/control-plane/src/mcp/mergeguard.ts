@@ -33,7 +33,8 @@ function parse(text: string): { calls: RpcCall[]; batch: boolean } {
   if (t === "") return { calls: [], batch: false };
   try {
     const v = JSON.parse(t) as unknown;
-    if (Array.isArray(v)) return { calls: v.filter((x) => typeof x === "object" && x !== null) as RpcCall[], batch: true };
+    if (Array.isArray(v))
+      return { calls: v.filter((x) => typeof x === "object" && x !== null) as RpcCall[], batch: true };
     if (typeof v === "object" && v !== null) return { calls: [v as RpcCall], batch: false };
   } catch {
     /* not JSON */
@@ -62,7 +63,10 @@ export async function guardMerge(text: string, p: MergePolicy): Promise<Response
  * Reads the body of `request` once and runs the guard. Returns the body
  * text for the next handler, or the refusal / size error Response.
  */
-export async function readGuarded(request: Request, p: MergePolicy): Promise<{ text: string } | { response: Response }> {
+export async function readGuarded(
+  request: Request,
+  p: MergePolicy,
+): Promise<{ text: string } | { response: Response }> {
   const text = await request.text();
   if (text.length > MAX_MCP_BODY) {
     return { response: new Response("the MCP request is too large\n", { status: 413 }) };
@@ -82,7 +86,11 @@ function refuse(calls: RpcCall[], batch: boolean): Response {
   for (const c of calls) {
     if (c.id === undefined || c.id === null) continue; // a notification has no response
     if (isMergeCall(c)) {
-      out.push({ jsonrpc: "2.0", id: c.id, result: { content: [{ type: "text", text: REFUSAL_TEXT }], isError: true } });
+      out.push({
+        jsonrpc: "2.0",
+        id: c.id,
+        result: { content: [{ type: "text", text: REFUSAL_TEXT }], isError: true },
+      });
     } else {
       out.push({
         jsonrpc: "2.0",
@@ -128,7 +136,8 @@ export function isMergeTool(name: string): boolean {
         if (is(i + 1, "request", "requests")) {
           // The noun "merge request".
         } else if (is(i + 1, "queue")) {
-          if (is(i - 1, "add", "enqueue") || (is(i - 1, "to") && is(i - 2, "add")) || is(i + 2, "add", "enqueue")) return true;
+          if (is(i - 1, "add", "enqueue") || (is(i - 1, "to") && is(i - 2, "add")) || is(i + 2, "add", "enqueue"))
+            return true;
         } else if (i === n - 1) {
           return true;
         } else if (target(i + 1)) {

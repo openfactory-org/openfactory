@@ -1,7 +1,8 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import type { Event } from "@openfactory/core";
 import { b64urlEncode, signRS256 } from "../jwt";
-import { FakeFetch, NOW, integration, kit, post, user } from "../testkit";
+import type { FakeFetch } from "../testkit";
+import { NOW, integration, kit, post, user } from "../testkit";
 import { KeySet } from "./auth";
 import { cleanText, fitThread, threadEntry, type ThreadEntry } from "./context";
 import { TeamsHandler, threadRoot, tokenTenants, DEFAULT_SERVICE_URL } from "./handler";
@@ -14,17 +15,32 @@ let pair: CryptoKeyPair;
 let jwk: Record<string, unknown>;
 
 beforeAll(async () => {
-  pair = (await crypto.subtle.generateKey({ name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"])) as CryptoKeyPair;
+  pair = (await crypto.subtle.generateKey(
+    { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+    true,
+    ["sign", "verify"],
+  )) as CryptoKeyPair;
   jwk = { ...(await crypto.subtle.exportKey("jwk", pair.publicKey)), kid: "k1" };
 });
 
 const token = (over: Record<string, unknown> = {}, header: Record<string, unknown> = { kid: "k1" }) =>
-  signRS256(pair.privateKey, header, { iss: "https://api.botframework.com", aud: APP, exp: nowS + 600, serviceurl: SERVICE, ...over });
+  signRS256(pair.privateKey, header, {
+    iss: "https://api.botframework.com",
+    aud: APP,
+    exp: nowS + 600,
+    serviceurl: SERVICE,
+    ...over,
+  });
 
 function setup() {
   const k = kit({ BOT_PW: "bot-password" });
   k.store.integrations = [
-    integration({ id: "int_t", provider: "microsoft_teams", secret_ref: "BOT_PW", config: { team_id: "G1", tenant_id: "ten-1", app_id: APP } }),
+    integration({
+      id: "int_t",
+      provider: "microsoft_teams",
+      secret_ref: "BOT_PW",
+      config: { team_id: "G1", tenant_id: "ten-1", app_id: APP },
+    }),
   ];
   k.store.users = [user({ id: "usr_1" })];
   k.store.identities.set("teams|aad-1", { user_id: "usr_1", provider: "teams", external_id: "aad-1", handle: "" });
@@ -46,22 +62,37 @@ const activity = (over: Record<string, unknown> = {}) => ({
   conversation: { id: "19:chan@thread.tacv2", conversationType: "channel", tenantId: "ten-1" },
   text: "<at>Factory</at> fix the bug",
   entities: [{ type: "mention", mentioned: { id: "28:" + APP } }],
-  channelData: { team: { aadGroupId: "G1" }, channel: { id: "19:chan@thread.tacv2", name: "dev" }, tenant: { id: "ten-1" } },
+  channelData: {
+    team: { aadGroupId: "G1" },
+    channel: { id: "19:chan@thread.tacv2", name: "dev" },
+    tenant: { id: "ten-1" },
+  },
   ...over,
 });
 
 const send = async (h: TeamsHandler, act: object, tok?: string) => {
-  const out = await h.handleMessages(post("https://of.example.com/integrations/teams/messages", JSON.stringify(act), { Authorization: "Bearer " + (tok ?? (await token())) }));
+  const out = await h.handleMessages(
+    post("https://of.example.com/integrations/teams/messages", JSON.stringify(act), {
+      Authorization: "Bearer " + (tok ?? (await token())),
+    }),
+  );
   await out.background?.();
   return out;
 };
 
-const sentTexts = (ff: FakeFetch) => ff.calls.filter((c) => c.url.endsWith("/activities") || c.url.includes("/activities")).map((c) => (JSON.parse(c.body) as { text: string }).text);
+const sentTexts = (ff: FakeFetch) =>
+  ff.calls
+    .filter((c) => c.url.endsWith("/activities") || c.url.includes("/activities"))
+    .map((c) => (JSON.parse(c.body) as { text: string }).text);
 
 describe("bot connector token validation", () => {
   const keys = () => {
     const { k } = setup();
-    return new KeySet({ metadataUrl: "https://login.test/openidconfiguration", fetch: k.ff.fetch, now: () => NOW.getTime() });
+    return new KeySet({
+      metadataUrl: "https://login.test/openidconfiguration",
+      fetch: k.ff.fetch,
+      now: () => NOW.getTime(),
+    });
   };
 
   it("accepts a valid token", async () => {
@@ -70,7 +101,8 @@ describe("bot connector token validation", () => {
 
   it("rejects each wrong claim", async () => {
     const ks = keys();
-    const bad = async (tok: string, re: RegExp) => expect(ks.validate("Bearer " + tok, [APP], "msteams", SERVICE)).rejects.toThrow(re);
+    const bad = async (tok: string, re: RegExp) =>
+      expect(ks.validate("Bearer " + tok, [APP], "msteams", SERVICE)).rejects.toThrow(re);
     await bad(await token({ iss: "https://evil" }), /unexpected issuer/);
     await bad(await token({ aud: "other" }), /audience/);
     await bad(await token({ exp: nowS - 3600 }), /expired/);
@@ -91,7 +123,9 @@ describe("bot connector token validation", () => {
 describe("teams activities", () => {
   it("rejects a request without a valid token", async () => {
     const { h } = setup();
-    const out = await h.handleMessages(post("https://x/m", JSON.stringify(activity()), { Authorization: "Bearer abc.def.ghi" }));
+    const out = await h.handleMessages(
+      post("https://x/m", JSON.stringify(activity()), { Authorization: "Bearer abc.def.ghi" }),
+    );
     expect(out.response.status).toBe(401);
   });
 
@@ -106,14 +140,28 @@ describe("teams activities", () => {
       source: { kind: "thread", channel: "19:chan@thread.tacv2", thread_id: "act-1", workspace: "G1" },
       text: "fix the bug",
     });
-    expect(k.published[0]!.attributes).toMatchObject({ team_id: "G1", tenant_id: "ten-1", channel_name: "dev", user_name: "Al", linked: true, actor_is_self: false });
+    expect(k.published[0]!.attributes).toMatchObject({
+      team_id: "G1",
+      tenant_id: "ten-1",
+      channel_name: "dev",
+      user_name: "Al",
+      linked: true,
+      actor_is_self: false,
+    });
     expect(k.published[0]!.attributes).not.toHaveProperty("thread_reply");
     expect(k.store.kv.get("teams:service_url:19:chan@thread.tacv2")).toBe(SERVICE);
   });
 
   it("marks a reply in a thread", async () => {
     const { k, h } = setup();
-    await send(h, activity({ id: "act-2", entities: [], conversation: { id: "19:chan@thread.tacv2;messageid=1700", conversationType: "channel", tenantId: "ten-1" } }));
+    await send(
+      h,
+      activity({
+        id: "act-2",
+        entities: [],
+        conversation: { id: "19:chan@thread.tacv2;messageid=1700", conversationType: "channel", tenantId: "ten-1" },
+      }),
+    );
     expect(k.published.map((e) => e.type)).toEqual(["message_posted"]);
     expect(k.published[0]!.source.thread_id).toBe("1700");
     expect(k.published[0]!.attributes).toMatchObject({ thread_reply: true, auto_follow_up: true });
@@ -123,8 +171,12 @@ describe("teams activities", () => {
     const { k, h } = setup();
     await send(h, activity({ text: "<at>Factory</at> Sign in." }));
     expect(sentTexts(k.ff)[0]).toContain("link your Microsoft account");
-    expect(k.ff.calls.find((c) => c.url.includes("/activities"))!.url).toBe(SERVICE.replace(/\/$/, "") + "/v3/conversations/19%3Achan%40thread.tacv2%3Bmessageid%3Dact-1/activities");
-    expect(k.ff.calls.find((c) => c.url.includes("/activities"))!.headers.get("Authorization")).toBe("Bearer bot-token");
+    expect(k.ff.calls.find((c) => c.url.includes("/activities"))!.url).toBe(
+      SERVICE.replace(/\/$/, "") + "/v3/conversations/19%3Achan%40thread.tacv2%3Bmessageid%3Dact-1/activities",
+    );
+    expect(k.ff.calls.find((c) => c.url.includes("/activities"))!.headers.get("Authorization")).toBe(
+      "Bearer bot-token",
+    );
     await send(h, activity({ id: "act-3", text: "<at>Factory</at> sign out" }));
     expect(k.store.identities.get("teams|aad-1")?.user_id).toBe("");
     expect(sentTexts(k.ff).at(-1)).toContain("no longer linked");
@@ -138,7 +190,14 @@ describe("teams activities", () => {
     await send(h, activity({ id: "a1", from: { id: "29:z", name: "Zed", aadObjectId: "aad-9" } }));
     expect(sentTexts(k.ff)[0]).toContain("/integrations");
     expect(sentTexts(k.ff)[0]).not.toContain("/integrations/link/");
-    await send(h, activity({ id: "a2", channelData: { team: { aadGroupId: "G1" }, tenant: { id: "other" } }, conversation: { id: "19:c@thread.tacv2", conversationType: "channel", tenantId: "other" } }));
+    await send(
+      h,
+      activity({
+        id: "a2",
+        channelData: { team: { aadGroupId: "G1" }, tenant: { id: "other" } },
+        conversation: { id: "19:c@thread.tacv2", conversationType: "channel", tenantId: "other" },
+      }),
+    );
     expect(sentTexts(k.ff).at(-1)).toContain("Microsoft 365 organization");
     expect(k.published).toHaveLength(0);
   });
@@ -179,14 +238,18 @@ describe("teams replies and posting", () => {
   it("replies in the thread with the recorded or default service URL", async () => {
     const { k, h } = setup();
     await h.reply("team_1", { work_item_id: "w", source: src, kind: "question", text: "Which?", options: ["a"] });
-    expect(k.ff.calls.find((c) => c.url.includes("/activities"))!.url.startsWith(DEFAULT_SERVICE_URL.replace(/\/$/, ""))).toBe(true);
+    expect(
+      k.ff.calls.find((c) => c.url.includes("/activities"))!.url.startsWith(DEFAULT_SERVICE_URL.replace(/\/$/, "")),
+    ).toBe(true);
     k.store.kv.set("teams:service_url:19:c", "https://eu.test/");
     k.ff.calls.length = 0;
     await h.reply("team_1", { work_item_id: "w", source: src, kind: "update", text: "done" });
     const c = k.ff.calls.find((x) => x.url.includes("/activities"))!;
     expect(c.url).toBe("https://eu.test/v3/conversations/19%3Ac%3Bmessageid%3D77/activities");
     expect(JSON.parse(c.body)).toEqual({ type: "message", text: "done", textFormat: "markdown" });
-    await expect(h.reply("team_1", { work_item_id: "w", source: { ...src, channel: "" }, kind: "update", text: "x" })).rejects.toThrow(/no channel/);
+    await expect(
+      h.reply("team_1", { work_item_id: "w", source: { ...src, channel: "" }, kind: "update", text: "x" }),
+    ).rejects.toThrow(/no channel/);
   });
 
   it("caches the bot token and requests it from botframework.com with the tenant as fallback", async () => {
@@ -203,14 +266,20 @@ describe("teams replies and posting", () => {
     const { k, h } = setup();
     k.ff.on("/botframework.com/oauth2", () => new Response("no", { status: 400 }));
     await h.reply("team_1", { work_item_id: "w", source: src, kind: "update", text: "1" });
-    expect(k.ff.calls.filter((c) => c.url.endsWith("/token")).map((c) => c.url.split("/")[3])).toEqual(["botframework.com", "ten-1"]);
+    expect(k.ff.calls.filter((c) => c.url.endsWith("/token")).map((c) => c.url.split("/")[3])).toEqual([
+      "botframework.com",
+      "ten-1",
+    ]);
   });
 
   it("chooses the token tenant from app_type", () => {
     const rec = (config: Record<string, string>) => integration({ id: "i", provider: "microsoft_teams", config });
     expect(tokenTenants(rec({ tenant_id: "t", app_type: "SingleTenant" }))).toEqual({ tenant: "t", fallback: "" });
     expect(() => tokenTenants(rec({ app_type: "SingleTenant" }))).toThrow(/requires config tenant_id/);
-    expect(tokenTenants(rec({ tenant_id: "t", app_type: "multi-tenant" }))).toEqual({ tenant: "botframework.com", fallback: "" });
+    expect(tokenTenants(rec({ tenant_id: "t", app_type: "multi-tenant" }))).toEqual({
+      tenant: "botframework.com",
+      fallback: "",
+    });
     expect(tokenTenants(rec({ tenant_id: "t" }))).toEqual({ tenant: "botframework.com", fallback: "t" });
     expect(() => tokenTenants(rec({ app_type: "x" }))).toThrow(/unknown app_type/);
   });
@@ -232,20 +301,45 @@ describe("teams replies and posting", () => {
 
 describe("teams thread context", () => {
   const ev = (): Event => ({
-    id: "e", team_id: "team_1", provider: "teams", type: "app_mention", actor: { provider: "teams", external_id: "a", handle: "", is_bot: false },
-    source: { provider: "teams", kind: "thread", channel: "19:c", thread_id: "77", workspace: "G1" }, attributes: { team_id: "G1", tenant_id: "ten-1" }, received_at: "",
+    id: "e",
+    team_id: "team_1",
+    provider: "teams",
+    type: "app_mention",
+    actor: { provider: "teams", external_id: "a", handle: "", is_bot: false },
+    source: { provider: "teams", kind: "thread", channel: "19:c", thread_id: "77", workspace: "G1" },
+    attributes: { team_id: "G1", tenant_id: "ten-1" },
+    received_at: "",
   });
-  const msg = (id: string, time: string, extra: object = {}) => ({ id, createdDateTime: time, messageType: "message", from: { user: { displayName: "Al", id: "u1" } }, body: { contentType: "html", content: `<p>${id}</p>` }, ...extra });
+  const msg = (id: string, time: string, extra: object = {}) => ({
+    id,
+    createdDateTime: time,
+    messageType: "message",
+    from: { user: { displayName: "Al", id: "u1" } },
+    body: { contentType: "html", content: `<p>${id}</p>` },
+    ...extra,
+  });
 
   it("reads the thread in time order and lists attachments by name", async () => {
     const { k, h } = setup();
     k.ff
       .on("/messages/77", () => msg("77", "2026-01-01T00:00:01Z"))
-      .on("/messages/77/replies", () => ({ value: [msg("r2", "2026-01-01T00:00:03Z"), msg("r1", "2026-01-01T00:00:02Z", { attachments: [{ name: "spec.pdf", contentType: "file" }] }), msg("sys", "2026-01-01T00:00:04Z", { messageType: "systemEventMessage" }), msg("del", "2026-01-01T00:00:05Z", { deletedDateTime: "x" })] }));
+      .on("/messages/77/replies", () => ({
+        value: [
+          msg("r2", "2026-01-01T00:00:03Z"),
+          msg("r1", "2026-01-01T00:00:02Z", { attachments: [{ name: "spec.pdf", contentType: "file" }] }),
+          msg("sys", "2026-01-01T00:00:04Z", { messageType: "systemEventMessage" }),
+          msg("del", "2026-01-01T00:00:05Z", { deletedDateTime: "x" }),
+        ],
+      }));
     const res = await h.eventContext(ev());
     const entries = JSON.parse(new TextDecoder().decode(res.files[0]!.data)) as ThreadEntry[];
     expect(entries.map((e) => e.id)).toEqual(["77", "r1", "r2"]);
-    expect(entries[1]).toMatchObject({ text: "r1", user: "Al", user_id: "u1", attachments: [{ name: "spec.pdf", content_type: "file" }] });
+    expect(entries[1]).toMatchObject({
+      text: "r1",
+      user: "Al",
+      user_id: "u1",
+      attachments: [{ name: "spec.pdf", content_type: "file" }],
+    });
     expect(res.omitted).toEqual([]);
     const graph = k.ff.calls.find((c) => c.url.includes("/teams/G1/"))!;
     expect(graph.headers.get("Authorization")).toBe("Bearer bot-token");
@@ -302,29 +396,49 @@ describe("teams thread context", () => {
     expect(threadRoot("19:c;messageid=", "act")).toEqual({ channel: "19:c", root: "act" });
     expect(threadRoot("19:c", "act")).toEqual({ channel: "19:c", root: "act" });
     expect(threadEntry({ id: "", body: {} })).toBeNull();
-    expect(threadEntry({ id: "1", from: { application: { displayName: "Bot" } }, body: { content: "t" } })).toEqual({ id: "1", user: "Bot", bot: true, text: "t" });
+    expect(threadEntry({ id: "1", from: { application: { displayName: "Bot" } }, body: { content: "t" } })).toEqual({
+      id: "1",
+      user: "Bot",
+      bot: true,
+      text: "t",
+    });
   });
 });
 
 describe("teams name resolver", () => {
   it("resolves channels and users through Graph, scoped by team", async () => {
     const { k, h } = setup();
-    k.store.integrations.push(integration({ id: "int_t2", provider: "microsoft_teams", secret_ref: "BOT_PW", config: { team_id: "G2", tenant_id: "ten-1", app_id: APP } }));
+    k.store.integrations.push(
+      integration({
+        id: "int_t2",
+        provider: "microsoft_teams",
+        secret_ref: "BOT_PW",
+        config: { team_id: "G2", tenant_id: "ten-1", app_id: APP },
+      }),
+    );
     k.ff
       .on("/teams/G1/channels", () => ({ value: [{ id: "ch1", displayName: "Dev" }] }))
       .on("/teams/G2/channels", () => ({ value: [{ id: "ch2", displayName: "dev" }] }))
       .on("/teams/G1/members", () => ({ value: [{ userId: "o1", displayName: "Al", email: "al@example.com" }] }));
     const r = new TeamsNameResolver(h);
     expect(await r.resolveNames("team_1", "teams", "channels", ["#dev"])).toEqual({ "#dev": ["ch1", "ch2"] });
-    expect(await r.resolveNames("team_1", "microsoft_teams", "channels", ["dev"], { team_ids: ["g2"] })).toEqual({ dev: ["ch2"] });
-    expect(await r.resolveNames("team_1", "teams", "users", ["AL@example.com"], { team_ids: ["G1"] })).toEqual({ "AL@example.com": ["o1"] });
-    await expect(r.resolveNames("team_1", "teams", "users", ["x"], { team_ids: ["G9"] })).rejects.toThrow(/no active Teams integration/);
+    expect(await r.resolveNames("team_1", "microsoft_teams", "channels", ["dev"], { team_ids: ["g2"] })).toEqual({
+      dev: ["ch2"],
+    });
+    expect(await r.resolveNames("team_1", "teams", "users", ["AL@example.com"], { team_ids: ["G1"] })).toEqual({
+      "AL@example.com": ["o1"],
+    });
+    await expect(r.resolveNames("team_1", "teams", "users", ["x"], { team_ids: ["G9"] })).rejects.toThrow(
+      /no active Teams integration/,
+    );
     await expect(r.resolveNames("team_1", "teams", "groups", ["x"])).rejects.toThrow(/cannot resolve/);
   });
 
   it("names the permission when Graph refuses", async () => {
     const { k, h } = setup();
     k.ff.on("/teams/G1/channels", () => new Response("no", { status: 403 }));
-    await expect(new TeamsNameResolver(h).resolveNames("team_1", "teams", "channels", ["x"])).rejects.toThrow(/ChannelSettings.Read.Group/);
+    await expect(new TeamsNameResolver(h).resolveNames("team_1", "teams", "channels", ["x"])).rejects.toThrow(
+      /ChannelSettings.Read.Group/,
+    );
   });
 });

@@ -1,6 +1,13 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import { COMPACT_CHUNK_ROWS, compactRunMessages, compactedKey, mergeMessages, readCompactedMessages, type CompactionHost } from "./compact";
+import {
+  COMPACT_CHUNK_ROWS,
+  compactRunMessages,
+  compactedKey,
+  mergeMessages,
+  readCompactedMessages,
+  type CompactionHost,
+} from "./compact";
 import { deletePrefix, parseRetention, pruneAttachments, pruneRunData, runPrefixes } from "../retention/sweep";
 
 function host(rows: { seq: number; data: string }[]): CompactionHost & { rows: typeof rows } {
@@ -35,7 +42,15 @@ describe("compaction", () => {
     const runId = "run_c2" + crypto.randomUUID();
     const rows = Array.from({ length: COMPACT_CHUNK_ROWS + 5 }, (_, i) => msg(i + 1));
     const h = host(rows);
-    const first = await compactRunMessages({ ...h, deleteRows: () => { throw new Error("crash"); } }, runId).catch((e: Error) => e);
+    const first = await compactRunMessages(
+      {
+        ...h,
+        deleteRows: () => {
+          throw new Error("crash");
+        },
+      },
+      runId,
+    ).catch((e: Error) => e);
     expect(first).toBeInstanceOf(Error);
     expect(rows).toHaveLength(COMPACT_CHUNK_ROWS + 5);
     const a = await compactRunMessages(h, runId);
@@ -48,7 +63,9 @@ describe("compaction", () => {
     expect(await env.DATA.head(compactedKey(runId))).toBeTruthy();
   });
   it("merges the compacted prefix with remaining rows without duplicates", () => {
-    expect(mergeMessages([{ seq: 1 }, { seq: 2 }, { seq: 3 }], [{ seq: 3 }, { seq: 4 }]).map((m) => m.seq)).toEqual([1, 2, 3, 4]);
+    expect(mergeMessages([{ seq: 1 }, { seq: 2 }, { seq: 3 }], [{ seq: 3 }, { seq: 4 }]).map((m) => m.seq)).toEqual([
+      1, 2, 3, 4,
+    ]);
   });
 });
 
@@ -69,12 +86,29 @@ describe("retention", () => {
     await mk("old");
     await mk("new");
     const now = Date.now();
-    const out = await pruneRunData({ bucket: env.DATA, teamId: t, runs: [{ id: "old", lastActivityMs: now - 10_000 }, { id: "new", lastActivityMs: now }], nowMs: now, retentionMs: 5000 });
+    const out = await pruneRunData({
+      bucket: env.DATA,
+      teamId: t,
+      runs: [
+        { id: "old", lastActivityMs: now - 10_000 },
+        { id: "new", lastActivityMs: now },
+      ],
+      nowMs: now,
+      retentionMs: 5000,
+    });
     expect(out).toEqual({ pruned: ["old"], more: false });
     expect((await env.DATA.list({ prefix: `runs/old/` })).objects).toHaveLength(0);
     expect((await env.DATA.list({ prefix: `snapshots/${t}/old/` })).objects).toHaveLength(0);
     expect((await env.DATA.list({ prefix: `runs/new/` })).objects).toHaveLength(1);
-    expect(await pruneRunData({ bucket: env.DATA, teamId: t, runs: [{ id: "new", lastActivityMs: 0 }], nowMs: now, retentionMs: 0 })).toEqual({ pruned: [], more: false });
+    expect(
+      await pruneRunData({
+        bucket: env.DATA,
+        teamId: t,
+        runs: [{ id: "new", lastActivityMs: 0 }],
+        nowMs: now,
+        retentionMs: 0,
+      }),
+    ).toEqual({ pruned: [], more: false });
     for (let i = 0; i < 3; i++) await env.DATA.put(`scratch/${t}/${i}`, "x");
     expect((await deletePrefix(env.DATA, `scratch/${t}/`, 2)).done).toBe(false);
     expect((await deletePrefix(env.DATA, `scratch/${t}/`, 2)).done).toBe(true);

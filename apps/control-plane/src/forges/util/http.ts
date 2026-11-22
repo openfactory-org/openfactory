@@ -85,7 +85,7 @@ export class HttpClient {
     try {
       return JSON.parse(r.text) as T;
     } catch (e) {
-      throw new Error(`decode ${method} ${redactURL(this.url(path))} response: ${(e as Error).message}`);
+      throw new Error(`decode ${method} ${redactURL(this.url(path))} response: ${(e as Error).message}`, { cause: e });
     }
   }
 

@@ -52,11 +52,15 @@ export function pluginWebhookName(pathname: string): string | undefined {
 export async function forwardPluginWebhook(name: string, req: Request, opts: WebhookForwardOptions): Promise<Response> {
   const log = opts.log ?? ((message, fields) => console.warn(JSON.stringify({ message, ...fields })));
   if (req.method !== "POST") {
-    return problemResponse(new OfError("invalid_request", "plugin webhooks accept POST only"), { instance: new URL(req.url).pathname });
+    return problemResponse(new OfError("invalid_request", "plugin webhooks accept POST only"), {
+      instance: new URL(req.url).pathname,
+    });
   }
   const plugin = opts.registry.get(name);
   if (!plugin || !plugin.info.roles.includes("ingress") || !plugin.stub.handleWebhook) {
-    return problemResponse(new OfError("resource_not_found", `plugin ${name} serves no webhook`), { instance: new URL(req.url).pathname });
+    return problemResponse(new OfError("resource_not_found", `plugin ${name} serves no webhook`), {
+      instance: new URL(req.url).pathname,
+    });
   }
   let result: WebhookResult;
   try {

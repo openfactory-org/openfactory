@@ -53,7 +53,13 @@ export function cookieString(name: string, value: string, o: CookieOpts): string
 
 /** Set-Cookie value of a new session. */
 export async function issueSessionCookie(env: Env, c: Omit<SessionClaims, "iat">, nowMs = Date.now()): Promise<string> {
-  const claims: SessionClaims = { u: c.u, t: c.t, p: c.p, ...(c.k ? { k: c.k, kp: c.kp } : {}), iat: Math.floor(nowMs / 1000) };
+  const claims: SessionClaims = {
+    u: c.u,
+    t: c.t,
+    p: c.p,
+    ...(c.k ? { k: c.k, kp: c.kp } : {}),
+    iat: Math.floor(nowMs / 1000),
+  };
   const exp = nowMs + SESSION_TTL_MS;
   const v = await (await sealer(env, "session")).seal(claims, SESSION_COOKIE, exp);
   return cookieString(SESSION_COOKIE, v, {
@@ -81,13 +87,25 @@ const flowCookie = (provider: string) => "of_flow_" + provider;
 export async function saveFlow(env: Env, provider: string, v: unknown, ttlMs: number): Promise<string> {
   const name = flowCookie(provider);
   const val = await (await sealer(env, "login-flow")).seal(v, name, Date.now() + ttlMs);
-  return cookieString(name, val, { path: `/auth/${provider}/`, maxAgeS: Math.floor(ttlMs / 1000), secure: serverConfig(env).secureCookies });
+  return cookieString(name, val, {
+    path: `/auth/${provider}/`,
+    maxAgeS: Math.floor(ttlMs / 1000),
+    secure: serverConfig(env).secureCookies,
+  });
 }
 
 /** LoadFlow: the saved state (or null) and the Set-Cookie that clears it. */
-export async function loadFlow<T>(env: Env, req: Request, provider: string): Promise<{ value: T | null; clear: string }> {
+export async function loadFlow<T>(
+  env: Env,
+  req: Request,
+  provider: string,
+): Promise<{ value: T | null; clear: string }> {
   const name = flowCookie(provider);
-  const clear = cookieString(name, "", { path: `/auth/${provider}/`, maxAgeS: -1, secure: serverConfig(env).secureCookies });
+  const clear = cookieString(name, "", {
+    path: `/auth/${provider}/`,
+    maxAgeS: -1,
+    secure: serverConfig(env).secureCookies,
+  });
   const v = getCookie(req, name);
   if (!v) return { value: null, clear };
   return { value: await (await sealer(env, "login-flow")).open<T>(v, name), clear };

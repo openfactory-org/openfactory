@@ -8,7 +8,10 @@ const wantAuth = "Basic " + btoa(":pat");
 
 function client(routes: Parameters<typeof mockFetch>[0]) {
   const m = mockFetch(routes);
-  return { c: new AzureDevOpsClient({ organization: "contoso", baseUrl: "https://ado.test", token: "pat", fetch: m.fetch }), calls: m.calls };
+  return {
+    c: new AzureDevOpsClient({ organization: "contoso", baseUrl: "https://ado.test", token: "pat", fetch: m.fetch }),
+    calls: m.calls,
+  };
 }
 
 async function code(p: Promise<unknown>): Promise<string> {
@@ -45,7 +48,13 @@ describe("AzureDevOpsClient", () => {
     });
     expect(c.cloneUrl("proj", "web")).toBe("https://pat:pat@ado.test/contoso/proj/_git/web");
 
-    const pr = await c.createPullRequest("proj", "web", { head: "factory/x", base: "", title: "T", body: "b", draft: true });
+    const pr = await c.createPullRequest("proj", "web", {
+      head: "factory/x",
+      base: "",
+      title: "T",
+      body: "b",
+      draft: true,
+    });
     expect(pr).toEqual({
       forge: "AZURE_DEVOPS",
       repo: "proj/web",
@@ -55,7 +64,11 @@ describe("AzureDevOpsClient", () => {
       branch: "factory/x",
     });
     const create = findCall(calls, `POST ${BASE}/pullrequests`)!;
-    expect(create.body).toMatchObject({ targetRefName: "refs/heads/main", sourceRefName: "refs/heads/factory/x", isDraft: true });
+    expect(create.body).toMatchObject({
+      targetRefName: "refs/heads/main",
+      sourceRefName: "refs/heads/factory/x",
+      isDraft: true,
+    });
     expect(create.headers.get("Authorization")).toBe(wantAuth);
     expect(create.query.get("api-version")).toBe("7.1");
 
@@ -68,7 +81,10 @@ describe("AzureDevOpsClient", () => {
       state: "succeeded",
       context: { genre: "openfactory", name: "definition" },
     });
-    expect(await c.getFiles("proj", "web", "main", "def")).toEqual({ files: { "factory.yaml": "name: y\n" }, commitSha: "c1" });
+    expect(await c.getFiles("proj", "web", "main", "def")).toEqual({
+      files: { "factory.yaml": "name: y\n" },
+      commitSha: "c1",
+    });
   });
 
   it("maps abandoned and plain open pull requests", async () => {
@@ -116,7 +132,10 @@ describe("review operations", () => {
   it("replies, resolves and marks ready", async () => {
     const { c, calls } = client(routes());
     await c.replyInThread("proj", "web", 11, "4", "done");
-    expect(findCall(calls, `POST ${prs}/threads/4/comments`)!.body).toMatchObject({ parentCommentId: 1, content: "done" });
+    expect(findCall(calls, `POST ${prs}/threads/4/comments`)!.body).toMatchObject({
+      parentCommentId: 1,
+      content: "done",
+    });
     await c.resolveThread("proj", "web", 11, "4");
     expect(findCall(calls, `PATCH ${prs}/threads/4`)!.body).toEqual({ status: "fixed" });
     await c.markReady("proj", "web", 11);
@@ -135,18 +154,30 @@ describe("review operations", () => {
     const posts = calls.filter((x) => x.method === "POST");
     expect(posts).toHaveLength(3);
     expect(posts[0]!.body).toMatchObject({
-      threadContext: { filePath: "/src/a.ts", rightFileStart: { line: 7, offset: 1 }, rightFileEnd: { line: 7, offset: 1 } },
+      threadContext: {
+        filePath: "/src/a.ts",
+        rightFileStart: { line: 7, offset: 1 },
+        rightFileEnd: { line: 7, offset: 1 },
+      },
     });
-    expect(posts[1]!.body).toMatchObject({ threadContext: { filePath: "/b.ts", leftFileStart: { line: 3, offset: 1 } } });
+    expect(posts[1]!.body).toMatchObject({
+      threadContext: { filePath: "/b.ts", leftFileStart: { line: 3, offset: 1 } },
+    });
     expect(posts[2]!.body).toMatchObject({ comments: [{ content: "Summary" }] });
   });
 
   it("rejects votes, unknown events, bad comments and bad thread references", async () => {
     const { c } = client(routes());
-    expect(await code(c.submitReview("proj", "web", 11, { event: "approve", body: "" }))).toBe("operation_not_supported");
-    expect(await code(c.submitReview("proj", "web", 11, { event: "request_changes", body: "" }))).toBe("operation_not_supported");
+    expect(await code(c.submitReview("proj", "web", 11, { event: "approve", body: "" }))).toBe(
+      "operation_not_supported",
+    );
+    expect(await code(c.submitReview("proj", "web", 11, { event: "request_changes", body: "" }))).toBe(
+      "operation_not_supported",
+    );
     expect(await code(c.submitReview("proj", "web", 11, { event: "x" as never, body: "" }))).toBe("invalid_request");
-    expect(await code(c.submitReview("proj", "web", 11, { body: "", comments: [{ path: "a", line: 0, body: "x" }] }))).toBe("invalid_request");
+    expect(
+      await code(c.submitReview("proj", "web", 11, { body: "", comments: [{ path: "a", line: 0, body: "x" }] })),
+    ).toBe("invalid_request");
     for (const ref of ["", "abc", "0", "-3", "1.5"]) {
       expect(await code(c.replyInThread("proj", "web", 11, ref, "x"))).toBe("invalid_request");
     }
@@ -163,7 +194,12 @@ describe("review context", () => {
         status: "fixed",
         threadContext: { filePath: "/src/a.ts", rightFileStart: { line: 9 } },
         comments: [
-          { id: 1, content: "rename", publishedDate: "2026-01-02T03:04:05Z", author: { displayName: "Dana", uniqueName: "dana@contoso.com" } },
+          {
+            id: 1,
+            content: "rename",
+            publishedDate: "2026-01-02T03:04:05Z",
+            author: { displayName: "Dana", uniqueName: "dana@contoso.com" },
+          },
           { id: 2, content: "system", commentType: "system", author: {} },
           { id: 3, content: "gone", isDeleted: true, author: {} },
           { id: 4, content: "ok", author: { displayName: "Bob" } },
@@ -172,7 +208,10 @@ describe("review context", () => {
     });
     const th = await c.reviewThread("proj", "web", 11, "4");
     expect(th).toMatchObject({ ref: "4", path: "src/a.ts", line: 9, resolved: true });
-    expect(th.comments.map((x) => [x.id, x.author])).toEqual([["1", "dana@contoso.com"], ["4", "Bob"]]);
+    expect(th.comments.map((x) => [x.id, x.author])).toEqual([
+      ["1", "dana@contoso.com"],
+      ["4", "Bob"],
+    ]);
     expect(th.comments[0]).toMatchObject({ path: "src/a.ts", line: 9, createdAt: "2026-01-02T03:04:05.000Z" });
   });
 
@@ -194,7 +233,9 @@ describe("review context", () => {
     const { c, calls } = client(diffRoutes("edit"));
     const d = await c.fileDiff("proj", "web", 11, "src/a.ts");
     expect(d.patch).toBe("@@ -1,3 +1,3 @@\n a\n-b\n+B\n c\n");
-    expect(calls.filter((x) => x.rawPath === `${BASE}/items`).map((x) => x.query.get("versionDescriptor.version"))).toEqual(["base", "head"]);
+    expect(
+      calls.filter((x) => x.rawPath === `${BASE}/items`).map((x) => x.query.get("versionDescriptor.version")),
+    ).toEqual(["base", "head"]);
   });
 
   it("reads only the head of an added file and only the base of a deleted one", async () => {

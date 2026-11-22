@@ -53,7 +53,12 @@ export interface Forge {
   comment(owner: string, repo: string, number: number, body: string): Promise<void>;
   setCommitStatus(owner: string, repo: string, sha: string, st: CommitStatus): Promise<void>;
   /** Reads a tree at ref (git-backed definitions): files relative to path, and the commit sha. */
-  getFiles(owner: string, repo: string, ref: string, path: string): Promise<{ files: Record<string, string>; sha: string }>;
+  getFiles(
+    owner: string,
+    repo: string,
+    ref: string,
+    path: string,
+  ): Promise<{ files: Record<string, string>; sha: string }>;
   replyInThread(owner: string, repo: string, number: number, threadRef: string, body: string): Promise<void>;
   resolveThread(owner: string, repo: string, number: number, threadRef: string): Promise<void>;
   submitReview(input: ReviewInput): Promise<void>;

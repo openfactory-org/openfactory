@@ -32,7 +32,10 @@ export function resourceMetadataURL(env: Env, path: string): string {
 }
 
 function json(status: number, body: unknown, headers: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(body) + "\n", { status, headers: { "content-type": "application/json", ...headers } });
+  return new Response(JSON.stringify(body) + "\n", {
+    status,
+    headers: { "content-type": "application/json", ...headers },
+  });
 }
 
 export function outcomeResponse(o: Outcome, extra: Record<string, string> = {}): Response {
@@ -89,7 +92,7 @@ function serverMetadata(env: Env): Response {
 /** The signed-in dashboard user of a browser request (session login only), or "". */
 async function sessionUser(request: Request, env: Env): Promise<string> {
   if (bearerToken(request) !== "") return "";
-  let p: Principal | null = null;
+  let p: Principal | null;
   try {
     // A POST must pass the CSRF check of the dashboard session.
     p = request.method === "GET" ? await sessionPrincipal(env, request) : await authenticate(request, env);
@@ -136,12 +139,17 @@ export async function handleOAuthRequest(request: Request, env: Env): Promise<Re
   if (m === "GET" && path === SERVER_METADATA_PATH) return serverMetadata(env);
   if (path === REGISTER_PATH && m === "POST") {
     const text = await request.text();
-    if (text.length > 64 << 10) return outcomeResponse(oauthError(400, "invalid_client_metadata", "the body must be a JSON client metadata document"));
+    if (text.length > 64 << 10)
+      return outcomeResponse(
+        oauthError(400, "invalid_client_metadata", "the body must be a JSON client metadata document"),
+      );
     let metadata: unknown;
     try {
       metadata = JSON.parse(text);
     } catch {
-      return outcomeResponse(oauthError(400, "invalid_client_metadata", "the body must be a JSON client metadata document"));
+      return outcomeResponse(
+        oauthError(400, "invalid_client_metadata", "the body must be a JSON client metadata document"),
+      );
     }
     return outcomeResponse(await teamOp<Outcome>(env, "mcpauth.register", { metadata, now: rt.now() }));
   }
@@ -159,7 +167,11 @@ export async function handleOAuthRequest(request: Request, env: Env): Promise<Re
   if (path === AUTHORIZE_PATH && m === "POST") {
     const f = await form(request.clone());
     if (!f) {
-      return outcomeResponse({ kind: "page", status: 400, page: { title: "Sign-in failed", message: "The form could not be read." } });
+      return outcomeResponse({
+        kind: "page",
+        status: 400,
+        page: { title: "Sign-in failed", message: "The form could not be read." },
+      });
     }
     const userId = await sessionUser(request, env);
     const o = await teamOp<Outcome>(env, "mcpauth.consent", {
@@ -173,7 +185,10 @@ export async function handleOAuthRequest(request: Request, env: Env): Promise<Re
   }
   if (path === TOKEN_PATH && m === "POST") {
     const f = await form(request);
-    if (!f) return outcomeResponse(oauthError(400, "invalid_request", "the body must be form encoded"), { "cache-control": "no-store" });
+    if (!f)
+      return outcomeResponse(oauthError(400, "invalid_request", "the body must be form encoded"), {
+        "cache-control": "no-store",
+      });
     const o = await teamOp<Outcome>(env, "mcpauth.token", { form: f, now: rt.now() });
     return outcomeResponse(o, { "cache-control": "no-store" });
   }

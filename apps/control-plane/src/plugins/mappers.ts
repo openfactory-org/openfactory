@@ -46,7 +46,14 @@ export function pullRequestToPlugin(p: PullRequestRef): PluginPullRequest {
 }
 
 export function pullRequestFromPlugin(p: PluginPullRequest): PullRequestRef {
-  return { forge: p.forge, repo: p.repo, number: p.number, url: p.url ?? "", branch: p.branch ?? "", state: p.state ?? "" };
+  return {
+    forge: p.forge,
+    repo: p.repo,
+    number: p.number,
+    url: p.url ?? "",
+    branch: p.branch ?? "",
+    state: p.state ?? "",
+  };
 }
 
 export function outboundToPlugin(m: OutboundMessage): PluginOutbound {

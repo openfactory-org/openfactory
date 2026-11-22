@@ -15,7 +15,16 @@
 //   identity.userByEmail   params email            -> User | null
 //   factorySettings        params factory_id       -> {provider: {key: value}}
 //   kv.get / kv.set        params key (, value)
-import { INTEGRATION_ACTIVE, INTEGRATION_DISABLED, OfError, integrationStatus, integrationWorkspace, integrationWorkspaceKey, newId, normalizeWorkspace } from "@openfactory/core";
+import {
+  INTEGRATION_ACTIVE,
+  INTEGRATION_DISABLED,
+  OfError,
+  integrationStatus,
+  integrationWorkspace,
+  integrationWorkspaceKey,
+  newId,
+  normalizeWorkspace,
+} from "@openfactory/core";
 import type { ExternalIdentity, Integration, User } from "@openfactory/core";
 import { listResponse } from "../../lib/page";
 import type { Migration } from "../../lib/sql/migrate";
@@ -38,7 +47,15 @@ CREATE TABLE integration_kv (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_
   },
 ];
 
-export const INTEGRATION_PROVIDERS = ["github", "gitlab", "azure_devops", "slack", "microsoft_teams", "linear", "jira"] as const;
+export const INTEGRATION_PROVIDERS = [
+  "github",
+  "gitlab",
+  "azure_devops",
+  "slack",
+  "microsoft_teams",
+  "linear",
+  "jira",
+] as const;
 const FORGE_PROVIDERS: readonly string[] = ["github", "gitlab", "azure_devops"];
 const SECRET_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
 
@@ -51,7 +68,11 @@ export function listIntegrations(kit: TeamKit, provider = ""): Integration[] {
   const rows =
     provider === ""
       ? all<{ data: string }>(kit.sql, "SELECT data FROM integrations ORDER BY created_ms, id")
-      : all<{ data: string }>(kit.sql, "SELECT data FROM integrations WHERE provider = ? ORDER BY created_ms, id", provider);
+      : all<{ data: string }>(
+          kit.sql,
+          "SELECT data FROM integrations WHERE provider = ? ORDER BY created_ms, id",
+          provider,
+        );
   return rows.map(parse);
 }
 
@@ -101,10 +122,12 @@ interface IntegrationRequest {
 }
 
 function request(body: unknown): IntegrationRequest {
-  if (typeof body !== "object" || body === null || Array.isArray(body)) throw new OfError("invalid_request", "the body must be a JSON object");
+  if (typeof body !== "object" || body === null || Array.isArray(body))
+    throw new OfError("invalid_request", "the body must be a JSON object");
   const b = body as Record<string, unknown>;
   for (const k of ["provider", "name", "secret_ref", "factory_id", "status"]) {
-    if (b[k] !== undefined && b[k] !== null && typeof b[k] !== "string") throw new OfError("invalid_request", `${k} must be a string`);
+    if (b[k] !== undefined && b[k] !== null && typeof b[k] !== "string")
+      throw new OfError("invalid_request", `${k} must be a string`);
   }
   if (b["config"] !== undefined && b["config"] !== null) {
     const c = b["config"];
@@ -118,7 +141,8 @@ function request(body: unknown): IntegrationRequest {
 /** Applies the status that an admin asks for: active or disabled. auth_failed is set only by the server. */
 function applyStatus(i: Integration, status: string | undefined): void {
   if (status === undefined || status === null) return;
-  if (status !== INTEGRATION_ACTIVE && status !== INTEGRATION_DISABLED) throw new OfError("invalid_request", "status must be active or disabled");
+  if (status !== INTEGRATION_ACTIVE && status !== INTEGRATION_DISABLED)
+    throw new OfError("invalid_request", "status must be active or disabled");
   if (integrationStatus(i) === status) return;
   i.status = status;
   i.status_reason = status === INTEGRATION_DISABLED ? "disabled by an admin" : "";
@@ -136,16 +160,26 @@ function checkForgeRecord(i: Integration): void {
       `config.org is necessary for a ${i.provider} record: set it to the owner that the record serves (an organization, a user name or, for GitLab, the top-level group)`,
     );
   }
-  if (org.includes("/")) throw new OfError("invalid_request", `config.org "${org}" must be one name without a slash (for GitLab, the top-level group)`);
+  if (org.includes("/"))
+    throw new OfError(
+      "invalid_request",
+      `config.org "${org}" must be one name without a slash (for GitLab, the top-level group)`,
+    );
   cfg["org"] = org;
   if (i.provider === "github" && (cfg["app_id"] ?? "") !== "") {
     if (!i.secret_ref && (cfg["private_key_ref"] ?? "") === "") {
-      throw new OfError("invalid_request", "a github app record needs its private key: set private_key_ref (or secret_ref) to the name of a team secret");
+      throw new OfError(
+        "invalid_request",
+        "a github app record needs its private key: set private_key_ref (or secret_ref) to the name of a team secret",
+      );
     }
     return;
   }
   if (i.secret_ref) return;
-  throw new OfError("invalid_request", `a ${i.provider} record needs a credential: set secret_ref to the name of a team secret that holds a token`);
+  throw new OfError(
+    "invalid_request",
+    `a ${i.provider} record needs a credential: set secret_ref to the name of a team secret that holds a token`,
+  );
 }
 
 const WORKSPACE_WHAT: Record<string, string> = {
@@ -182,11 +216,17 @@ function checkUnique(kit: TeamKit, i: Integration): void {
     if (wsKey !== "") {
       const want = i.config?.[wsKey] ?? "";
       if (integrationWorkspace(x).toLowerCase() !== want.toLowerCase()) continue;
-      throw new OfError("conflict", `${where} already has a ${i.provider} record for config.${wsKey} "${want}" (${x.id})`);
+      throw new OfError(
+        "conflict",
+        `${where} already has a ${i.provider} record for config.${wsKey} "${want}" (${x.id})`,
+      );
     }
     if (!isForge) throw new OfError("conflict", `factory ${fac} already has a ${i.provider} integration (${x.id})`);
     if ((x.config?.["org"] ?? "").trim().toLowerCase() !== (i.config?.["org"] ?? "").toLowerCase()) continue;
-    throw new OfError("conflict", `${where} already has a ${i.provider} record for the owner "${i.config?.["org"]}" (${x.id})`);
+    throw new OfError(
+      "conflict",
+      `${where} already has a ${i.provider} record for the owner "${i.config?.["org"]}" (${x.id})`,
+    );
   }
 }
 
@@ -197,22 +237,32 @@ function integrationFor(kit: TeamKit, id: string): Integration {
 }
 
 function checkSecretRef(v: string | undefined): void {
-  if (v !== undefined && v !== "" && !SECRET_NAME_RE.test(v)) throw new OfError("invalid_request", `invalid secret_ref "${v}"`);
+  if (v !== undefined && v !== "" && !SECRET_NAME_RE.test(v))
+    throw new OfError("invalid_request", `invalid secret_ref "${v}"`);
 }
 
-const sortedByCreated = (a: Integration, b: Integration): number => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : a.id < b.id ? -1 : 1);
+const sortedByCreated = (a: Integration, b: Integration): number =>
+  a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : a.id < b.id ? -1 : 1;
 
 // ---------- store ops for the Worker side ----------
 
 const jsonOf = <T>(r: { data: string } | undefined): T | null => (r ? (JSON.parse(r.data) as T) : null);
 
 function findIdentity(kit: TeamKit, provider: string, externalId: string): ExternalIdentity | null {
-  return jsonOf<ExternalIdentity>(first<{ data: string }>(kit.sql, "SELECT data FROM external_identities WHERE provider = ? AND external_id = ?", provider, externalId));
+  return jsonOf<ExternalIdentity>(
+    first<{ data: string }>(
+      kit.sql,
+      "SELECT data FROM external_identities WHERE provider = ? AND external_id = ?",
+      provider,
+      externalId,
+    ),
+  );
 }
 
 function identityBody(c: OpCall): ExternalIdentity {
   const b = c.body as Partial<ExternalIdentity> | null;
-  if (!b || !b.provider || !b.external_id) throw new OfError("invalid_request", "identity needs provider and external_id");
+  if (!b || !b.provider || !b.external_id)
+    throw new OfError("invalid_request", "identity needs provider and external_id");
   return { user_id: b.user_id ?? "", provider: b.provider, external_id: b.external_id, handle: b.handle ?? "" };
 }
 
@@ -273,7 +323,8 @@ export const ops: Record<string, TeamOp> = {
     kit.tx(() => {
       const i = integrationFor(kit, c.params["id"]!);
       const req = request(c.body);
-      if (req.provider !== undefined && req.provider !== i.provider) throw new OfError("invalid_request", "provider cannot change");
+      if (req.provider !== undefined && req.provider !== i.provider)
+        throw new OfError("invalid_request", "provider cannot change");
       if (req.factory_id !== undefined && req.factory_id.trim() !== (i.factory_id ?? "")) {
         throw new OfError("invalid_request", "factory_id cannot change");
       }
@@ -332,7 +383,11 @@ export const ops: Record<string, TeamOp> = {
   factorySettings: (kit, c) => {
     const out: Record<string, Record<string, string>> = {};
     try {
-      for (const r of all<{ provider: string; settings: string }>(kit.sql, "SELECT provider, settings FROM factory_integrations WHERE factory_id = ?", c.params["factory_id"]!)) {
+      for (const r of all<{ provider: string; settings: string }>(
+        kit.sql,
+        "SELECT provider, settings FROM factory_integrations WHERE factory_id = ?",
+        c.params["factory_id"]!,
+      )) {
         out[r.provider] = JSON.parse(r.settings) as Record<string, string>;
       }
     } catch {
@@ -340,7 +395,9 @@ export const ops: Record<string, TeamOp> = {
     }
     return out;
   },
-  "kv.get": (kit, c) => first<{ value: string }>(kit.sql, "SELECT value FROM integration_kv WHERE key = ?", c.params["key"]!)?.value ?? null,
+  "kv.get": (kit, c) =>
+    first<{ value: string }>(kit.sql, "SELECT value FROM integration_kv WHERE key = ?", c.params["key"]!)?.value ??
+    null,
   "kv.set": (kit, c) =>
     kit.tx(() => {
       kit.sql.exec(

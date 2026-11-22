@@ -12,9 +12,9 @@ export interface ValidationError {
   message: string;
 }
 
-export type HarnessType = 'claude' | 'codex' | '';
+export type HarnessType = "claude" | "codex" | "";
 
-export type AgentType = 'FOREMAN' | 'TRIAGE' | 'SPEC' | 'IMPLEMENT' | 'REVIEW' | 'VERIFY' | 'CUSTOM';
+export type AgentType = "FOREMAN" | "TRIAGE" | "SPEC" | "IMPLEMENT" | "REVIEW" | "VERIFY" | "CUSTOM";
 
 export interface HarnessAuth {
   /** managedSecret | workerEnvironment */

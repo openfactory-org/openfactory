@@ -35,7 +35,13 @@ describe("conversation", () => {
     ]);
     const blocks = conv.steps!.flatMap((s) => s.messages!.flatMap((m) => m.blocks ?? []));
     expect(blocks).toHaveLength(3);
-    expect(blocks[1]).toMatchObject({ type: "action", name: "bash", call_id: "c1", input: { command: "ls" }, state: "completed" });
+    expect(blocks[1]).toMatchObject({
+      type: "action",
+      name: "bash",
+      call_id: "c1",
+      input: { command: "ls" },
+      state: "completed",
+    });
     expect(blocks[2]).toMatchObject({ type: "action_result", call_id: "c1", text: "a.txt" });
     expect(conv.conversation_id).toBe("run_1");
     expect(conv.steps![0]!.step_id).toBe("step_1");
@@ -94,7 +100,9 @@ describe("metadata", () => {
   });
 
   it("merges child over batch over parent and checks the limit", () => {
-    expect(mergeMetadata({ a: "parent", b: "parent", c: "parent" }, { b: "batch", c: "batch" }, { c: "child" })).toEqual({
+    expect(
+      mergeMetadata({ a: "parent", b: "parent", c: "parent" }, { b: "batch", c: "batch" }, { c: "child" }),
+    ).toEqual({
       a: "parent",
       b: "batch",
       c: "child",
@@ -107,7 +115,9 @@ describe("metadata", () => {
   });
 
   it("reports problems in Go wording", () => {
-    expect(() => validateMetadata({ "a.b": "1", "a-b": "2" })).toThrow('metadata keys "a-b" and "a.b" both map to OF_METADATA_A_B');
+    expect(() => validateMetadata({ "a.b": "1", "a-b": "2" })).toThrow(
+      'metadata keys "a-b" and "a.b" both map to OF_METADATA_A_B',
+    );
   });
 });
 
@@ -141,7 +151,9 @@ describe("harness models", () => {
 
 describe("canonical JSON and hashing", () => {
   it("sorts keys at every level and uses Go escaping", () => {
-    expect(canonicalJSON({ b: 1, a: { d: [1, "x<y"], c: null }, u: undefined })).toBe('{"a":{"c":null,"d":[1,"x\\u003cy"]},"b":1}');
+    expect(canonicalJSON({ b: 1, a: { d: [1, "x<y"], c: null }, u: undefined })).toBe(
+      '{"a":{"c":null,"d":[1,"x\\u003cy"]},"b":1}',
+    );
     expect(canonicalJSON({ b: 1, a: 2 })).toBe(canonicalJSON({ a: 2, b: 1 }));
   });
 

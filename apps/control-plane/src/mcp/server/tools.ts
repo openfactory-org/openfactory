@@ -67,7 +67,14 @@ function jsonResult(v: unknown): CallToolResult {
 
 // ---------- input schemas (hand-written; go-sdk inferred them from struct tags) ----------
 
-type Prop = { type: string; description?: string; items?: unknown; additionalProperties?: unknown; properties?: unknown; required?: string[] };
+type Prop = {
+  type: string;
+  description?: string;
+  items?: unknown;
+  additionalProperties?: unknown;
+  properties?: unknown;
+  required?: string[];
+};
 
 function obj(props: Record<string, Prop>, required: string[] = []): JsonSchema {
   return { type: "object", properties: props, required, additionalProperties: false };
@@ -123,19 +130,39 @@ interface RunJson {
 
 interface WorkItemDetail extends WorkItem {
   runs?: RunJson[];
-  inbox?: (Json & { id: string; kind: string; title: string; options?: unknown; questions?: unknown[]; resolved?: boolean; factory_id?: string; recipients?: unknown[] })[];
+  inbox?: (Json & {
+    id: string;
+    kind: string;
+    title: string;
+    options?: unknown;
+    questions?: unknown[];
+    resolved?: boolean;
+    factory_id?: string;
+    recipients?: unknown[];
+  })[];
 }
 
 const TERMINAL_STAGES = new Set(["complete", "cancelled"]);
 const TERMINAL_RUN_STATES = new Set(["completed", "failed", "cancelled", "succeeded", "error"]);
-const STAGES = ["intake", "triage", "planning", "awaiting_approval", "building", "reviewing", "handoff", "complete", "cancelled"];
+const STAGES = [
+  "intake",
+  "triage",
+  "planning",
+  "awaiting_approval",
+  "building",
+  "reviewing",
+  "handoff",
+  "complete",
+  "cancelled",
+];
 
 async function factoryOf(c: FactoryCtx, id: string): Promise<Factory> {
   try {
     return await c.backend.api<Factory>(c.env, c.principal, "GET", `/factories/${encodeURIComponent(id)}`);
   } catch (e) {
     const { error } = toOfError(e);
-    if (error.code === "resource_not_found" || error.code === "not_authorized") throw notFound(`factory ${id} not found`);
+    if (error.code === "resource_not_found" || error.code === "not_authorized")
+      throw notFound(`factory ${id} not found`);
     throw error;
   }
 }
@@ -174,7 +201,7 @@ function workItemView(c: FactoryCtx, w: WorkItem): Json {
 /** InboxForCaller: the items that need the caller. */
 function forCaller(it: { recipients?: unknown[] }, p: Principal): boolean {
   const rc = (it.recipients ?? [])
-    .map((r) => (typeof r === "string" ? r : ((r as Json)?.user_id ?? (r as Json)?.id) as string | undefined))
+    .map((r) => (typeof r === "string" ? r : (((r as Json)?.user_id ?? (r as Json)?.id) as string | undefined)))
     .filter((x): x is string => !!x);
   if (rc.length === 0) return true;
   return userIdOf(p) !== "" && rc.includes(userIdOf(p));
@@ -196,7 +223,13 @@ export const FACTORY_MCP_INSTRUCTIONS = instructions;
 
 type Handler = (c: FactoryCtx, a: Args) => Promise<unknown>;
 
-function tool(name: string, description: string, readOnly: boolean, inputSchema: JsonSchema, h: Handler): Tool<FactoryCtx> {
+function tool(
+  name: string,
+  description: string,
+  readOnly: boolean,
+  inputSchema: JsonSchema,
+  h: Handler,
+): Tool<FactoryCtx> {
   return {
     name,
     description,
@@ -228,7 +261,12 @@ const FORGE_PROVIDERS: Record<string, string> = { GITHUB: "github", GITLAB: "git
 const CONNECTION_PROVIDERS = ["github", "gitlab", "slack", "linear", "jira"];
 
 async function existingIntegration(c: FactoryCtx, provider: string): Promise<{ id: string } | null> {
-  const out = await c.backend.api<{ items?: { id: string; provider: string }[] }>(c.env, c.principal, "GET", "/integrations");
+  const out = await c.backend.api<{ items?: { id: string; provider: string }[] }>(
+    c.env,
+    c.principal,
+    "GET",
+    "/integrations",
+  );
   return (out.items ?? []).find((x) => x.provider === provider) ?? null;
 }
 
@@ -289,7 +327,10 @@ async function resolveWorkItem(c: FactoryCtx, ref0: string): Promise<WorkItem> {
   let best: WorkItem | null = null;
   for (const f of fs) {
     for (const wi of await listWorkItemsOf(c, f.id, 500)) {
-      if (matchesWorkItem(wi, plan.keys, plan.prURL, plan.branch) && (!best || Date.parse(wi.updated_at) > Date.parse(best.updated_at))) {
+      if (
+        matchesWorkItem(wi, plan.keys, plan.prURL, plan.branch) &&
+        (!best || Date.parse(wi.updated_at) > Date.parse(best.updated_at))
+      ) {
         best = wi;
       }
     }
@@ -298,7 +339,12 @@ async function resolveWorkItem(c: FactoryCtx, ref0: string): Promise<WorkItem> {
   return best;
 }
 
-async function listWorkItemsOf(c: FactoryCtx, factoryId: string, max: number, query: Record<string, string> = {}): Promise<WorkItem[]> {
+async function listWorkItemsOf(
+  c: FactoryCtx,
+  factoryId: string,
+  max: number,
+  query: Record<string, string> = {},
+): Promise<WorkItem[]> {
   const out: WorkItem[] = [];
   let cursor = "";
   while (out.length < max) {
@@ -330,24 +376,51 @@ interface Route {
 }
 
 async function routes(c: FactoryCtx, f: Factory): Promise<Route[]> {
-  const out: Route[] = [{ id: "inbox", kind: "inbox", description: `Your Open Factory inbox (${inboxLink(c.publicURL)})` }];
-  const ints = await c.backend.api<Json>(c.env, c.principal, "GET", `/factories/${encodeURIComponent(f.id)}/integrations`);
+  const out: Route[] = [
+    { id: "inbox", kind: "inbox", description: `Your Open Factory inbox (${inboxLink(c.publicURL)})` },
+  ];
+  const ints = await c.backend.api<Json>(
+    c.env,
+    c.principal,
+    "GET",
+    `/factories/${encodeURIComponent(f.id)}/integrations`,
+  );
   const raw = (ints?.integrations ?? ints) as unknown;
-  const keys = (Array.isArray(raw) ? raw.map((x) => (typeof x === "string" ? x : String((x as Json).type ?? (x as Json).provider ?? ""))) : Object.keys((raw as Json) ?? {})).sort();
+  const keys = (
+    Array.isArray(raw)
+      ? raw.map((x) => (typeof x === "string" ? x : String((x as Json).type ?? (x as Json).provider ?? "")))
+      : Object.keys((raw as Json) ?? {})
+  ).sort();
   for (const k of keys) {
     switch (k) {
       case "slack":
-        out.push({ id: "slack_dm", kind: "slack", description: "Slack direct message (requires a linked Slack account)" });
+        out.push({
+          id: "slack_dm",
+          kind: "slack",
+          description: "Slack direct message (requires a linked Slack account)",
+        });
         break;
       case "microsoft-teams":
       case "microsoft_teams":
-        out.push({ id: "teams_dm", kind: "microsoft_teams", description: "Microsoft Teams chat message (requires a linked account)" });
+        out.push({
+          id: "teams_dm",
+          kind: "microsoft_teams",
+          description: "Microsoft Teams chat message (requires a linked account)",
+        });
         break;
       case "linear":
-        out.push({ id: "linear_issue", kind: "linear", description: "Comment on the work item's Linear issue, when it has one" });
+        out.push({
+          id: "linear_issue",
+          kind: "linear",
+          description: "Comment on the work item's Linear issue, when it has one",
+        });
         break;
       case "jira":
-        out.push({ id: "jira_issue", kind: "jira", description: "Comment on the work item's Jira issue, when it has one" });
+        out.push({
+          id: "jira_issue",
+          kind: "jira",
+          description: "Comment on the work item's Jira issue, when it has one",
+        });
         break;
     }
   }
@@ -359,9 +432,17 @@ async function checkRoute(c: FactoryCtx, f: Factory, id: string): Promise<void> 
   if (!rs.some((r) => r.id === id)) throw invalid(`unknown notify_route "${id}"; call list_notification_routes`);
 }
 
-async function factoryRepos(c: FactoryCtx, factoryId: string): Promise<{ codeForge: string; owner: string; name: string }[]> {
+async function factoryRepos(
+  c: FactoryCtx,
+  factoryId: string,
+): Promise<{ codeForge: string; owner: string; name: string }[]> {
   try {
-    const d = await c.backend.api<Json>(c.env, c.principal, "GET", `/factories/${encodeURIComponent(factoryId)}/definition`);
+    const d = await c.backend.api<Json>(
+      c.env,
+      c.principal,
+      "GET",
+      `/factories/${encodeURIComponent(factoryId)}/definition`,
+    );
     const compiled = (d?.compiled ?? d?.definition ?? d) as Json;
     const repos = (compiled?.repositories ?? []) as { codeForge?: string; owner?: string; name?: string }[];
     return repos.map((r) => ({ codeForge: r.codeForge ?? "GITHUB", owner: r.owner ?? "", name: r.name ?? "" }));
@@ -405,9 +486,13 @@ async function startWorking(c: FactoryCtx, wi: WorkItem, activeRuns: number): Pr
       setups.push(repoSetupFor(r.codeForge, r.owner, r.name, newBranch, "main", sid, false));
     }
   }
-  const warnings = ["Picking up a work item does not claim, lock, or pause it: the factory may keep running its own work on it."];
+  const warnings = [
+    "Picking up a work item does not claim, lock, or pause it: the factory may keep running its own work on it.",
+  ];
   if (activeRuns > 0) {
-    warnings.push(`${activeRuns} run(s) are still active on this work item; coordinate with the foreman to avoid duplicate changes.`);
+    warnings.push(
+      `${activeRuns} run(s) are still active on this work item; coordinate with the foreman to avoid duplicate changes.`,
+    );
   }
   if (setups.length === 0) {
     warnings.push("No repository is linked to this work item or its factory; ask the foreman which repository to use.");
@@ -434,21 +519,27 @@ const REPO_ITEM: Prop = {
 };
 
 export const FACTORY_TOOLS: readonly Tool<FactoryCtx>[] = [
-  tool("list_factories", "Lists the factories you can access.", true, obj({ search: str("optional case-insensitive filter on factory name or alias") }), async (c, a) => {
-    const q = s(a, "search").toLowerCase();
-    const out = (await listFactoriesAll(c, s(a, "search")))
-      .filter((f) => q === "" || f.name.toLowerCase().includes(q) || (f.alias ?? "").toLowerCase().includes(q))
-      .map((f) => ({
-        uid: f.id,
-        name: f.name,
-        alias: f.alias ?? "",
-        ...(f.description ? { description: f.description } : {}),
-        source: f.source ?? "",
-        url: factoryURL(c, f),
-      }))
-      .sort((x, y) => (x.name < y.name ? -1 : x.name > y.name ? 1 : 0));
-    return { factories: out };
-  }),
+  tool(
+    "list_factories",
+    "Lists the factories you can access.",
+    true,
+    obj({ search: str("optional case-insensitive filter on factory name or alias") }),
+    async (c, a) => {
+      const q = s(a, "search").toLowerCase();
+      const out = (await listFactoriesAll(c, s(a, "search")))
+        .filter((f) => q === "" || f.name.toLowerCase().includes(q) || (f.alias ?? "").toLowerCase().includes(q))
+        .map((f) => ({
+          uid: f.id,
+          name: f.name,
+          alias: f.alias ?? "",
+          ...(f.description ? { description: f.description } : {}),
+          source: f.source ?? "",
+          url: factoryURL(c, f),
+        }))
+        .sort((x, y) => (x.name < y.name ? -1 : x.name > y.name ? 1 : 0));
+      return { factories: out };
+    },
+  ),
 
   tool(
     "get_factory_file_schema",
@@ -466,10 +557,20 @@ export const FACTORY_TOOLS: readonly Tool<FactoryCtx>[] = [
       }
       const doc = s(a, "document");
       if (doc !== "") {
-        const schema = await c.backend.api(c.env, c.principal, "GET", `/factory-files/schemas/${encodeURIComponent(version)}/${encodeURIComponent(doc)}`);
+        const schema = await c.backend.api(
+          c.env,
+          c.principal,
+          "GET",
+          `/factory-files/schemas/${encodeURIComponent(version)}/${encodeURIComponent(doc)}`,
+        );
         return { version, document: doc, schema };
       }
-      const docs = await c.backend.api<Json>(c.env, c.principal, "GET", `/factory-files/schemas/${encodeURIComponent(version)}`);
+      const docs = await c.backend.api<Json>(
+        c.env,
+        c.principal,
+        "GET",
+        `/factory-files/schemas/${encodeURIComponent(version)}`,
+      );
       return {
         applies_to: APPLIES_TO,
         documents: Object.keys(docs ?? {}).sort(),
@@ -502,7 +603,12 @@ export const FACTORY_TOOLS: readonly Tool<FactoryCtx>[] = [
   ),
 
   tool("list_teams", "Lists current memberships and first-time joinable team choices.", true, obj({}), async (c) => {
-    const team = await c.backend.api<{ id: string; name: string }>(c.env, c.principal, "GET", `/teams/${encodeURIComponent(c.principal.teamId)}`);
+    const team = await c.backend.api<{ id: string; name: string }>(
+      c.env,
+      c.principal,
+      "GET",
+      `/teams/${encodeURIComponent(c.principal.teamId)}`,
+    );
     return {
       joinable: [],
       memberships: [{ name: team.name, role: c.principal.role, team_id: team.id }],
@@ -514,31 +620,61 @@ export const FACTORY_TOOLS: readonly Tool<FactoryCtx>[] = [
     "create_team",
     "Creates the authenticated user's first team with a confirmed name.",
     false,
-    obj({ name: str("the team name the user confirmed"), confirmed: bool("must be true once the user explicitly confirmed the name") }, ["name", "confirmed"]),
+    obj(
+      {
+        name: str("the team name the user confirmed"),
+        confirmed: bool("must be true once the user explicitly confirmed the name"),
+      },
+      ["name", "confirmed"],
+    ),
     async (c, a) => {
       if (s(a, "name").trim() === "") throw invalid("name is required");
       if (!b(a, "confirmed")) throw invalid("confirm the team name with the user, then call again with confirmed=true");
-      const team = await c.backend.api<{ id: string; name: string }>(c.env, c.principal, "GET", `/teams/${encodeURIComponent(c.principal.teamId)}`);
-      throw new OfError("conflict", `you are already a member of team "${team.name}" (${team.id}); a first team can only be created once`);
+      const team = await c.backend.api<{ id: string; name: string }>(
+        c.env,
+        c.principal,
+        "GET",
+        `/teams/${encodeURIComponent(c.principal.teamId)}`,
+      );
+      throw new OfError(
+        "conflict",
+        `you are already a member of team "${team.name}" (${team.id}); a first team can only be created once`,
+      );
     },
   ),
 
-  tool("join_team", "Joins a team selected from the first-time discovery choices.", false, obj({ team_id: str("ID of a team from list_teams joinable choices") }, ["team_id"]), async (c, a) => {
-    if (s(a, "team_id") === c.principal.teamId) return { status: "already_member", team_id: c.principal.teamId };
-    throw new OfError("operation_not_supported", `team "${s(a, "team_id")}" is not among your joinable teams; ask one of its admins to add you`);
-  }),
+  tool(
+    "join_team",
+    "Joins a team selected from the first-time discovery choices.",
+    false,
+    obj({ team_id: str("ID of a team from list_teams joinable choices") }, ["team_id"]),
+    async (c, a) => {
+      if (s(a, "team_id") === c.principal.teamId) return { status: "already_member", team_id: c.principal.teamId };
+      throw new OfError(
+        "operation_not_supported",
+        `team "${s(a, "team_id")}" is not among your joinable teams; ask one of its admins to add you`,
+      );
+    },
+  ),
 
   tool(
     "list_forge_repositories",
     "Lists repositories available through a team's connected GitHub or GitLab account.",
     true,
-    obj({ team_id: str("team ID; defaults to your team"), code_forge: str("GITHUB (default) or GITLAB"), query: str("optional filter on owner/name") }),
+    obj({
+      team_id: str("team ID; defaults to your team"),
+      code_forge: str("GITHUB (default) or GITLAB"),
+      query: str("optional filter on owner/name"),
+    }),
     async (c, a) => {
       checkTeam(c.principal, s(a, "team_id"));
       const forge = (s(a, "code_forge") || "GITHUB").toUpperCase();
       if (!(forge in FORGE_PROVIDERS)) throw invalid("code_forge must be GITHUB or GITLAB");
       if (!c.backend.listRepositories) {
-        throw new OfError("integration_not_configured", `repository listing is not available; call start_connection with provider "${FORGE_PROVIDERS[forge]}"`);
+        throw new OfError(
+          "integration_not_configured",
+          `repository listing is not available; call start_connection with provider "${FORGE_PROVIDERS[forge]}"`,
+        );
       }
       const repos = await c.backend.listRepositories(c.env, c.principal.teamId, forge, s(a, "query"));
       return { code_forge: forge, repositories: repos ?? [] };
@@ -555,50 +691,83 @@ export const FACTORY_TOOLS: readonly Tool<FactoryCtx>[] = [
       const prov = s(a, "provider").toLowerCase();
       if (prov !== "linear" && prov !== "jira") throw invalid("provider must be linear or jira");
       if (!c.backend.listTrackerScopes) {
-        throw new OfError("integration_not_configured", `${prov} is not connected; call start_connection with provider "${prov}"`);
+        throw new OfError(
+          "integration_not_configured",
+          `${prov} is not connected; call start_connection with provider "${prov}"`,
+        );
       }
       const scopes = await c.backend.listTrackerScopes(c.env, c.principal.teamId, prov);
       return { provider: prov, scopes: scopes ?? [] };
     },
   ),
 
-  tool("start_connection", "Starts or checks setup for GitHub, GitLab, Slack, Linear, or Jira.", false, obj({ provider: str("github, gitlab, slack, linear or jira") }, ["provider"]), async (c, a) => {
-    const prov = s(a, "provider").toLowerCase();
-    if (!CONNECTION_PROVIDERS.includes(prov)) throw invalid(`provider must be one of ${CONNECTION_PROVIDERS.join(", ")}`);
-    if (c.backend.startConnection) return c.backend.startConnection(c.env, c.principal.teamId, prov);
-    const ex = await existingIntegration(c, prov);
-    if (ex) return { provider: prov, status: "connected", integration_id: ex.id } satisfies Connection;
-    if (!can(c.principal, "admin")) {
-      throw new OfError("not_authorized", `${prov} is not connected and connecting team integrations requires an admin`);
-    }
-    const { id } = await teamOp<{ id: string }>(c.env, "mcp.connection.start", { provider: prov }, { teamId: c.principal.teamId });
-    return {
-      connection_id: id,
-      provider: prov,
-      status: "pending",
-      authorize_url: integrationsLink(c.publicURL, prov, id),
-      detail: "Open authorize_url in a browser, connect the integration on the Integrations page, then call get_connection_status.",
-    } satisfies Connection;
-  }),
+  tool(
+    "start_connection",
+    "Starts or checks setup for GitHub, GitLab, Slack, Linear, or Jira.",
+    false,
+    obj({ provider: str("github, gitlab, slack, linear or jira") }, ["provider"]),
+    async (c, a) => {
+      const prov = s(a, "provider").toLowerCase();
+      if (!CONNECTION_PROVIDERS.includes(prov))
+        throw invalid(`provider must be one of ${CONNECTION_PROVIDERS.join(", ")}`);
+      if (c.backend.startConnection) return c.backend.startConnection(c.env, c.principal.teamId, prov);
+      const ex = await existingIntegration(c, prov);
+      if (ex) return { provider: prov, status: "connected", integration_id: ex.id } satisfies Connection;
+      if (!can(c.principal, "admin")) {
+        throw new OfError(
+          "not_authorized",
+          `${prov} is not connected and connecting team integrations requires an admin`,
+        );
+      }
+      const { id } = await teamOp<{ id: string }>(
+        c.env,
+        "mcp.connection.start",
+        { provider: prov },
+        { teamId: c.principal.teamId },
+      );
+      return {
+        connection_id: id,
+        provider: prov,
+        status: "pending",
+        authorize_url: integrationsLink(c.publicURL, prov, id),
+        detail:
+          "Open authorize_url in a browser, connect the integration on the Integrations page, then call get_connection_status.",
+      } satisfies Connection;
+    },
+  ),
 
   tool(
     "get_connection_status",
     "Checks whether a browser authorization flow completed.",
     true,
-    obj({ connection_id: str("connection_id returned by start_connection"), provider: str("alternatively, the provider to check") }),
+    obj({
+      connection_id: str("connection_id returned by start_connection"),
+      provider: str("alternatively, the provider to check"),
+    }),
     async (c, a) => {
       const cid = s(a, "connection_id");
       if (cid === "" && s(a, "provider") === "") throw invalid("connection_id or provider is required");
       if (cid !== "" && c.backend.connectionStatus) return c.backend.connectionStatus(c.env, c.principal.teamId, cid);
       let prov = s(a, "provider").toLowerCase();
       if (cid !== "") {
-        const row = await teamOp<{ provider: string } | null>(c.env, "mcp.connection.get", { id: cid }, { teamId: c.principal.teamId });
+        const row = await teamOp<{ provider: string } | null>(
+          c.env,
+          "mcp.connection.get",
+          { id: cid },
+          { teamId: c.principal.teamId },
+        );
         if (!row) throw notFound(`connection ${cid} not found`);
         prov = row.provider;
       }
       const ex = await existingIntegration(c, prov);
-      if (ex) return { ...(cid ? { connection_id: cid } : {}), provider: prov, status: "connected", integration_id: ex.id };
-      return { ...(cid ? { connection_id: cid } : {}), provider: prov, status: "pending", detail: "authorization has not completed yet" };
+      if (ex)
+        return { ...(cid ? { connection_id: cid } : {}), provider: prov, status: "connected", integration_id: ex.id };
+      return {
+        ...(cid ? { connection_id: cid } : {}),
+        provider: prov,
+        status: "pending",
+        detail: "authorization has not completed yet",
+      };
     },
   ),
 
@@ -615,10 +784,15 @@ export const FACTORY_TOOLS: readonly Tool<FactoryCtx>[] = [
         repositories: { type: "array", description: "repositories the factory works on", items: REPO_ITEM },
         integrations: {
           type: "array",
-          description: "integrations to attach: slack, microsoft-teams, linear or jira (linear and jira are mutually exclusive)",
+          description:
+            "integrations to attach: slack, microsoft-teams, linear or jira (linear and jira are mutually exclusive)",
           items: { type: "string" },
         },
-        agents: { type: "array", description: "default agents besides the foreman: triage, spec, implement, review; omit for all", items: { type: "string" } },
+        agents: {
+          type: "array",
+          description: "default agents besides the foreman: triage, spec, implement, review; omit for all",
+          items: { type: "string" },
+        },
         model: str(
           "default model for agents; a Claude model selects the claude harness and an OpenAI model selects codex; defaults to claude-opus-5-5",
         ),
@@ -657,7 +831,9 @@ export const FACTORY_TOOLS: readonly Tool<FactoryCtx>[] = [
       {
         factory_id: str("factory UID"),
         creator: str("'me' or a user ID"),
-        stage: str("comma-separated stages: intake, triage, planning, awaiting_approval, building, reviewing, handoff, complete, cancelled"),
+        stage: str(
+          "comma-separated stages: intake, triage, planning, awaiting_approval, building, reviewing, handoff, complete, cancelled",
+        ),
         since: str("RFC 3339 time or YYYY-MM-DD"),
         limit: int("page size (default 20, max 100)"),
         cursor: str("next_cursor from a previous call"),
@@ -675,7 +851,9 @@ export const FACTORY_TOOLS: readonly Tool<FactoryCtx>[] = [
       if (creator === "me") q.set("creator", userIdOf(c.principal));
       else if (creator !== "") q.set("creator", creator);
       if (s(a, "stage") !== "") {
-        const stages = s(a, "stage").split(",").map((x) => x.trim().toLowerCase());
+        const stages = s(a, "stage")
+          .split(",")
+          .map((x) => x.trim().toLowerCase());
         for (const st of stages) if (!STAGES.includes(st)) throw invalid(`unknown stage "${st}"`);
         q.set("stage", stages.join(","));
       }
@@ -697,7 +875,9 @@ export const FACTORY_TOOLS: readonly Tool<FactoryCtx>[] = [
     "search_work_items",
     "Searches work item titles across all factories you can access.",
     true,
-    obj({ query: str("text to search for in work item titles"), limit: int("maximum results (default 20)") }, ["query"]),
+    obj({ query: str("text to search for in work item titles"), limit: int("maximum results (default 20)") }, [
+      "query",
+    ]),
     async (c, a) => {
       const q = s(a, "query").trim();
       if (q === "") throw invalid("query is required");
@@ -776,7 +956,10 @@ export const FACTORY_TOOLS: readonly Tool<FactoryCtx>[] = [
     "message_foreman",
     "Sends a message to a work item's foreman.",
     false,
-    obj({ work_item_id: str("work item ID"), message: str("progress, a question, or a blocker for the foreman") }, ["work_item_id", "message"]),
+    obj({ work_item_id: str("work item ID"), message: str("progress, a question, or a blocker for the foreman") }, [
+      "work_item_id",
+      "message",
+    ]),
     async (c, a) => {
       const res = await c.backend.api<{ work_item_id?: string; run_id?: string }>(
         c.env,
@@ -798,18 +981,21 @@ export const FACTORY_TOOLS: readonly Tool<FactoryCtx>[] = [
     "get_conversation",
     "Reads a work item's foreman conversation.",
     true,
-    obj({ work_item_id: str("work item ID"), after: int("only return messages with a sequence number greater than this") }, ["work_item_id"]),
+    obj(
+      {
+        work_item_id: str("work item ID"),
+        after: int("only return messages with a sequence number greater than this"),
+      },
+      ["work_item_id"],
+    ),
     async (c, a) => {
       const d = await workItemDetail(c, s(a, "work_item_id"));
       const out: Json = { messages: [], stage: d.stage, work_item_id: d.id };
       if (!d.root_run_id) return out;
       const q = new URLSearchParams({ after: String(n(a, "after")) });
-      const msgs = await c.backend.api<{ messages?: { seq: number; role: string; content: string; created_at: string }[] }>(
-        c.env,
-        c.principal,
-        "GET",
-        `/runs/${encodeURIComponent(d.root_run_id)}/messages?${q}`,
-      );
+      const msgs = await c.backend.api<{
+        messages?: { seq: number; role: string; content: string; created_at: string }[];
+      }>(c.env, c.principal, "GET", `/runs/${encodeURIComponent(d.root_run_id)}/messages?${q}`);
       let last = 0;
       const conv: Json[] = [];
       for (const m of msgs.messages ?? []) {
@@ -839,7 +1025,9 @@ export const FACTORY_TOOLS: readonly Tool<FactoryCtx>[] = [
         ),
         branch: str("pushed branch holding the work"),
         pull_request_url: str("pull request holding the work"),
-        notify_route: str("route ID from list_notification_routes to be notified when the work item needs you or finishes"),
+        notify_route: str(
+          "route ID from list_notification_routes to be notified when the work item needs you or finishes",
+        ),
       },
       ["note"],
     ),
@@ -852,23 +1040,31 @@ export const FACTORY_TOOLS: readonly Tool<FactoryCtx>[] = [
         if (s(a, "branch")) pr.branch = s(a, "branch");
       }
       if (s(a, "work_item_id") !== "") return handBack(c, a, pr);
-      if (s(a, "factory_id") === "") throw invalid("factory_id is required for a new work item (or pass work_item_id to hand work back)");
+      if (s(a, "factory_id") === "")
+        throw invalid("factory_id is required for a new work item (or pass work_item_id to hand work back)");
       const f = await factoryOf(c, s(a, "factory_id"));
       if (s(a, "notify_route")) await checkRoute(c, f, s(a, "notify_route"));
       const title = s(a, "title").trim() || firstLine(s(a, "note"));
       let prompt = s(a, "note");
       const refs = workRefs(s(a, "branch"), s(a, "pull_request_url"));
       if (refs) prompt += "\n\n" + refs;
-      const run = await c.backend.api<RunJson & { work_item_id: string }>(c.env, c.principal, "POST", `/factories/${encodeURIComponent(f.id)}/runs`, {
-        prompt,
-        title,
-        source: { provider: "mcp", kind: "work_item", title },
-        metadata: { triggered_by: "mcp" },
-      });
+      const run = await c.backend.api<RunJson & { work_item_id: string }>(
+        c.env,
+        c.principal,
+        "POST",
+        `/factories/${encodeURIComponent(f.id)}/runs`,
+        {
+          prompt,
+          title,
+          source: { provider: "mcp", kind: "work_item", title },
+          metadata: { triggered_by: "mcp" },
+        },
+      );
       const wiId = run.work_item_id;
       const runId = run.run_id ?? run.id ?? "";
       if (pr) await c.backend.linkPullRequest(c.env, c.principal, wiId, pr);
-      if (s(a, "notify_route")) await c.backend.patchWorkItem(c.env, c.principal, wiId, { labels: { notify_route: s(a, "notify_route") } });
+      if (s(a, "notify_route"))
+        await c.backend.patchWorkItem(c.env, c.principal, wiId, { labels: { notify_route: s(a, "notify_route") } });
       return {
         note: "The foreman takes it from here and reports progress on the work item's conversation.",
         run_id: runId,
@@ -887,7 +1083,11 @@ export const FACTORY_TOOLS: readonly Tool<FactoryCtx>[] = [
     obj({ factory_id: str("factory UID") }, ["factory_id"]),
     async (c, a) => {
       const f = await factoryOf(c, s(a, "factory_id"));
-      return { factory_id: f.id, note: "Delivery is best-effort; treat notifications as a convenience.", routes: await routes(c, f) };
+      return {
+        factory_id: f.id,
+        note: "Delivery is best-effort; treat notifications as a convenience.",
+        routes: await routes(c, f),
+      };
     },
   ),
 
@@ -897,9 +1097,15 @@ export const FACTORY_TOOLS: readonly Tool<FactoryCtx>[] = [
     false,
     obj({ work_item_id: str("work item ID"), note: str("closing note") }, ["work_item_id"]),
     async (c, a) => {
-      const wi = await c.backend.api<WorkItem>(c.env, c.principal, "POST", `/work-items/${encodeURIComponent(s(a, "work_item_id"))}/complete`, {
-        ...(s(a, "note") ? { note: s(a, "note") } : {}),
-      });
+      const wi = await c.backend.api<WorkItem>(
+        c.env,
+        c.principal,
+        "POST",
+        `/work-items/${encodeURIComponent(s(a, "work_item_id"))}/complete`,
+        {
+          ...(s(a, "note") ? { note: s(a, "note") } : {}),
+        },
+      );
       return { status: "completed", work_item: workItemView(c, wi) };
     },
   ),
@@ -911,7 +1117,8 @@ async function handBack(c: FactoryCtx, a: Args, pr: PullRequestRef | null): Prom
   if (TERMINAL_STAGES.has(wi.stage)) throw new OfError("conflict", `work item ${wi.id} is already ${wi.stage}`);
   const f = await factoryOf(c, wi.factory_id);
   if (s(a, "notify_route")) await checkRoute(c, f, s(a, "notify_route"));
-  if (pr && !(wi.pull_requests ?? []).some((x) => x.url === pr.url)) await c.backend.linkPullRequest(c.env, p, wi.id, pr);
+  if (pr && !(wi.pull_requests ?? []).some((x) => x.url === pr.url))
+    await c.backend.linkPullRequest(c.env, p, wi.id, pr);
   const who = userIdOf(p);
   let msg = `## Work handed back from a local session (${who})\n\n${s(a, "note")}`;
   const refs = workRefs(s(a, "branch"), s(a, "pull_request_url"));

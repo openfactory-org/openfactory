@@ -304,7 +304,8 @@ export function normalize(rec: IntegrationRecord, body: string, opts: NormalizeO
       const content = res.comment?.content ?? "";
       emit("pull_request_commented", author, src, content, attrs);
       const m = extractMentions(content);
-      if (m.length > 0 && !isSelf(author.id ?? "")) emit("pull_request_mentioned", author, src, content, mentionAttrs(attrs, m));
+      if (m.length > 0 && !isSelf(author.id ?? ""))
+        emit("pull_request_mentioned", author, src, content, mentionAttrs(attrs, m));
       break;
     }
     case "workitem.created":
@@ -369,7 +370,11 @@ export function normalize(rec: IntegrationRecord, body: string, opts: NormalizeO
         if (tg !== undefined) {
           const added = difference(splitTags(str(tg.newValue)), splitTags(str(tg.oldValue)));
           if (added.length > 0) {
-            emit("work_item_labeled", actor, src, text, { ...a, [A.AddedLabels]: added, [A.Labels]: splitTags(str(tg.newValue)) });
+            emit("work_item_labeled", actor, src, text, {
+              ...a,
+              [A.AddedLabels]: added,
+              [A.Labels]: splitTags(str(tg.newValue)),
+            });
           }
         }
         const hist = changes["System.History"] as { newValue?: unknown } | undefined;
@@ -440,7 +445,9 @@ export function basicAuth(req: Request): { user: string; pass: string } | undefi
  */
 export async function routeFactories(host: HostApi, integ: IntegrationRecord, events: PluginEvent[]): Promise<void> {
   const needs = events.some(
-    (ev) => (typeof ev.attributes?.[A.Alias] === "string" && ev.attributes[A.Alias] !== "") || ev.source?.kind === "work_item",
+    (ev) =>
+      (typeof ev.attributes?.[A.Alias] === "string" && ev.attributes[A.Alias] !== "") ||
+      ev.source?.kind === "work_item",
   );
   if (!needs) return;
   const factories = await host.listFactories();

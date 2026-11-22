@@ -32,7 +32,12 @@ const task: Task = {
   image: "ghcr.io/example/sandbox:1",
   platform: { os: "linux", arch: "amd64" },
   resources: { cpu: "2", memory: "4Gi" },
-  env: { OF_CONTROL_URL: "https://of.example.com", OF_RUN_ID: "run_abc", OF_SESSION: "1", OF_BOOTSTRAP_TOKEN: "ofb_test" },
+  env: {
+    OF_CONTROL_URL: "https://of.example.com",
+    OF_RUN_ID: "run_abc",
+    OF_SESSION: "1",
+    OF_BOOTSTRAP_TOKEN: "ofb_test",
+  },
   network_policy: { mode: "restricted", allowed_hosts: ["github.com"], denied_hosts: null },
   max_session_seconds: 3600,
   failure_retention_seconds: 0,
@@ -92,7 +97,11 @@ describe("auth", () => {
     expect(fromBase64url(ch.params.nonce)).toHaveLength(32);
     const kp = (await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"])) as CryptoKeyPair;
     const pub = new Uint8Array((await crypto.subtle.exportKey("raw", kp.publicKey)) as ArrayBuffer);
-    const sig = base64url(new Uint8Array(await crypto.subtle.sign({ name: "Ed25519" }, kp.privateKey, authMessage("wrk_1", "conn_1", ch.params.nonce))));
+    const sig = base64url(
+      new Uint8Array(
+        await crypto.subtle.sign({ name: "Ed25519" }, kp.privateKey, authMessage("wrk_1", "conn_1", ch.params.nonce)),
+      ),
+    );
     const resp = { type: "auth.response", params: { worker_id: "wrk_1", alg: "ed25519", sig } };
     expect(validateFrame(resp).errors).toEqual([]);
     expect(await verifyAuthSignature(pub, "wrk_1", "conn_1", ch.params.nonce, sig)).toBe(true);

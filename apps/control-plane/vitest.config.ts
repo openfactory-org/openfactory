@@ -16,7 +16,13 @@ export class ${entrypoint} extends WorkerEntrypoint { async id() { return "${id}
 export default { fetch() { return new Response("stub", { status: 404 }); } };`,
 });
 
-const pluginInfo = (name: string, forge: string) => ({ name, version: "0.0.0-stub", apiVersion: 1, roles: ["forge", "ingress"], forgeProviders: [forge] });
+const pluginInfo = (name: string, forge: string) => ({
+  name,
+  version: "0.0.0-stub",
+  apiVersion: 1,
+  roles: ["forge", "ingress"],
+  forgeProviders: [forge],
+});
 
 export default defineProject({
   plugins: [
@@ -26,7 +32,12 @@ export default defineProject({
         workers: [
           stubWorker("openfactory-provider-cloudflare-sandbox", "SandboxProvider", "cloudflare-sandbox"),
           stubWorker("openfactory-plugin-gitlab", "Plugin", "gitlab", pluginInfo("gitlab", "gitlab")),
-          stubWorker("openfactory-plugin-azuredevops", "Plugin", "azuredevops", pluginInfo("azuredevops", "azure_devops")),
+          stubWorker(
+            "openfactory-plugin-azuredevops",
+            "Plugin",
+            "azuredevops",
+            pluginInfo("azuredevops", "azure_devops"),
+          ),
         ],
         // Clearly fake test values.
         bindings: {

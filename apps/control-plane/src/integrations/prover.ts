@@ -239,7 +239,8 @@ export function selectSignIn(ints: Integration[], provider: string, factoryId: s
   const team: Integration[] = [];
   const other: Integration[] = [];
   for (const i of ints) {
-    if (!sameIntegrationProvider(i.provider, provider) || (i.config?.[CONFIG_OAUTH_CLIENT_ID] ?? "").trim() === "") continue;
+    if (!sameIntegrationProvider(i.provider, provider) || (i.config?.[CONFIG_OAUTH_CLIENT_ID] ?? "").trim() === "")
+      continue;
     const f = i.factory_id ?? "";
     if (f === "") team.push(i);
     else if (factoryId !== "" && f === factoryId) fac.push(i);

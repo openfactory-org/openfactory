@@ -36,7 +36,12 @@ describe("PluginWorker", () => {
 
   it("fills the API version and the default version", async () => {
     const p = new Demo({} as ExecutionContext, {});
-    expect(await p.info()).toEqual({ name: "demo", roles: ["forge"], version: "0.0.0-dev", apiVersion: PLUGIN_API_VERSION });
+    expect(await p.info()).toEqual({
+      name: "demo",
+      roles: ["forge"],
+      version: "0.0.0-dev",
+      apiVersion: PLUGIN_API_VERSION,
+    });
     expect((await new Demo({} as ExecutionContext, { V: "3" }).info()).version).toBe("3");
     await expect(p.ping()).resolves.toBeUndefined();
     await expect(p.configure({ a: "b" })).resolves.toBeUndefined();

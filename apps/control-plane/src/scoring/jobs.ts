@@ -9,7 +9,12 @@ import { ScoringService, type BenchmarkPort } from "./service";
 import type { ScoringOptions } from "./types";
 import { benchmarkDoName } from "./names";
 
-export const SCORING_JOB_KINDS = ["scoring.runFinished", "scoring.sample", "judge.result", "bench.trialUpdate"] as const;
+export const SCORING_JOB_KINDS = [
+  "scoring.runFinished",
+  "scoring.sample",
+  "judge.result",
+  "bench.trialUpdate",
+] as const;
 
 export function benchmarkPort(env: Env, teamId: string): BenchmarkPort {
   const stub = (benchId: string) => env.BENCHMARK.getByName(benchmarkDoName(teamId, benchId));
@@ -43,7 +48,9 @@ export async function handleScoringJob(env: Env, msg: JobMessage, teamId: string
       return;
     case "judge.result":
       // The judge run itself is the unit: its update finishes the score.
-      await scoringService(env, teamId).handleRunUpdate(String((msg.result as { judge_run_id?: string }).judge_run_id ?? msg.runId));
+      await scoringService(env, teamId).handleRunUpdate(
+        String((msg.result as { judge_run_id?: string }).judge_run_id ?? msg.runId),
+      );
       return;
     case "bench.trialUpdate":
       await env.BENCHMARK.getByName(benchmarkDoName(teamId, msg.benchId)).trialRunUpdate(msg.runId);

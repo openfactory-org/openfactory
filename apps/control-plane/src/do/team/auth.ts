@@ -99,7 +99,9 @@ function getUserByEmail(kit: TeamKit, email: string): User | undefined {
 }
 
 export function listUsers(kit: TeamKit): User[] {
-  return all<{ data: string }>(kit.sql, "SELECT data FROM users ORDER BY created_ms, id").map((r) => JSON.parse(r.data) as User);
+  return all<{ data: string }>(kit.sql, "SELECT data FROM users ORDER BY created_ms, id").map(
+    (r) => JSON.parse(r.data) as User,
+  );
 }
 
 function cleanUser(u: User): User {
@@ -158,7 +160,11 @@ export function listApiKeys(kit: TeamKit): ApiKey[] {
 }
 
 function getApiKey(kit: TeamKit, id: string): ApiKey | undefined {
-  const r = first<{ data: string; last_used_ms: number }>(kit.sql, "SELECT data, last_used_ms FROM api_keys WHERE id = ?", id);
+  const r = first<{ data: string; last_used_ms: number }>(
+    kit.sql,
+    "SELECT data, last_used_ms FROM api_keys WHERE id = ?",
+    id,
+  );
   return r ? keyRow(r) : undefined;
 }
 
@@ -382,7 +388,8 @@ function applyFactoryRoles(kit: TeamKit, u: User, input: Record<string, string |
       if (u.factory_roles) delete u.factory_roles[fid];
       continue;
     }
-    if (!validRole(role)) throw new OfError("invalid_request", `factory_roles.${fid}: role must be admin, editor or user`);
+    if (!validRole(role))
+      throw new OfError("invalid_request", `factory_roles.${fid}: role must be admin, editor or user`);
     u.factory_roles ??= {};
     u.factory_roles[fid] = normalizeRole(role);
   }
@@ -449,11 +456,16 @@ export const ops: Record<string, TeamOp> = {
 
   getTeam: (kit, c) => {
     const team = getTeamRecord(kit);
-    if (!team || c.params["id"] !== team.id) throw new OfError("resource_not_found", `team ${c.params["id"]} not found`);
+    if (!team || c.params["id"] !== team.id)
+      throw new OfError("resource_not_found", `team ${c.params["id"]} not found`);
     return team;
   },
 
-  listUsers: (kit) => listResponse(listUsers(kit).filter((u) => !isServiceAccount(u)), ""),
+  listUsers: (kit) =>
+    listResponse(
+      listUsers(kit).filter((u) => !isServiceAccount(u)),
+      "",
+    ),
 
   getUser: (kit, c) => userOf(kit, c.params["id"]!),
 
@@ -531,7 +543,10 @@ export const ops: Record<string, TeamOp> = {
         if (!isAdmin(c)) throw new OfError("not_authorized", "only admins can create API keys for other users");
         const u = userOf(kit, reqUser);
         if (isServiceAccount(u)) {
-          throw new OfError("invalid_request", `user ${u.id} is a service account: use POST /service-accounts/{id}/keys`);
+          throw new OfError(
+            "invalid_request",
+            `user ${u.id} is a service account: use POST /service-accounts/{id}/keys`,
+          );
         }
         uid = u.id;
       }
@@ -570,7 +585,8 @@ export const ops: Record<string, TeamOp> = {
     if (!validRole(role)) throw new OfError("invalid_request", "role must be admin, editor or user");
     const g = optBool(b, "create_api_key") ? await mintKey(SERVICE_ACCOUNT_KEY_PREFIX) : undefined;
     return kit.tx(() => {
-      if (findServiceAccount(kit, name)) throw new OfError("conflict", `a service account named ${name} already exists`);
+      if (findServiceAccount(kit, name))
+        throw new OfError("conflict", `a service account named ${name} already exists`);
       const u: User = {
         id: newId(SERVICE_ACCOUNT_ID_PREFIX),
         team_id: kit.teamId(),
@@ -602,7 +618,8 @@ export const ops: Record<string, TeamOp> = {
       if (name !== undefined) {
         const n = name.trim();
         validServiceAccountName(n);
-        if (n !== u.name && findServiceAccount(kit, n)) throw new OfError("conflict", `a service account named ${n} already exists`);
+        if (n !== u.name && findServiceAccount(kit, n))
+          throw new OfError("conflict", `a service account named ${n} already exists`);
         u.name = n;
       }
       if (role !== undefined) {

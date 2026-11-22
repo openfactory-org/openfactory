@@ -99,7 +99,10 @@ export class SlackClient {
   }
 
   async channelName(channel: string): Promise<string> {
-    const out = await this.call<{ channel?: { name?: string } }>("conversations.info", new URLSearchParams({ channel }));
+    const out = await this.call<{ channel?: { name?: string } }>(
+      "conversations.info",
+      new URLSearchParams({ channel }),
+    );
     return out.channel?.name ?? "";
   }
 

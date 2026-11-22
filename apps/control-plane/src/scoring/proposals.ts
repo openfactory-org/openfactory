@@ -68,7 +68,10 @@ export interface ProposalTree {
  * Merges the requested changes onto the base tree (the active version) and
  * returns the new tree with its diff. Throws invalid_request for a bad request.
  */
-export function mergeProposal(base: Record<string, string> | null | undefined, req: Pick<ProposalRequest, "files" | "delete">): ProposalTree {
+export function mergeProposal(
+  base: Record<string, string> | null | undefined,
+  req: Pick<ProposalRequest, "files" | "delete">,
+): ProposalTree {
   const reqFiles = req.files ?? {};
   const del = req.delete ?? [];
   if (Object.keys(reqFiles).length === 0 && del.length === 0) {
@@ -92,7 +95,8 @@ export function mergeProposal(base: Record<string, string> | null | undefined, r
   }
   for (const p of del) {
     const clean = cleanDefinitionPath(p);
-    if (!(root + clean in files)) throw new OfError("invalid_request", `cannot delete ${clean}: the file does not exist`);
+    if (!(root + clean in files))
+      throw new OfError("invalid_request", `cannot delete ${clean}: the file does not exist`);
     delete files[root + clean];
   }
   const diff = diffFiles(baseFiles, files);
@@ -101,7 +105,10 @@ export function mergeProposal(base: Record<string, string> | null | undefined, r
 }
 
 /** The body of the review item of a proposal. */
-export function proposalBody(v: { id: string; author_run_id: string; message: string; base_version_id: string }, diff: string): string {
+export function proposalBody(
+  v: { id: string; author_run_id: string; message: string; base_version_id: string },
+  diff: string,
+): string {
   let b = `Run ${v.author_run_id} proposes a change to the factory definition.\n\n`;
   b += `${v.message}\n\n`;
   b += `Proposed version: \`${v.id}\`. Base version: \`${v.base_version_id}\`. Approve applies the version. Reject sends your comment to the run.\n\n`;
@@ -115,14 +122,18 @@ export function proposalBody(v: { id: string; author_run_id: string; message: st
   return b;
 }
 
-export const proposalTitle = (message: string): string => "Review definition change: " + truncate(oneLine(message), 120);
+export const proposalTitle = (message: string): string =>
+  "Review definition change: " + truncate(oneLine(message), 120);
 
 // ---------- Diff ----------
 
 const sortStr = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /** A unified diff of two definition trees, file by file. */
-export function diffFiles(oldTree: Record<string, string> | null | undefined, newTree: Record<string, string> | null | undefined): string {
+export function diffFiles(
+  oldTree: Record<string, string> | null | undefined,
+  newTree: Record<string, string> | null | undefined,
+): string {
   const o = oldTree ?? {};
   const n = newTree ?? {};
   const paths = [...new Set([...Object.keys(o), ...Object.keys(n)])].sort(sortStr);
@@ -153,7 +164,7 @@ export function lineDiff(a: string[], b: string[]): string {
   let out = "";
   let oldLine = 1;
   let newLine = 1;
-  for (let i = 0; i < ops.length; ) {
+  for (let i = 0; i < ops.length;) {
     if (!show[i]) {
       if (ops[i]![0] !== "+") oldLine++;
       if (ops[i]![0] !== "-") newLine++;
@@ -217,4 +228,5 @@ export function lineOps(a: string[], b: string[]): string[] {
 }
 
 /** States of a version that make it a proposal. */
-export const isProposalState = (st: string | undefined): boolean => st === "proposed" || st === "approved" || st === "rejected";
+export const isProposalState = (st: string | undefined): boolean =>
+  st === "proposed" || st === "approved" || st === "rejected";

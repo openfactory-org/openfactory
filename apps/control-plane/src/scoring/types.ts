@@ -66,7 +66,8 @@ export const clampThreshold = (n: number): number =>
 export const finishedForScoring = (s: RunState): boolean =>
   s === "succeeded" || s === "failed" || s === "cancelled" || s === "error" || s === "idle" || s === "blocked";
 
-export const isTerminalState = (s: RunState): boolean => s === "succeeded" || s === "failed" || s === "cancelled" || s === "error";
+export const isTerminalState = (s: RunState): boolean =>
+  s === "succeeded" || s === "failed" || s === "cancelled" || s === "error";
 export const waitsForInput = (s: RunState): boolean => s === "idle" || s === "blocked";
 
 // ---------- Requests to the engine ----------
@@ -137,8 +138,16 @@ export interface EnginePort {
   followUp(runId: string, message: string, actor: string): Promise<void>;
   /** Throws conflict when the item is resolved, not_found when it does not exist. */
   resolveInbox(inboxId: string, resolution: string, actor: string): Promise<void>;
-  applyDefinition(factoryId: string, files: Record<string, string>, actor: string, message: string): Promise<{ id: string }>;
-  checkDefinition(factoryId: string, files: Record<string, string>): Promise<{ valid: boolean; errors: ValidationError[] }>;
+  applyDefinition(
+    factoryId: string,
+    files: Record<string, string>,
+    actor: string,
+    message: string,
+  ): Promise<{ id: string }>;
+  checkDefinition(
+    factoryId: string,
+    files: Record<string, string>,
+  ): Promise<{ valid: boolean; errors: ValidationError[] }>;
   /**
    * Creates an inbox item. An item of a work item is owned by the WorkDO of that
    * work item; an item without one is a team-level item owned by IndexDO.
@@ -224,8 +233,16 @@ export interface ScoringOptions {
   randomInt?: (n: number) => number;
   newId?: (prefix: string) => string;
   /** Asks a reviewer on the forge. Optional. */
-  requestReview?: (teamId: string, pr: { forge: string; repo: string; number: number; url: string }, userId: string) => Promise<void>;
-  log?: { info(msg: string, f?: Record<string, unknown>): void; warn(msg: string, f?: Record<string, unknown>): void; error(msg: string, f?: Record<string, unknown>): void };
+  requestReview?: (
+    teamId: string,
+    pr: { forge: string; repo: string; number: number; url: string },
+    userId: string,
+  ) => Promise<void>;
+  log?: {
+    info(msg: string, f?: Record<string, unknown>): void;
+    warn(msg: string, f?: Record<string, unknown>): void;
+    error(msg: string, f?: Record<string, unknown>): void;
+  };
 }
 
 export type { BenchmarkAgentPin, BenchmarkConfiguration, BenchmarkSuite };

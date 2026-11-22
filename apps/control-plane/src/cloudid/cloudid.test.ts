@@ -6,10 +6,25 @@ import { Issuer } from "./issuer";
 const enc = new TextEncoder();
 const ISS = "https://factory.example.test/";
 const GO = {
-  "seed-1": { kid: "2d12fd30fa615383", x: "NGZEixRcAS8XHbDUkxHLBXmFvJb59Ff6ll4nhbB-9Qk", y: "tbHfnfVtGcEwZiLZHTHHHH5upt9IaaKY5eSFU20KQ0o" },
-  "seed-2": { kid: "b4386d7008b35d81", x: "wDogY1Cuwy_rSaLikoHrjpxIjLxyC4ac0pUjS-mBX5k", y: "k2UdDoCDA0O9hu9cRIdD5B5uN4OOKGPfr10tQ79BJWA" },
+  "seed-1": {
+    kid: "2d12fd30fa615383",
+    x: "NGZEixRcAS8XHbDUkxHLBXmFvJb59Ff6ll4nhbB-9Qk",
+    y: "tbHfnfVtGcEwZiLZHTHHHH5upt9IaaKY5eSFU20KQ0o",
+  },
+  "seed-2": {
+    kid: "b4386d7008b35d81",
+    x: "wDogY1Cuwy_rSaLikoHrjpxIjLxyC4ac0pUjS-mBX5k",
+    y: "k2UdDoCDA0O9hu9cRIdD5B5uN4OOKGPfr10tQ79BJWA",
+  },
 };
-const run = { id: "run_1", team_id: "default", factory_id: "fac_1", agent_name: "implement", work_item_id: "wi_1", config: { type: "IMPLEMENT" } };
+const run = {
+  id: "run_1",
+  team_id: "default",
+  factory_id: "fac_1",
+  agent_name: "implement",
+  work_item_id: "wi_1",
+  config: { type: "IMPLEMENT" },
+};
 
 describe("cloud identity issuer", () => {
   it("derives the same key as Go and publishes it in the JWKS", async () => {
@@ -26,7 +41,10 @@ describe("cloud identity issuer", () => {
   it("signs run tokens that verify, with Go claims", async () => {
     const i = await Issuer.fromSeeds(ISS, enc.encode("seed"));
     i.setClock(() => 1_800_000_000_000);
-    const { token, expiresAt } = await i.token(run, "//iam.googleapis.com/x", 0, { creator: "usr_1", workerHost: "server" });
+    const { token, expiresAt } = await i.token(run, "//iam.googleapis.com/x", 0, {
+      creator: "usr_1",
+      workerHost: "server",
+    });
     expect(expiresAt).toBe(1_800_003_600_000);
     const header = JSON.parse(atob(token.split(".")[0]!.replace(/-/g, "+").replace(/_/g, "/")));
     expect(header).toEqual({ alg: "ES256", kid: i.kid, typ: "JWT" });

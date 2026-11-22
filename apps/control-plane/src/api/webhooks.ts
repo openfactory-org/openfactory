@@ -73,7 +73,8 @@ export const testWebhookFilter: Handler = async (request, env, ctx) => {
   let ids: string[] = [];
   let hasIds = false;
   if (req.filter !== undefined && req.filter !== null) {
-    if (typeof req.filter !== "object" || Array.isArray(req.filter)) throw new OfError("invalid_request", "filter must be an object");
+    if (typeof req.filter !== "object" || Array.isArray(req.filter))
+      throw new OfError("invalid_request", "filter must be an object");
     const f = req.filter as { webhook_ids?: unknown; payload?: unknown };
     if (f.webhook_ids !== undefined && f.webhook_ids !== null) {
       hasIds = true;
@@ -81,7 +82,13 @@ export const testWebhookFilter: Handler = async (request, env, ctx) => {
     }
     if (pattern === undefined || pattern === null) pattern = f.payload;
   }
-  const res: { would_trigger: boolean; result: string; webhook_check: Check; payload_check: Check; delivery_id?: string } = {
+  const res: {
+    would_trigger: boolean;
+    result: string;
+    webhook_check: Check;
+    payload_check: Check;
+    delivery_id?: string;
+  } = {
     would_trigger: false,
     result: "",
     webhook_check: !hasIds
@@ -95,9 +102,19 @@ export const testWebhookFilter: Handler = async (request, env, ctx) => {
   if (body === undefined || body === null) {
     const params = { ...opParams(ctx), ...(req.delivery_id ? { deliveryId: req.delivery_id } : {}) };
     const op = req.delivery_id ? "getDelivery" : "latestAcceptedDelivery";
-    const d = (await (await opResult(await ingressStub(env, ctx, wh.id).deliveries(callMeta(ctx), op, params))).json()) as { id?: string; body?: unknown } | null;
-    if (!d) throw new OfError("invalid_request", "no stored accepted delivery to test against; send a test delivery or pass body");
-    if (d.body === undefined || d.body === null) throw new OfError("invalid_request", `delivery ${d.id} has no stored payload (only accepted deliveries keep their body)`);
+    const d = (await (
+      await opResult(await ingressStub(env, ctx, wh.id).deliveries(callMeta(ctx), op, params))
+    ).json()) as { id?: string; body?: unknown } | null;
+    if (!d)
+      throw new OfError(
+        "invalid_request",
+        "no stored accepted delivery to test against; send a test delivery or pass body",
+      );
+    if (d.body === undefined || d.body === null)
+      throw new OfError(
+        "invalid_request",
+        `delivery ${d.id} has no stored payload (only accepted deliveries keep their body)`,
+      );
     body = d.body;
     if (d.id) res.delivery_id = d.id;
   }
@@ -111,7 +128,9 @@ export const testWebhookFilter: Handler = async (request, env, ctx) => {
     } catch (e) {
       throw new OfError("invalid_request", `invalid payload filter: ${(e as Error).message}`);
     }
-    res.payload_check = ok ? { passed: true, detail: "payload matches the filter" } : { passed: false, detail: "payload does not match the filter" };
+    res.payload_check = ok
+      ? { passed: true, detail: "payload matches the filter" }
+      : { passed: false, detail: "payload does not match the filter" };
   }
   res.would_trigger = res.webhook_check.passed && res.payload_check.passed && wh.enabled;
   if (!wh.enabled) res.webhook_check.detail += " (webhook is disabled)";
@@ -129,14 +148,17 @@ async function enqueue(env: Env, teamId: string, partition: string, event: Event
 }
 
 /** POST /webhooks/w/{uid} and /webhooks/w/{uid}/{token}. */
-export async function serveWebhookIngress(request: Request, env: Env, uid: string, token: string | null): Promise<Response> {
+export async function serveWebhookIngress(
+  request: Request,
+  env: Env,
+  uid: string,
+  token: string | null,
+): Promise<Response> {
   const team = env.TEAM.getByName(doName.team(INGRESS_TEAM));
   return handleWebhookDelivery(request, uid, token, {
     async getWebhook(id) {
       const out = (await team.api({ requestId: "webhook-ingress" }, "webhooksResolve", { "?id": id }, undefined)) as
-        | { webhook: Webhook; team_id: string }
-        | { $error: { code: string; detail: string } }
-        | null;
+        { webhook: Webhook; team_id: string } | { $error: { code: string; detail: string } } | null;
       if (!out) return null;
       if ("$error" in out) throw new Error(`${out.$error.code}: ${out.$error.detail}`);
       return { webhook: out.webhook, teamId: out.team_id };
@@ -150,10 +172,12 @@ export async function serveWebhookIngress(request: Request, env: Env, uid: strin
 export async function serveGitHubWebhook(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const resolver = resolverFor(env);
   const factories = async (teamId: string): Promise<FactoryInfo[]> => {
-    const out = (await env.TEAM.getByName(doName.team(teamId)).api({ requestId: "github-webhook" }, "forgeFactories", {}, undefined)) as
-      | { items?: FactoryInfo[] }
-      | { $error: unknown }
-      | null;
+    const out = (await env.TEAM.getByName(doName.team(teamId)).api(
+      { requestId: "github-webhook" },
+      "forgeFactories",
+      {},
+      undefined,
+    )) as { items?: FactoryInfo[] } | { $error: unknown } | null;
     return out && "items" in out ? (out.items ?? []) : [];
   };
   return handleGitHubWebhook(request, {
@@ -162,7 +186,8 @@ export async function serveGitHubWebhook(request: Request, env: Env, ctx: Execut
     secrets: teamSecrets(env),
     resolver,
     factories: {
-      byAlias: async (teamId, alias) => (await factories(teamId)).find((f) => (f.alias ?? "").toLowerCase() === alias.toLowerCase()) ?? null,
+      byAlias: async (teamId, alias) =>
+        (await factories(teamId)).find((f) => (f.alias ?? "").toLowerCase() === alias.toLowerCase()) ?? null,
       list: factories,
     },
     publish: async (teamId, events) => {
@@ -179,12 +204,18 @@ export async function serveGitHubWebhook(request: Request, env: Env, ctx: Execut
 export async function routeWebhookIngress(request: Request, env: Env, ctx: ExecutionContext): Promise<Response | null> {
   const url = new URL(request.url);
   if (url.pathname === "/integrations/github/webhook") {
-    if (request.method !== "POST") return new Response("Method Not Allowed\n", { status: 405, headers: { allow: "POST" } });
+    if (request.method !== "POST")
+      return new Response("Method Not Allowed\n", { status: 405, headers: { allow: "POST" } });
     return serveGitHubWebhook(request, env, ctx);
   }
   const m = /^\/webhooks\/w\/([^/]+)(?:\/([^/]+))?$/.exec(url.pathname);
   if (!m) return null;
-  if (request.method !== "POST") return new Response("Method Not Allowed\n", { status: 405, headers: { allow: "POST" } });
-  return serveWebhookIngress(request, env, decodeURIComponent(m[1]!), m[2] === undefined ? null : decodeURIComponent(m[2]));
+  if (request.method !== "POST")
+    return new Response("Method Not Allowed\n", { status: 405, headers: { allow: "POST" } });
+  return serveWebhookIngress(
+    request,
+    env,
+    decodeURIComponent(m[1]!),
+    m[2] === undefined ? null : decodeURIComponent(m[2]),
+  );
 }
-

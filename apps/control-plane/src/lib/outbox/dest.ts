@@ -32,7 +32,8 @@ export function parseDest(d: string): ParsedDest {
     const rest = d.slice(3);
     const i = rest.indexOf(":");
     const binding = rest.slice(0, i);
-    if (i > 0 && binding in DO_BINDINGS) return { scheme: "do", binding: binding as DoBinding, name: rest.slice(i + 1) };
+    if (i > 0 && binding in DO_BINDINGS)
+      return { scheme: "do", binding: binding as DoBinding, name: rest.slice(i + 1) };
   }
   if (d === "queue:JOBS") return { scheme: "queue", queue: "JOBS" };
   return { scheme: "custom", raw: d };

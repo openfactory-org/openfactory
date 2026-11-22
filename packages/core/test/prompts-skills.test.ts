@@ -50,14 +50,30 @@ describe("composeSystemPrompt", () => {
       name: "foreman",
       type: "FOREMAN",
       instructions: "Always be kind.",
-      skills: [{ name: "github", description: "Use gh", path: "/workspace/.openfactory/skills/github/SKILL.md", content: "", scope: "" }],
+      skills: [
+        {
+          name: "github",
+          description: "Use gh",
+          path: "/workspace/.openfactory/skills/github/SKILL.md",
+          content: "",
+          scope: "",
+        },
+      ],
     });
     const wi = {
       id: "wi_1",
       title: "PO number",
       stage: "triage",
-      source: { provider: "github", kind: "issue", repo: "acme/api", number: 7, url: "https://github.com/acme/api/issues/7" },
-      pull_requests: [{ url: "https://github.com/acme/api/pull/42", branch: "po", forge: "", repo: "", number: 0, state: "" }],
+      source: {
+        provider: "github",
+        kind: "issue",
+        repo: "acme/api",
+        number: 7,
+        url: "https://github.com/acme/api/issues/7",
+      },
+      pull_requests: [
+        { url: "https://github.com/acme/api/pull/42", branch: "po", forge: "", repo: "", number: 0, state: "" },
+      ],
     } as WorkItem;
     const run = { id: "run_1", name: "foreman", metadata: { setup_profile: "backend" } } as Partial<Run> as Run;
     const out = composeSystemPrompt(cfg, wi, run, roster());
@@ -86,24 +102,51 @@ describe("composeSystemPrompt", () => {
   });
 
   it("composes a stage agent prompt", () => {
-    const out = composeSystemPrompt(agent({ id: "agt_i", name: "implement", type: "IMPLEMENT", instructions: "Use TDD." }), null, null, roster());
-    for (const want of ["Role: implement agent (implement)", "final message is delivered to the foreman", "link_pull_request", "untrusted input", "`agt_d`", "Use TDD."]) {
+    const out = composeSystemPrompt(
+      agent({ id: "agt_i", name: "implement", type: "IMPLEMENT", instructions: "Use TDD." }),
+      null,
+      null,
+      roster(),
+    );
+    for (const want of [
+      "Role: implement agent (implement)",
+      "final message is delivered to the foreman",
+      "link_pull_request",
+      "untrusted input",
+      "`agt_d`",
+      "Use TDD.",
+    ]) {
       expect(out).toContain(want);
     }
     expect(out).not.toContain("`agt_t`");
-    const custom = composeSystemPrompt(agent({ name: "docs", type: "CUSTOM", description: "Updates reference pages" }), null, null, roster());
+    const custom = composeSystemPrompt(
+      agent({ name: "docs", type: "CUSTOM", description: "Updates reference pages" }),
+      null,
+      null,
+      roster(),
+    );
     expect(custom).toContain("Your responsibility: Updates reference pages");
   });
 
   it("adds no workflow policy of its own", () => {
     const out = composeSystemPrompt(
-      agent({ name: "foreman", type: "FOREMAN", instructions: "Dispatch implement for every request. Hand off the pull request." }),
+      agent({
+        name: "foreman",
+        type: "FOREMAN",
+        instructions: "Dispatch implement for every request. Hand off the pull request.",
+      }),
       null,
       null,
       roster(),
     );
     const low = out.toLowerCase();
-    for (const notWant of ["spec approval", "approval of the spec", "obtain explicit human approval", "never merge", "only after a merge"]) {
+    for (const notWant of [
+      "spec approval",
+      "approval of the spec",
+      "obtain explicit human approval",
+      "never merge",
+      "only after a merge",
+    ]) {
       expect(low).not.toContain(notWant);
     }
     expect(out).toContain("Dispatch implement for every request.");
@@ -138,9 +181,15 @@ describe("skills", () => {
 
   it("picks the built-in skills of a run", () => {
     const ints = ["slack", "linear", "jira"];
-    expect(names(builtinSkillsForRun({ agentType: "FOREMAN", forges: ["GITHUB", ""], integrations: ints }))).toBe("github,chat,linear,jira");
-    expect(names(builtinSkillsForRun({ agentType: "TRIAGE", forges: ["GITLAB"], integrations: ints }))).toBe("gitlab,linear,jira");
-    expect(names(builtinSkillsForRun({ agentType: "IMPLEMENT", forges: ["AZURE_DEVOPS"], integrations: ints }))).toBe("azure-devops");
+    expect(names(builtinSkillsForRun({ agentType: "FOREMAN", forges: ["GITHUB", ""], integrations: ints }))).toBe(
+      "github,chat,linear,jira",
+    );
+    expect(names(builtinSkillsForRun({ agentType: "TRIAGE", forges: ["GITLAB"], integrations: ints }))).toBe(
+      "gitlab,linear,jira",
+    );
+    expect(names(builtinSkillsForRun({ agentType: "IMPLEMENT", forges: ["AZURE_DEVOPS"], integrations: ints }))).toBe(
+      "azure-devops",
+    );
     expect(names(builtinSkillsForRun({ agentType: "REVIEW", selfImprovement: true }))).toBe("factory-definition");
     expect(names(builtinSkillsForRun({ agentType: "FOREMAN", integrations: ["microsoft_teams"] }))).toBe("chat");
   });
@@ -153,7 +202,9 @@ describe("skills", () => {
       [s("checks", SCOPE_REPOSITORY), s("github", SCOPE_REPOSITORY)],
       [s("github", SCOPE_BUILTIN), s("chat", SCOPE_BUILTIN)],
     );
-    expect(got.map((x) => `${x.name}=${x.scope}`).join(",")).toBe("deploy=implement,checks=factory,github=repository,chat=builtin");
+    expect(got.map((x) => `${x.name}=${x.scope}`).join(",")).toBe(
+      "deploy=implement,checks=factory,github=repository,chat=builtin",
+    );
     const split = splitSkills([s("a", "implement"), s("b", SCOPE_FACTORY)]);
     expect(names(split.agent)).toBe("a");
     expect(names(split.factory)).toBe("b");

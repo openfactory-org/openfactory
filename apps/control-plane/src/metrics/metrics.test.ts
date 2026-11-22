@@ -24,8 +24,19 @@ const until = day0 + 7 * DAY;
 const at = (d: number, h: number): string => new Date(day0 + d * DAY + h * HOUR).toISOString();
 const approx = (a: number, b: number): boolean => Math.abs(a - b) < 1e-9;
 
-const ev = (kind: string, t: string, data?: unknown): MEvent => ({ kind, created_at: t, ...(data === undefined ? {} : { data }) });
-const pr = (n: number, state: string): PullRequestRef => ({ forge: "GITHUB", repo: "acme/app", number: n, url: `https://x/${n}`, branch: "", state });
+const ev = (kind: string, t: string, data?: unknown): MEvent => ({
+  kind,
+  created_at: t,
+  ...(data === undefined ? {} : { data }),
+});
+const pr = (n: number, state: string): PullRequestRef => ({
+  forge: "GITHUB",
+  repo: "acme/app",
+  number: n,
+  url: `https://x/${n}`,
+  branch: "",
+  state,
+});
 
 function fixture(): MetricsData {
   const pr1 = pr(1, "merged");
@@ -38,7 +49,12 @@ function fixture(): MetricsData {
       wi({ id: "w1", stage: "complete", created_at: at(0, 0), completed_at: at(0, 10), pull_requests: [pr1] }),
       wi({ id: "w2", stage: "complete", created_at: at(1, 0), completed_at: at(1, 20), pull_requests: [pr2, pr3] }),
       wi({ id: "w3", stage: "complete", created_at: at(2, 0), completed_at: at(3, 6) }),
-      wi({ id: "w4", stage: "complete", created_at: new Date(since - 48 * HOUR).toISOString(), completed_at: at(0, 2) }),
+      wi({
+        id: "w4",
+        stage: "complete",
+        created_at: new Date(since - 48 * HOUR).toISOString(),
+        completed_at: at(0, 2),
+      }),
       wi({ id: "w5", stage: "cancelled", created_at: at(3, 0), completed_at: at(3, 1) }),
       wi({ id: "w6", stage: "building", created_at: at(4, 0), pull_requests: [pr4] }),
       wi({ id: "w7", stage: "complete", created_at: at(5, 0), completed_at: at(5, 1), local_owner: "dev@laptop" }),
@@ -69,11 +85,53 @@ function fixture(): MetricsData {
       w6: [ev("pr_linked", at(4, 3), { note: "unparsable" })],
     },
     runs: [
-      { id: "r1", work_item_id: "w1", agent_name: "foreman", state: "succeeded", triggered_by: "automation:a1", created_at: at(0, 0), config: { harness: { model: "big" } }, usage: { cost_usd: 1, input_tokens: 100, output_tokens: 10, duration_ms: 0 } },
-      { id: "r1c", work_item_id: "w1", agent_name: "implement", state: "succeeded", triggered_by: "run:r1", created_at: at(0, 1), config: { harness: { model: "small" } }, usage: { cost_usd: 2, input_tokens: 200, output_tokens: 20, duration_ms: 0 } },
-      { id: "r2", work_item_id: "w2", agent_name: "foreman", state: "failed", triggered_by: "api", created_at: at(1, 0), config: { harness: { model: "big" } }, usage: { cost_usd: 4, input_tokens: 400, output_tokens: 40, duration_ms: 0 } },
-      { id: "r6", work_item_id: "w6", agent_name: "implement", state: "running", triggered_by: "benchmark:b1", created_at: at(4, 0), usage: { cost_usd: 0.5, input_tokens: 0, output_tokens: 0, duration_ms: 0 } },
-      { id: "r4", work_item_id: "w4", agent_name: "foreman", state: "succeeded", created_at: new Date(since - 47 * HOUR).toISOString(), usage: { cost_usd: 100, input_tokens: 0, output_tokens: 0, duration_ms: 0 } },
+      {
+        id: "r1",
+        work_item_id: "w1",
+        agent_name: "foreman",
+        state: "succeeded",
+        triggered_by: "automation:a1",
+        created_at: at(0, 0),
+        config: { harness: { model: "big" } },
+        usage: { cost_usd: 1, input_tokens: 100, output_tokens: 10, duration_ms: 0 },
+      },
+      {
+        id: "r1c",
+        work_item_id: "w1",
+        agent_name: "implement",
+        state: "succeeded",
+        triggered_by: "run:r1",
+        created_at: at(0, 1),
+        config: { harness: { model: "small" } },
+        usage: { cost_usd: 2, input_tokens: 200, output_tokens: 20, duration_ms: 0 },
+      },
+      {
+        id: "r2",
+        work_item_id: "w2",
+        agent_name: "foreman",
+        state: "failed",
+        triggered_by: "api",
+        created_at: at(1, 0),
+        config: { harness: { model: "big" } },
+        usage: { cost_usd: 4, input_tokens: 400, output_tokens: 40, duration_ms: 0 },
+      },
+      {
+        id: "r6",
+        work_item_id: "w6",
+        agent_name: "implement",
+        state: "running",
+        triggered_by: "benchmark:b1",
+        created_at: at(4, 0),
+        usage: { cost_usd: 0.5, input_tokens: 0, output_tokens: 0, duration_ms: 0 },
+      },
+      {
+        id: "r4",
+        work_item_id: "w4",
+        agent_name: "foreman",
+        state: "succeeded",
+        created_at: new Date(since - 47 * HOUR).toISOString(),
+        usage: { cost_usd: 100, input_tokens: 0, output_tokens: 0, duration_ms: 0 },
+      },
     ] as MRun[],
     inbox: [
       { id: "i1", work_item_id: "w2", kind: "question", created_at: at(1, 2), resolved: true, resolved_at: at(1, 3) },
@@ -81,7 +139,10 @@ function fixture(): MetricsData {
       { id: "i3", work_item_id: "w6", kind: "approval", created_at: new Date(until - 2 * HOUR).toISOString() },
       { id: "i4", kind: "review", created_at: at(1, 0) },
     ] as MInbox[],
-    scorers: [{ id: "s1", slug: "tests-run", name: "Tests run" }, { id: "s2", slug: "idle" }],
+    scorers: [
+      { id: "s1", slug: "tests-run", name: "Tests run" },
+      { id: "s2", slug: "idle" },
+    ],
     scores: [
       { scorer_id: "s1", label: "tests_run", passed: true, created_at: at(0, 3) },
       { scorer_id: "s1", label: "tests_skipped", passed: false, created_at: at(0, 4) },
@@ -135,7 +196,13 @@ describe("build", () => {
 
   it("computes human wait", () => {
     const h = d.human_wait;
-    expect(h).toMatchObject({ items: 3, pending: 1, median_ms: (HOUR + 4 * HOUR) / 2, p90_ms: 4 * HOUR, total_ms: 7 * HOUR });
+    expect(h).toMatchObject({
+      items: 3,
+      pending: 1,
+      median_ms: (HOUR + 4 * HOUR) / 2,
+      p90_ms: 4 * HOUR,
+      total_ms: 7 * HOUR,
+    });
     expect(h.by_kind["approval"]).toBe(2);
     expect(h.by_kind["review"]).toBeUndefined();
   });
@@ -170,7 +237,15 @@ describe("build", () => {
     expect(d.daily[0]!.date).toBe("2026-05-01");
     expect(d.daily[6]!.date).toBe("2026-05-07");
     const p0 = d.daily[0]!;
-    expect(p0).toMatchObject({ runs: 2, work_items_created: 1, work_items_completed: 2, prs_opened: 1, prs_merged: 1, scores: 2, scores_passed: 1 });
+    expect(p0).toMatchObject({
+      runs: 2,
+      work_items_created: 1,
+      work_items_completed: 2,
+      prs_opened: 1,
+      prs_merged: 1,
+      scores: 2,
+      scores_passed: 1,
+    });
     expect(approx(p0.cost_usd, 3)).toBe(true);
     expect(d.daily[1]).toMatchObject({ prs_opened: 2, prs_merged: 1 });
     expect(d.daily.reduce((n, p) => n + p.runs, 0)).toBe(d.runs.total);
@@ -223,8 +298,20 @@ it("deduplicates a pull request across work items", () => {
     ],
     events: {},
     runs: [
-      { id: "a", work_item_id: "x", state: "succeeded", created_at: at(2, 0), usage: { cost_usd: 1, input_tokens: 0, output_tokens: 0, duration_ms: 0 } },
-      { id: "b", work_item_id: "y", state: "succeeded", created_at: at(1, 0), usage: { cost_usd: 2, input_tokens: 0, output_tokens: 0, duration_ms: 0 } },
+      {
+        id: "a",
+        work_item_id: "x",
+        state: "succeeded",
+        created_at: at(2, 0),
+        usage: { cost_usd: 1, input_tokens: 0, output_tokens: 0, duration_ms: 0 },
+      },
+      {
+        id: "b",
+        work_item_id: "y",
+        state: "succeeded",
+        created_at: at(1, 0),
+        usage: { cost_usd: 2, input_tokens: 0, output_tokens: 0, duration_ms: 0 },
+      },
     ] as MRun[],
     inbox: [],
     scorers: [],
@@ -276,8 +363,20 @@ describe("compute time", () => {
       scorers: [],
       scores: [],
       runs: [
-        { id: "r1", agent_name: "implement", state: "succeeded", created_at: at(1, 0), usage: { cost_usd: 2, input_tokens: 0, output_tokens: 0, duration_ms: 0 } },
-        { id: "r2", agent_name: "triage", state: "succeeded", created_at: at(1, 1), usage: { cost_usd: 1, input_tokens: 0, output_tokens: 0, duration_ms: 0 } },
+        {
+          id: "r1",
+          agent_name: "implement",
+          state: "succeeded",
+          created_at: at(1, 0),
+          usage: { cost_usd: 2, input_tokens: 0, output_tokens: 0, duration_ms: 0 },
+        },
+        {
+          id: "r2",
+          agent_name: "triage",
+          state: "succeeded",
+          created_at: at(1, 1),
+          usage: { cost_usd: 1, input_tokens: 0, output_tokens: 0, duration_ms: 0 },
+        },
         { id: "r3", agent_name: "triage", state: "running", created_at: at(2, 0) },
       ] as MRun[],
       sessions: {
@@ -285,7 +384,13 @@ describe("compute time", () => {
           { instance_shape: big, compute_seconds: 600, assigned_at: at(1, 0), ended_at: at(1, 5) },
           { instance_shape: big, compute_seconds: 60 },
         ],
-        r2: [{ assigned_at: at(1, 1), started_at: at(1, 1), ended_at: new Date(Date.parse(at(1, 1)) + 120_000).toISOString() }],
+        r2: [
+          {
+            assigned_at: at(1, 1),
+            started_at: at(1, 1),
+            ended_at: new Date(Date.parse(at(1, 1)) + 120_000).toISOString(),
+          },
+        ],
         r3: [{ assigned_at: new Date(until - HOUR).toISOString(), started_at: new Date(until - HOUR).toISOString() }],
       },
     };
@@ -306,12 +411,28 @@ describe("facts", () => {
   const person = { handle: "dana", is_bot: false };
   const ci = { handle: "ci[bot]", is_bot: true };
   const src = { provider: "github", kind: "pull_request", repo: "acme/app", number: 1, url: "https://x/1" };
-  const prEvent = (type: string, actor: FactEvent["actor"], h: number, attrs: Record<string, unknown> = {}): FactEvent => ({
-    team_id: "team1", provider: "github", type, actor, source: src, attributes: attrs, received_at: iso(h),
+  const prEvent = (
+    type: string,
+    actor: FactEvent["actor"],
+    h: number,
+    attrs: Record<string, unknown> = {},
+  ): FactEvent => ({
+    team_id: "team1",
+    provider: "github",
+    type,
+    actor,
+    source: src,
+    attributes: attrs,
+    received_at: iso(h),
   });
   const push = (actor: FactEvent["actor"], h: number, sha: string): FactEvent => ({
-    team_id: "team1", provider: "github", type: "push", actor, source: { provider: "github", kind: "push", repo: "acme/app" },
-    attributes: { branch: "fix", head_sha: sha }, received_at: iso(h),
+    team_id: "team1",
+    provider: "github",
+    type: "push",
+    actor,
+    source: { provider: "github", kind: "push", repo: "acme/app" },
+    attributes: { branch: "fix", head_sha: sha },
+    received_at: iso(h),
   });
 
   it("records an autonomous pull request", () => {
@@ -325,7 +446,15 @@ describe("facts", () => {
       prEvent("pull_request_review_submitted", person, 4),
       prEvent("pull_request_merged", person, 5, { merged_at: iso(5) }),
       push(person, 6, "s2"),
-      { team_id: "team1", provider: "slack", type: "message", actor: person, source: { provider: "slack", kind: "pull_request", repo: "x", number: 9 }, attributes: {}, received_at: iso(0) },
+      {
+        team_id: "team1",
+        provider: "slack",
+        type: "message",
+        actor: person,
+        source: { provider: "slack", kind: "pull_request", repo: "x", number: 9 },
+        attributes: {},
+        received_at: iso(0),
+      },
     ];
     for (const s of steps) book.record(s, Date.parse(s.received_at));
     const f = book.get("team1", "github:acme/app#1")!;
@@ -345,24 +474,54 @@ describe("facts", () => {
     const dels = 2;
     const facts: Record<string, PullRequestFacts> = {
       [prFactsKey({ forge: "GITHUB", repo: "acme/app", number: 1 })]: {
-        id: "t|1", team_id: "t", key: "github:acme/app#1", provider: "github", repo: "acme/app", number: 1, updated_at: at(0, 0),
-        opener_kind: "agent", opened_at: at(0, 4), first_review_at: at(0, 6), merged_at: at(0, 9),
-        pushes: [{ at: at(0, 5), kind: "bot" }], additions: adds, deletions: dels,
+        id: "t|1",
+        team_id: "t",
+        key: "github:acme/app#1",
+        provider: "github",
+        repo: "acme/app",
+        number: 1,
+        updated_at: at(0, 0),
+        opener_kind: "agent",
+        opened_at: at(0, 4),
+        first_review_at: at(0, 6),
+        merged_at: at(0, 9),
+        pushes: [{ at: at(0, 5), kind: "bot" }],
+        additions: adds,
+        deletions: dels,
       },
       [prFactsKey({ forge: "GITHUB", repo: "Acme/App", number: 2 })]: {
-        id: "t|2", team_id: "t", key: "github:acme/app#2", provider: "github", repo: "acme/app", number: 2, updated_at: at(0, 0),
-        opener_kind: "agent", opened_at: at(1, 8), merged_at: at(1, 18),
-        pushes: [{ at: at(1, 10), kind: "person" }], additions: 400,
+        id: "t|2",
+        team_id: "t",
+        key: "github:acme/app#2",
+        provider: "github",
+        repo: "acme/app",
+        number: 2,
+        updated_at: at(0, 0),
+        opener_kind: "agent",
+        opened_at: at(1, 8),
+        merged_at: at(1, 18),
+        pushes: [{ at: at(1, 10), kind: "person" }],
+        additions: 400,
       },
     };
     const d = build("fac", { ...fixture(), facts }, since, until);
     const a = d.autonomy;
-    expect(a).toMatchObject({ merged_prs: 2, autonomous_merged_prs: 1, pr_rate: 0.5, merged_prs_without_facts: 0, facts_since: at(0, 4) });
+    expect(a).toMatchObject({
+      merged_prs: 2,
+      autonomous_merged_prs: 1,
+      pr_rate: 0.5,
+      merged_prs_without_facts: 0,
+      facts_since: at(0, 4),
+    });
     expect(a.completed_work_items).toBe(5);
     const pc = d.cycle_time.pull_requests;
     expect(pc).toMatchObject({
-      count: 2, reviewed: 1, start_to_pr_ms: 6 * HOUR, pr_to_first_review_ms: 2 * HOUR,
-      first_review_to_merge_ms: 3 * HOUR, start_to_merge_ms: (9 * HOUR + 18 * HOUR) / 2,
+      count: 2,
+      reviewed: 1,
+      start_to_pr_ms: 6 * HOUR,
+      pr_to_first_review_ms: 2 * HOUR,
+      first_review_to_merge_ms: 3 * HOUR,
+      start_to_merge_ms: (9 * HOUR + 18 * HOUR) / 2,
     });
     const sizes = Object.fromEntries(d.pull_requests.by_size.map((b) => [b.size, b]));
     expect(sizes["xs"]!.count).toBe(1);

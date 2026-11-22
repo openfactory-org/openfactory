@@ -55,7 +55,9 @@ export function select(ints: Integration[], provider: string, factoryId: string,
         `${provider}: ${t.length} records (${ids}) can serve this source and it does not name its ${label}: keep one record`,
       );
     }
-    throw new NoIntegrationError(`${provider}: ${t.length} records (${ids}) serve the ${label} "${workspace}": keep one`);
+    throw new NoIntegrationError(
+      `${provider}: ${t.length} records (${ids}) serve the ${label} "${workspace}": keep one`,
+    );
   }
   if (workspace === "") throw new NoIntegrationError(`no ${provider} integration record serves this source`);
   throw new NoIntegrationError(
@@ -125,7 +127,9 @@ export async function intake(
   }
   if (cands.length === 0) return fail(`no ${provider} integration record for the ${label} "${workspace}"`);
   if (teams.size > 1) {
-    return fail(`records of ${teams.size} teams serve the ${provider} ${label} "${workspace}": keep the records of one team`);
+    return fail(
+      `records of ${teams.size} teams serve the ${provider} ${label} "${workspace}": keep the records of one team`,
+    );
   }
   let first: unknown;
   try {

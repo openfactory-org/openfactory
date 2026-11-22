@@ -76,7 +76,8 @@ export function pageFrom(q: Query): PageParams {
   if (limit > MAX_PAGE_SIZE) limit = MAX_PAGE_SIZE;
   const c = get(q, "cursor");
   const by = get(q, "sort_by").toLowerCase();
-  if (by !== "" && by !== "created_at") throw new OfError("invalid_request", `unknown sort_by "${by}" (expected created_at)`);
+  if (by !== "" && by !== "created_at")
+    throw new OfError("invalid_request", `unknown sort_by "${by}" (expected created_at)`);
   const o = get(q, "sort_order").toLowerCase();
   if (o !== "" && o !== "desc" && o !== "asc") {
     throw new OfError("invalid_request", `unknown sort_order "${o}" (expected asc or desc)`);
@@ -95,13 +96,17 @@ export function listResponse<T>(items: T[], next: string, extra?: Record<string,
 }
 
 /** Sorts in memory and returns one page (Go paginate). */
-export function paginate<T>(items: T[], key: (t: T) => { ms: number; id: string }, p: PageParams): { items: T[]; next: string } {
+export function paginate<T>(
+  items: T[],
+  key: (t: T) => { ms: number; id: string },
+  p: PageParams,
+): { items: T[]; next: string } {
   const sorted = [...items].sort((a, b) => {
     const ka = key(a);
     const kb = key(b);
-    if (ka.ms !== kb.ms) return (ka.ms > kb.ms) !== p.asc ? -1 : 1;
+    if (ka.ms !== kb.ms) return ka.ms > kb.ms !== p.asc ? -1 : 1;
     if (ka.id === kb.id) return 0;
-    return (ka.id > kb.id) !== p.asc ? -1 : 1;
+    return ka.id > kb.id !== p.asc ? -1 : 1;
   });
   let start = 0;
   if (p.cursor) {
@@ -109,7 +114,9 @@ export function paginate<T>(items: T[], key: (t: T) => { ms: number; id: string 
     start = sorted.length;
     for (let i = 0; i < sorted.length; i++) {
       const k = key(sorted[i]!);
-      const next = p.asc ? k.ms > c.ms || (k.ms === c.ms && k.id > c.id) : k.ms < c.ms || (k.ms === c.ms && k.id < c.id);
+      const next = p.asc
+        ? k.ms > c.ms || (k.ms === c.ms && k.id > c.id)
+        : k.ms < c.ms || (k.ms === c.ms && k.id < c.id);
       if (next) {
         start = i;
         break;

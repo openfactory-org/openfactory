@@ -24,12 +24,19 @@ const at = "2026-11-22T10:00:00Z";
 describe("validators", () => {
   it("accepts valid events and rejects bad envelopes", () => {
     const ev = newEvent(1, "message", { role: "assistant", content: "hi" }, { at, turnId: "t1" });
-    expect(ev).toEqual({ seq: 1, type: "message", at: "2026-11-22T10:00:00.000Z", turn_id: "t1", data: { role: "assistant", content: "hi" } });
+    expect(ev).toEqual({
+      seq: 1,
+      type: "message",
+      at: "2026-11-22T10:00:00.000Z",
+      turn_id: "t1",
+      data: { role: "assistant", content: "hi" },
+    });
     expect(validateEvent(ev)).toEqual([]);
     expect(isRunner("events#Event", ev)).toBe(true);
     const bad = validateRunner("events#Event", { seq: 0, type: "nope", at });
     expect(bad.valid).toBe(false);
-    if (!bad.valid) expect(bad.errors.map((e) => e.instanceLocation)).toEqual(expect.arrayContaining(["#/seq", "#/type"]));
+    if (!bad.valid)
+      expect(bad.errors.map((e) => e.instanceLocation)).toEqual(expect.arrayContaining(["#/seq", "#/type"]));
     expect(isRunner("events#Event", { seq: 1, type: "idle", at, extra: true })).toBe(false);
   });
 
@@ -53,8 +60,12 @@ describe("validators", () => {
   });
 
   it("parses or throws", () => {
-    expect(parseRunner("transfer#GitCredentialRequest", { protocol: "https", host: "github.com", path: "a/b" }).host).toBe("github.com");
-    expect(() => parseRunner("transfer#GitCredentialRequest", { host: 1 })).toThrow(/invalid transfer#GitCredentialRequest/);
+    expect(
+      parseRunner("transfer#GitCredentialRequest", { protocol: "https", host: "github.com", path: "a/b" }).host,
+    ).toBe("github.com");
+    expect(() => parseRunner("transfer#GitCredentialRequest", { host: 1 })).toThrow(
+      /invalid transfer#GitCredentialRequest/,
+    );
   });
 
   it("accepts the conversation that core builds", () => {

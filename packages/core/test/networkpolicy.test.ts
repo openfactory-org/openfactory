@@ -58,7 +58,9 @@ describe("catalog", () => {
       }
     }
     const pr = resolvePolicy("builtin/package-registries@1.0.0");
-    expect(pr.error === undefined && pr.hosts).toEqual(expect.arrayContaining(["registry.npmjs.org", "pypi.org", "crates.io"]));
+    expect(pr.error === undefined && pr.hosts).toEqual(
+      expect.arrayContaining(["registry.npmjs.org", "pypi.org", "crates.io"]),
+    );
   });
 });
 

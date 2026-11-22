@@ -19,12 +19,21 @@ function router(env: Env, teamId: string) {
 }
 
 /** router.resolveOrReserve: the active or reserved work item of any key, or a new reservation (atomic in RouterDO). */
-export function resolveOrReserve(env: Env, teamId: string, input: ResolveOrReserveInput): Promise<{ wiId: string; token: string; created: boolean }> {
+export function resolveOrReserve(
+  env: Env,
+  teamId: string,
+  input: ResolveOrReserveInput,
+): Promise<{ wiId: string; token: string; created: boolean }> {
   return router(env, teamId).resolveOrReserve(input);
 }
 
 /** The work item of the first key with an active or reserved route, else null. */
-export async function resolveAny(env: Env, teamId: string, factoryId: string, keys: string[]): Promise<{ wiId: string; token: string; status: string } | null> {
+export async function resolveAny(
+  env: Env,
+  teamId: string,
+  factoryId: string,
+  keys: string[],
+): Promise<{ wiId: string; token: string; status: string } | null> {
   for (const k of keys) {
     if (!k) continue;
     const r = await router(env, teamId).resolve(factoryId, k);
@@ -48,7 +57,9 @@ export interface WorkItemSummary {
  * The router.status messages that restore RouterDO routes from summaries
  * (RouterDO ignores lower versions, so a replay is safe).
  */
-export function routeRebuildMessages(items: WorkItemSummary[]): { wiId: string; factoryId: string; stage: string; completedMs: number | null; version: number; keys: string[] }[] {
+export function routeRebuildMessages(
+  items: WorkItemSummary[],
+): { wiId: string; factoryId: string; stage: string; completedMs: number | null; version: number; keys: string[] }[] {
   return items.map((wi) => ({
     wiId: wi.id,
     factoryId: wi.factory_id,
@@ -64,7 +75,13 @@ export async function rebuildRoutes(env: Env, teamId: string, items: WorkItemSum
   const r = router(env, teamId);
   let n = 0;
   for (const p of routeRebuildMessages(items)) {
-    await r.receive({ msgId: `rebuild:${p.wiId}:${p.version}`, kind: "router.status", lane: "router", origin: doName.index(teamId), payload: p });
+    await r.receive({
+      msgId: `rebuild:${p.wiId}:${p.version}`,
+      kind: "router.status",
+      lane: "router",
+      origin: doName.index(teamId),
+      payload: p,
+    });
     n++;
   }
   return n;

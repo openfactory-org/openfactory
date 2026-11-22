@@ -200,10 +200,7 @@ export class GitLabClient {
           throw new OfError("invalid_request", `gitlab: more than ${MAX_TREE_FILES} files under "${path}"`);
         }
         const raw = await this.wrap(`read ${e.path}`, () =>
-          this.api.bytes(
-            "GET",
-            `${pp}/repository/files/${pathEscape(e.path)}/raw?${encodeQuery({ ref: commit.id })}`,
-          ),
+          this.api.bytes("GET", `${pp}/repository/files/${pathEscape(e.path)}/raw?${encodeQuery({ ref: commit.id })}`),
         );
         if (raw.byteLength > MAX_FILE_BYTES) {
           throw new OfError("invalid_request", `gitlab: ${e.path} exceeds ${MAX_FILE_BYTES} bytes`);
@@ -294,7 +291,7 @@ export class GitLabClient {
     const mr = await this.wrap(`read !${number}`, () => this.mrDetails(owner, repo, number));
     if (!mr.draft) return;
     let title = (mr.title ?? "").trim();
-    for (let changed = true; changed; ) {
+    for (let changed = true; changed;) {
       changed = false;
       for (const p of DRAFT_PREFIXES) {
         if (title.length >= p.length && title.slice(0, p.length).toLowerCase() === p) {
@@ -364,7 +361,12 @@ export class GitLabClient {
       let cs: MrChange[];
       let next = "";
       try {
-        const res = await this.api.request<MrChange[]>("GET", `${mrPath}/diffs?per_page=100&page=${page}`, undefined, "json");
+        const res = await this.api.request<MrChange[]>(
+          "GET",
+          `${mrPath}/diffs?per_page=100&page=${page}`,
+          undefined,
+          "json",
+        );
         cs = res.data ?? [];
         next = res.headers.get("X-Next-Page") ?? "";
       } catch (e) {
@@ -380,7 +382,8 @@ export class GitLabClient {
     }
     if (!hit) throw new OfError("resource_not_found", `gitlab: ${p} is not changed in !${number}`);
     if ((hit.diff ?? "").trim() === "") {
-      const reason = hit.too_large || hit.collapsed ? "GitLab left the diff out because the file is too large" : "the diff is empty";
+      const reason =
+        hit.too_large || hit.collapsed ? "GitLab left the diff out because the file is too large" : "the diff is empty";
       throw new OfError("resource_not_found", `gitlab: ${p}: ${reason}`);
     }
     return { path: p, patch: hit.diff!, truncated: false };
@@ -390,7 +393,11 @@ export class GitLabClient {
   async login(): Promise<string> {
     const u = await this.wrap("read the user of the token", () => this.api.json<{ username?: string }>("GET", "/user"));
     const name = (u.username ?? "").trim();
-    if (name === "") throw new OfError("invalid_request", "gitlab: the token has no username (a project or group token is not a user)");
+    if (name === "")
+      throw new OfError(
+        "invalid_request",
+        "gitlab: the token has no username (a project or group token is not a user)",
+      );
     return name;
   }
 

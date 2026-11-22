@@ -15,7 +15,14 @@ import { proxied } from "./validate";
  * The request headers passed from the run to the upstream server. Everything
  * else, notably the run's Authorization header and cookies, is dropped.
  */
-const FORWARDED_HEADERS = ["accept", "content-type", "mcp-session-id", "mcp-protocol-version", "last-event-id", "user-agent"];
+const FORWARDED_HEADERS = [
+  "accept",
+  "content-type",
+  "mcp-session-id",
+  "mcp-protocol-version",
+  "last-event-id",
+  "user-agent",
+];
 
 const STATUS_TEXT: Record<number, string> = { 401: "Unauthorized", 403: "Forbidden" };
 
@@ -58,7 +65,11 @@ export async function serveProxy(
       headers.set("authorization", "Bearer " + (await accessToken(env, rt, m)));
     } catch (e) {
       const code = e instanceof NotConnectedError ? "not_connected" : "upstream_auth";
-      return runError(502, code, "MCP server " + m.name + " is not connected: an editor must reconnect it in the dashboard");
+      return runError(
+        502,
+        code,
+        "MCP server " + m.name + " is not connected: an editor must reconnect it in the dashboard",
+      );
     }
   }
 
@@ -79,12 +90,17 @@ export async function serveProxy(
     out.delete("www-authenticate");
     console.warn("mcp proxy: upstream rejected credentials", m.name, run.id, res.status);
     if (m.oauth) {
-      await teamOp(env, "mcp.oauth.setStatus", {
-        serverId: m.id,
-        status: MCP_OAUTH_ERROR,
-        message: `the server rejected the access token (HTTP ${STATUS_TEXT[res.status]}); reconnect it`,
-        now: rt.now(),
-      }, { teamId: run.teamId }).catch(() => undefined);
+      await teamOp(
+        env,
+        "mcp.oauth.setStatus",
+        {
+          serverId: m.id,
+          status: MCP_OAUTH_ERROR,
+          message: `the server rejected the access token (HTTP ${STATUS_TEXT[res.status]}); reconnect it`,
+          now: rt.now(),
+        },
+        { teamId: run.teamId },
+      ).catch(() => undefined);
     }
   }
   // The body streams through (SSE responses arrive as they are written).

@@ -2,7 +2,8 @@
 // internal/triggers/catalog.go.
 import * as T from "./attributes";
 
-export type CmpKind = "exact" | "fold" | "int" | "glob" | "keyword" | "emoji" | "branch" | "channelName" | "channelNameFold" | "noop";
+export type CmpKind =
+  "exact" | "fold" | "int" | "glob" | "keyword" | "emoji" | "branch" | "channelName" | "channelNameFold" | "noop";
 
 export interface FieldSpec {
   attrs: string[];
@@ -74,7 +75,12 @@ export const CATALOG: Record<string, ProviderSpec> = {
     },
     events: {
       ...ev(["repos", "labels", "assignees", "authors", "keywords", SB], "issue_created"),
-      ...ev(["repos", "labels", "assignees", "authors", SB], "issue_labeled", "issue_assigned", "pull_request_assigned"),
+      ...ev(
+        ["repos", "labels", "assignees", "authors", SB],
+        "issue_labeled",
+        "issue_assigned",
+        "pull_request_assigned",
+      ),
       ...ev(["repos", "labels", "authors", "keywords", SB], "issue_commented", "pull_request_commented"),
       ...ev(["repos", "mentioned", "labels", "authors", "keywords", SB], "issue_mentioned", "pull_request_mentioned"),
       ...ev(
@@ -93,7 +99,10 @@ export const CATALOG: Record<string, ProviderSpec> = {
         "pull_request_synchronized",
       ),
       ...ev(["repos", "reviewers", "reviewer_teams", "authors", SB], "pull_request_review_requested"),
-      ...ev(["repos", "mentioned", "labels", "review_states", "authors", "keywords", SB], "pull_request_review_submitted"),
+      ...ev(
+        ["repos", "mentioned", "labels", "review_states", "authors", "keywords", SB],
+        "pull_request_review_submitted",
+      ),
       ...ev(["repos", "branches", "paths", SB], "push"),
       ...ev(["repos", "conclusions", "branches", "labels", "authors", SB], "check_suite_completed"),
       ...ev(["repos", "conclusions", "branches", "workflows", "labels", "authors", SB], "workflow_run_completed"),
@@ -139,7 +148,12 @@ export const CATALOG: Record<string, ProviderSpec> = {
         "pull_request_merged",
       ),
       ...ev(["repos", "mentioned"], "pull_request_mentioned"),
-      ...ev(["work_item_types", "labels", "assignees", "authors"], "work_item_created", "work_item_assigned", "work_item_labeled"),
+      ...ev(
+        ["work_item_types", "labels", "assignees", "authors"],
+        "work_item_created",
+        "work_item_assigned",
+        "work_item_labeled",
+      ),
       ...ev(["mentioned"], "work_item_mentioned"),
       push: { keys: ["repos", "branches"], notAuthorable: true },
     },
@@ -187,7 +201,10 @@ export const CATALOG: Record<string, ProviderSpec> = {
         "issue_assigned",
         "issue_state_changed",
       ),
-      ...ev(["team_ids", "project_ids", "labels", "state_ids", "issue_ids", "mentioned_user_ids", "creator_ids"], "comment_created"),
+      ...ev(
+        ["team_ids", "project_ids", "labels", "state_ids", "issue_ids", "mentioned_user_ids", "creator_ids"],
+        "comment_created",
+      ),
       ...ev(["team_ids", "project_ids", "labels", "creator_ids", "keywords"], "agent_session_created"),
     },
   },
@@ -205,7 +222,14 @@ export const CATALOG: Record<string, ProviderSpec> = {
       itemUsers: f([T.AttrItemUserName, T.AttrItemUserEmail], "fold", { plainListOnly: true, native: "item_user_ids" }),
     },
     events: {
-      ...ev(["channel_ids", "user_ids", "keywords"], "app_mention", "message_dm", "message_im", "message_mpim", "message_posted"),
+      ...ev(
+        ["channel_ids", "user_ids", "keywords"],
+        "app_mention",
+        "message_dm",
+        "message_im",
+        "message_mpim",
+        "message_posted",
+      ),
       ...ev(["channel_ids", "user_ids", "keywords", "emojis", "item_user_ids"], "reaction_added"),
       ...ev(["channel_ids", "user_ids"], "member_joined_channel"),
     },

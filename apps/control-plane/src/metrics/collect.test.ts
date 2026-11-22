@@ -21,16 +21,61 @@ function fake(items: Record<string, Record<string, unknown>[]>, calls: string[])
 describe("collect", () => {
   it("pages, stops at the lookback and builds the dashboard", async () => {
     const calls: string[] = [];
-    const runs = Array.from({ length: 10 }, (_, i) => ({ id: `r${i}`, state: "succeeded", agent_name: "a", created_at: iso(day0 + i * 1000), usage: { cost_usd: 1, input_tokens: 1, output_tokens: 1, duration_ms: 0 } }));
-    runs.unshift({ id: "ancient", state: "succeeded", agent_name: "a", created_at: iso(day0 - 400 * DAY), usage: { cost_usd: 100, input_tokens: 0, output_tokens: 0, duration_ms: 0 } });
+    const runs = Array.from({ length: 10 }, (_, i) => ({
+      id: `r${i}`,
+      state: "succeeded",
+      agent_name: "a",
+      created_at: iso(day0 + i * 1000),
+      usage: { cost_usd: 1, input_tokens: 1, output_tokens: 1, duration_ms: 0 },
+    }));
+    runs.unshift({
+      id: "ancient",
+      state: "succeeded",
+      agent_name: "a",
+      created_at: iso(day0 - 400 * DAY),
+      usage: { cost_usd: 100, input_tokens: 0, output_tokens: 0, duration_ms: 0 },
+    });
     const list = fake(
       {
         runs,
-        workItems: [{ id: "w1", stage: "complete", created_at: iso(day0), completed_at: iso(day0 + 3600_000), updated_at: iso(day0), pull_requests: [{ forge: "GITHUB", repo: "o/r", number: 1, url: "", branch: "", state: "merged" }] }],
-        metricEvents: [{ id: "e1", work_item_id: "w1", kind: "pr_linked", at_ms: day0 + 1000, data: { repo: "o/r", number: 1, forge: "GITHUB" } }],
+        workItems: [
+          {
+            id: "w1",
+            stage: "complete",
+            created_at: iso(day0),
+            completed_at: iso(day0 + 3600_000),
+            updated_at: iso(day0),
+            pull_requests: [{ forge: "GITHUB", repo: "o/r", number: 1, url: "", branch: "", state: "merged" }],
+          },
+        ],
+        metricEvents: [
+          {
+            id: "e1",
+            work_item_id: "w1",
+            kind: "pr_linked",
+            at_ms: day0 + 1000,
+            data: { repo: "o/r", number: 1, forge: "GITHUB" },
+          },
+        ],
         prFacts: [
-          { team_id: "t", provider: "github", type: "pull_request_opened", actor: { handle: "bot", is_bot: true, is_self: true }, source: { provider: "github", kind: "pull_request", repo: "o/r", number: 1 }, attributes: {}, received_at: iso(day0 + 2000) },
-          { team_id: "t", provider: "github", type: "pull_request_merged", actor: { handle: "p", is_bot: false }, source: { provider: "github", kind: "pull_request", repo: "o/r", number: 1 }, attributes: {}, received_at: iso(day0 + 3000) },
+          {
+            team_id: "t",
+            provider: "github",
+            type: "pull_request_opened",
+            actor: { handle: "bot", is_bot: true, is_self: true },
+            source: { provider: "github", kind: "pull_request", repo: "o/r", number: 1 },
+            attributes: {},
+            received_at: iso(day0 + 2000),
+          },
+          {
+            team_id: "t",
+            provider: "github",
+            type: "pull_request_merged",
+            actor: { handle: "p", is_bot: false },
+            source: { provider: "github", kind: "pull_request", repo: "o/r", number: 1 },
+            attributes: {},
+            received_at: iso(day0 + 3000),
+          },
         ],
         scores: [{ scorer_id: "s", label: "x", passed: true, created_at: iso(day0 + 5) }],
         inbox: [],

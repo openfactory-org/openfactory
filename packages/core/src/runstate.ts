@@ -222,9 +222,7 @@ export function nextRunState(cur: string, input: RunStateInput): RunStateResult 
 
 /** Where an event leads from one state, for the default input of the event. */
 export type TransitionTarget =
-  | { kind: "move"; to: RunState }
-  | { kind: "stay" }
-  | { kind: "depends"; to: readonly RunState[]; on: string };
+  { kind: "move"; to: RunState } | { kind: "stay" } | { kind: "depends"; to: readonly RunState[]; on: string };
 
 /**
  * The transition table of the run state machine: for each event, the states
@@ -232,7 +230,9 @@ export type TransitionTarget =
  * event is an invalid transition. tryNextRunState is the implementation; a
  * test checks that both agree.
  */
-export const RUN_TRANSITIONS: Readonly<Record<RunEvent, Partial<Record<(typeof RUN_STATES)[number], TransitionTarget>>>> = {
+export const RUN_TRANSITIONS: Readonly<
+  Record<RunEvent, Partial<Record<(typeof RUN_STATES)[number], TransitionTarget>>>
+> = {
   assigned: { queued: { kind: "move", to: "pending" } },
   config_fault: { queued: { kind: "move", to: "failed" } },
   queue_timeout: {

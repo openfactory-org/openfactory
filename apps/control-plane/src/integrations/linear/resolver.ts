@@ -40,7 +40,8 @@ export class LinearNameResolver implements NameResolver {
     scope: Record<string, string[]> = {},
   ): Promise<Record<string, string[]>> {
     if (!equalFold(provider, PROVIDER)) throw new Error(`the Linear resolver cannot list ${provider} objects`);
-    if (!["teams", "projects", "states", "issues"].includes(kind)) throw new Error(`the Linear resolver cannot resolve "${kind}"`);
+    if (!["teams", "projects", "states", "issues"].includes(kind))
+      throw new Error(`the Linear resolver cannot resolve "${kind}"`);
     let all: Integration[];
     try {
       all = (await this.deps.store.listIntegrations(teamId)).filter((i) => equalFold(i.provider, PROVIDER));
@@ -103,8 +104,10 @@ export class LinearNameResolver implements NameResolver {
 
 function describe(kind: string, e: unknown): unknown {
   const msg = `Linear refused the credential of the integration, so the ${kind} cannot be listed`;
-  if (e instanceof ApiError && (e.status === 401 || e.status === 403)) return new Error(`${msg}: ${e.message}`, { cause: e });
-  if (e instanceof GraphQLError && e.message.toLowerCase().includes("authenticat")) return new Error(`${msg}: ${e.message}`, { cause: e });
+  if (e instanceof ApiError && (e.status === 401 || e.status === 403))
+    return new Error(`${msg}: ${e.message}`, { cause: e });
+  if (e instanceof GraphQLError && e.message.toLowerCase().includes("authenticat"))
+    return new Error(`${msg}: ${e.message}`, { cause: e });
   return e;
 }
 

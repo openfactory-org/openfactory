@@ -36,7 +36,7 @@ export function parseKeyList(name: string, list: string | undefined): Uint8Array
     try {
       out.push(loadKey(item));
     } catch (e) {
-      throw new Error(`${name} item ${i + 1}: ${(e as Error).message}`);
+      throw new Error(`${name} item ${i + 1}: ${(e as Error).message}`, { cause: e });
     }
   });
   return out;
@@ -56,7 +56,10 @@ function configError(msg: string): OfError {
 export function encryptionKeys(env: Pick<Env, "OF_SECRET_KEY" | "OF_SECRET_KEY_PREVIOUS">): KeySet {
   if (!env.OF_SECRET_KEY || env.OF_SECRET_KEY.trim() === "") throw configError("OF_SECRET_KEY is not set");
   try {
-    return { current: loadKey(env.OF_SECRET_KEY), previous: parseKeyList("OF_SECRET_KEY_PREVIOUS", env.OF_SECRET_KEY_PREVIOUS) };
+    return {
+      current: loadKey(env.OF_SECRET_KEY),
+      previous: parseKeyList("OF_SECRET_KEY_PREVIOUS", env.OF_SECRET_KEY_PREVIOUS),
+    };
   } catch (e) {
     throw configError(`OF_SECRET_KEY: ${(e as Error).message}`);
   }
@@ -70,11 +73,15 @@ export function signingKeys(
   env: Pick<Env, "OF_SECRET_KEY" | "OF_SECRET_KEY_PREVIOUS" | "OF_SIGNING_KEY" | "OF_SIGNING_KEY_PREVIOUS">,
 ): KeySet {
   if (!env.OF_SIGNING_KEY || env.OF_SIGNING_KEY.trim() === "") {
-    if ((env.OF_SIGNING_KEY_PREVIOUS ?? "").trim() !== "") throw configError("OF_SIGNING_KEY_PREVIOUS needs OF_SIGNING_KEY");
+    if ((env.OF_SIGNING_KEY_PREVIOUS ?? "").trim() !== "")
+      throw configError("OF_SIGNING_KEY_PREVIOUS needs OF_SIGNING_KEY");
     return encryptionKeys(env);
   }
   try {
-    return { current: loadKey(env.OF_SIGNING_KEY), previous: parseKeyList("OF_SIGNING_KEY_PREVIOUS", env.OF_SIGNING_KEY_PREVIOUS) };
+    return {
+      current: loadKey(env.OF_SIGNING_KEY),
+      previous: parseKeyList("OF_SIGNING_KEY_PREVIOUS", env.OF_SIGNING_KEY_PREVIOUS),
+    };
   } catch (e) {
     throw configError(`OF_SIGNING_KEY: ${(e as Error).message}`);
   }
@@ -111,7 +118,7 @@ export async function keyVersion(key: Uint8Array): Promise<string> {
 
 // ---------- durations ----------
 
-const UNIT_MS: Record<string, number> = { ns: 1e-6, us: 1e-3, "µs": 1e-3, ms: 1, s: 1000, m: 60_000, h: 3_600_000 };
+const UNIT_MS: Record<string, number> = { ns: 1e-6, us: 1e-3, µs: 1e-3, ms: 1, s: 1000, m: 60_000, h: 3_600_000 };
 
 /** Go time.ParseDuration subset ("90s", "1h30m", "15m", "0"). Returns ms. */
 export function parseDuration(s: string): number {
@@ -203,7 +210,11 @@ export function serverConfig(env: Env): ServerConfig {
     r2AccountId: env.OF_R2_ACCOUNT_ID ?? "",
     r2Bucket: env.OF_R2_BUCKET || "openfactory-data",
     oidc: env.OF_OIDC_ISSUER_URL
-      ? { issuer: env.OF_OIDC_ISSUER_URL, clientId: env.OF_OIDC_CLIENT_ID ?? "", clientSecret: env.OF_OIDC_CLIENT_SECRET ?? "" }
+      ? {
+          issuer: env.OF_OIDC_ISSUER_URL,
+          clientId: env.OF_OIDC_CLIENT_ID ?? "",
+          clientSecret: env.OF_OIDC_CLIENT_SECRET ?? "",
+        }
       : null,
     logLevel: env.OF_LOG_LEVEL || "info",
   };

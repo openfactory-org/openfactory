@@ -5,7 +5,12 @@
 // sort order: UTF-8 bytes) and strings use Go escaping. Payload filters parse
 // JSON losslessly (plan rule 12): Go compares numbers above 2^53 exactly.
 
-import { isLosslessNumber, LosslessNumber, parse as losslessParse, stringify as losslessStringify } from "lossless-json";
+import {
+  isLosslessNumber,
+  LosslessNumber,
+  parse as losslessParse,
+  stringify as losslessStringify,
+} from "lossless-json";
 import { compareBytes, goJSONString } from "./gostd";
 
 export { isLosslessNumber, LosslessNumber };

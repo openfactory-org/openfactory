@@ -5,7 +5,15 @@
 // App JWTs are RS256 with WebCrypto; installation tokens are cached per
 // isolate (and optionally in a shared TokenCache) until 10 minutes before
 // they expire.
-import { OfError, pathEscape, queryEscape, type FileDiff, type PullRequestRef, type ReviewThread, type ThreadComment } from "@openfactory/core";
+import {
+  OfError,
+  pathEscape,
+  queryEscape,
+  type FileDiff,
+  type PullRequestRef,
+  type ReviewThread,
+  type ThreadComment,
+} from "@openfactory/core";
 import type { CheckRunInput } from "../checkrun";
 import type { CommitStatus, Forge, PullRequestInput, ReviewInput } from "../forge";
 import { HttpClient, statusCode, type FetchFn } from "../util/http";
@@ -98,18 +106,27 @@ function prRef(p: GitHubPullRequest, owner: string, repo: string): PullRequestRe
   let state = p.state;
   if (p.merged || (p.merged_at ?? "") !== "") state = "merged";
   else if (p.state === "open" && p.draft) state = "draft";
-  return { forge: FORGE_NAME, repo: `${owner}/${repo}`, number: p.number, url: p.html_url, branch: p.head?.ref ?? "", state };
+  return {
+    forge: FORGE_NAME,
+    repo: `${owner}/${repo}`,
+    number: p.number,
+    url: p.html_url,
+    branch: p.head?.ref ?? "",
+    state,
+  };
 }
 
 function commentId(threadRef: string): number {
   const t = threadRef.trim();
   const id = /^\d+$/.test(t) ? Number(t) : NaN;
-  if (!(id > 0)) throw new OfError("invalid_request", `github: thread reference "${threadRef}" is not a review comment ID`);
+  if (!(id > 0))
+    throw new OfError("invalid_request", `github: thread reference "${threadRef}" is not a review comment ID`);
   return id;
 }
 
 function wrap(msg: string, e: unknown): Error {
-  if (e instanceof OfError) return new OfError(e.code, `${msg}: ${e.detail}`, { cause: e, ...(e.reason ? { reason: e.reason } : {}) });
+  if (e instanceof OfError)
+    return new OfError(e.code, `${msg}: ${e.detail}`, { cause: e, ...(e.reason ? { reason: e.reason } : {}) });
   return new Error(`${msg}: ${(e as Error).message}`, { cause: e });
 }
 
@@ -131,7 +148,8 @@ export class GitHubClient implements Forge {
     this.now = cfg.now ?? Date.now;
     this.scope = scope;
     if (cfg.appId || cfg.privateKey) {
-      if (!cfg.appId || !cfg.privateKey) throw new Error("github: app authentication requires both app_id and private key");
+      if (!cfg.appId || !cfg.privateKey)
+        throw new Error("github: app authentication requires both app_id and private key");
       this.keyPem = cfg.privateKey;
     } else if (!cfg.token) {
       throw new Error("github: a token or app credentials are required");
@@ -155,7 +173,7 @@ export class GitHubClient implements Forge {
       try {
         await c.appKey();
       } catch (e) {
-        throw new Error(`github: ${(e as Error).message}`);
+        throw new Error(`github: ${(e as Error).message}`, { cause: e });
       }
     }
     return c;
@@ -224,7 +242,12 @@ export class GitHubClient implements Forge {
   }
 
   private cacheKey(inst: number, owner: string): string {
-    const scope = this.scope ? (this.scope.get(owner.toLowerCase()) ?? []).map((s) => s.toLowerCase()).sort().join(",") : "*";
+    const scope = this.scope
+      ? (this.scope.get(owner.toLowerCase()) ?? [])
+          .map((s) => s.toLowerCase())
+          .sort()
+          .join(",")
+      : "*";
     return `${this.cfg.baseURL}|${this.cfg.appId}|${inst}|${scope}`;
   }
 
@@ -283,7 +306,8 @@ export class GitHubClient implements Forge {
     const hit = isolateInstallations.get(key);
     if (hit !== undefined) return hit;
     const jwt = await this.appJWT();
-    const path = repo === "" ? "/users/" + pathEscape(owner) + "/installation" : repoPath(owner, repo) + "/installation";
+    const path =
+      repo === "" ? "/users/" + pathEscape(owner) + "/installation" : repoPath(owner, repo) + "/installation";
     let resp: { id?: number } | undefined;
     try {
       resp = await this.api.do("GET", path, undefined, "Bearer " + jwt);
@@ -322,10 +346,22 @@ export class GitHubClient implements Forge {
   }
 
   async createPullRequest(input: PullRequestInput): Promise<PullRequestRef> {
-    const body: Record<string, unknown> = { title: input.title, head: input.head, base: input.base, body: input.body, draft: !!input.draft };
+    const body: Record<string, unknown> = {
+      title: input.title,
+      head: input.head,
+      base: input.base,
+      body: input.body,
+      draft: !!input.draft,
+    };
     if (input.base === "") body["base"] = await this.defaultBranch(input.owner, input.repo);
     try {
-      const pr = await this.call<GitHubPullRequest>(input.owner, input.repo, "POST", repoPath(input.owner, input.repo) + "/pulls", body);
+      const pr = await this.call<GitHubPullRequest>(
+        input.owner,
+        input.repo,
+        "POST",
+        repoPath(input.owner, input.repo) + "/pulls",
+        body,
+      );
       return prRef(pr, input.owner, input.repo);
     } catch (e) {
       throw wrap("github: create pull request", e);
@@ -382,7 +418,13 @@ export class GitHubClient implements Forge {
    */
   async setCommitStatus(owner: string, repo: string, sha: string, st: CommitStatus): Promise<void> {
     if (this.isApp()) {
-      const cr: GitHubCheckRun = { name: st.context, headSha: sha, detailsUrl: st.targetUrl ?? "", title: st.description ?? "", summary: st.description ?? "" };
+      const cr: GitHubCheckRun = {
+        name: st.context,
+        headSha: sha,
+        detailsUrl: st.targetUrl ?? "",
+        title: st.description ?? "",
+        summary: st.description ?? "",
+      };
       switch (st.state) {
         case "pending":
         case "":
@@ -418,7 +460,13 @@ export class GitHubClient implements Forge {
 
   async createCheckRun(owner: string, repo: string, cr: GitHubCheckRun): Promise<number> {
     try {
-      const r = await this.call<{ id: number }>(owner, repo, "POST", repoPath(owner, repo) + "/check-runs", checkRunBody(cr, true, this.now()));
+      const r = await this.call<{ id: number }>(
+        owner,
+        repo,
+        "POST",
+        repoPath(owner, repo) + "/check-runs",
+        checkRunBody(cr, true, this.now()),
+      );
       return r?.id ?? 0;
     } catch (e) {
       throw wrap("github: create check run", e);
@@ -427,7 +475,13 @@ export class GitHubClient implements Forge {
 
   async updateCheckRun(owner: string, repo: string, id: number, cr: GitHubCheckRun): Promise<void> {
     try {
-      await this.call(owner, repo, "PATCH", `${repoPath(owner, repo)}/check-runs/${id}`, checkRunBody(cr, false, this.now()));
+      await this.call(
+        owner,
+        repo,
+        "PATCH",
+        `${repoPath(owner, repo)}/check-runs/${id}`,
+        checkRunBody(cr, false, this.now()),
+      );
     } catch (e) {
       throw wrap("github: update check run", e);
     }
@@ -439,7 +493,12 @@ export class GitHubClient implements Forge {
    */
   async publishCheckRun(owner: string, repo: string, cr: CheckRunInput): Promise<void> {
     if (!this.isApp()) {
-      const st: CommitStatus = { context: cr.name, targetUrl: cr.detailsUrl ?? "", description: cr.title ?? "", state: "" };
+      const st: CommitStatus = {
+        context: cr.name,
+        targetUrl: cr.detailsUrl ?? "",
+        description: cr.title ?? "",
+        state: "",
+      };
       if (cr.status !== "completed") st.state = "pending";
       else if (cr.conclusion === "success") st.state = "success";
       else st.state = "failure";
@@ -484,7 +543,12 @@ export class GitHubClient implements Forge {
   }
 
   /** Reads every blob under path at ref with the git trees and blobs APIs. */
-  async getFiles(owner: string, repo: string, ref: string, path: string): Promise<{ files: Record<string, string>; sha: string }> {
+  async getFiles(
+    owner: string,
+    repo: string,
+    ref: string,
+    path: string,
+  ): Promise<{ files: Record<string, string>; sha: string }> {
     const r = ref === "" ? await this.defaultBranch(owner, repo) : ref;
     let commit: { sha: string; commit: { tree: { sha: string } } };
     try {
@@ -494,7 +558,12 @@ export class GitHubClient implements Forge {
     }
     let tree: { tree: { path: string; type: string; sha: string; size?: number }[]; truncated?: boolean };
     try {
-      tree = await this.call(owner, repo, "GET", `${repoPath(owner, repo)}/git/trees/${commit.commit.tree.sha}?recursive=1`);
+      tree = await this.call(
+        owner,
+        repo,
+        "GET",
+        `${repoPath(owner, repo)}/git/trees/${commit.commit.tree.sha}?recursive=1`,
+      );
     } catch (e) {
       throw wrap("github: read tree", e);
     }
@@ -518,7 +587,7 @@ export class GitHubClient implements Forge {
         try {
           content = new TextDecoder().decode(fromB64(blob.content.replace(/\n/g, "")));
         } catch (err) {
-          throw new Error(`github: decode ${e.path}: ${(err as Error).message}`);
+          throw new Error(`github: decode ${e.path}: ${(err as Error).message}`, { cause: err });
         }
       }
       files[e.path.slice(prefix.length)] = content;
@@ -546,12 +615,24 @@ export class GitHubClient implements Forge {
   }
 
   async graphql<T>(owner: string, repo: string, query: string, variables: Record<string, unknown>): Promise<T> {
-    const resp = await this.call<{ data?: T; errors?: { message: string }[] }>(owner, repo, "POST", this.graphqlPath(), { query, variables });
-    if (resp?.errors && resp.errors.length > 0) throw new Error("github graphql: " + resp.errors.map((e) => e.message).join("; "));
+    const resp = await this.call<{ data?: T; errors?: { message: string }[] }>(
+      owner,
+      repo,
+      "POST",
+      this.graphqlPath(),
+      { query, variables },
+    );
+    if (resp?.errors && resp.errors.length > 0)
+      throw new Error("github graphql: " + resp.errors.map((e) => e.message).join("; "));
     return resp?.data as T;
   }
 
-  private async reviewThreadId(owner: string, repo: string, number: number, id: number): Promise<{ nodeId: string; resolved: boolean }> {
+  private async reviewThreadId(
+    owner: string,
+    repo: string,
+    number: number,
+    id: number,
+  ): Promise<{ nodeId: string; resolved: boolean }> {
     let after: string | null = null;
     for (let page = 0; page < 20; page++) {
       type Page = {
@@ -614,11 +695,17 @@ export class GitHubClient implements Forge {
       return { path: c.path, line: c.line, side: (c.side ?? "").toUpperCase() || "RIGHT", body: c.body };
     });
     try {
-      await this.call(input.owner, input.repo, "POST", `${repoPath(input.owner, input.repo)}/pulls/${input.number}/reviews`, {
-        event,
-        body: input.body,
-        comments,
-      });
+      await this.call(
+        input.owner,
+        input.repo,
+        "POST",
+        `${repoPath(input.owner, input.repo)}/pulls/${input.number}/reviews`,
+        {
+          event,
+          body: input.body,
+          comments,
+        },
+      );
     } catch (e) {
       throw wrap(`github: submit review on ${input.owner}/${input.repo}#${input.number}`, e);
     }
@@ -643,7 +730,9 @@ export class GitHubClient implements Forge {
   async requestReviewers(owner: string, repo: string, number: number, logins: string[]): Promise<void> {
     if (logins.length === 0) return;
     try {
-      await this.call(owner, repo, "POST", `${repoPath(owner, repo)}/pulls/${number}/requested_reviewers`, { reviewers: logins });
+      await this.call(owner, repo, "POST", `${repoPath(owner, repo)}/pulls/${number}/requested_reviewers`, {
+        reviewers: logins,
+      });
     } catch (e) {
       throw wrap(`github: request review of ${owner}/${repo}#${number}`, e);
     }
@@ -669,10 +758,25 @@ export class GitHubClient implements Forge {
     const th: ReviewThread = { ref: String(root), comments: [] };
     let found = false;
     for (let page = 1; page <= MAX_REVIEW_PAGES; page++) {
-      type C = { id: number; in_reply_to_id?: number; body?: string; path?: string; line?: number | null; original_line?: number | null; created_at?: string; user?: { login?: string } };
+      type C = {
+        id: number;
+        in_reply_to_id?: number;
+        body?: string;
+        path?: string;
+        line?: number | null;
+        original_line?: number | null;
+        created_at?: string;
+        user?: { login?: string };
+      };
       let cs: C[];
       try {
-        cs = (await this.call<C[]>(owner, repo, "GET", `${repoPath(owner, repo)}/pulls/${number}/comments?per_page=100&page=${page}`)) ?? [];
+        cs =
+          (await this.call<C[]>(
+            owner,
+            repo,
+            "GET",
+            `${repoPath(owner, repo)}/pulls/${number}/comments?per_page=100&page=${page}`,
+          )) ?? [];
       } catch (e) {
         throw wrap(`github: read review comments of ${owner}/${repo}#${number}`, e);
       }
@@ -680,7 +784,13 @@ export class GitHubClient implements Forge {
         if (x.id !== root && x.in_reply_to_id !== root) continue;
         found = true;
         const line = x.line || x.original_line || 0;
-        const tc: ThreadComment = { id: String(x.id), author: x.user?.login ?? "", body: x.body ?? "", path: x.path ?? "", line };
+        const tc: ThreadComment = {
+          id: String(x.id),
+          author: x.user?.login ?? "",
+          body: x.body ?? "",
+          path: x.path ?? "",
+          line,
+        };
         const t = x.created_at ? Date.parse(x.created_at) : NaN;
         if (Number.isFinite(t)) tc.created_at = new Date(t).toISOString().replace(".000Z", "Z");
         if (x.id === root) {
@@ -691,7 +801,8 @@ export class GitHubClient implements Forge {
       }
       if (cs.length < 100) break;
     }
-    if (!found) throw new OfError("resource_not_found", `github: review thread ${threadRef} of ${owner}/${repo}#${number}`);
+    if (!found)
+      throw new OfError("resource_not_found", `github: review thread ${threadRef} of ${owner}/${repo}#${number}`);
     return th;
   }
 
@@ -702,13 +813,20 @@ export class GitHubClient implements Forge {
     for (let page = 1; page <= MAX_REVIEW_PAGES; page++) {
       let files: { filename: string; patch?: string }[];
       try {
-        files = (await this.call(owner, repo, "GET", `${repoPath(owner, repo)}/pulls/${number}/files?per_page=100&page=${page}`)) ?? [];
+        files =
+          (await this.call(
+            owner,
+            repo,
+            "GET",
+            `${repoPath(owner, repo)}/pulls/${number}/files?per_page=100&page=${page}`,
+          )) ?? [];
       } catch (e) {
         throw wrap(`github: read files of ${owner}/${repo}#${number}`, e);
       }
       for (const f of files) {
         if (f.filename !== p) continue;
-        if (!f.patch) throw new OfError("resource_not_found", `github: ${p} has no patch (the file is binary or too large)`);
+        if (!f.patch)
+          throw new OfError("resource_not_found", `github: ${p} has no patch (the file is binary or too large)`);
         return { path: p, patch: f.patch };
       }
       if (files.length < 100) break;
@@ -743,7 +861,10 @@ export function checkRunBody(cr: GitHubCheckRun, create: boolean, nowMs: number)
   if (cr.detailsUrl) b["details_url"] = cr.detailsUrl;
   if (cr.externalId) b["external_id"] = cr.externalId;
   if (cr.title || cr.summary) {
-    const out: Record<string, string> = { title: truncate(cr.title || cr.name, 255), summary: truncate(cr.summary ?? "", 65535) };
+    const out: Record<string, string> = {
+      title: truncate(cr.title || cr.name, 255),
+      summary: truncate(cr.summary ?? "", 65535),
+    };
     if (cr.text) out["text"] = truncate(cr.text, 65535);
     b["output"] = out;
   }

@@ -13,7 +13,9 @@ export async function shouldSample(scorerId: string, runId: string, ratePercent:
   const rate = Math.round(ratePercent * 100) / 100;
   if (!(rate > 0) || Number.isNaN(rate)) return false;
   if (rate >= 100) return true;
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${scorerId}\x00${runId}`)));
+  const digest = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${scorerId}\x00${runId}`)),
+  );
   // The first 8 bytes as a big-endian uint64; 53 bits give an exact float in [0, 1).
   let v = 0n;
   for (let i = 0; i < 8; i++) v = (v << 8n) | BigInt(digest[i]!);

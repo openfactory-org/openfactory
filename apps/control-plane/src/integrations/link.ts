@@ -136,7 +136,9 @@ export class Linker implements LinkerLike {
 
   /** The text of a link prompt in a public place: it has no link URL. */
   dashboardHint(provider: string): string {
-    const where = this.o.publicUrl ? this.o.publicUrl.replace(/\/+$/, "") + "/integrations" : "the Open Factory dashboard";
+    const where = this.o.publicUrl
+      ? this.o.publicUrl.replace(/\/+$/, "") + "/integrations"
+      : "the Open Factory dashboard";
     return `Sign in to ${where} and link your ${providerLabel(provider)} account under "Link your account".`;
   }
 
@@ -165,12 +167,18 @@ export class Linker implements LinkerLike {
     if (path === LINK_CALLBACK_PATH && req.method === "GET") return this.serveCallback(req, url);
     if (path.startsWith(LINKS_PATH) && req.method === "DELETE") {
       const [provider, ...rest] = path.slice(LINKS_PATH.length).split("/");
-      if (provider && rest.length > 0) return this.serveRemove(req, decodeURIComponent(provider), decodeURIComponent(rest.join("/")));
+      if (provider && rest.length > 0)
+        return this.serveRemove(req, decodeURIComponent(provider), decodeURIComponent(rest.join("/")));
     }
     return null;
   }
 
-  private page(status: number, title: string, message: string, action?: { action: string; csrf: string; button: string }): Response {
+  private page(
+    status: number,
+    title: string,
+    message: string,
+    action?: { action: string; csrf: string; button: string },
+  ): Response {
     const form = action
       ? `<form method="post" action="${esc(action.action)}"><input type="hidden" name="csrf" value="${esc(action.csrf)}"><button type="submit">${esc(action.button)}</button></form>`
       : "";
@@ -193,7 +201,7 @@ ${form}
 
   /** The signed-in user, or a response (login redirect or page). */
   private async signedIn(req: Request): Promise<{ user: User } | { res: Response }> {
-    let user: User | null = null;
+    let user: User | null;
     try {
       user = await this.o.currentUser(req);
     } catch {
@@ -202,12 +210,17 @@ ${form}
     if (user) return { user };
     if (this.o.loginUrl && req.method === "GET") {
       const u = new URL(req.url);
-      return { res: new Response(null, { status: 302, headers: { Location: this.o.loginUrl(u.pathname + u.search) } }) };
+      return {
+        res: new Response(null, { status: 302, headers: { Location: this.o.loginUrl(u.pathname + u.search) } }),
+      };
     }
     return { res: this.page(401, "Sign in required", "Sign in to Open Factory, then open this link again.") };
   }
 
-  private async linkRequest(req: Request, tok: string): Promise<{ claims: LinkClaims; user: User } | { res: Response }> {
+  private async linkRequest(
+    req: Request,
+    tok: string,
+  ): Promise<{ claims: LinkClaims; user: User } | { res: Response }> {
     let claims: LinkClaims;
     try {
       claims = await this.parse(tok);
@@ -217,7 +230,13 @@ ${form}
     const s = await this.signedIn(req);
     if ("res" in s) return s;
     if (s.user.team_id !== claims.t) {
-      return { res: this.page(403, "Wrong team", "Your Open Factory account is not a member of the team this request belongs to.") };
+      return {
+        res: this.page(
+          403,
+          "Wrong team",
+          "Your Open Factory account is not a member of the team this request belongs to.",
+        ),
+      };
     }
     return { claims, user: s.user };
   }
@@ -259,14 +278,18 @@ ${form}
         action,
       );
     }
-    return this.page(403, "Link not possible", `This link cannot be proved: ${label} sign-in is not configured for your team. Ask a team admin.`);
+    return this.page(
+      403,
+      "Link not possible",
+      `This link cannot be proved: ${label} sign-in is not configured for your team. Ask a team admin.`,
+    );
   }
 
   private async serveComplete(req: Request, tok: string): Promise<Response> {
     const r = await this.linkRequest(req, tok);
     if ("res" in r) return r.res;
     const { claims, user } = r;
-    let csrf = "";
+    let csrf: string;
     try {
       csrf = String((await req.formData()).get("csrf") ?? "");
     } catch {
@@ -287,7 +310,11 @@ ${form}
     if ("res" in s) return s.res;
     const p = await this.proverOf(s.user.team_id, provider);
     if (!p) {
-      return this.page(404, "Link not possible", `${providerLabel(provider)} sign-in is not configured for your team. Ask a team admin.`);
+      return this.page(
+        404,
+        "Link not possible",
+        `${providerLabel(provider)} sign-in is not configured for your team. Ask a team admin.`,
+      );
     }
     return this.redirectToProvider(p, { u: s.user.id, t: s.user.team_id, p: provider });
   }
@@ -299,7 +326,10 @@ ${form}
   private async redirectToProvider(p: Prover, st: Omit<StateClaims, "n" | "e">): Promise<Response> {
     const n = crypto.getRandomValues(new Uint8Array(16));
     const full: StateClaims = { ...st, n: b64urlEncode(n), e: this.nowS() + STATE_TTL_S };
-    return new Response(null, { status: 303, headers: { Location: p.authUrl(await this.seal("state", full), this.redirectUri()) } });
+    return new Response(null, {
+      status: 303,
+      headers: { Location: p.authUrl(await this.seal("state", full), this.redirectUri()) },
+    });
   }
 
   private async serveCallback(req: Request, url: URL): Promise<Response> {
@@ -346,14 +376,24 @@ ${form}
           method: "provider_sign_in",
           reason: "account mismatch",
         });
-        return this.page(403, "Link failed", `You signed in to ${providerLabel(st.p)} with a different account than the one in the link.`);
+        return this.page(
+          403,
+          "Link failed",
+          `You signed in to ${providerLabel(st.p)} with a different account than the one in the link.`,
+        );
       }
       if (handle === "") handle = claims.h ?? "";
     }
     return this.finish(user, st.p, id, handle, "provider_sign_in");
   }
 
-  private async finish(user: User, provider: string, externalId: string, handle: string, method: string): Promise<Response> {
+  private async finish(
+    user: User,
+    provider: string,
+    externalId: string,
+    handle: string,
+    method: string,
+  ): Promise<Response> {
     try {
       await this.link(user, provider, externalId, handle, method);
     } catch (e) {
@@ -372,7 +412,11 @@ ${form}
   }
 
   /** A message and status when the external account is linked to another user. */
-  private async ownerConflict(user: User, provider: string, externalId: string): Promise<{ message: string; status: number } | null> {
+  private async ownerConflict(
+    user: User,
+    provider: string,
+    externalId: string,
+  ): Promise<{ message: string; status: number } | null> {
     const x = await this.o.store.findExternalIdentity(provider, externalId);
     if (!x || x.user_id === "" || x.user_id === user.id) return null;
     let owner = "another Open Factory account";
@@ -493,5 +537,8 @@ ${form}
 }
 
 function errorJson(status: number, code: string, message: string): Response {
-  return new Response(JSON.stringify({ error: { code, message } }), { status, headers: { "Content-Type": "application/json" } });
+  return new Response(JSON.stringify({ error: { code, message } }), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
 }

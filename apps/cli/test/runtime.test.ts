@@ -14,7 +14,7 @@ function fakeRuntime(): string {
 }
 
 describe.skipIf(process.platform === "win32")("runtime commands", () => {
-  it.each(["runner", "netguard", "vm-init", "machine", "worker"])(
+  it.each(["runner", "netguard", "vm-init", "worker"])(
     "forwards %s with all arguments to openfactory-runtime",
     async (cmd) => {
       const dir = fakeRuntime();
@@ -23,6 +23,20 @@ describe.skipIf(process.platform === "win32")("runtime commands", () => {
       expect(r.ran).toEqual([{ file: join(dir, "openfactory-runtime"), args: [cmd, "--id", "w1", "extra"] }]);
     },
   );
+
+  it.each(["enroll", "run", "status", "drain", "doctor"])("forwards worker %s to openfactory-runtime", async (sub) => {
+    const dir = fakeRuntime();
+    const r = await runCli(["worker", sub], { vars: { PATH: dir } });
+    expect(r.code).toBe(0);
+    expect(r.ran[0]?.args).toEqual(["worker", sub]);
+  });
+
+  it("has no machine command: host commands are under worker", async () => {
+    const dir = fakeRuntime();
+    const r = await runCli(["machine", "doctor"], { vars: { PATH: dir } });
+    expect(r.code).not.toBe(0);
+    expect(r.ran).toHaveLength(0);
+  });
 
   it("starts a worker without arguments", async () => {
     const dir = fakeRuntime();

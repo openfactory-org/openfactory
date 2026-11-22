@@ -98,7 +98,8 @@ export async function compactRunMessages(host: CompactionHost, runId: string): P
       customMetadata: { count: String(prevMsgs.length + fresh.length), maxSeq: String(fresh[fresh.length - 1]!.seq) },
     });
     const head = await host.bucket.head(key);
-    if (!head || head.size !== bytes) throw new Error(`compaction of ${runId}: the object ${key} does not have the expected size`);
+    if (!head || head.size !== bytes)
+      throw new Error(`compaction of ${runId}: the object ${key} does not have the expected size`);
   }
   const deleted = host.deleteRows(runId, upto);
   return { moved: deleted, more: rows.length >= COMPACT_CHUNK_ROWS, key, bytes };

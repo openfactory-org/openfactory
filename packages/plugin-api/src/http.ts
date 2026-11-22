@@ -117,7 +117,7 @@ export class ApiClient {
     try {
       return { data: JSON.parse(text) as T, headers: res.headers };
     } catch (e) {
-      throw new Error(`decode ${method} ${redactUrl(target)} response: ${(e as Error).message}`);
+      throw new Error(`decode ${method} ${redactUrl(target)} response: ${(e as Error).message}`, { cause: e });
     }
   }
 }

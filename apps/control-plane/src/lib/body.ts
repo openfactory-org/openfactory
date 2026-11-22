@@ -9,7 +9,8 @@ export function bodyObject(body: unknown, optional = false): JsonObject {
     if (optional) return {};
     throw new OfError("invalid_request", "request body is required");
   }
-  if (typeof body !== "object" || Array.isArray(body)) throw new OfError("invalid_request", "malformed JSON body: expected an object");
+  if (typeof body !== "object" || Array.isArray(body))
+    throw new OfError("invalid_request", "malformed JSON body: expected an object");
   return body as JsonObject;
 }
 
@@ -55,7 +56,11 @@ export function optStringMap(o: JsonObject, k: string): Record<string, string> |
 export function optNullableStringMap(o: JsonObject, k: string): Record<string, string | null> | undefined {
   const v = o[k];
   if (v === undefined || v === null) return undefined;
-  if (typeof v !== "object" || Array.isArray(v) || !Object.values(v).every((x) => x === null || typeof x === "string")) {
+  if (
+    typeof v !== "object" ||
+    Array.isArray(v) ||
+    !Object.values(v).every((x) => x === null || typeof x === "string")
+  ) {
     throw typeErr(k, "map[string]*string");
   }
   return v as Record<string, string | null>;

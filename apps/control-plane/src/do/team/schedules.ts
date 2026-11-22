@@ -19,7 +19,14 @@ import { parseCron } from "../../triggers/cron";
 import { EventCronFired, ProviderSchedule } from "../../triggers/attributes";
 import { scheduleEvent, scheduleId, scheduleKey } from "../../triggers/schedules";
 import { USER_TOKEN_FORGES, integrationProvider, supportsUserTokens } from "../../forges/registry";
-import { ingressURL, generateSecret, AUTH_SIGNATURE, AUTH_URL_TOKEN, MAX_WEBHOOKS_PER_FACTORY, validURLToken } from "../../webhooks/config";
+import {
+  ingressURL,
+  generateSecret,
+  AUTH_SIGNATURE,
+  AUTH_URL_TOKEN,
+  MAX_WEBHOOKS_PER_FACTORY,
+  validURLToken,
+} from "../../webhooks/config";
 import { signatureSchemes } from "../../webhooks/signature";
 import { created, noContent, type OpCall, type TeamKit, type TeamOp } from "./index";
 import * as factories from "./factories";
@@ -83,7 +90,9 @@ const getRow = (kit: TeamKit, key: string) =>
   first<ScheduleRow & Record<string, SqlStorageValue>>(kit.sql, "SELECT * FROM schedules WHERE key = ?", key);
 
 function scheduleTriggers(a: Automation): Trigger[] {
-  return (a.triggers ?? []).filter((t) => canonicalProvider(t.provider) === ProviderSchedule && t.event === EventCronFired && t.schedule);
+  return (a.triggers ?? []).filter(
+    (t) => canonicalProvider(t.provider) === ProviderSchedule && t.event === EventCronFired && t.schedule,
+  );
 }
 
 function nextSlot(cron: string, baseMs: number): number {
@@ -106,7 +115,11 @@ export function syncSchedules(kit: TeamKit, factoryId: string, automations: unkn
     if (!a?.enabled) continue;
     for (const t of scheduleTriggers(a)) want.set(scheduleKey(a.id, t.schedule!.name ?? ""), { a, t });
   }
-  for (const r of all<ScheduleRow & Record<string, SqlStorageValue>>(kit.sql, "SELECT * FROM schedules WHERE factory_id = ? AND active = 1", factoryId)) {
+  for (const r of all<ScheduleRow & Record<string, SqlStorageValue>>(
+    kit.sql,
+    "SELECT * FROM schedules WHERE factory_id = ? AND active = 1",
+    factoryId,
+  )) {
     if (want.has(r.key)) continue;
     kit.sql.exec("UPDATE schedules SET active = 0, next_ms = 0 WHERE key = ?", r.key);
     kit.clearTimer(timerName(r.key));
@@ -328,9 +341,17 @@ export function syncWebhooks(kit: TeamKit, factoryId: string, webhooks: unknown[
   for (const w0 of webhooks as Webhook[]) {
     if (!w0?.id) continue;
     keep.add(w0.id);
-    const old = first<{ created_ms: number; data: string }>(kit.sql, "SELECT created_ms, data FROM webhooks WHERE id = ?", w0.id);
+    const old = first<{ created_ms: number; data: string }>(
+      kit.sql,
+      "SELECT created_ms, data FROM webhooks WHERE id = ?",
+      w0.id,
+    );
     const createdMs = old?.created_ms ?? now;
-    const w: Webhook = { ...w0, factory_id: factoryId, created_at: old ? (JSON.parse(old.data) as Webhook).created_at : iso(createdMs) };
+    const w: Webhook = {
+      ...w0,
+      factory_id: factoryId,
+      created_at: old ? (JSON.parse(old.data) as Webhook).created_at : iso(createdMs),
+    };
     kit.sql.exec(
       `INSERT INTO webhooks (id, factory_id, name, secret_name, created_ms, data) VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET factory_id = excluded.factory_id, name = excluded.name, secret_name = excluded.secret_name, data = excluded.data`,
@@ -353,9 +374,11 @@ export function getWebhook(kit: TeamKit, id: string): Webhook | undefined {
 }
 
 export function listWebhooks(kit: TeamKit, factoryId: string): Webhook[] {
-  return all<{ data: string }>(kit.sql, "SELECT data FROM webhooks WHERE factory_id = ? ORDER BY created_ms, id", factoryId).map(
-    (r) => JSON.parse(r.data) as Webhook,
-  );
+  return all<{ data: string }>(
+    kit.sql,
+    "SELECT data FROM webhooks WHERE factory_id = ? ORDER BY created_ms, id",
+    factoryId,
+  ).map((r) => JSON.parse(r.data) as Webhook);
 }
 
 function webhookView(kit: TeamKit, w: Webhook): Webhook & { ingress_url: string } {
@@ -377,16 +400,27 @@ const webhookFile = (name: string) => `webhooks/${name}.yaml`;
 
 async function managedFiles(kit: TeamKit, f: factories.FactoryRecord): Promise<Record<string, string>> {
   if (f.source && f.source !== "managed") {
-    throw new OfError("operation_not_supported", `this factory's definition lives in ${f.git_repo ?? "git"}: change webhooks/<name>.yaml there`);
+    throw new OfError(
+      "operation_not_supported",
+      `this factory's definition lives in ${f.git_repo ?? "git"}: change webhooks/<name>.yaml there`,
+    );
   }
   if (!f.active_version_id) throw new OfError("operation_not_supported", "factory has no applied definition yet");
   return { ...(await factories.activeFiles(kit, f)) };
 }
 
-async function applyFiles(kit: TeamKit, c: OpCall, f: factories.FactoryRecord, files: Record<string, string>, message: string): Promise<void> {
+async function applyFiles(
+  kit: TeamKit,
+  c: OpCall,
+  f: factories.FactoryRecord,
+  files: Record<string, string>,
+  message: string,
+): Promise<void> {
   const r = await factories.applyDefinition(kit, f.id, { files, message, author: actorId(c.principal()) });
   if (r.invalid) {
-    throw new OfError("invalid_request", "definition could not be applied", { extra: { errors: r.version.errors ?? [] } });
+    throw new OfError("invalid_request", "definition could not be applied", {
+      extra: { errors: r.version.errors ?? [] },
+    });
   }
 }
 
@@ -415,7 +449,10 @@ async function createWebhook(kit: TeamKit, c: OpCall): Promise<unknown> {
   };
   const name = (req.name ?? "").trim();
   if (!WEBHOOK_NAME_RE.test(name)) {
-    throw new OfError("invalid_request", "name must be 1-63 lowercase letters, digits, '-' or '_' (it becomes webhooks/<name>.yaml)");
+    throw new OfError(
+      "invalid_request",
+      "name must be 1-63 lowercase letters, digits, '-' or '_' (it becomes webhooks/<name>.yaml)",
+    );
   }
   const mode = req.auth_mode || "token";
   const scheme = req.signature_scheme ?? "";
@@ -423,18 +460,23 @@ async function createWebhook(kit: TeamKit, c: OpCall): Promise<unknown> {
     if (scheme) throw new OfError("invalid_request", "signature_scheme is only valid with auth_mode signature");
     if (req.secret) throw new OfError("invalid_request", `secret is generated for ${mode} webhooks; omit it`);
   } else if (mode === AUTH_SIGNATURE) {
-    if (!signatureSchemes().includes(scheme)) throw new OfError("invalid_request", `signature_scheme must be one of ${signatureSchemes().join(", ")}`);
+    if (!signatureSchemes().includes(scheme))
+      throw new OfError("invalid_request", `signature_scheme must be one of ${signatureSchemes().join(", ")}`);
   } else {
     throw new OfError("invalid_request", "auth_mode must be token, url_token or signature");
   }
   const files = await managedFiles(kit, f);
   if (webhookFile(name) in files) throw new OfError("conflict", `webhook "${name}" already exists`);
-  if (Object.keys(files).filter((p) => p.startsWith("webhooks/") && p.endsWith(".yaml")).length >= MAX_WEBHOOKS_PER_FACTORY) {
+  if (
+    Object.keys(files).filter((p) => p.startsWith("webhooks/") && p.endsWith(".yaml")).length >=
+    MAX_WEBHOOKS_PER_FACTORY
+  ) {
     throw new OfError("conflict", `a factory can have at most ${MAX_WEBHOOKS_PER_FACTORY} webhooks`);
   }
   const explicit = (req.secret_name ?? "").trim() !== "";
   const secretName = explicit ? req.secret_name!.trim() : defaultSecretName(name);
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(secretName)) throw new OfError("invalid_request", `invalid secret_name "${secretName}"`);
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(secretName))
+    throw new OfError("invalid_request", `invalid secret_name "${secretName}"`);
   let enabled = req.enabled === undefined || req.enabled;
   const old = await secrets.getSecretValue(kit, "", secretName);
   const existing = old !== undefined;
@@ -497,10 +539,24 @@ async function createWebhook(kit: TeamKit, c: OpCall): Promise<unknown> {
 
 async function updateWebhook(kit: TeamKit, c: OpCall): Promise<unknown> {
   const { wh, f } = webhookFor(kit, c);
-  const req = (c.body ?? {}) as { name?: string; auth_mode?: string; signature_scheme?: string; enabled?: boolean; delivery_id_header?: string; secret?: string };
-  if (req.name !== undefined && req.name !== wh.name) throw new OfError("operation_not_supported", "webhooks cannot be renamed; create a new webhook instead");
-  if ((req.auth_mode !== undefined && req.auth_mode !== wh.auth_mode) || (req.signature_scheme !== undefined && req.signature_scheme !== (wh.signature_scheme ?? ""))) {
-    throw new OfError("operation_not_supported", "auth_mode and signature_scheme cannot change; delete and recreate the webhook");
+  const req = (c.body ?? {}) as {
+    name?: string;
+    auth_mode?: string;
+    signature_scheme?: string;
+    enabled?: boolean;
+    delivery_id_header?: string;
+    secret?: string;
+  };
+  if (req.name !== undefined && req.name !== wh.name)
+    throw new OfError("operation_not_supported", "webhooks cannot be renamed; create a new webhook instead");
+  if (
+    (req.auth_mode !== undefined && req.auth_mode !== wh.auth_mode) ||
+    (req.signature_scheme !== undefined && req.signature_scheme !== (wh.signature_scheme ?? ""))
+  ) {
+    throw new OfError(
+      "operation_not_supported",
+      "auth_mode and signature_scheme cannot change; delete and recreate the webhook",
+    );
   }
   const files = await managedFiles(kit, f);
   const path = webhookFile(wh.name);
@@ -508,13 +564,18 @@ async function updateWebhook(kit: TeamKit, c: OpCall): Promise<unknown> {
   if (doc === undefined) throw new OfError("resource_not_found", "webhook file " + path);
   const edits: Record<string, unknown> = {};
   if (req.secret !== undefined) {
-    if (wh.auth_mode !== AUTH_SIGNATURE) throw new OfError("invalid_request", "secret can only be supplied for signature webhooks; use rotate-secret instead");
+    if (wh.auth_mode !== AUTH_SIGNATURE)
+      throw new OfError(
+        "invalid_request",
+        "secret can only be supplied for signature webhooks; use rotate-secret instead",
+      );
     if (req.secret.trim() === "") throw new OfError("invalid_request", "secret cannot be empty");
     await secrets.putSecret(kit, "", wh.secret_name, "generic", req.secret);
     if (req.enabled === undefined) edits["enabled"] = true;
   }
   if (req.enabled !== undefined) edits["enabled"] = req.enabled;
-  if (req.delivery_id_header !== undefined) edits["deliveryIdHeader"] = req.delivery_id_header === "" ? null : req.delivery_id_header;
+  if (req.delivery_id_header !== undefined)
+    edits["deliveryIdHeader"] = req.delivery_id_header === "" ? null : req.delivery_id_header;
   files[path] = factories.editYamlDocument(doc, edits);
   await applyFiles(kit, c, f, files, "Update webhook " + wh.name);
   const nwh = listWebhooks(kit, f.id).find((w) => w.name === wh.name);
@@ -528,7 +589,8 @@ async function rotateSecret(kit: TeamKit, c: OpCall): Promise<unknown> {
   const files = await managedFiles(kit, f);
   let reveal = "";
   if (req.secret) {
-    if (wh.auth_mode !== AUTH_SIGNATURE) throw new OfError("invalid_request", "secret can only be supplied for signature webhooks");
+    if (wh.auth_mode !== AUTH_SIGNATURE)
+      throw new OfError("invalid_request", "secret can only be supplied for signature webhooks");
     await secrets.putSecret(kit, "", wh.secret_name, "generic", req.secret);
   } else if (wh.auth_mode === AUTH_SIGNATURE && wh.signature_scheme !== "standard_webhooks") {
     throw new OfError("invalid_request", 'supply the provider\'s new signing secret in "secret"');
@@ -561,9 +623,18 @@ function userOf(c: OpCall): string {
 export async function getUserForgeToken(kit: TeamKit, userId: string, codeForge: string): Promise<string | undefined> {
   if (!userId) return undefined;
   const p = integrationProvider(codeForge);
-  const r = first<{ envelope: ArrayBuffer }>(kit.sql, "SELECT envelope FROM user_forge_tokens WHERE user_id = ? AND provider = ?", userId, p);
+  const r = first<{ envelope: ArrayBuffer }>(
+    kit.sql,
+    "SELECT envelope FROM user_forge_tokens WHERE user_id = ? AND provider = ?",
+    userId,
+    p,
+  );
   if (!r) return undefined;
-  const v = await secrets.openValue(kit, { teamId: kit.teamId(), factoryId: "", name: tokenName(userId, p), type: "generic" }, new Uint8Array(r.envelope));
+  const v = await secrets.openValue(
+    kit,
+    { teamId: kit.teamId(), factoryId: "", name: tokenName(userId, p), type: "generic" },
+    new Uint8Array(r.envelope),
+  );
   return new TextDecoder().decode(v);
 }
 
@@ -573,10 +644,17 @@ async function setUserForgeToken(kit: TeamKit, c: OpCall): Promise<unknown> {
   const tok = ((c.body ?? {}) as { token?: string }).token?.trim() ?? "";
   if (tok === "") throw new OfError("invalid_request", "token is required");
   if (!supportsUserTokens(forge)) {
-    throw new OfError("invalid_request", `${forge} does not support per-user tokens (supported: ${USER_TOKEN_FORGES.join(", ")})`);
+    throw new OfError(
+      "invalid_request",
+      `${forge} does not support per-user tokens (supported: ${USER_TOKEN_FORGES.join(", ")})`,
+    );
   }
   const p = integrationProvider(forge);
-  const env = await secrets.sealValue(kit, { teamId: kit.teamId(), factoryId: "", name: tokenName(uid, p), type: "generic" }, tok);
+  const env = await secrets.sealValue(
+    kit,
+    { teamId: kit.teamId(), factoryId: "", name: tokenName(uid, p), type: "generic" },
+    tok,
+  );
   kit.tx(() =>
     kit.sql.exec(
       `INSERT INTO user_forge_tokens (user_id, provider, envelope, updated_ms) VALUES (?, ?, ?, ?)
@@ -618,7 +696,7 @@ export const ops: Record<string, TeamOp> = {
   resumeSchedule: (kit, c) => setPaused(kit, c, false),
   /** Internal (Worker runAutomation): the automation and its factory, authorized for editor. */
   automationForRun: (kit, c) => {
-    const id = c.params["id"] ?? (c.query["id"] ?? "");
+    const id = c.params["id"] ?? c.query["id"] ?? "";
     for (const f of factories.listFactories(kit)) {
       const a = factories.listAutomations(kit, f.id).find((x) => x.id === id);
       if (!a) continue;
@@ -631,7 +709,10 @@ export const ops: Record<string, TeamOp> = {
 
   listWebhooks: (kit, c) => {
     const f = factories.factoryFor(kit, c);
-    return listResponse(listWebhooks(kit, f.id).map((w) => webhookView(kit, w)), "");
+    return listResponse(
+      listWebhooks(kit, f.id).map((w) => webhookView(kit, w)),
+      "",
+    );
   },
   getWebhook: (kit, c) => webhookView(kit, webhookFor(kit, c).wh),
   createWebhook,
@@ -682,14 +763,22 @@ export function setup(kit: TeamKit): void {
   secrets.registerRewrapSource({
     name: "user_forge_tokens",
     list: (k) =>
-      all<{ user_id: string; provider: string; envelope: ArrayBuffer }>(k.sql, "SELECT user_id, provider, envelope FROM user_forge_tokens").map((r) => ({
+      all<{ user_id: string; provider: string; envelope: ArrayBuffer }>(
+        k.sql,
+        "SELECT user_id, provider, envelope FROM user_forge_tokens",
+      ).map((r) => ({
         key: `${r.user_id}\u0000${r.provider}`,
         id: { teamId: k.teamId(), factoryId: "", name: tokenName(r.user_id, r.provider), type: "generic" },
         envelope: new Uint8Array(r.envelope),
       })),
     replace: (k, key, old, next) => {
       const [uid, p] = key.split("\u0000") as [string, string];
-      const cur = first<{ envelope: ArrayBuffer }>(k.sql, "SELECT envelope FROM user_forge_tokens WHERE user_id = ? AND provider = ?", uid, p);
+      const cur = first<{ envelope: ArrayBuffer }>(
+        k.sql,
+        "SELECT envelope FROM user_forge_tokens WHERE user_id = ? AND provider = ?",
+        uid,
+        p,
+      );
       if (!cur) return false;
       const a = new Uint8Array(cur.envelope);
       if (a.length !== old.length || a.some((x, i) => x !== old[i])) return false;
@@ -698,4 +787,3 @@ export function setup(kit: TeamKit): void {
     },
   });
 }
-

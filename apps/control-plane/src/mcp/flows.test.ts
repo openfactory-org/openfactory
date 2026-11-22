@@ -30,13 +30,18 @@ let clock = Date.UTC(2026, 10, 9, 12, 0, 0);
 const fakeFetch: typeof fetch = async (input, init) => {
   const req = new Request(input as RequestInfo, init);
   const u = new URL(req.url);
-  for (const [prefix, h] of upstreams) if (req.url.startsWith(prefix) || u.origin + u.pathname === prefix) return h(req);
+  for (const [prefix, h] of upstreams)
+    if (req.url.startsWith(prefix) || u.origin + u.pathname === prefix) return h(req);
   return new Response("no fake for " + req.url, { status: 599 });
 };
 
 beforeAll(() => {
   let enc: ReturnType<typeof localEncrypter> | undefined;
-  setMcpRuntime((e): McpRuntime => ({ fetch: fakeFetch, now: () => clock, encrypter: () => (enc ??= localEncrypter(e)) }));
+  setMcpRuntime((e): McpRuntime => ({
+    fetch: fakeFetch,
+    now: () => clock,
+    encrypter: () => (enc ??= localEncrypter(e)),
+  }));
 });
 
 afterEach(() => {
@@ -47,7 +52,15 @@ afterEach(() => {
 async function seedUser(id: string, role: Role, opts: { kind?: string; team?: string } = {}): Promise<void> {
   const stub = E.TEAM.getByName(doName.team("default"));
   await runInDurableObject(stub, (_i, state) => {
-    const u = { id, team_id: opts.team ?? "default", email: `${id}@example.test`, name: id, role, ...(opts.kind ? { kind: opts.kind } : {}), created_at: new Date().toISOString() };
+    const u = {
+      id,
+      team_id: opts.team ?? "default",
+      email: `${id}@example.test`,
+      name: id,
+      role,
+      ...(opts.kind ? { kind: opts.kind } : {}),
+      created_at: new Date().toISOString(),
+    };
     state.storage.sql.exec(
       "INSERT OR REPLACE INTO users (id, email, kind, role, name, created_ms, data) VALUES (?, ?, ?, ?, ?, ?, ?)",
       id,
@@ -61,9 +74,21 @@ async function seedUser(id: string, role: Role, opts: { kind?: string; team?: st
   });
 }
 
-const principal = (id: string, role: Role): Principal => ({ kind: "user", id, teamId: "default", role, factoryRoles: {}, userId: id });
+const principal = (id: string, role: Role): Principal => ({
+  kind: "user",
+  id,
+  teamId: "default",
+  role,
+  factoryRoles: {},
+  userId: id,
+});
 
-async function rest<T = Record<string, unknown>>(p: Principal, method: string, path: string, body?: unknown): Promise<{ status: number; body: T }> {
+async function rest<T = Record<string, unknown>>(
+  p: Principal,
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<{ status: number; body: T }> {
   try {
     return { status: 200, body: await callRoute<T>(E, p, method, path, body) };
   } catch (e) {
@@ -77,16 +102,29 @@ async function sessionCookie(userId: string): Promise<string> {
   return (await issueSessionCookie(E, { u: userId, t: "default", p: "password" })).split(";")[0]!;
 }
 
-async function req(method: string, path: string, init: { body?: string; headers?: Record<string, string> } = {}): Promise<Response> {
+async function req(
+  method: string,
+  path: string,
+  init: { body?: string; headers?: Record<string, string> } = {},
+): Promise<Response> {
   const res = await handleMcpRequest(new Request(PUBLIC + path, { method, ...init, redirect: "manual" }), E);
   if (!res) throw new Error("not an MCP path: " + path);
   return res;
 }
 
-async function rpc(path: string, token: string, method: string, params: unknown = {}): Promise<Record<string, unknown>> {
+async function rpc(
+  path: string,
+  token: string,
+  method: string,
+  params: unknown = {},
+): Promise<Record<string, unknown>> {
   const res = await req("POST", path, {
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-    headers: { authorization: "Bearer " + token, "content-type": "application/json", accept: "application/json, text/event-stream" },
+    headers: {
+      authorization: "Bearer " + token,
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+    },
   });
   expect(res.status, await res.clone().text()).toBe(200);
   return (await res.json()) as Record<string, unknown>;
@@ -101,7 +139,9 @@ describe("Factory MCP browser sign-in (mcpauth)", () => {
   });
 
   async function register(uris = ["http://localhost/cb"]): Promise<string> {
-    const r = await req("POST", "/oauth/register", { body: JSON.stringify({ client_name: "cli", redirect_uris: uris }) });
+    const r = await req("POST", "/oauth/register", {
+      body: JSON.stringify({ client_name: "cli", redirect_uris: uris }),
+    });
     expect(r.status).toBe(201);
     return ((await r.json()) as { client_id: string }).client_id;
   }
@@ -124,7 +164,12 @@ describe("Factory MCP browser sign-in (mcpauth)", () => {
   }
 
   const token = async (form: Record<string, string>) =>
-    (await (await req("POST", "/oauth/token", { body: new URLSearchParams(form).toString(), headers: { "content-type": "application/x-www-form-urlencoded" } })).json()) as Record<string, unknown>;
+    (await (
+      await req("POST", "/oauth/token", {
+        body: new URLSearchParams(form).toString(),
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+      })
+    ).json()) as Record<string, unknown>;
 
   async function signIn(): Promise<{ clientId: string; tok: Record<string, unknown> }> {
     const clientId = await register();
@@ -142,11 +187,22 @@ describe("Factory MCP browser sign-in (mcpauth)", () => {
     expect(r.searchParams.get("state")).toBe("xyz");
     expect(r.searchParams.get("iss")).toBe(PUBLIC);
     // A wrong verifier fails, and the code is then used up.
-    const bad = await token({ grant_type: "authorization_code", code: r.searchParams.get("code")!, client_id: clientId, code_verifier: "w".repeat(50) });
+    const bad = await token({
+      grant_type: "authorization_code",
+      code: r.searchParams.get("code")!,
+      client_id: clientId,
+      code_verifier: "w".repeat(50),
+    });
     expect(bad.error).toBe("invalid_grant");
     r = await browser(q, "allow");
     const code = r.searchParams.get("code")!;
-    const tok = await token({ grant_type: "authorization_code", code, client_id: clientId, code_verifier: verifier, redirect_uri: "http://localhost:5555/cb" });
+    const tok = await token({
+      grant_type: "authorization_code",
+      code,
+      client_id: clientId,
+      code_verifier: verifier,
+      redirect_uri: "http://localhost:5555/cb",
+    });
     expect(tok.access_token, JSON.stringify(tok)).toBeTruthy();
     const again = await token({ grant_type: "authorization_code", code, client_id: clientId, code_verifier: verifier });
     expect(again.error).toBe("invalid_grant");
@@ -157,8 +213,13 @@ describe("Factory MCP browser sign-in (mcpauth)", () => {
     for (const path of ["/mcp", "/api/v1/mcp/factory"]) {
       const r = await req("POST", path, { body: "{}" });
       expect(r.status).toBe(401);
-      expect(r.headers.get("www-authenticate")).toContain(`resource_metadata="${PUBLIC}/.well-known/oauth-protected-resource${path}"`);
-      const md = (await (await req("GET", "/.well-known/oauth-protected-resource" + path)).json()) as { resource: string; authorization_servers: string[] };
+      expect(r.headers.get("www-authenticate")).toContain(
+        `resource_metadata="${PUBLIC}/.well-known/oauth-protected-resource${path}"`,
+      );
+      const md = (await (await req("GET", "/.well-known/oauth-protected-resource" + path)).json()) as {
+        resource: string;
+        authorization_servers: string[];
+      };
       expect(md.resource).toBe(PUBLIC + path);
       expect(md.authorization_servers).toEqual([PUBLIC]);
     }
@@ -180,7 +241,13 @@ describe("Factory MCP browser sign-in (mcpauth)", () => {
 
   it("denied and signed out", async () => {
     const clientId = await register();
-    const q = new URLSearchParams({ response_type: "code", client_id: clientId, redirect_uri: "http://localhost/cb", code_challenge: "abc", code_challenge_method: "S256" }).toString();
+    const q = new URLSearchParams({
+      response_type: "code",
+      client_id: clientId,
+      redirect_uri: "http://localhost/cb",
+      code_challenge: "abc",
+      code_challenge_method: "S256",
+    }).toString();
     const denied = await browser(q, "deny");
     expect(denied.searchParams.get("error")).toBe("access_denied");
     const out = await browser(q, "", false);
@@ -197,12 +264,18 @@ describe("Factory MCP browser sign-in (mcpauth)", () => {
 
     // The Factory MCP server accepts the access token.
     const list = await rpc("/mcp", access, "tools/list");
-    expect(((list.result as { tools: unknown[] }).tools).length).toBeGreaterThan(10);
-    const grants = await rest<{ items: { client_name: string; team_id: string; id: string }[] }>(principal("usr_ada", "editor"), "GET", "/mcp-sign-ins");
+    expect((list.result as { tools: unknown[] }).tools.length).toBeGreaterThan(10);
+    const grants = await rest<{ items: { client_name: string; team_id: string; id: string }[] }>(
+      principal("usr_ada", "editor"),
+      "GET",
+      "/mcp-sign-ins",
+    );
     expect(grants.body.items.some((g) => g.client_name === "cli" && g.team_id === "default")).toBe(true);
 
     clock += 61 * 60 * 1000;
-    expect((await req("POST", "/mcp", { body: "{}", headers: { authorization: "Bearer " + access } })).status).toBe(401);
+    expect((await req("POST", "/mcp", { body: "{}", headers: { authorization: "Bearer " + access } })).status).toBe(
+      401,
+    );
     const next = await token({ grant_type: "refresh_token", refresh_token: refresh, client_id: clientId });
     const newAccess = next.access_token as string;
     expect(newAccess).toBeTruthy();
@@ -211,14 +284,25 @@ describe("Factory MCP browser sign-in (mcpauth)", () => {
     expect((await token({ grant_type: "refresh_token", refresh_token: refresh })).error).toBe("invalid_grant");
 
     // RFC 7009 revocation ends the sign-in.
-    const rv = await req("POST", "/oauth/revoke", { body: new URLSearchParams({ token: next.refresh_token as string }).toString() });
+    const rv = await req("POST", "/oauth/revoke", {
+      body: new URLSearchParams({ token: next.refresh_token as string }).toString(),
+    });
     expect(rv.status).toBe(200);
-    expect((await req("POST", "/mcp", { body: "{}", headers: { authorization: "Bearer " + newAccess } })).status).toBe(401);
+    expect((await req("POST", "/mcp", { body: "{}", headers: { authorization: "Bearer " + newAccess } })).status).toBe(
+      401,
+    );
 
     // A user moved out of the team cannot use a sign-in.
     const second = await signIn();
     await seedUser("usr_ada", "editor", { team: "team2" });
-    expect((await req("POST", "/mcp", { body: "{}", headers: { authorization: "Bearer " + (second.tok.access_token as string) } })).status).toBe(401);
+    expect(
+      (
+        await req("POST", "/mcp", {
+          body: "{}",
+          headers: { authorization: "Bearer " + (second.tok.access_token as string) },
+        })
+      ).status,
+    ).toBe(401);
     await seedUser("usr_ada", "editor");
   });
 
@@ -230,19 +314,32 @@ describe("Factory MCP browser sign-in (mcpauth)", () => {
     const mine = await rest<{ items: { id: string }[] }>(ada, "GET", "/mcp-sign-ins");
     const id = mine.body.items[0]!.id;
     expect((await rest(principal("usr_bob", "user"), "GET", "/mcp-sign-ins?scope=team")).status).toBe(403);
-    const team = await rest<{ items: { id: string }[] }>(principal("usr_admin", "admin"), "GET", "/mcp-sign-ins?scope=team");
+    const team = await rest<{ items: { id: string }[] }>(
+      principal("usr_admin", "admin"),
+      "GET",
+      "/mcp-sign-ins?scope=team",
+    );
     expect(team.body.items.some((g) => g.id === id)).toBe(true);
     expect((await rest(principal("usr_bob", "user"), "DELETE", `/mcp-sign-ins/${id}`)).status).toBe(403);
     expect((await rest(ada, "DELETE", "/mcp-sign-ins/mcps_missing")).status).toBe(404);
     expect((await rest(principal("usr_admin", "admin"), "DELETE", `/mcp-sign-ins/${id}`)).status).toBe(200);
     for (const g of mine.body.items.slice(1)) await rest(ada, "DELETE", `/mcp-sign-ins/${g.id}`);
-    expect((await req("POST", "/mcp", { body: "{}", headers: { authorization: "Bearer " + (tok.access_token as string) } })).status).toBe(401);
+    expect(
+      (await req("POST", "/mcp", { body: "{}", headers: { authorization: "Bearer " + (tok.access_token as string) } }))
+        .status,
+    ).toBe(401);
   });
 
   it("a service account cannot sign in", async () => {
     const clientId = await register();
     const cookie = await sessionCookie("sa_bot");
-    const q = new URLSearchParams({ response_type: "code", client_id: clientId, redirect_uri: "http://localhost/cb", code_challenge: "abc", code_challenge_method: "S256" }).toString();
+    const q = new URLSearchParams({
+      response_type: "code",
+      client_id: clientId,
+      redirect_uri: "http://localhost/cb",
+      code_challenge: "abc",
+      code_challenge_method: "S256",
+    }).toString();
     const r = await req("GET", "/oauth/authorize?" + q, { headers: { cookie } });
     // The session principal of a service account is not a user: the browser goes to the login.
     expect([302, 403]).toContain(r.status);
@@ -257,9 +354,17 @@ describe("MCP server registry REST (TestMCPServersCRUD)", () => {
 
   it("validates, defaults, enforces names, patches and deletes", async () => {
     expect((await rest(editor, "POST", "/mcp-servers", { name: "x" })).status).toBe(400);
-    expect((await rest(editor, "POST", "/mcp-servers", { name: "x", url: "https://a.test/mcp", command: "x" })).status).toBe(400);
-    expect((await rest(editor, "POST", "/mcp-servers", { name: "builtin-x", url: "https://a.test/mcp" })).status).toBe(400);
-    const lit = await rest(editor, "POST", "/mcp-servers", { name: "x", url: "https://a.test/mcp", headers: { Authorization: "Bearer abc" } });
+    expect(
+      (await rest(editor, "POST", "/mcp-servers", { name: "x", url: "https://a.test/mcp", command: "x" })).status,
+    ).toBe(400);
+    expect((await rest(editor, "POST", "/mcp-servers", { name: "builtin-x", url: "https://a.test/mcp" })).status).toBe(
+      400,
+    );
+    const lit = await rest(editor, "POST", "/mcp-servers", {
+      name: "x",
+      url: "https://a.test/mcp",
+      headers: { Authorization: "Bearer abc" },
+    });
     expect(lit.status).toBe(400);
     expect(String(lit.body.detail)).toContain("{{SECRET_NAME}}");
     expect((await rest(viewer, "POST", "/mcp-servers", { name: "x", url: "https://a.test/mcp" })).status).toBe(403);
@@ -277,21 +382,35 @@ describe("MCP server registry REST (TestMCPServersCRUD)", () => {
       expect(dup.status).toBe(409);
       expect(dup.body.detail).toBe(`an MCP server named "sentry" already exists`);
     }
-    const other = await rest<RegisteredMCPServer>(editor, "POST", "/mcp-servers", { name: "rename-me", url: "https://other.test/mcp" });
+    const other = await rest<RegisteredMCPServer>(editor, "POST", "/mcp-servers", {
+      name: "rename-me",
+      url: "https://other.test/mcp",
+    });
     expect((await rest(editor, "PATCH", `/mcp-servers/${other.body.id}`, { name: "SENTRY" })).status).toBe(409);
     expect((await rest(editor, "PATCH", `/mcp-servers/${other.body.id}`, { name: "Rename-Me" })).status).toBe(200);
     expect((await rest(editor, "DELETE", `/mcp-servers/${other.body.id}`)).status).toBe(200);
 
-    const d = await rest<RegisteredMCPServer & { warnings?: string[] }>(editor, "POST", "/mcp-servers", { name: "private", url: "http://10.0.0.5/mcp", connection: "direct" });
+    const d = await rest<RegisteredMCPServer & { warnings?: string[] }>(editor, "POST", "/mcp-servers", {
+      name: "private",
+      url: "http://10.0.0.5/mcp",
+      connection: "direct",
+    });
     expect(d.body.connection).toBe("direct");
     expect(d.body.warnings).toBeUndefined();
-    const sse = await rest<RegisteredMCPServer & { warnings?: string[] }>(editor, "POST", "/mcp-servers", { name: "legacy", url: "https://c.test/sse" });
+    const sse = await rest<RegisteredMCPServer & { warnings?: string[] }>(editor, "POST", "/mcp-servers", {
+      name: "legacy",
+      url: "https://c.test/sse",
+    });
     expect(sse.body.connection).toBe("direct");
     expect(sse.body.warnings).toHaveLength(1);
     expect((await rest<{ warnings?: unknown }>(viewer, "GET", "/mcp-servers/legacy")).body.warnings).toBeUndefined();
     for (const n of ["private", "legacy"]) expect((await rest(editor, "DELETE", `/mcp-servers/${n}`)).status).toBe(200);
 
-    const o = await rest<RegisteredMCPServer>(editor, "POST", "/mcp-servers", { name: "notion", url: "https://mcp.notion.test/mcp", oauth: { scopes: ["read"] } });
+    const o = await rest<RegisteredMCPServer>(editor, "POST", "/mcp-servers", {
+      name: "notion",
+      url: "https://mcp.notion.test/mcp",
+      oauth: { scopes: ["read"] },
+    });
     expect(o.body.connection).toBe("proxy");
     expect(o.body.oauth?.status).toBe(MCP_OAUTH_NOT_CONNECTED);
 
@@ -300,18 +419,28 @@ describe("MCP server registry REST (TestMCPServersCRUD)", () => {
     expect(l.body.items).toHaveLength(2);
     expect(l.body.builtin).toHaveLength(4);
 
-    const u = await rest<RegisteredMCPServer>(editor, "PATCH", `/mcp-servers/${id}`, { url: "", headers: {}, command: "npx", args: ["-y", "sentry-mcp"] });
+    const u = await rest<RegisteredMCPServer>(editor, "PATCH", `/mcp-servers/${id}`, {
+      url: "",
+      headers: {},
+      command: "npx",
+      args: ["-y", "sentry-mcp"],
+    });
     expect(u.body.command).toBe("npx");
     expect(u.body.url).toBeUndefined();
     expect(u.body.connection).toBeUndefined();
 
     // Changing the OAuth client while connected disconnects and forgets the token.
     await teamOp(E, "mcp.oauth.complete", { serverId: o.body.id, envelope: "x", userId: "usr_ed" });
-    const p = await rest<RegisteredMCPServer>(editor, "PATCH", `/mcp-servers/${o.body.id}`, { oauth: { client_id: "abc" } });
+    const p = await rest<RegisteredMCPServer>(editor, "PATCH", `/mcp-servers/${o.body.id}`, {
+      oauth: { client_id: "abc" },
+    });
     expect(p.body.oauth?.status).toBe(MCP_OAUTH_NOT_CONNECTED);
     expect((await teamOp<{ envelope: string }>(E, "mcp.oauth.token", { serverId: o.body.id })).envelope).toBe("");
     expect((await rest(editor, "PATCH", `/mcp-servers/${o.body.id}`, { oauth: { bogus: 1 } })).status).toBe(400);
-    const np = await rest<RegisteredMCPServer>(editor, "PATCH", `/mcp-servers/${o.body.id}`, { oauth: null, connection: "direct" });
+    const np = await rest<RegisteredMCPServer>(editor, "PATCH", `/mcp-servers/${o.body.id}`, {
+      oauth: null,
+      connection: "direct",
+    });
     expect(np.body.oauth).toBeUndefined();
     expect(np.body.connection).toBe("direct");
     expect((await rest(editor, "POST", `/mcp-servers/${id}/oauth/connect`)).status).toBe(400);
@@ -323,7 +452,11 @@ describe("MCP server registry REST (TestMCPServersCRUD)", () => {
   it("resolve for the planner (TestResolve)", async () => {
     const mk = async (b: unknown) => (await rest<RegisteredMCPServer>(editor, "POST", "/mcp-servers", b)).body;
     const direct = await mk({ name: "docs", command: "npx", args: ["-y", "docs"], env: { DOCS_TOKEN: "{{DOCS}}" } });
-    const prox = await mk({ name: "sentry2", url: "https://mcp.sentry.test/mcp", headers: { Authorization: "Bearer {{S}}" } });
+    const prox = await mk({
+      name: "sentry2",
+      url: "https://mcp.sentry.test/mcp",
+      headers: { Authorization: "Bearer {{S}}" },
+    });
     await mk({ name: "notion2", url: "https://mcp.notion.test/mcp", oauth: {} });
     const run = { id: "run_r1", mcpServers: {} };
     const resolve = (managedId: string) => teamOp<Record<string, unknown>>(E, "mcp.resolve", { run, managedId });
@@ -339,11 +472,15 @@ describe("MCP server registry REST (TestMCPServersCRUD)", () => {
 
 // ---------- OAuth connect, refresh, proxy ----------
 
-function fakeRunBackend(runs: Map<string, RunView>, opts: { allowMerge?: () => boolean; records?: string[]; logs?: string[]; secrets?: Record<string, string> } = {}): McpRunBackend {
+function fakeRunBackend(
+  runs: Map<string, RunView>,
+  opts: { allowMerge?: () => boolean; records?: string[]; logs?: string[]; secrets?: Record<string, string> } = {},
+): McpRunBackend {
   return {
     async authenticate(_env, runId, token) {
       const run = runs.get(runId);
-      if (!run || token !== "ofs_good-" + runId) return { status: 401, code: "unauthorized", message: "invalid or missing run token" };
+      if (!run || token !== "ofs_good-" + runId)
+        return { status: 401, code: "unauthorized", message: "invalid or missing run token" };
       return { run };
     },
     async allowAgentMerge() {
@@ -374,7 +511,10 @@ function fakeProvider(base: string) {
   upstreams.set(base + "/mcp", async (r) => {
     const auth = r.headers.get("authorization") ?? "";
     if (!auth.startsWith("Bearer at-")) {
-      return new Response(null, { status: 401, headers: { "www-authenticate": `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource/mcp"` } });
+      return new Response(null, {
+        status: 401,
+        headers: { "www-authenticate": `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource/mcp"` },
+      });
     }
     st.lastAuth = `${auth}|${r.headers.get("x-team") ?? ""}|${r.headers.get("cookie") ?? ""}`;
     return new Response(`event: message\ndata: ${await r.text()}\n\n`, {
@@ -382,7 +522,11 @@ function fakeProvider(base: string) {
     });
   });
   upstreams.set(base + "/.well-known/oauth-protected-resource/mcp", () =>
-    Response.json({ resource: base + "/mcp", authorization_servers: [base + "/as"], scopes_supported: ["read", "write"] }),
+    Response.json({
+      resource: base + "/mcp",
+      authorization_servers: [base + "/as"],
+      scopes_supported: ["read", "write"],
+    }),
   );
   upstreams.set(base + "/.well-known/oauth-authorization-server/as", () =>
     Response.json({
@@ -409,7 +553,12 @@ function fakeProvider(base: string) {
       st.refreshes++;
     }
     st.tokens++;
-    return Response.json({ access_token: `at-${st.tokens}`, token_type: "Bearer", expires_in: st.expiresIn, refresh_token: `rt-${st.tokens}` });
+    return Response.json({
+      access_token: `at-${st.tokens}`,
+      token_type: "Bearer",
+      expires_in: st.expiresIn,
+      refresh_token: `rt-${st.tokens}`,
+    });
   });
   return st;
 }
@@ -424,7 +573,14 @@ describe("registry OAuth, proxy and built-in servers", () => {
   it("connects with discovery and DCR, proxies with token and headers, refreshes once, disconnects (TestOAuthConnectRefreshAndProxy)", async () => {
     const base = "https://notion.example.test";
     const p = fakeProvider(base);
-    const m = (await rest<RegisteredMCPServer>(editor, "POST", "/mcp-servers", { name: "notion-o", url: base + "/mcp", headers: { "X-Team": "{{TEAM_HEADER}}" }, oauth: {} })).body;
+    const m = (
+      await rest<RegisteredMCPServer>(editor, "POST", "/mcp-servers", {
+        name: "notion-o",
+        url: base + "/mcp",
+        headers: { "X-Team": "{{TEAM_HEADER}}" },
+        oauth: {},
+      })
+    ).body;
     const cn = await rest<{ authorization_url: string }>(editor, "POST", `/mcp-servers/${m.id}/oauth/connect`);
     expect(cn.status).toBe(200);
     const au = new URL(cn.body.authorization_url);
@@ -436,7 +592,8 @@ describe("registry OAuth, proxy and built-in servers", () => {
     expect(au.searchParams.get("scope")).toBe("read write");
 
     // Another user cannot finish it, and the state is single use.
-    const cb = (state: string, who: Principal) => callRoute(E, who, "GET", `/mcp-servers/oauth/callback?state=${state}&code=the-code`).catch((e) => e);
+    const cb = (state: string, who: Principal) =>
+      callRoute(E, who, "GET", `/mcp-servers/oauth/callback?state=${state}&code=the-code`).catch((e) => e);
     const callback = async (state: string, who: Principal) => {
       const url = new URL(`${PUBLIC}/api/v1/mcp-servers/oauth/callback?state=${state}&code=the-code`);
       const { mcpOAuthCallback } = await import("../api/mcp-servers");
@@ -444,7 +601,13 @@ describe("registry OAuth, proxy and built-in servers", () => {
         params: {},
         url,
         requestId: "t",
-        route: { method: "GET", path: "/mcp-servers/oauth/callback", operationId: "mcpOAuthCallback", role: "editor", handler: mcpOAuthCallback },
+        route: {
+          method: "GET",
+          path: "/mcp-servers/oauth/callback",
+          operationId: "mcpOAuthCallback",
+          role: "editor",
+          handler: mcpOAuthCallback,
+        },
         executionCtx: {} as ExecutionContext,
         principal: who,
       });
@@ -456,7 +619,10 @@ describe("registry OAuth, proxy and built-in servers", () => {
     expect(other.searchParams.get("oauth")).toBe("error");
     expect((await callback(state, editor)).searchParams.get("oauth")).toBe("error");
 
-    const au2 = new URL((await rest<{ authorization_url: string }>(editor, "POST", `/mcp-servers/${m.id}/oauth/connect`)).body.authorization_url);
+    const au2 = new URL(
+      (await rest<{ authorization_url: string }>(editor, "POST", `/mcp-servers/${m.id}/oauth/connect`)).body
+        .authorization_url,
+    );
     const done = await callback(au2.searchParams.get("state")!, editor);
     expect(done.searchParams.get("oauth")).toBe("connected");
     expect(done.pathname).toBe(`/mcp-servers/${m.id}`);
@@ -470,16 +636,30 @@ describe("registry OAuth, proxy and built-in servers", () => {
 
     // The run reaches the proxy; the proxy adds the token and headers.
     const runs = new Map<string, RunView>();
-    runs.set("run_a", { id: "run_a", teamId: "default", factoryId: "fac1", metadata: {}, mcpServers: { notes: { managedId: "notion-o" } } });
+    runs.set("run_a", {
+      id: "run_a",
+      teamId: "default",
+      factoryId: "fac1",
+      metadata: {},
+      mcpServers: { notes: { managedId: "notion-o" } },
+    });
     runs.set("run_b", { id: "run_b", teamId: "default", factoryId: "fac1", metadata: {}, mcpServers: {} });
     setMcpBackends({ run: fakeRunBackend(runs, { secrets: { TEAM_HEADER: "eng" } }) });
-    const resolved = await teamOp<{ url: string }>(E, "mcp.resolve", { run: { id: "run_a", mcpServers: runs.get("run_a")!.mcpServers }, managedId: "notion-o" });
+    const resolved = await teamOp<{ url: string }>(E, "mcp.resolve", {
+      run: { id: "run_a", mcpServers: runs.get("run_a")!.mcpServers },
+      managedId: "notion-o",
+    });
     const call = (auth: string, url = resolved.url) =>
       handleMcpRequest(
         new Request(url, {
           method: "POST",
           body: `{"jsonrpc":"2.0","id":1,"method":"ping"}`,
-          headers: { authorization: auth, "content-type": "application/json", accept: "application/json, text/event-stream", cookie: "leak=1" },
+          headers: {
+            authorization: auth,
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+            cookie: "leak=1",
+          },
         }),
         E,
       ) as Promise<Response>;
@@ -514,7 +694,9 @@ describe("registry OAuth, proxy and built-in servers", () => {
     upstreams.set(base + "/.well-known/oauth-authorization-server", () =>
       Response.json({ authorization_endpoint: "https://idp.test/authorize", token_endpoint: "https://idp.test/token" }),
     );
-    const m = (await rest<RegisteredMCPServer>(editor, "POST", "/mcp-servers", { name: "noreg", url: base + "/mcp", oauth: {} })).body;
+    const m = (
+      await rest<RegisteredMCPServer>(editor, "POST", "/mcp-servers", { name: "noreg", url: base + "/mcp", oauth: {} })
+    ).body;
     const r = await rest(editor, "POST", `/mcp-servers/${m.id}/oauth/connect`);
     expect(r.status).toBe(400);
     expect(String(r.body.detail)).toContain("client_id");
@@ -530,13 +712,37 @@ describe("registry OAuth, proxy and built-in servers", () => {
       upstreamAuth = r.headers.get("authorization") ?? "";
       return Response.json({ jsonrpc: "2.0", id: 1, result: {} });
     });
-    const m = (await rest<RegisteredMCPServer>(editor, "POST", "/mcp-servers", { name: "sentry-p", url: "https://sentry.example.test/mcp", headers: { Authorization: "Bearer {{SENTRY_TOKEN}}" } })).body;
-    const runs = new Map<string, RunView>([["run_s", { id: "run_s", teamId: "default", factoryId: "fac1", metadata: {}, mcpServers: { s: { managedId: "sentry-p" } } }]]);
+    const m = (
+      await rest<RegisteredMCPServer>(editor, "POST", "/mcp-servers", {
+        name: "sentry-p",
+        url: "https://sentry.example.test/mcp",
+        headers: { Authorization: "Bearer {{SENTRY_TOKEN}}" },
+      })
+    ).body;
+    const runs = new Map<string, RunView>([
+      [
+        "run_s",
+        {
+          id: "run_s",
+          teamId: "default",
+          factoryId: "fac1",
+          metadata: {},
+          mcpServers: { s: { managedId: "sentry-p" } },
+        },
+      ],
+    ]);
     setMcpBackends({ run: fakeRunBackend(runs, { secrets: { SENTRY_TOKEN: "sentry-secret-value" } }) });
-    const got = await teamOp<Record<string, unknown>>(E, "mcp.resolve", { run: { id: "run_s" }, managedId: "sentry-p" });
+    const got = await teamOp<Record<string, unknown>>(E, "mcp.resolve", {
+      run: { id: "run_s" },
+      managedId: "sentry-p",
+    });
     expect(got).toEqual({ url: `${PUBLIC}/mcp/proxy/run_s/${m.id}` });
     const res = (await handleMcpRequest(
-      new Request(got.url as string, { method: "POST", body: `{"jsonrpc":"2.0","id":1,"method":"ping"}`, headers: { authorization: "Bearer ofs_good-run_s" } }),
+      new Request(got.url as string, {
+        method: "POST",
+        body: `{"jsonrpc":"2.0","id":1,"method":"ping"}`,
+        headers: { authorization: "Bearer ofs_good-run_s" },
+      }),
       E,
     ))!;
     expect(res.status).toBe(200);
@@ -550,19 +756,50 @@ describe("registry OAuth, proxy and built-in servers", () => {
       if (msg.params?.name === "merge_pull_request") merged++;
       return Response.json({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: "ok" }] } });
     });
-    const m = (await rest<RegisteredMCPServer>(editor, "POST", "/mcp-servers", { name: "forge", url: "https://forge.example.test/mcp" })).body;
+    const m = (
+      await rest<RegisteredMCPServer>(editor, "POST", "/mcp-servers", {
+        name: "forge",
+        url: "https://forge.example.test/mcp",
+      })
+    ).body;
     let allow = false;
     const records: string[] = [];
     const runs = new Map<string, RunView>([
-      ["run_m", { id: "run_m", teamId: "default", factoryId: "fac1", metadata: {}, mcpServers: { forge: { managedId: "forge" } } }],
-      ["run_l", { id: "run_l", teamId: "default", factoryId: "fac1", metadata: {}, mcpServers: { linear: { managedId: "builtin/linear", allowWrite: true } } }],
+      [
+        "run_m",
+        {
+          id: "run_m",
+          teamId: "default",
+          factoryId: "fac1",
+          metadata: {},
+          mcpServers: { forge: { managedId: "forge" } },
+        },
+      ],
+      [
+        "run_l",
+        {
+          id: "run_l",
+          teamId: "default",
+          factoryId: "fac1",
+          metadata: {},
+          mcpServers: { linear: { managedId: "builtin/linear", allowWrite: true } },
+        },
+      ],
     ]);
-    setMcpBackends({ run: fakeRunBackend(runs, { allowMerge: () => allow, records }), integrations: fakeIntegrations() });
+    setMcpBackends({
+      run: fakeRunBackend(runs, { allowMerge: () => allow, records }),
+      integrations: fakeIntegrations(),
+    });
     const callTool = async (url: string, run: string, name: string) => {
       const res = (await handleMcpRequest(
         new Request(url, {
           method: "POST",
-          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: { number: 1 } } }),
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: { name, arguments: { number: 1 } },
+          }),
           headers: { authorization: "Bearer ofs_good-" + run },
         }),
         E,
@@ -580,35 +817,85 @@ describe("registry OAuth, proxy and built-in servers", () => {
     allow = true;
     expect((await callTool(proxyURL, "run_m", "merge_pull_request")).result.isError).toBeFalsy();
     expect(merged).toBe(1);
-    expect(records).toEqual(["run_m|merge_pull_request|refused", "run_l|merge_pull_request|refused", "run_m|merge_pull_request|allowed"]);
+    expect(records).toEqual([
+      "run_m|merge_pull_request|refused",
+      "run_l|merge_pull_request|refused",
+      "run_m|merge_pull_request|allowed",
+    ]);
   });
 
   it("built-in Linear: grant, write tools, trial mode (TestBuiltinLinear, TestTrialWritesStayInTheRun)", async () => {
     const logs: string[] = [];
     const calls: string[] = [];
     const runs = new Map<string, RunView>([
-      ["run_r", { id: "run_r", teamId: "default", factoryId: "fac1", metadata: {}, mcpServers: { linear: { managedId: "builtin/linear" } } }],
-      ["run_w", { id: "run_w", teamId: "default", factoryId: "fac1", metadata: {}, mcpServers: { linear: { managedId: "builtin/linear", allowWrite: true } } }],
-      ["run_t", { id: "run_t", teamId: "default", factoryId: "fac1", metadata: { trial_mode: "true" }, mcpServers: { linear: { managedId: "builtin/linear", allowWrite: true } } }],
+      [
+        "run_r",
+        {
+          id: "run_r",
+          teamId: "default",
+          factoryId: "fac1",
+          metadata: {},
+          mcpServers: { linear: { managedId: "builtin/linear" } },
+        },
+      ],
+      [
+        "run_w",
+        {
+          id: "run_w",
+          teamId: "default",
+          factoryId: "fac1",
+          metadata: {},
+          mcpServers: { linear: { managedId: "builtin/linear", allowWrite: true } },
+        },
+      ],
+      [
+        "run_t",
+        {
+          id: "run_t",
+          teamId: "default",
+          factoryId: "fac1",
+          metadata: { trial_mode: "true" },
+          mcpServers: { linear: { managedId: "builtin/linear", allowWrite: true } },
+        },
+      ],
       ["run_n", { id: "run_n", teamId: "default", factoryId: "fac1", metadata: {}, mcpServers: {} }],
     ]);
     setMcpBackends({ run: fakeRunBackend(runs, { logs }), integrations: fakeIntegrations(calls) });
     const tools = async (run: string) => {
       const r = await rpc(`/mcp/integrations/linear/${run}`, "ofs_good-" + run, "tools/list");
-      return ((r.result as { tools: { name: string }[] }).tools).map((t) => t.name);
+      return (r.result as { tools: { name: string }[] }).tools.map((t) => t.name);
     };
     expect(await tools("run_r")).toEqual(["linear_get_issue", "linear_search_issues"]);
     expect(await tools("run_w")).toEqual(["linear_get_issue", "linear_search_issues", "linear_create_comment"]);
-    const notGranted = await req("POST", "/mcp/integrations/linear/run_n", { body: "{}", headers: { authorization: "Bearer ofs_good-run_n" } });
+    const notGranted = await req("POST", "/mcp/integrations/linear/run_n", {
+      body: "{}",
+      headers: { authorization: "Bearer ofs_good-run_n" },
+    });
     expect(notGranted.status).toBe(403);
-    expect((await req("POST", "/mcp/integrations/nope/run_r", { body: "{}", headers: { authorization: "Bearer ofs_good-run_r" } })).status).toBe(404);
+    expect(
+      (
+        await req("POST", "/mcp/integrations/nope/run_r", {
+          body: "{}",
+          headers: { authorization: "Bearer ofs_good-run_r" },
+        })
+      ).status,
+    ).toBe(404);
 
-    const get = await rpc("/mcp/integrations/linear/run_r", "ofs_good-run_r", "tools/call", { name: "linear_get_issue", arguments: { id: "ENG-42" } });
-    expect(((get.result as { content: { text: string }[] }).content[0]!.text)).toContain("ENG-42");
-    await rpc("/mcp/integrations/linear/run_w", "ofs_good-run_w", "tools/call", { name: "linear_create_comment", arguments: { issue_id: "ENG-42", body: "hi" } });
+    const get = await rpc("/mcp/integrations/linear/run_r", "ofs_good-run_r", "tools/call", {
+      name: "linear_get_issue",
+      arguments: { id: "ENG-42" },
+    });
+    expect((get.result as { content: { text: string }[] }).content[0]!.text).toContain("ENG-42");
+    await rpc("/mcp/integrations/linear/run_w", "ofs_good-run_w", "tools/call", {
+      name: "linear_create_comment",
+      arguments: { issue_id: "ENG-42", body: "hi" },
+    });
     expect(calls).toContain("comment:ENG-42:hi");
-    const trial = await rpc("/mcp/integrations/linear/run_t", "ofs_good-run_t", "tools/call", { name: "linear_create_comment", arguments: { issue_id: "ENG-1", body: "x" } });
-    expect(((trial.result as { content: { text: string }[] }).content[0]!.text)).toContain("trial mode");
+    const trial = await rpc("/mcp/integrations/linear/run_t", "ofs_good-run_t", "tools/call", {
+      name: "linear_create_comment",
+      arguments: { issue_id: "ENG-1", body: "x" },
+    });
+    expect((trial.result as { content: { text: string }[] }).content[0]!.text).toContain("trial mode");
     expect(calls.filter((c) => c.startsWith("comment:ENG-1:"))).toHaveLength(0);
     expect(logs[0]).toContain("Trial mode: linear_create_comment was recorded");
   });
@@ -616,14 +903,35 @@ describe("registry OAuth, proxy and built-in servers", () => {
   it("built-in Teams lists channels and posts (TestBuiltinTeams)", async () => {
     const posts: string[] = [];
     const runs = new Map<string, RunView>([
-      ["run_tm", { id: "run_tm", teamId: "default", factoryId: "fac1", metadata: {}, mcpServers: { t: { managedId: "builtin/teams", allowWrite: true } } }],
+      [
+        "run_tm",
+        {
+          id: "run_tm",
+          teamId: "default",
+          factoryId: "fac1",
+          metadata: {},
+          mcpServers: { t: { managedId: "builtin/teams", allowWrite: true } },
+        },
+      ],
     ]);
-    const ib = fakeIntegrations([], { provider: "microsoft_teams", config: { channel_ids: "19:a@thread, 19:b@thread" } });
+    const ib = fakeIntegrations([], {
+      provider: "microsoft_teams",
+      config: { channel_ids: "19:a@thread, 19:b@thread" },
+    });
     ib.teamsPost = async (_r, ch, root, text) => void posts.push(`${ch}|${root}|${text}`);
     setMcpBackends({ run: fakeRunBackend(runs), integrations: ib });
-    const list = await rpc("/mcp/integrations/teams/run_tm", "ofs_good-run_tm", "tools/call", { name: "teams_list_channels", arguments: {} });
-    expect(JSON.parse(((list.result as { content: { text: string }[] }).content[0]!.text))).toEqual({ channel_ids: ["19:a@thread", "19:b@thread"], limited: true });
-    await rpc("/mcp/integrations/teams/run_tm", "ofs_good-run_tm", "tools/call", { name: "teams_post_message", arguments: { channel: "19:a@thread", text: "hello" } });
+    const list = await rpc("/mcp/integrations/teams/run_tm", "ofs_good-run_tm", "tools/call", {
+      name: "teams_list_channels",
+      arguments: {},
+    });
+    expect(JSON.parse((list.result as { content: { text: string }[] }).content[0]!.text)).toEqual({
+      channel_ids: ["19:a@thread", "19:b@thread"],
+      limited: true,
+    });
+    await rpc("/mcp/integrations/teams/run_tm", "ofs_good-run_tm", "tools/call", {
+      name: "teams_post_message",
+      arguments: { channel: "19:a@thread", text: "hello" },
+    });
     expect(posts).toEqual(["19:a@thread||hello"]);
   });
 });
@@ -632,7 +940,8 @@ function fakeIntegrations(calls: string[] = [], rec: Partial<IntegrationRecord> 
   const record: IntegrationRecord = { id: "int1", provider: "linear", config: {}, ...rec };
   return {
     async factoryIntegration(_e, _run, provider) {
-      if (provider === "jira") throw new Error("the factory does not attach the jira integration (add it to factory.yaml integrations)");
+      if (provider === "jira")
+        throw new Error("the factory does not attach the jira integration (add it to factory.yaml integrations)");
       return record;
     },
     async credential() {

@@ -21,9 +21,7 @@ interface KeyEntry {
 export class KeySet {
   private keys: Map<string, KeyEntry> | null = null;
   private fetched = 0;
-  constructor(
-    private readonly o: { metadataUrl?: string; fetch?: Fetch; now?: () => number } = {},
-  ) {}
+  constructor(private readonly o: { metadataUrl?: string; fetch?: Fetch; now?: () => number } = {}) {}
 
   private now(): number {
     return this.o.now ? this.o.now() : Date.now();
@@ -86,7 +84,8 @@ export class KeySet {
     await j.verifyRS256(e.pub);
     const iss = j.claimString("iss");
     if (iss !== BOT_FRAMEWORK_ISSUER) throw new Error(`teams: unexpected issuer "${iss}"`);
-    if (!appIds.some((a) => a !== "" && j.hasAudience(a))) throw new Error("teams: token audience does not match the bot app id");
+    if (!appIds.some((a) => a !== "" && j.hasAudience(a)))
+      throw new Error("teams: token audience does not match the bot app id");
     j.verifyTime(this.now(), CLOCK_SKEW_MS);
     if (e.endorsements.length > 0 && channelId !== "") {
       if (!e.endorsements.some((en) => en.toLowerCase() === channelId.toLowerCase())) {
@@ -94,7 +93,11 @@ export class KeySet {
       }
     }
     const su = j.claimString("serviceurl");
-    if (su !== "" && serviceUrl !== "" && su.replace(/\/+$/, "").toLowerCase() !== serviceUrl.replace(/\/+$/, "").toLowerCase()) {
+    if (
+      su !== "" &&
+      serviceUrl !== "" &&
+      su.replace(/\/+$/, "").toLowerCase() !== serviceUrl.replace(/\/+$/, "").toLowerCase()
+    ) {
       throw new Error("teams: serviceUrl claim does not match the activity");
     }
   }

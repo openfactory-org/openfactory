@@ -2,12 +2,20 @@
 // github (client with a fetch fake, scope, events, webhook intake) and the
 // forge responder.
 import { beforeEach, describe, expect, it } from "vitest";
-import { OfError, type Event, type Integration } from "@openfactory/core";
+import type { OfError } from "@openfactory/core";
+import { type Event, type Integration } from "@openfactory/core";
 import { b64, utf8 } from "../lib/bytes";
 import { extractMentions, hasMention, formatOutbound, splitRepo, truncate } from "./util/text";
 import { hmacSha256Hex, verifyHmacSha256Hex } from "./util/webhook";
-import { JWT, decodePEM, parseRSAPrivateKey, pkcs1ToPkcs8, rsaPublicKey, signRS256, signHS256 } from "./util/jwt";
-import { DeliveryAmbiguousError, DeliveryUnverifiedError, intakeVerified, isNoIntegration, repoOwner, selectIntegration } from "./util/select";
+import { JWT, decodePEM, parseRSAPrivateKey, rsaPublicKey, signRS256, signHS256 } from "./util/jwt";
+import {
+  DeliveryAmbiguousError,
+  DeliveryUnverifiedError,
+  intakeVerified,
+  isNoIntegration,
+  repoOwner,
+  selectIntegration,
+} from "./util/select";
 import { GitHubClient, resetGitHubCaches, deriveWebURL } from "./github/client";
 import { Normalizer, aliasFromLabels, checkName, isDefinitionPath, normalizeRepo } from "./github/events";
 import { handleGitHubWebhook, type GitHubWebhookDeps } from "./github/webhook";
@@ -24,12 +32,15 @@ describe("forgeutil text", () => {
     ["mail bob@example.com", []],
     ["@a @A @b", ["a", "b"]],
   ];
-  for (const [text, want] of cases) it(`mentions ${JSON.stringify(text)}`, () => expect(extractMentions(text)).toEqual(want));
+  for (const [text, want] of cases)
+    it(`mentions ${JSON.stringify(text)}`, () => expect(extractMentions(text)).toEqual(want));
   it("helpers", () => {
     expect(hasMention("ping @OpenFactory[bot]", "openfactory")).toBe(true);
     expect(splitRepo("group/sub/proj")).toEqual(["group/sub", "proj"]);
     expect(truncate("héllo", 3)).toBe("hé…");
-    expect(formatOutbound({ kind: "question", text: " Pick? ", options: ["a", "b"] })).toBe("**Question from the factory**\n\nPick?\n\nReply with one of:\n- `a`\n- `b`");
+    expect(formatOutbound({ kind: "question", text: " Pick? ", options: ["a", "b"] })).toBe(
+      "**Question from the factory**\n\nPick?\n\nReply with one of:\n- `a`\n- `b`",
+    );
   });
   it("HMAC", async () => {
     const sig = await hmacSha256Hex(utf8("s3cret"), "body");
@@ -64,7 +75,9 @@ async function rsaPKCS1(): Promise<{ pem: string; pub: CryptoKey; jwk: JsonWebKe
   i += 1; // OCTET STRING tag
   const n = len();
   const pkcs1 = p8.subarray(i, i + n);
-  const lines = b64(pkcs1).match(/.{1,64}/g)!.join("\n");
+  const lines = b64(pkcs1)
+    .match(/.{1,64}/g)!
+    .join("\n");
   const jwk = (await crypto.subtle.exportKey("jwk", kp.publicKey)) as JsonWebKey;
   return { pem: `-----BEGIN RSA PRIVATE KEY-----\n${lines}\n-----END RSA PRIVATE KEY-----\n`, pub: kp.publicKey, jwk };
 }
@@ -124,15 +137,23 @@ describe("selection rule", () => {
       expect(isNoIntegration(e)).toBe(true);
       expect((e as Error).message).toMatch(/owner "globex"/);
     }
-    expect(() => selectIntegration([rec("a"), rec("b")], "github", "", "acme")).toThrow(/2 records \(a, b\) serve the owner/);
+    expect(() => selectIntegration([rec("a"), rec("b")], "github", "", "acme")).toThrow(
+      /2 records \(a, b\) serve the owner/,
+    );
   });
   it("intake verified across teams", async () => {
     const t1 = rec("t1");
     const t2 = rec("t2", { team_id: "team_2" });
     expect((await intakeVerified([t1, t2], "github", ["acme"], async (i) => i.id === "t2")).id).toBe("t2");
-    await expect(intakeVerified([t1, t2], "github", ["acme"], async () => true)).rejects.toBeInstanceOf(DeliveryAmbiguousError);
-    await expect(intakeVerified([t1, t2], "github", ["acme"], async () => false)).rejects.toBeInstanceOf(DeliveryUnverifiedError);
-    const e = (await intakeVerified([t1], "github", ["globex"], async () => true).catch((x: unknown) => x)) as DeliveryUnverifiedError;
+    await expect(intakeVerified([t1, t2], "github", ["acme"], async () => true)).rejects.toBeInstanceOf(
+      DeliveryAmbiguousError,
+    );
+    await expect(intakeVerified([t1, t2], "github", ["acme"], async () => false)).rejects.toBeInstanceOf(
+      DeliveryUnverifiedError,
+    );
+    const e = (await intakeVerified([t1], "github", ["globex"], async () => true).catch(
+      (x: unknown) => x,
+    )) as DeliveryUnverifiedError;
     expect(e.noIntegration).toBe(true);
   });
   it("forge names", () => {
@@ -155,7 +176,8 @@ function fakeGitHub(): FakeGH {
   const bodies = new Map<string, unknown>();
   const auth = new Map<string, string>();
   const calls: string[] = [];
-  const ok = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { "content-type": "application/json" } });
+  const ok = (v: unknown, status = 200) =>
+    new Response(JSON.stringify(v), { status, headers: { "content-type": "application/json" } });
   const fetchFn = async (input: Request | string | URL, init?: RequestInit): Promise<Response> => {
     const u = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
     const method = init?.method ?? "GET";
@@ -179,7 +201,10 @@ function fakeGitHub(): FakeGH {
       case key === "POST /repos/acme/api/statuses/abc":
         return ok({}, 201);
       case key === "POST /repos/acme/api/pulls":
-        return ok({ number: 5, html_url: "https://github.com/acme/api/pull/5", state: "open", draft: true, head: { ref: "f" } }, 201);
+        return ok(
+          { number: 5, html_url: "https://github.com/acme/api/pull/5", state: "open", draft: true, head: { ref: "f" } },
+          201,
+        );
       case key === "GET /repos/acme/api/commits/trunk":
         return ok({ sha: "c0ffee", commit: { tree: { sha: "tree1" } } });
       case key === "GET /repos/acme/api/git/trees/tree1":
@@ -196,11 +221,22 @@ function fakeGitHub(): FakeGH {
       case key === "GET /repos/acme/api/git/blobs/b2":
         return ok({ content: "hi", encoding: "utf-8" });
       case key === "GET /repos/acme/api/pulls/7/files":
-        return ok([{ filename: "a.go", patch: "@@ -1 +1 @@\n-a\n+b" }, { filename: "new.go", previous_filename: "old.go" }]);
+        return ok([
+          { filename: "a.go", patch: "@@ -1 +1 @@\n-a\n+b" },
+          { filename: "new.go", previous_filename: "old.go" },
+        ]);
       case key === "GET /repos/acme/api/pulls/7/comments":
         return ok([
           { id: 10, body: "root", path: "a.go", line: 3, created_at: "2026-01-01T00:00:00Z", user: { login: "alex" } },
-          { id: 11, in_reply_to_id: 10, body: "reply", path: "a.go", line: null, original_line: 3, user: { login: "sam" } },
+          {
+            id: 11,
+            in_reply_to_id: 10,
+            body: "reply",
+            path: "a.go",
+            line: null,
+            original_line: 3,
+            user: { login: "sam" },
+          },
           { id: 12, body: "other", path: "b.go", line: 1, user: { login: "x" } },
         ]);
       case key === "GET /user":
@@ -225,11 +261,19 @@ describe("GitHubClient", () => {
 
   it("app installation tokens are scoped to the repositories of the owner", async () => {
     const f = fakeGitHub();
-    const c = await GitHubClient.create({ baseURL: "https://gh.test", appId: "123", privateKey: pem, installationId: 42, fetch: f.fetch });
+    const c = await GitHubClient.create({
+      baseURL: "https://gh.test",
+      appId: "123",
+      privateKey: pem,
+      installationId: 42,
+      fetch: f.fetch,
+    });
     const s = c.scoped(["acme/api", "acme/web", "other/x"]);
     expect(c.scoped(["acme/web", "ACME/api", "other/x"])).toBe(s);
     expect(await s.cloneURL("acme", "api")).toBe("https://x-access-token:ghs_inst@gh.test/acme/api.git");
-    expect((f.bodies.get("POST /app/installations/42/access_tokens") as { repositories: string[] }).repositories).toEqual(["api", "web"]);
+    expect(
+      (f.bodies.get("POST /app/installations/42/access_tokens") as { repositories: string[] }).repositories,
+    ).toEqual(["api", "web"]);
     expect(f.auth.get("POST /app/installations/42/access_tokens")).toMatch(/^Bearer ey/);
     await expect(s.cloneURL("acme", "billing")).rejects.toMatchObject({ code: "not_authorized" });
     await expect(s.token("nobody", "")).rejects.toMatchObject({ code: "not_authorized" });
@@ -244,7 +288,14 @@ describe("GitHubClient", () => {
   it("auth failure callback fires for a missing installation", async () => {
     const f = fakeGitHub();
     const got: unknown[] = [];
-    const c = await GitHubClient.create({ baseURL: "https://gh.test", appId: "123", privateKey: pem, installationId: 7, fetch: f.fetch, onAuthFailure: (e) => got.push(e) });
+    const c = await GitHubClient.create({
+      baseURL: "https://gh.test",
+      appId: "123",
+      privateKey: pem,
+      installationId: 7,
+      fetch: f.fetch,
+      onAuthFailure: (e) => got.push(e),
+    });
     await expect(c.token("acme", "api")).rejects.toThrow(/create installation token/);
     expect(got.length).toBe(1);
   });
@@ -260,7 +311,15 @@ describe("GitHubClient", () => {
     const st = f.bodies.get("POST /repos/acme/api/statuses/abc") as Record<string, string>;
     expect(st.state).toBe("pending");
     expect(Array.from(st.description!).length).toBe(140);
-    const pr = await c.createPullRequest({ owner: "acme", repo: "api", head: "f", base: "", title: "t", body: "b", draft: true });
+    const pr = await c.createPullRequest({
+      owner: "acme",
+      repo: "api",
+      head: "f",
+      base: "",
+      title: "t",
+      body: "b",
+      draft: true,
+    });
     expect(pr).toMatchObject({ forge: "GITHUB", number: 5, state: "draft", branch: "f" });
     expect((f.bodies.get("POST /repos/acme/api/pulls") as { base: string }).base).toBe("trunk");
     const { files, sha } = await c.getFiles("acme", "api", "", "defs/");
@@ -281,15 +340,30 @@ describe("GitHubClient", () => {
 
   it("an App publishes check runs and updates the run in progress", async () => {
     const f = fakeGitHub();
-    const c = await GitHubClient.create({ baseURL: "https://gh.test", appId: "123", privateKey: pem, installationId: 42, fetch: f.fetch });
+    const c = await GitHubClient.create({
+      baseURL: "https://gh.test",
+      appId: "123",
+      privateKey: pem,
+      installationId: 42,
+      fetch: f.fetch,
+    });
     await c.publishCheckRun("acme", "api", { name: "openfactory/definition", headSha: "abc", title: "Validating" });
-    await c.publishCheckRun("acme", "api", { name: "openfactory/definition", headSha: "abc", status: "completed", conclusion: "success", title: "ok", summary: "s" });
+    await c.publishCheckRun("acme", "api", {
+      name: "openfactory/definition",
+      headSha: "abc",
+      status: "completed",
+      conclusion: "success",
+      title: "ok",
+      summary: "s",
+    });
     expect(f.calls).toContain("PATCH /repos/acme/api/check-runs/99");
     const body = f.bodies.get("PATCH /repos/acme/api/check-runs/99") as Record<string, unknown>;
     expect(body).toMatchObject({ status: "completed", conclusion: "success", output: { title: "ok", summary: "s" } });
     expect(body["name"]).toBeUndefined();
     await c.setCommitStatus("acme", "api", "abc", { context: "c", state: "error" });
-    expect((f.bodies.get("POST /repos/acme/api/check-runs") as Record<string, unknown>)["conclusion"]).toBe("action_required");
+    expect((f.bodies.get("POST /repos/acme/api/check-runs") as Record<string, unknown>)["conclusion"]).toBe(
+      "action_required",
+    );
     await expect(c.login()).rejects.toThrow(/no user login/);
   });
 });
@@ -303,14 +377,28 @@ describe("GitHub normalizer", () => {
       action: "opened",
       repository: { full_name: "acme/api" },
       sender: { id: 5, login: "alex", type: "User" },
-      issue: { number: 3, title: "Bug", body: "please @openfactory fix", html_url: "u", user: { login: "alex" }, labels: [{ name: "factory:ops" }], assignees: [] },
+      issue: {
+        number: 3,
+        title: "Bug",
+        body: "please @openfactory fix",
+        html_url: "u",
+        user: { login: "alex" },
+        labels: [{ name: "factory:ops" }],
+        assignees: [],
+      },
     });
     const evs = norm.normalize("issues", "d1", body);
     expect(evs.map((e) => e.type)).toEqual(["issue_created", "issue_labeled", "issue_mentioned"]);
     const e = evs[0]!;
     expect(e.delivery_id).toBe("d1:issue_created");
     expect(e.action_key).toBe("github:d1");
-    expect(e.attributes).toMatchObject({ repo: "acme/api", alias: "ops", added_labels: ["factory:ops"], actor_is_bot: false, actor_is_self: false });
+    expect(e.attributes).toMatchObject({
+      repo: "acme/api",
+      alias: "ops",
+      added_labels: ["factory:ops"],
+      actor_is_bot: false,
+      actor_is_self: false,
+    });
     expect(e.text).toBe("Bug\n\nplease @openfactory fix");
     expect(evs[2]!.attributes!["mentioned"]).toEqual(["openfactory"]);
   });
@@ -319,7 +407,15 @@ describe("GitHub normalizer", () => {
       action: "created",
       repository: { full_name: "acme/api" },
       sender: { id: 9, login: "openfactory[bot]", type: "Bot" },
-      pull_request: { number: 8, title: "T", html_url: "u", head: { ref: "f", sha: "s" }, base: { ref: "main" }, user: { login: "x" }, additions: 3 },
+      pull_request: {
+        number: 8,
+        title: "T",
+        html_url: "u",
+        head: { ref: "f", sha: "s" },
+        base: { ref: "main" },
+        user: { login: "x" },
+        additions: 3,
+      },
       comment: { id: 22, in_reply_to_id: 20, body: "ok", user: { login: "openfactory[bot]" } },
     });
     const [e] = norm.normalize("pull_request_review_comment", "d2", body);
@@ -328,14 +424,49 @@ describe("GitHub normalizer", () => {
     expect(e!.attributes).toMatchObject({ pr_number: 8, base_branch: "main", additions: 3, thread_ref: "20" });
   });
   it("push, status, CI and ignored deliveries", () => {
-    const push = norm.normalize("push", "", JSON.stringify({ ref: "refs/heads/main", after: "abc", repository: { full_name: "acme/api" }, commits: [{ added: ["a"], modified: ["a", "b"] }] }));
+    const push = norm.normalize(
+      "push",
+      "",
+      JSON.stringify({
+        ref: "refs/heads/main",
+        after: "abc",
+        repository: { full_name: "acme/api" },
+        commits: [{ added: ["a"], modified: ["a", "b"] }],
+      }),
+    );
     expect(push[0]!.attributes).toMatchObject({ branch: "main", paths: ["a", "b"], head_sha: "abc" });
     expect(push[0]!.action_key).toBeUndefined();
-    expect(norm.normalize("push", "", JSON.stringify({ ref: "refs/heads/main", after: "0000", repository: {} }))).toEqual([]);
+    expect(
+      norm.normalize("push", "", JSON.stringify({ ref: "refs/heads/main", after: "0000", repository: {} })),
+    ).toEqual([]);
     expect(norm.normalize("status", "", JSON.stringify({ state: "pending", repository: {} }))).toEqual([]);
-    const ws = norm.normalize("workflow_run", "x", JSON.stringify({ action: "completed", repository: { full_name: "a/b" }, workflow_run: { id: 1, name: "CI", conclusion: "failure", pull_requests: [{ number: 4, base: { ref: "main" } }] } }));
-    expect(ws[0]!.attributes).toMatchObject({ linked_pr_count: 1, pr_number: 4, conclusion: "failure", workflow: "CI" });
-    expect(norm.normalize("check_run", "x", JSON.stringify({ action: "rerequested", check_run: { id: 1, app: { slug: "other" } } }))).toEqual([]);
+    const ws = norm.normalize(
+      "workflow_run",
+      "x",
+      JSON.stringify({
+        action: "completed",
+        repository: { full_name: "a/b" },
+        workflow_run: {
+          id: 1,
+          name: "CI",
+          conclusion: "failure",
+          pull_requests: [{ number: 4, base: { ref: "main" } }],
+        },
+      }),
+    );
+    expect(ws[0]!.attributes).toMatchObject({
+      linked_pr_count: 1,
+      pr_number: 4,
+      conclusion: "failure",
+      workflow: "CI",
+    });
+    expect(
+      norm.normalize(
+        "check_run",
+        "x",
+        JSON.stringify({ action: "rerequested", check_run: { id: 1, app: { slug: "other" } } }),
+      ),
+    ).toEqual([]);
   });
   it("helpers", () => {
     expect(aliasFromLabels(["bug", "Factory:Ops "])).toBe("Ops");
@@ -372,20 +503,49 @@ describe("GitHub webhook receiver", () => {
   beforeEach(() => {
     published = [];
     statuses = [];
-    records = [rec("int_gh", { config: { org: "acme", webhook_secret_ref: "WH", installation_id: "42", app_id: "123", app_slug: "openfactory" } })];
+    records = [
+      rec("int_gh", {
+        config: {
+          org: "acme",
+          webhook_secret_ref: "WH",
+          installation_id: "42",
+          app_id: "123",
+          app_slug: "openfactory",
+        },
+      }),
+    ];
   });
   const deliver = async (event: string, secret: string, body: unknown, d = deps()) => {
     const text = JSON.stringify(body);
     const sig = "sha256=" + (await hmacSha256Hex(utf8(secret), text));
-    return handleGitHubWebhook(new Request("https://cp.test/integrations/github/webhook", { method: "POST", body: text, headers: { "x-github-event": event, "x-github-delivery": "d1", "x-hub-signature-256": sig } }), d);
+    return handleGitHubWebhook(
+      new Request("https://cp.test/integrations/github/webhook", {
+        method: "POST",
+        body: text,
+        headers: { "x-github-event": event, "x-github-delivery": "d1", "x-hub-signature-256": sig },
+      }),
+      d,
+    );
   };
   it("verifies, normalizes, routes by alias and publishes", async () => {
     const fr = new FakeResolver();
     const res = await deliver(
       "issues",
       "whsec",
-      { action: "labeled", repository: { full_name: "acme/api" }, sender: { id: 1, login: "a" }, issue: { number: 1, labels: [{ name: "factory:ops" }] }, label: { name: "factory:ops" } },
-      deps({ resolver: fr, factories: { byAlias: async (_t, a) => (a === "ops" ? { id: "fac_ops", alias: "ops" } : null), list: async () => [] } }),
+      {
+        action: "labeled",
+        repository: { full_name: "acme/api" },
+        sender: { id: 1, login: "a" },
+        issue: { number: 1, labels: [{ name: "factory:ops" }] },
+        label: { name: "factory:ops" },
+      },
+      deps({
+        resolver: fr,
+        factories: {
+          byAlias: async (_t, a) => (a === "ops" ? { id: "fac_ops", alias: "ops" } : null),
+          list: async () => [],
+        },
+      }),
     );
     expect(res.status).toBe(202);
     expect(await res.json()).toEqual({ status: "accepted", events: 1 });
@@ -416,10 +576,18 @@ describe("GitHub webhook receiver", () => {
     await deliver(
       "pull_request",
       "whsec",
-      { action: "opened", repository: { full_name: "acme/defs" }, sender: { id: 1, login: "a" }, pull_request: { number: 2, head: { sha: "h", ref: "f" }, base: { ref: "main" } } },
+      {
+        action: "opened",
+        repository: { full_name: "acme/defs" },
+        sender: { id: 1, login: "a" },
+        pull_request: { number: 2, head: { sha: "h", ref: "f" }, base: { ref: "main" } },
+      },
       deps({
         resolver: fr,
-        factories: { byAlias: async () => null, list: async () => [{ id: "f1", source: "git", git_repo: "github.com/acme/defs" }] },
+        factories: {
+          byAlias: async () => null,
+          list: async () => [{ id: "f1", source: "git", git_repo: "github.com/acme/defs" }],
+        },
         onDefinitionPR: async (pr) => {
           prs.push(pr);
         },
@@ -450,26 +618,59 @@ describe("ForgeResponder", () => {
     expect(f.callsOf("commentIssue").length).toBe(1);
     await r.reply("t", msg("update", { kind: "push", repo: "acme/api" }));
     expect(fr.lookups.length).toBe(3);
-    await expect(r.setIssueState("t", { provider: "github", kind: "issue", repo: "a/b", number: 1 }, "done")).rejects.toMatchObject({ code: "operation_not_supported" });
+    await expect(
+      r.setIssueState("t", { provider: "github", kind: "issue", repo: "a/b", number: 1 }, "done"),
+    ).rejects.toMatchObject({ code: "operation_not_supported" });
   });
 });
 
 describe("Resolver", () => {
   it("selects, refuses disabled records and the generic git forge", async () => {
-    const ints = [rec("i1", { secret_ref: "PAT" }), rec("i2", { config: { org: "off" }, status: "disabled", status_reason: "removed" }), rec("g", { provider: "git", config: {} })];
-    const r = new Resolver({ integrations: { list: async (_t, p) => ints.filter((x) => !p || x.provider === p) }, secrets: { get: async () => "ghp_x" } });
-    const f = await r.forge({ teamId: "team_1", codeForge: "GITHUB", repo: "acme/api", scope: ["acme/api", "other/x"] });
+    const ints = [
+      rec("i1", { secret_ref: "PAT" }),
+      rec("i2", { config: { org: "off" }, status: "disabled", status_reason: "removed" }),
+      rec("g", { provider: "git", config: {} }),
+    ];
+    const r = new Resolver({
+      integrations: { list: async (_t, p) => ints.filter((x) => !p || x.provider === p) },
+      secrets: { get: async () => "ghp_x" },
+    });
+    const f = await r.forge({
+      teamId: "team_1",
+      codeForge: "GITHUB",
+      repo: "acme/api",
+      scope: ["acme/api", "other/x"],
+    });
     expect(f.name()).toBe("GITHUB");
-    await expect(r.forge({ teamId: "team_1", codeForge: "GITHUB", repo: "off/x" })).rejects.toMatchObject({ code: "integration_disabled" });
-    await expect(r.forge({ teamId: "team_1", codeForge: "GIT", repo: "x/y" })).rejects.toMatchObject({ code: "operation_not_supported" });
-    await expect(r.forge({ teamId: "team_1", codeForge: "GITLAB", repo: "x/y" })).rejects.toMatchObject({ code: "invalid_request" });
-    await expect(r.forgeForUser({ teamId: "team_1", codeForge: "GITHUB", repo: "acme/api" }, "u1")).resolves.toMatchObject({ userToken: false });
-    const ru = new Resolver({ integrations: { list: async () => ints }, secrets: { get: async () => "x" }, userTokens: { get: async () => undefined } });
-    await expect(ru.forgeForUser({ teamId: "team_1", codeForge: "GITHUB", repo: "acme/api" }, "u1")).rejects.toMatchObject({ code: "external_authentication_required" });
+    await expect(r.forge({ teamId: "team_1", codeForge: "GITHUB", repo: "off/x" })).rejects.toMatchObject({
+      code: "integration_disabled",
+    });
+    await expect(r.forge({ teamId: "team_1", codeForge: "GIT", repo: "x/y" })).rejects.toMatchObject({
+      code: "operation_not_supported",
+    });
+    await expect(r.forge({ teamId: "team_1", codeForge: "GITLAB", repo: "x/y" })).rejects.toMatchObject({
+      code: "invalid_request",
+    });
+    await expect(
+      r.forgeForUser({ teamId: "team_1", codeForge: "GITHUB", repo: "acme/api" }, "u1"),
+    ).resolves.toMatchObject({ userToken: false });
+    const ru = new Resolver({
+      integrations: { list: async () => ints },
+      secrets: { get: async () => "x" },
+      userTokens: { get: async () => undefined },
+    });
+    await expect(
+      ru.forgeForUser({ teamId: "team_1", codeForge: "GITHUB", repo: "acme/api" }, "u1"),
+    ).rejects.toMatchObject({ code: "external_authentication_required" });
   });
   it("plugin forges need their plugin Worker", async () => {
-    const r = new Resolver({ integrations: { list: async () => [rec("gl", { provider: "gitlab" })] }, secrets: { get: async () => "x" } });
-    const e = (await r.forge({ teamId: "team_1", codeForge: "GITLAB", repo: "acme/x" }).catch((x: unknown) => x)) as OfError;
+    const r = new Resolver({
+      integrations: { list: async () => [rec("gl", { provider: "gitlab" })] },
+      secrets: { get: async () => "x" },
+    });
+    const e = (await r
+      .forge({ teamId: "team_1", codeForge: "GITLAB", repo: "acme/x" })
+      .catch((x: unknown) => x)) as OfError;
     expect(e.code).toBe("feature_not_available");
     expect(e.message).not.toMatch(/openfactory-plugin/);
   });
@@ -478,8 +679,16 @@ describe("Resolver", () => {
 describe("defsync", () => {
   it("parses git repositories", () => {
     expect(parseGitRepo("acme/defs")).toEqual({ codeForge: "GITHUB", owner: "acme", repo: "defs" });
-    expect(parseGitRepo("https://gitlab.example.com/g/sub/defs.git")).toEqual({ codeForge: "GITLAB", owner: "g/sub", repo: "defs" });
-    expect(parseGitRepo("https://dev.azure.com/org/proj/_git/repo")).toEqual({ codeForge: "AZURE_DEVOPS", owner: "org/proj", repo: "repo" });
+    expect(parseGitRepo("https://gitlab.example.com/g/sub/defs.git")).toEqual({
+      codeForge: "GITLAB",
+      owner: "g/sub",
+      repo: "defs",
+    });
+    expect(parseGitRepo("https://dev.azure.com/org/proj/_git/repo")).toEqual({
+      codeForge: "AZURE_DEVOPS",
+      owner: "org/proj",
+      repo: "repo",
+    });
     expect(parseGitRepo("git.example.org/a/b").codeForge).toBe("GIT");
     expect(() => parseGitRepo("x")).toThrow(/owner\/repository/);
   });
@@ -504,10 +713,23 @@ describe("defsync", () => {
     expect(applied).toEqual(["Sync main @ 0123456"]);
   });
   it("renders checks", () => {
-    expect(renderCheck({ valid: false, errors: [{ file: "a.yaml", line: 2, field: "x", message: "bad" }], warnings: [], skipped: [] }).title).toBe("1 error(s): a.yaml:2 x: bad");
-    expect(renderCheck({ valid: true, errors: [], warnings: [], skipped: [], diff: { empty: false, added: 1, removed: 0, changed: 2, summary: "+ agent a" } }).title).toBe(
-      "Definition is valid: 1 added, 0 removed, 2 changed",
-    );
+    expect(
+      renderCheck({
+        valid: false,
+        errors: [{ file: "a.yaml", line: 2, field: "x", message: "bad" }],
+        warnings: [],
+        skipped: [],
+      }).title,
+    ).toBe("1 error(s): a.yaml:2 x: bad");
+    expect(
+      renderCheck({
+        valid: true,
+        errors: [],
+        warnings: [],
+        skipped: [],
+        diff: { empty: false, added: 1, removed: 0, changed: 2, summary: "+ agent a" },
+      }).title,
+    ).toBe("Definition is valid: 1 added, 0 removed, 2 changed");
     expect(truncateDesc("a  b " + "x".repeat(200)).endsWith("...")).toBe(true);
   });
 });

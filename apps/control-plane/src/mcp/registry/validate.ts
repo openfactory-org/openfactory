@@ -61,15 +61,26 @@ export function privateHostWarning(m: RegisteredMCPServer): string {
 
 export function isPrivateHost(host: string): boolean {
   const h = host.toLowerCase().replace(/^\[|\]$/g, "");
-  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".local") || h.endsWith(".internal") || !h.includes(".") && !h.includes(":")) {
+  if (
+    h === "localhost" ||
+    h.endsWith(".localhost") ||
+    h.endsWith(".local") ||
+    h.endsWith(".internal") ||
+    (!h.includes(".") && !h.includes(":"))
+  ) {
     return true;
   }
   const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
   if (v4) {
     const [a, b] = [Number(v4[1]), Number(v4[2])];
     return (
-      a === 10 || a === 127 || a === 0 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) ||
-      (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127)
+      a === 10 ||
+      a === 127 ||
+      a === 0 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 169 && b === 254) ||
+      (a === 100 && b >= 64 && b <= 127)
     );
   }
   if (h.includes(":")) return h === "::1" || h.startsWith("fc") || h.startsWith("fd") || h.startsWith("fe80");
@@ -106,7 +117,8 @@ export function validate(m: RegisteredMCPServer): void {
   }
   if (m.command !== "") {
     if (Object.keys(headers).length > 0) throw invalid("headers apply only to url servers");
-    if (m.connection === MCP_CONNECTION_PROXY || m.oauth) throw invalid("connection proxy and oauth apply only to url servers");
+    if (m.connection === MCP_CONNECTION_PROXY || m.oauth)
+      throw invalid("connection proxy and oauth apply only to url servers");
     m.connection = "";
   }
   if (m.url !== "" && m.connection === "") m.connection = m.oauth ? MCP_CONNECTION_PROXY : MCP_CONNECTION_DIRECT;
@@ -118,7 +130,8 @@ export function validate(m: RegisteredMCPServer): void {
     const o = m.oauth;
     o.client_id = (o.client_id ?? "").trim();
     o.client_secret_name = (o.client_secret_name ?? "").trim();
-    if (o.client_secret_name !== "" && o.client_id === "") throw invalid("oauth.client_secret_name needs oauth.client_id");
+    if (o.client_secret_name !== "" && o.client_id === "")
+      throw invalid("oauth.client_secret_name needs oauth.client_id");
     for (const [name, v] of [
       ["authorization_endpoint", o.authorization_endpoint ?? ""],
       ["token_endpoint", o.token_endpoint ?? ""],
@@ -128,7 +141,8 @@ export function validate(m: RegisteredMCPServer): void {
       if (e) throw invalid(`oauth.${name}: ${e}`);
     }
     for (const sc of o.scopes ?? []) {
-      if (sc.trim() === "" || /[ \t\n]/.test(sc)) throw invalid("oauth.scopes entries must be single non-empty scope values");
+      if (sc.trim() === "" || /[ \t\n]/.test(sc))
+        throw invalid("oauth.scopes entries must be single non-empty scope values");
     }
     if (!o.status) o.status = MCP_OAUTH_NOT_CONNECTED;
     if (o.client_id === "") delete o.client_id;
@@ -163,7 +177,8 @@ export function checkURL(raw: string, httpsOnly: boolean): string {
   } catch {
     return "must be an absolute http or https URL";
   }
-  if (u.host === "" || (u.protocol !== "http:" && u.protocol !== "https:")) return "must be an absolute http or https URL";
+  if (u.host === "" || (u.protocol !== "http:" && u.protocol !== "https:"))
+    return "must be an absolute http or https URL";
   if (u.username !== "" || u.password !== "" || /^[a-z]+:\/\/[^/]*@/i.test(raw)) return "must not embed credentials";
   if (httpsOnly && u.protocol === "http:" && !isLoopbackHost(u.hostname)) return "must use https";
   return "";

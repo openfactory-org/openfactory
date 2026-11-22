@@ -25,7 +25,7 @@ export function parseGitRepo(raw: string): GitLocation {
   if (s === "") throw new OfError("invalid_request", "empty git repository");
   let host = "";
   let path = s;
-  let parsed: URL | null = null;
+  let parsed: URL | null;
   try {
     parsed = /^[a-z][a-z0-9+.-]*:\/\//i.test(s) ? new URL(s) : null;
   } catch {
@@ -42,10 +42,11 @@ export function parseGitRepo(raw: string): GitLocation {
     }
   }
   path = path.replace(/^\/+|\/+$/g, "").replace(/\.git$/, "");
-  let [owner, name] = splitRepo(path);
+  const [owner0, name] = splitRepo(path);
+  let owner = owner0;
   if (!owner || !name) throw new OfError("invalid_request", `git repository "${raw}" must name owner/repository`);
   const h = host.toLowerCase();
-  let forge = "GITHUB";
+  let forge: string;
   if (h === "" || h.includes("github")) forge = "GITHUB";
   else if (h.includes("gitlab")) forge = "GITLAB";
   else if (h.includes("dev.azure.com") || h.includes("visualstudio.com")) {
@@ -85,7 +86,12 @@ export interface DefSyncDeps {
   /** commit_sha of the active version ("" when unknown). */
   activeCommitSha?(f: GitFactory): Promise<string>;
   /** Applies files as a new version. invalid: the definition has validation errors. */
-  apply(f: GitFactory, files: Record<string, string>, message: string, sha: string): Promise<{ versionId: string } | { invalid: true; errors: ValidationError[] }>;
+  apply(
+    f: GitFactory,
+    files: Record<string, string>,
+    message: string,
+    sha: string,
+  ): Promise<{ versionId: string } | { invalid: true; errors: ValidationError[] }>;
   check(f: GitFactory, files: Record<string, string>): Promise<CheckResult>;
 }
 
@@ -94,7 +100,12 @@ function short(sha: string): string {
 }
 
 async function forgeOf(deps: DefSyncDeps, f: GitFactory, loc: GitLocation): Promise<Forge> {
-  return deps.resolver.forge({ teamId: f.team_id, factoryId: f.id, codeForge: loc.codeForge, repo: `${loc.owner}/${loc.repo}` });
+  return deps.resolver.forge({
+    teamId: f.team_id,
+    factoryId: f.id,
+    codeForge: loc.codeForge,
+    repo: `${loc.owner}/${loc.repo}`,
+  });
 }
 
 /** Fetches the production branch and applies it when its commit is new. */
@@ -183,7 +194,10 @@ export function renderCheck(chk: CheckResult): DefinitionCheckResult {
 
 /** Collapses spaces and cuts to 140 bytes with "...". */
 export function truncateDesc(s0: string): string {
-  const s = s0.split(/\s+/).filter((x) => x).join(" ");
+  const s = s0
+    .split(/\s+/)
+    .filter((x) => x)
+    .join(" ");
   const b = new TextEncoder().encode(s);
   if (b.length <= 140) return s;
   let cut = 137;
@@ -199,7 +213,10 @@ export async function checkBranch(deps: DefSyncDeps, f: GitFactory): Promise<voi
   try {
     files = (await fg.getFiles(loc.owner, loc.repo, branchOf(f), f.git_path ?? "")).files;
   } catch (e) {
-    throw new OfError("invalid_request", `could not read the definition from ${f.git_repo} branch "${branchOf(f)}": ${(e as Error).message}`);
+    throw new OfError(
+      "invalid_request",
+      `could not read the definition from ${f.git_repo} branch "${branchOf(f)}": ${(e as Error).message}`,
+    );
   }
   const chk = await deps.check(f, files);
   if (!chk.valid) {
@@ -228,13 +245,29 @@ export async function checkPullRequest(deps: DefSyncDeps, f: GitFactory, pr: Def
       });
       return;
     }
-    await fg.setCommitStatus(owner, name, pr.headSha, { context: cname, state: res.conclusion, description: truncateDesc(res.title), targetUrl: target });
+    await fg.setCommitStatus(owner, name, pr.headSha, {
+      context: cname,
+      state: res.conclusion,
+      description: truncateDesc(res.title),
+      targetUrl: target,
+    });
   };
   try {
     if (fg.publishCheckRun) {
-      await fg.publishCheckRun(owner, name, { name: cname, headSha: pr.headSha, status: "in_progress", title: "Validating factory definition", detailsUrl: target });
+      await fg.publishCheckRun(owner, name, {
+        name: cname,
+        headSha: pr.headSha,
+        status: "in_progress",
+        title: "Validating factory definition",
+        detailsUrl: target,
+      });
     } else {
-      await fg.setCommitStatus(owner, name, pr.headSha, { context: cname, state: "pending", description: "Validating factory definition", targetUrl: target });
+      await fg.setCommitStatus(owner, name, pr.headSha, {
+        context: cname,
+        state: "pending",
+        description: "Validating factory definition",
+        targetUrl: target,
+      });
     }
   } catch {
     /* the final result is published below */
@@ -243,13 +276,21 @@ export async function checkPullRequest(deps: DefSyncDeps, f: GitFactory, pr: Def
   try {
     files = (await fg.getFiles(owner, name, pr.headSha, f.git_path ?? "")).files;
   } catch (e) {
-    return publish({ conclusion: "error", title: "Could not read the definition: " + (e as Error).message, summary: "" });
+    return publish({
+      conclusion: "error",
+      title: "Could not read the definition: " + (e as Error).message,
+      summary: "",
+    });
   }
   let chk: CheckResult;
   try {
     chk = await deps.check(f, files);
   } catch (e) {
-    return publish({ conclusion: "error", title: "Could not check the definition: " + (e as Error).message, summary: "" });
+    return publish({
+      conclusion: "error",
+      title: "Could not check the definition: " + (e as Error).message,
+      summary: "",
+    });
   }
   await publish(renderCheck(chk));
 }

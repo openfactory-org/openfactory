@@ -2,14 +2,7 @@
 // per session) behind its WorkerHubDO. The control plane gives it a
 // WorkerHubClient (the typed RPC stub of the hub), so this file has no
 // dependency on the control-plane bindings.
-import type {
-  Arch,
-  PreflightResult,
-  ProviderCapabilities,
-  SandboxProvider,
-  SandboxTask,
-  TaskStatus,
-} from "../types";
+import type { Arch, PreflightResult, ProviderCapabilities, SandboxProvider, SandboxTask, TaskStatus } from "../types";
 
 /** What the provider needs of a WorkerHubDO (a subset of WorkerHubRpc). */
 export interface WorkerHubClient {
@@ -53,7 +46,14 @@ export class MicroVMProvider implements SandboxProvider {
       maxLifetimeSeconds: null,
       startRate: [],
       instanceTypes: s.slotSize
-        ? [{ name: "slot", vcpus: s.slotSize.vcpus, memoryMiB: s.slotSize.memoryMiB, ...(s.slotSize.scratchGiB ? { diskMiB: s.slotSize.scratchGiB * 1024 } : {}) }]
+        ? [
+            {
+              name: "slot",
+              vcpus: s.slotSize.vcpus,
+              memoryMiB: s.slotSize.memoryMiB,
+              ...(s.slotSize.scratchGiB ? { diskMiB: s.slotSize.scratchGiB * 1024 } : {}),
+            },
+          ]
         : [],
       customResources: false,
       loopbackDaemonPorts: [],

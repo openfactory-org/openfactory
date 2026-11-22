@@ -20,7 +20,13 @@ afterEach(() => vi.unstubAllGlobals());
 describe("Plugin", () => {
   it("reports its info and passes the version check", async () => {
     const info = await plugin({ PLUGIN_VERSION: "2.0.0" }).info();
-    expect(info).toMatchObject({ name: "azuredevops", version: "2.0.0", apiVersion: PLUGIN_API_VERSION, roles: ["forge", "ingress"], forgeProviders: ["azure_devops"] });
+    expect(info).toMatchObject({
+      name: "azuredevops",
+      version: "2.0.0",
+      apiVersion: PLUGIN_API_VERSION,
+      roles: ["forge", "ingress"],
+      forgeProviders: ["azure_devops"],
+    });
     expect(checkPluginInfo(info)).toEqual({ ok: true });
     expect(JSON.parse(info.configSchema!).required).toEqual(["org"]);
   });
@@ -32,7 +38,9 @@ describe("Plugin", () => {
   });
 
   it("throws operation_not_supported for issue comments", async () => {
-    const e = await plugin().commentIssue(target, "p", "r", 1, "x").catch((x: unknown) => x);
+    const e = await plugin()
+      .commentIssue(target, "p", "r", 1, "x")
+      .catch((x: unknown) => x);
     expect(toOfError(e).error.code).toBe("operation_not_supported");
     expect((e as Error).message.startsWith("operation_not_supported")).toBe(true);
   });
@@ -44,7 +52,9 @@ describe("Plugin", () => {
     });
     vi.stubGlobal("fetch", m.fetch);
     expect(await plugin().defaultBranch(target, "proj", "web")).toBe("trunk");
-    const err = await plugin().getPullRequest(target, "proj", "web", 8).catch((e: unknown) => e);
+    const err = await plugin()
+      .getPullRequest(target, "proj", "web", 8)
+      .catch((e: unknown) => e);
     expect(toOfError(err).error.code).toBe("resource_unavailable");
   });
 });

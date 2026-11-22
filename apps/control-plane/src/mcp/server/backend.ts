@@ -80,7 +80,11 @@ export async function callRoute<T>(env: Env, p: Principal, method: string, path:
     url,
     requestId: "mcp",
     route: m.route,
-    executionCtx: { waitUntil: () => undefined, passThroughOnException: () => undefined, props: {} } as unknown as ExecutionContext,
+    executionCtx: {
+      waitUntil: () => undefined,
+      passThroughOnException: () => undefined,
+      props: {},
+    } as unknown as ExecutionContext,
     principal: p,
   });
   const text = await res.text();

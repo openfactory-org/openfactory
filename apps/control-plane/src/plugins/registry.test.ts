@@ -23,10 +23,19 @@ const quiet = { log: () => {} };
 describe("loadPlugins", () => {
   it("loads plugins in binding order and ignores other vars", async () => {
     const reg = await loadPlugins(
-      { PLUGIN_B: stub(info({ name: "b", roles: ["sandbox"] })), PLUGIN_A: stub(info()), PLUGIN_VERSION: "1", OTHER: stub(info({ name: "x" })), NULLISH: null },
+      {
+        PLUGIN_B: stub(info({ name: "b", roles: ["sandbox"] })),
+        PLUGIN_A: stub(info()),
+        PLUGIN_VERSION: "1",
+        OTHER: stub(info({ name: "x" })),
+        NULLISH: null,
+      },
       quiet,
     );
-    expect(reg.plugins.map((p) => [p.binding, p.info.name])).toEqual([["PLUGIN_A", "gitlab"], ["PLUGIN_B", "b"]]);
+    expect(reg.plugins.map((p) => [p.binding, p.info.name])).toEqual([
+      ["PLUGIN_A", "gitlab"],
+      ["PLUGIN_B", "b"],
+    ]);
     expect(reg.rejected).toEqual([]);
     expect(reg.get("b")?.binding).toBe("PLUGIN_B");
     expect(reg.withRole("sandbox").map((p) => p.info.name)).toEqual(["b"]);
@@ -58,7 +67,10 @@ describe("loadPlugins", () => {
 
   it("finds the plugin of a forge provider and builds the resolver map", async () => {
     const reg = await loadPlugins(
-      { PLUGIN_GITLAB: stub(info()), PLUGIN_SBX: stub(info({ name: "sbx", roles: ["sandbox"], forgeProviders: ["gitlab"] })) },
+      {
+        PLUGIN_GITLAB: stub(info()),
+        PLUGIN_SBX: stub(info({ name: "sbx", roles: ["sandbox"], forgeProviders: ["gitlab"] })),
+      },
       quiet,
     );
     expect(reg.forProvider("gitlab")?.info.name).toBe("gitlab");
@@ -69,7 +81,10 @@ describe("loadPlugins", () => {
   });
 
   it("keys forge plugins by name and by provider", async () => {
-    const reg = await loadPlugins({ PLUGIN_X: stub(info({ name: "acme-forge", forgeProviders: ["Acme", "acme_cloud"] })) }, quiet);
+    const reg = await loadPlugins(
+      { PLUGIN_X: stub(info({ name: "acme-forge", forgeProviders: ["Acme", "acme_cloud"] })) },
+      quiet,
+    );
     expect(Object.keys(reg.forgePlugins()).sort()).toEqual(["acme", "acme-forge", "acme_cloud"]);
   });
 

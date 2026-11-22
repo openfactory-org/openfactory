@@ -195,7 +195,10 @@ export function goQuote(s: string): string {
 
 /** Go strings.Fields joined by one space. */
 export function oneLine(s: string): string {
-  return s.split(/\s+/u).filter((x) => x !== "").join(" ");
+  return s
+    .split(/\s+/u)
+    .filter((x) => x !== "")
+    .join(" ");
 }
 
 /** Go strings.Trim(s, cutset). */

@@ -1,5 +1,13 @@
 // Judge runs: instructions, prompt and request. Port of judge.go.
-import { JUDGE_SKILL_NAME, OfError, type RepoAtCommit, type Run, type Scorer, type ScorerLabel, type Usage } from "@openfactory/core";
+import {
+  JUDGE_SKILL_NAME,
+  OfError,
+  type RepoAtCommit,
+  type Run,
+  type Scorer,
+  type ScorerLabel,
+  type Usage,
+} from "@openfactory/core";
 import { buildTranscript } from "./transcript";
 import { parseJudgeAnswer } from "./sample";
 import { clip, f2, oneLine } from "./text";
@@ -30,8 +38,12 @@ export function scorerExec(sc: Scorer): JudgeExec {
 /** The system instructions of a judge run. */
 export function judgeInstructions(name: string, rubric: string, labels: readonly ScorerLabel[]): string {
   const b: string[] = [];
-  b.push(`You are the judge of the scorer ${JSON.stringify(name)}. You classify one agent run with exactly one label.\n\n`);
-  b.push(`The evidence is in the skill \`${JUDGE_SKILL_NAME}\` in your workspace. Its file \`transcript.md\` holds the full transcript of the run, with its child runs. `);
+  b.push(
+    `You are the judge of the scorer ${JSON.stringify(name)}. You classify one agent run with exactly one label.\n\n`,
+  );
+  b.push(
+    `The evidence is in the skill \`${JUDGE_SKILL_NAME}\` in your workspace. Its file \`transcript.md\` holds the full transcript of the run, with its child runs. `,
+  );
   b.push("The repositories in your workspace are checked out at the commits where the run started. ");
   b.push(
     "You can read files, run commands and use your tools to check the work. Do not change anything outside your workspace: do not push, comment, post messages or open pull requests.\n\n",
@@ -75,10 +87,21 @@ export async function judgeRequest(runs: RunsPort, input: JudgeRequestInput): Pr
       `the scorer ${JSON.stringify(input.name)} has no harness (set harness or model on the scorer, scorerDefaults or agentDefaults)`,
     );
   }
-  const transcript = await buildTranscript(runs, input.scored, input.includeDescendants, 0, DEFAULT_MAX_JUDGE_FILE_BYTES);
+  const transcript = await buildTranscript(
+    runs,
+    input.scored,
+    input.includeDescendants,
+    0,
+    DEFAULT_MAX_JUDGE_FILE_BYTES,
+  );
   let refs = input.refs ?? [];
   if (refs.length === 0) {
-    refs = (await runs.loadStartCommits(input.scored.id)).map((s) => ({ codeForge: s.codeForge, owner: s.owner, repo: s.repo, ref: s.ref }));
+    refs = (await runs.loadStartCommits(input.scored.id)).map((s) => ({
+      codeForge: s.codeForge,
+      owner: s.owner,
+      repo: s.repo,
+      ref: s.ref,
+    }));
   }
   const req: JudgeRunRequest = {
     factoryId: input.factoryId,
@@ -99,7 +122,10 @@ export const isJudgeRun = (r: Pick<Run, "metadata" | "triggered_by">): boolean =
   !!r.metadata?.["judge"] || (r.triggered_by ?? "").startsWith("scorer:");
 
 /** Reads the label and the rationale from a finished judge run. */
-export async function judgeAnswer(runs: Pick<RunsPort, "listMessages">, judge: Run): Promise<{ label: string; rationale: string }> {
+export async function judgeAnswer(
+  runs: Pick<RunsPort, "listMessages">,
+  judge: Run,
+): Promise<{ label: string; rationale: string }> {
   switch (judge.state) {
     case "cancelled":
       throw new Error("the judge run was cancelled");

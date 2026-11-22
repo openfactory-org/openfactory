@@ -191,4 +191,3 @@ export default {
     return new Response("openfactory-plugin-gitlab: call this Worker through a service binding", { status: 404 });
   },
 };
-

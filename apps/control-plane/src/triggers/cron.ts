@@ -174,7 +174,16 @@ function getField(field: string, r: Bounds): bigint {
 
 const all = (r: Bounds): bigint => getBits(r.min, r.max, 1) | STAR_BIT;
 
-const UNIT: Record<string, number> = { ns: 1e-6, us: 1e-3, "µs": 1e-3, "μs": 1e-3, ms: 1, s: 1000, m: 60_000, h: 3_600_000 };
+const UNIT: Record<string, number> = {
+  ns: 1e-6,
+  us: 1e-3,
+  µs: 1e-3,
+  μs: 1e-3,
+  ms: 1,
+  s: 1000,
+  m: 60_000,
+  h: 3_600_000,
+};
 
 /** Go time.ParseDuration, in milliseconds (fractions of a millisecond kept). */
 export function parseGoDuration(orig: string): number {
@@ -189,7 +198,8 @@ export function parseGoDuration(orig: string): number {
   let total = 0;
   while (s !== "") {
     const m = /^(\d*)(?:\.(\d*))?/.exec(s)!;
-    if (m[0] === "" || m[0] === "." || (m[1] === "" && (m[2] ?? "") === "")) throw new CronError(`time: invalid duration "${orig}"`);
+    if (m[0] === "" || m[0] === "." || (m[1] === "" && (m[2] ?? "") === ""))
+      throw new CronError(`time: invalid duration "${orig}"`);
     s = s.slice(m[0].length);
     const u = /^[^\d.]+/.exec(s);
     if (!u) throw new CronError(`time: missing unit in duration "${orig}"`);
@@ -235,7 +245,8 @@ function parseSpec(spec: string): CronSchedule {
   if (spec.length === 0) throw new CronError("empty spec string");
   if (spec.startsWith("@")) return parseDescriptor(spec);
   const fields = spec.split(/\s+/).filter((x) => x !== "");
-  if (fields.length !== 5) throw new CronError(`expected exactly 5 fields, found ${fields.length}: [${fields.join(" ")}]`);
+  if (fields.length !== 5)
+    throw new CronError(`expected exactly 5 fields, found ${fields.length}: [${fields.join(" ")}]`);
   return new SpecSchedule(
     getField(fields[0]!, MINUTES),
     getField(fields[1]!, HOURS),
@@ -249,13 +260,14 @@ function parseSpec(spec: string): CronSchedule {
 export function parseCron(expr0: string): CronSchedule {
   const expr = expr0.trim();
   if (expr === "") throw new Error("cron expression is required");
-  if (expr.startsWith("TZ=") || expr.startsWith("CRON_TZ=")) throw new Error("time zones are not supported; schedules run in UTC");
+  if (expr.startsWith("TZ=") || expr.startsWith("CRON_TZ="))
+    throw new Error("time zones are not supported; schedules run in UTC");
   if (expr.startsWith("@every")) {
     let s: CronSchedule;
     try {
       s = parseSpec(expr);
     } catch (e) {
-      throw new Error(`invalid cron expression "${expr}": ${(e as Error).message}`);
+      throw new Error(`invalid cron expression "${expr}": ${(e as Error).message}`, { cause: e });
     }
     if (s instanceof ConstantDelaySchedule && s.delayMs < MIN_EVERY_INTERVAL_MS) {
       throw new Error(`invalid cron expression "${expr}": interval must be at least 1m0s`);
@@ -263,12 +275,14 @@ export function parseCron(expr0: string): CronSchedule {
     return s;
   }
   if (!expr.startsWith("@") && expr.split(/\s+/).filter((x) => x !== "").length !== 5) {
-    throw new Error(`invalid cron expression "${expr}": expected 5 fields (minute hour day-of-month month day-of-week)`);
+    throw new Error(
+      `invalid cron expression "${expr}": expected 5 fields (minute hour day-of-month month day-of-week)`,
+    );
   }
   try {
     return parseSpec(expr);
   } catch (e) {
-    throw new Error(`invalid cron expression "${expr}": ${(e as Error).message}`);
+    throw new Error(`invalid cron expression "${expr}": ${(e as Error).message}`, { cause: e });
   }
 }
 

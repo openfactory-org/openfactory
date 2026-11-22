@@ -22,7 +22,17 @@ import type {
   WebhookOutcome,
 } from "../types";
 import { consoleLogger } from "../types";
-import { Dedupe, cfg, equalFold, errMessage, errorResponse, formatOutbound, integrationSecret, readBody, stringSet } from "../util";
+import {
+  Dedupe,
+  cfg,
+  equalFold,
+  errMessage,
+  errorResponse,
+  formatOutbound,
+  integrationSecret,
+  readBody,
+  stringSet,
+} from "../util";
 import { DEFAULT_TOKEN_TENANT, GRAPH_SCOPE, KeySet, TokenSource } from "./auth";
 import { GRAPH_PAGE_SIZE, MAX_THREAD_MESSAGES, cleanText, fitThread, threadEntry, type ThreadEntry } from "./context";
 import { EVENT_CONTEXT_MAX_PAYLOAD_BYTES } from "../types";
@@ -135,7 +145,12 @@ export class TeamsHandler implements Responder, EventContextBuilder {
       return { response: errorResponse(400, "invalid_payload", "activity is not valid JSON") };
     }
     try {
-      await this.keys.validate(req.headers.get("Authorization") ?? "", await this.appIds(), act.channelId ?? "", act.serviceUrl ?? "");
+      await this.keys.validate(
+        req.headers.get("Authorization") ?? "",
+        await this.appIds(),
+        act.channelId ?? "",
+        act.serviceUrl ?? "",
+      );
     } catch (e) {
       this.log.info("rejected bot framework request", { err: errMessage(e) });
       return { response: errorResponse(401, "unauthorized", "invalid Bot Connector token") };
@@ -157,7 +172,12 @@ export class TeamsHandler implements Responder, EventContextBuilder {
   /** The record of an activity: records whose team_id is the Graph team and whose app_id is the bot that received it. */
   private findIntegration(graphTeamId: string, recipientId: string) {
     const botId = recipientId.startsWith("28:") ? recipientId.slice(3) : recipientId;
-    return intake(this.deps.store, INTEGRATION_PROVIDER, graphTeamId, (i) => botId === "" || equalFold(cfg(i, "app_id"), botId));
+    return intake(
+      this.deps.store,
+      INTEGRATION_PROVIDER,
+      graphTeamId,
+      (i) => botId === "" || equalFold(cfg(i, "app_id"), botId),
+    );
   }
 
   private async handleMessage(act: Activity, raw: string): Promise<void> {
@@ -217,7 +237,11 @@ export class TeamsHandler implements Responder, EventContextBuilder {
         case "logout":
         case "unlink":
           if (this.deps.linker) await this.deps.linker.unlink(PROVIDER, actorId, "");
-          await this.replyActivity(in_, act, "Your Microsoft account is no longer linked to Open Factory in this organization.");
+          await this.replyActivity(
+            in_,
+            act,
+            "Your Microsoft account is no longer linked to Open Factory in this organization.",
+          );
           return;
         case "help":
         case "":
@@ -272,7 +296,13 @@ export class TeamsHandler implements Responder, EventContextBuilder {
       attrs[A.ThreadReply] = true;
       attrs[A.AutoFollowUp] = await autoRespondToThreadReplies(this.deps.store, factoryId, DEFINITION_TYPE);
     }
-    const src: SourceRef = { provider: PROVIDER, kind: "thread", channel: channelId, thread_id: root, workspace: integrationWorkspace(in_) };
+    const src: SourceRef = {
+      provider: PROVIDER,
+      kind: "thread",
+      channel: channelId,
+      thread_id: root,
+      workspace: integrationWorkspace(in_),
+    };
     const payload = JSON.parse(raw) as unknown;
     const events: Event[] = [];
     const emit = (typ: string): void => {
@@ -310,8 +340,9 @@ export class TeamsHandler implements Responder, EventContextBuilder {
     const id = recipientId.slice(3);
     try {
       return (
-        (await this.allRecords()).find((i) => equalFold(cfg(i, "app_id"), id) && (i.secret_ref ?? "") !== "" && (i.status || "active") === "active") ??
-        null
+        (await this.allRecords()).find(
+          (i) => equalFold(cfg(i, "app_id"), id) && (i.secret_ref ?? "") !== "" && (i.status || "active") === "active",
+        ) ?? null
       );
     } catch {
       return null;
@@ -347,7 +378,13 @@ export class TeamsHandler implements Responder, EventContextBuilder {
   }
 
   /** Posts a message activity into a channel thread. */
-  private async send(in_: Integration | null, serviceUrl: string, channelId: string, rootId: string, text: string): Promise<void> {
+  private async send(
+    in_: Integration | null,
+    serviceUrl: string,
+    channelId: string,
+    rootId: string,
+    text: string,
+  ): Promise<void> {
     const ts = await this.tokenSource(in_);
     const tok = await ts.getToken();
     const conv = rootId !== "" ? `${channelId};messageid=${rootId}` : channelId;
@@ -358,7 +395,11 @@ export class TeamsHandler implements Responder, EventContextBuilder {
       authorize: (h) => h.set("Authorization", "Bearer " + tok),
     });
     try {
-      await c.send("POST", `/v3/conversations/${encodeURIComponent(conv)}/activities`, { type: "message", text, textFormat: "markdown" });
+      await c.send("POST", `/v3/conversations/${encodeURIComponent(conv)}/activities`, {
+        type: "message",
+        text,
+        textFormat: "markdown",
+      });
     } catch (e) {
       throw new Error(`teams: send activity: ${errMessage(e)}`, { cause: e });
     }
@@ -402,7 +443,13 @@ export class TeamsHandler implements Responder, EventContextBuilder {
   /** Replies in the originating channel thread. */
   async reply(teamId: string, msg: OutboundMessage): Promise<void> {
     if (!msg.source.channel) throw new Error("teams: outbound message has no channel");
-    const in_ = await selectTeam(this.deps.store, teamId, INTEGRATION_PROVIDER, msg.factory_id ?? "", msg.source.workspace ?? "");
+    const in_ = await selectTeam(
+      this.deps.store,
+      teamId,
+      INTEGRATION_PROVIDER,
+      msg.factory_id ?? "",
+      msg.source.workspace ?? "",
+    );
     const v = await this.deps.store.kvGet(serviceUrlKey(msg.source.channel));
     await this.send(in_, v || DEFAULT_SERVICE_URL, msg.source.channel, msg.source.thread_id ?? "", formatOutbound(msg));
   }
@@ -418,7 +465,10 @@ export class TeamsHandler implements Responder, EventContextBuilder {
     const { appId, password } = await this.botCredentials(in_);
     let tenant = tenantIn;
     if (in_ && cfg(in_, "tenant_id").trim() !== "") tenant = cfg(in_, "tenant_id").trim();
-    if (tenant === "") throw new Error("teams: Microsoft Graph needs the Microsoft 365 tenant: set config tenant_id on the integration record");
+    if (tenant === "")
+      throw new Error(
+        "teams: Microsoft Graph needs the Microsoft 365 tenant: set config tenant_id on the integration record",
+      );
     const key = `${appId}|${tenant}|graph`;
     let ts = this.tokens.get(key);
     if (!ts || ts.appPassword !== password) {
@@ -525,7 +575,10 @@ export class TeamsHandler implements Responder, EventContextBuilder {
 /** A hint for the errors that a missing permission or a wrong tenant gives. */
 export function describeGraphError(what: string, permission: string, err: unknown): Error {
   if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
-    return new Error(`Microsoft Graph refused the request to ${what}: the bot needs the permission ${permission} in the team: ${err.message}`, { cause: err });
+    return new Error(
+      `Microsoft Graph refused the request to ${what}: the bot needs the permission ${permission} in the team: ${err.message}`,
+      { cause: err },
+    );
   }
   return err instanceof Error ? err : new Error(String(err));
 }
@@ -551,7 +604,9 @@ export function tokenTenants(in_: Integration | null): { tenant: string; fallbac
     case "":
       break;
     default:
-      throw new Error(`teams: unknown app_type "${in_ ? cfg(in_, "app_type") : ""}" (want SingleTenant or MultiTenant)`);
+      throw new Error(
+        `teams: unknown app_type "${in_ ? cfg(in_, "app_type") : ""}" (want SingleTenant or MultiTenant)`,
+      );
   }
   return { tenant: DEFAULT_TOKEN_TENANT, fallback: recTenant };
 }

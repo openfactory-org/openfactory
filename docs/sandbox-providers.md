@@ -77,7 +77,7 @@ See [Self-hosted workers](self-hosted-machines.md).
 - `daytona` needs a Daytona API key and the organization tier. Any key of the organization can control every running sandbox of that organization, so use a dedicated organization.
 - `boatdev` needs a boat.dev API key (`boat_...`) with the `ci` preset.
 
-The control plane reads the credentials of `daytona` and `boatdev` from its provider configuration. Do not put them in a definition or in an agent secret.
+The control plane reads the credentials of `daytona` and `boatdev` from the Worker secrets `OF_DAYTONA_API_KEY` and `OF_BOATDEV_API_KEY`, and the Daytona tier and region from the variables `OF_DAYTONA_TIER` and `OF_DAYTONA_TARGET`. See [Configuration](self-hosting/configuration.md). Do not put the keys in a definition or in an agent secret.
 
 ## Build the sandbox image
 

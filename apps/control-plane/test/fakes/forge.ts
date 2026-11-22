@@ -2,7 +2,14 @@
 // internal/forge/forgeutil/forgetest). Every call is appended to `calls`.
 import { OfError, type FileDiff, type PullRequestRef, type ReviewThread } from "@openfactory/core";
 import type { CheckRunInput } from "../../src/forges/checkrun";
-import type { CommitStatus, Forge, ForgeLookup, ForgeResolver, PullRequestInput, ReviewInput } from "../../src/forges/forge";
+import type {
+  CommitStatus,
+  Forge,
+  ForgeLookup,
+  ForgeResolver,
+  PullRequestInput,
+  ReviewInput,
+} from "../../src/forges/forge";
 
 export interface Call {
   op: string;
@@ -50,7 +57,14 @@ export class FakeForge implements Forge {
   async createPullRequest(req: PullRequestInput): Promise<PullRequestRef> {
     this.rec("createPullRequest", req);
     const n = this.nextNumber++;
-    return { forge: this.forgeName, repo: `${req.owner}/${req.repo}`, number: n, url: `https://example.test/${req.owner}/${req.repo}/pull/${n}`, branch: req.head, state: req.draft ? "draft" : "open" };
+    return {
+      forge: this.forgeName,
+      repo: `${req.owner}/${req.repo}`,
+      number: n,
+      url: `https://example.test/${req.owner}/${req.repo}/pull/${n}`,
+      branch: req.head,
+      state: req.draft ? "draft" : "open",
+    };
   }
   async getPullRequest(owner: string, repo: string, number: number): Promise<PullRequestRef> {
     this.rec("getPullRequest", owner, repo, number);
@@ -65,7 +79,12 @@ export class FakeForge implements Forge {
   async setCommitStatus(owner: string, repo: string, sha: string, st: CommitStatus): Promise<void> {
     this.rec("setCommitStatus", owner, repo, sha, st);
   }
-  async getFiles(owner: string, repo: string, ref: string, path: string): Promise<{ files: Record<string, string>; sha: string }> {
+  async getFiles(
+    owner: string,
+    repo: string,
+    ref: string,
+    path: string,
+  ): Promise<{ files: Record<string, string>; sha: string }> {
     this.rec("getFiles", owner, repo, ref, path);
     return { files: { ...this.files }, sha: this.sha };
   }

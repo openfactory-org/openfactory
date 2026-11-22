@@ -6,7 +6,8 @@ const fencedCode = /(```|~~~)[\s\S]*?(```|~~~|$)/g;
 const inlineCode = /`[^`\n]*`/g;
 const quoteLine = /^\s*>.*$/gm;
 // GitHub and GitLab handles: @login, @org/team, @app-name, @bot[bot]
-const mentionRe = /(^|[^A-Za-z0-9_.\-/@`])@([A-Za-z0-9](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?(?:\/[A-Za-z0-9_.-]+)?(?:\[bot\])?)/g;
+const mentionRe =
+  /(^|[^A-Za-z0-9_.\-/@`])@([A-Za-z0-9](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?(?:\/[A-Za-z0-9_.-]+)?(?:\[bot\])?)/g;
 
 /** Removes fenced code blocks, inline code spans and quoted lines. */
 export function stripCode(text: string): string {

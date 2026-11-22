@@ -3,7 +3,7 @@
 // its error messages (including the strconv and time.ParseDuration texts) are
 // reproduced so that schedule errors match the Go server.
 
-import { goFields, goQuote, goTimeQuote, goTrimSpace } from './gofmt.ts';
+import { goFields, goQuote, goTimeQuote, goTrimSpace } from "./gofmt.ts";
 
 interface Bounds {
   min: number;
@@ -32,14 +32,14 @@ function goAtoi(s: string): number {
   };
   let body = s;
   let neg = false;
-  if (body[0] === '+' || body[0] === '-') {
-    neg = body[0] === '-';
+  if (body[0] === "+" || body[0] === "-") {
+    neg = body[0] === "-";
     body = body.slice(1);
   }
-  if (body === '' || !/^[0-9]+$/.test(body)) fail('invalid syntax');
+  if (body === "" || !/^[0-9]+$/.test(body)) fail("invalid syntax");
   let v = BigInt(body);
   if (neg) v = -v;
-  if (v > MAX_INT64 || v < -(1n << 63n)) fail('value out of range');
+  if (v > MAX_INT64 || v < -(1n << 63n)) fail("value out of range");
   return Number(v);
 }
 
@@ -63,13 +63,13 @@ function parseIntOrName(expr: string, names: Record<string, number> | null): num
 }
 
 function getRange(expr: string, r: Bounds): void {
-  const rangeAndStep = expr.split('/');
-  const lowAndHigh = rangeAndStep[0]!.split('-');
+  const rangeAndStep = expr.split("/");
+  const lowAndHigh = rangeAndStep[0]!.split("-");
   const singleDigit = lowAndHigh.length === 1;
   let start: number;
   let end: number;
   let step: number;
-  if (lowAndHigh[0] === '*' || lowAndHigh[0] === '?') {
+  if (lowAndHigh[0] === "*" || lowAndHigh[0] === "?") {
     start = r.min;
     end = r.max;
   } else {
@@ -93,8 +93,8 @@ function getRange(expr: string, r: Bounds): void {
 }
 
 function getField(field: string, r: Bounds): void {
-  for (const expr of field.split(',')) {
-    if (expr === '') continue;
+  for (const expr of field.split(",")) {
+    if (expr === "") continue;
     getRange(expr, r);
   }
 }
@@ -102,8 +102,8 @@ function getField(field: string, r: Bounds): void {
 const unitMap: Record<string, bigint> = {
   ns: 1n,
   us: 1000n,
-  'µs': 1000n,
-  'μs': 1000n,
+  µs: 1000n,
+  μs: 1000n,
   ms: 1000000n,
   s: 1000000000n,
   m: 60n * 1000000000n,
@@ -115,17 +115,17 @@ export function parseDuration(orig: string): string | null {
   let s = orig;
   let d = 0n;
   const invalid = `time: invalid duration ${goTimeQuote(orig)}`;
-  if (s !== '' && (s[0] === '-' || s[0] === '+')) s = s.slice(1);
-  if (s === '0') return null;
-  if (s === '') return invalid;
+  if (s !== "" && (s[0] === "-" || s[0] === "+")) s = s.slice(1);
+  if (s === "0") return null;
+  if (s === "") return invalid;
   const limit = 1n << 63n;
-  while (s !== '') {
+  while (s !== "") {
     let v = 0n;
     let f = 0n;
     let scale = 1;
-    if (!(s[0] === '.' || (s[0]! >= '0' && s[0]! <= '9'))) return invalid;
+    if (!(s[0] === "." || (s[0]! >= "0" && s[0]! <= "9"))) return invalid;
     let i = 0;
-    while (i < s.length && s[i]! >= '0' && s[i]! <= '9') {
+    while (i < s.length && s[i]! >= "0" && s[i]! <= "9") {
       v = v * 10n + BigInt(s.charCodeAt(i) - 48);
       if (v > limit) return invalid;
       i++;
@@ -133,11 +133,11 @@ export function parseDuration(orig: string): string | null {
     const pre = i > 0;
     s = s.slice(i);
     let post = false;
-    if (s !== '' && s[0] === '.') {
+    if (s !== "" && s[0] === ".") {
       s = s.slice(1);
       let j = 0;
       let overflow = false;
-      while (j < s.length && s[j]! >= '0' && s[j]! <= '9') {
+      while (j < s.length && s[j]! >= "0" && s[j]! <= "9") {
         if (!overflow) {
           const nf = f * 10n + BigInt(s.charCodeAt(j) - 48);
           if (nf >= limit) overflow = true;
@@ -153,7 +153,7 @@ export function parseDuration(orig: string): string | null {
     }
     if (!pre && !post) return invalid;
     let k = 0;
-    while (k < s.length && !(s[k] === '.' || (s[k]! >= '0' && s[k]! <= '9'))) k++;
+    while (k < s.length && !(s[k] === "." || (s[k]! >= "0" && s[k]! <= "9"))) k++;
     if (k === 0) return `time: missing unit in duration ${goTimeQuote(orig)}`;
     const u = s.slice(0, k);
     s = s.slice(k);
@@ -168,23 +168,23 @@ export function parseDuration(orig: string): string | null {
     d += v;
     if (d > limit) return invalid;
   }
-  const neg = orig[0] === '-';
+  const neg = orig[0] === "-";
   if (!neg && d > limit - 1n) return invalid;
   return null;
 }
 
 function parseDescriptor(descriptor: string): void {
   switch (descriptor) {
-    case '@yearly':
-    case '@annually':
-    case '@monthly':
-    case '@weekly':
-    case '@daily':
-    case '@midnight':
-    case '@hourly':
+    case "@yearly":
+    case "@annually":
+    case "@monthly":
+    case "@weekly":
+    case "@daily":
+    case "@midnight":
+    case "@hourly":
       return;
   }
-  const every = '@every ';
+  const every = "@every ";
   if (descriptor.startsWith(every)) {
     const err = parseDuration(descriptor.slice(every.length));
     if (err !== null) throw new CronError(`failed to parse duration ${descriptor}: ${err}`);
@@ -194,13 +194,14 @@ function parseDescriptor(descriptor: string): void {
 }
 
 function parseStandard(spec: string): void {
-  if (spec.length === 0) throw new CronError('empty spec string');
-  if (spec.startsWith('@')) {
+  if (spec.length === 0) throw new CronError("empty spec string");
+  if (spec.startsWith("@")) {
     parseDescriptor(spec);
     return;
   }
   const fields = goFields(spec);
-  if (fields.length !== 5) throw new CronError(`expected exactly 5 fields, found ${fields.length}: [${fields.join(' ')}]`);
+  if (fields.length !== 5)
+    throw new CronError(`expected exactly 5 fields, found ${fields.length}: [${fields.join(" ")}]`);
   getField(fields[0]!, minutes);
   getField(fields[1]!, hours);
   getField(fields[2]!, dom);
@@ -214,9 +215,10 @@ function parseStandard(spec: string): void {
  */
 export function validateCron(expr: string): string | null {
   const e = goTrimSpace(expr);
-  if (e.startsWith('TZ=') || e.startsWith('CRON_TZ=')) return 'schedules are always UTC; time zone prefixes are not supported';
-  if (!e.startsWith('@') && goFields(e).length !== 5) {
-    return 'must be a five-field cron expression or a descriptor such as @daily or @every 1h';
+  if (e.startsWith("TZ=") || e.startsWith("CRON_TZ="))
+    return "schedules are always UTC; time zone prefixes are not supported";
+  if (!e.startsWith("@") && goFields(e).length !== 5) {
+    return "must be a five-field cron expression or a descriptor such as @daily or @every 1h";
   }
   try {
     parseStandard(e);

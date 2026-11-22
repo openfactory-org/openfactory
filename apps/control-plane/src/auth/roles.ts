@@ -59,7 +59,11 @@ export function canOn(p: Principal | undefined | null, factoryId: string, min: R
  * minimum roles pass.
  */
 export function requireRole(p: Principal | undefined | null, factoryId: string, min: RouteRole): Principal {
-  if (!p) throw new OfError("authentication_required", "missing credentials: sign in or send an Authorization: Bearer header");
+  if (!p)
+    throw new OfError(
+      "authentication_required",
+      "missing credentials: sign in or send an Authorization: Bearer header",
+    );
   if (min === "public" || min === "worker") return p;
   if (!canOn(p, factoryId, min)) {
     if (factoryId !== "") {

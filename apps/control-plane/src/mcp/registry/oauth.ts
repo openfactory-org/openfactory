@@ -124,7 +124,10 @@ export function authParam(values: string[], name: string): string {
       if (sp > 0 && part.slice(0, sp).toLowerCase() === "bearer") part = part.slice(sp + 1).trim();
       const eq = part.indexOf("=");
       if (eq >= 0 && part.slice(0, eq).trim().toLowerCase() === name.toLowerCase()) {
-        return part.slice(eq + 1).trim().replace(/^"+|"+$/g, "");
+        return part
+          .slice(eq + 1)
+          .trim()
+          .replace(/^"+|"+$/g, "");
       }
     }
   }
@@ -201,7 +204,10 @@ async function discoverAuthServer(rt: McpRuntime, issuer: string, signal: AbortS
   if (u.host === "") throw new Error(`invalid authorization server "${issuer}"`);
   const origin = `${u.protocol}//${u.host}`;
   const p = u.pathname.replace(/\/+$/, "");
-  const candidates = [origin + "/.well-known/oauth-authorization-server" + p, origin + "/.well-known/openid-configuration" + p];
+  const candidates = [
+    origin + "/.well-known/oauth-authorization-server" + p,
+    origin + "/.well-known/openid-configuration" + p,
+  ];
   if (p !== "") candidates.push(origin + p + "/.well-known/openid-configuration");
   for (const c of candidates) {
     const md = await getJSON<ASMetadata>(rt, c, signal);
@@ -217,12 +223,19 @@ async function discoverAuthServer(rt: McpRuntime, issuer: string, signal: AbortS
 
 function pickAuthMethod(supported: string[] | undefined): string {
   const s = supported ?? [];
-  if (s.length > 0 && !s.includes("client_secret_basic") && s.includes("client_secret_post")) return "client_secret_post";
+  if (s.length > 0 && !s.includes("client_secret_basic") && s.includes("client_secret_post"))
+    return "client_secret_post";
   return "client_secret_basic";
 }
 
 /** Dynamic client registration; fills p's client. */
-async function registerClient(env: Env, rt: McpRuntime, endpoint: string, p: PendingAuth, signal: AbortSignal): Promise<void> {
+async function registerClient(
+  env: Env,
+  rt: McpRuntime,
+  endpoint: string,
+  p: PendingAuth,
+  signal: AbortSignal,
+): Promise<void> {
   let res: Response;
   try {
     res = await rt.fetch(endpoint, {
@@ -238,7 +251,7 @@ async function registerClient(env: Env, rt: McpRuntime, endpoint: string, p: Pen
       signal,
     });
   } catch (e) {
-    throw new Error(`client registration: ${(e as Error).message}`);
+    throw new Error(`client registration: ${(e as Error).message}`, { cause: e });
   }
   let out: Record<string, unknown> = {};
   try {
@@ -270,7 +283,13 @@ async function readTeamSecret(env: Env, meta: CallMeta, name: string): Promise<s
  * StartOAuth: begins the authorization code flow for m on behalf of userId
  * and returns the provider's authorization URL.
  */
-export async function startOAuth(env: Env, rt: McpRuntime, meta: CallMeta, m: RegisteredMCPServer, userId: string): Promise<string> {
+export async function startOAuth(
+  env: Env,
+  rt: McpRuntime,
+  meta: CallMeta,
+  m: RegisteredMCPServer,
+  userId: string,
+): Promise<string> {
   if (!m.oauth) throw invalid(`MCP server "${m.name}" has no oauth configuration`);
   if (!env.OF_PUBLIC_URL) throw new Error("OAuth needs the server's public URL (OF_PUBLIC_URL) for the redirect URI");
   const url = m.url ?? "";
@@ -293,7 +312,8 @@ export async function startOAuth(env: Env, rt: McpRuntime, meta: CallMeta, m: Re
       if (e) throw new Error(`oauth ${name} "${v}": ${e}`);
     }
     const ccm = as.code_challenge_methods_supported ?? [];
-    if (ccm.length > 0 && !ccm.includes("S256")) throw new Error("the authorization server does not support PKCE with S256");
+    if (ccm.length > 0 && !ccm.includes("S256"))
+      throw new Error("the authorization server does not support PKCE with S256");
 
     const now = rt.now();
     const p: PendingAuth = {
@@ -312,7 +332,7 @@ export async function startOAuth(env: Env, rt: McpRuntime, meta: CallMeta, m: Re
         try {
           p.client_secret = await readTeamSecret(env, meta, m.oauth!.client_secret_name);
         } catch (e) {
-          throw new Error(`oauth client secret ${m.oauth!.client_secret_name}: ${(e as Error).message}`);
+          throw new Error(`oauth client secret ${m.oauth!.client_secret_name}: ${(e as Error).message}`, { cause: e });
         }
         p.auth_method = pickAuthMethod(as.token_endpoint_auth_methods_supported);
       } else p.auth_method = "none";
@@ -376,7 +396,8 @@ export async function completeOAuth(
     // The state is sealed to the team that started it.
     throw invalid("this authorization was started by another user");
   }
-  if (p.team_id !== input.teamId || p.user_id !== input.userId) throw invalid("this authorization was started by another user");
+  if (p.team_id !== input.teamId || p.user_id !== input.userId)
+    throw invalid("this authorization was started by another user");
   if (rt.now() > Date.parse(p.expires_at)) throw invalid("the authorization expired; start the connection again");
   const m = await teamOp<RegisteredMCPServer | null>(env, "mcp.server.get", { serverId: p.server_id });
   if (!m || m.team_id !== input.teamId) throw new OfError("resource_not_found", "MCP server no longer exists");
@@ -421,25 +442,36 @@ async function setStatus(env: Env, rt: McpRuntime, serverId: string, status: str
   return teamOp<RegisteredMCPServer | null>(env, "mcp.oauth.setStatus", { serverId, status, message, now: rt.now() });
 }
 
-async function sealToken(rt: McpRuntime, m: Pick<RegisteredMCPServer, "id" | "team_id">, ts: TokenSet): Promise<string> {
+async function sealToken(
+  rt: McpRuntime,
+  m: Pick<RegisteredMCPServer, "id" | "team_id">,
+  ts: TokenSet,
+): Promise<string> {
   const enc = await rt.encrypter();
   return b64(await enc.encrypt(m.team_id, "", tokenName(m.id), MCP_TOKEN_TYPE, utf8(JSON.stringify(ts))));
 }
 
-async function openToken(rt: McpRuntime, m: Pick<RegisteredMCPServer, "id" | "team_id">, envelope: string): Promise<TokenSet> {
+async function openToken(
+  rt: McpRuntime,
+  m: Pick<RegisteredMCPServer, "id" | "team_id">,
+  envelope: string,
+): Promise<TokenSet> {
   if (envelope === "") throw new NotConnectedError();
   const enc = await rt.encrypter();
   let ts: TokenSet;
   try {
-    ts = JSON.parse(fromUtf8(await enc.decrypt(m.team_id, "", tokenName(m.id), MCP_TOKEN_TYPE, fromB64(envelope)))) as TokenSet;
+    ts = JSON.parse(
+      fromUtf8(await enc.decrypt(m.team_id, "", tokenName(m.id), MCP_TOKEN_TYPE, fromB64(envelope))),
+    ) as TokenSet;
   } catch (e) {
-    throw new Error(`stored oauth token: ${(e as Error).message}`);
+    throw new Error(`stored oauth token: ${(e as Error).message}`, { cause: e });
   }
   if (!ts.access_token) throw new NotConnectedError();
   return ts;
 }
 
-const expiring = (rt: McpRuntime, ts: TokenSet) => !!ts.expires_at && rt.now() + REFRESH_SKEW_MS > Date.parse(ts.expires_at);
+const expiring = (rt: McpRuntime, ts: TokenSet) =>
+  !!ts.expires_at && rt.now() + REFRESH_SKEW_MS > Date.parse(ts.expires_at);
 
 /**
  * AccessToken: a valid access token for m, refreshed when it is about to
@@ -521,7 +553,7 @@ export async function tokenRequest(rt: McpRuntime, ts: TokenSet, form: Record<st
       rt.fetch(ts.token_endpoint, { method: "POST", headers, body: sorted.toString(), signal }),
     );
   } catch (e) {
-    throw new Error(`token endpoint: ${(e as Error).message}`);
+    throw new Error(`token endpoint: ${(e as Error).message}`, { cause: e });
   }
   const trimmed = (await readLimited(res)).trim();
   let out: Record<string, unknown> = {};
@@ -530,13 +562,16 @@ export async function tokenRequest(rt: McpRuntime, ts: TokenSet, form: Record<st
     // Some providers answer with a form-encoded body.
     const v = new URLSearchParams(trimmed);
     out = Object.fromEntries(
-      ["access_token", "token_type", "refresh_token", "scope", "expires_in", "error", "error_description"].map((k) => [k, v.get(k) ?? ""]),
+      ["access_token", "token_type", "refresh_token", "scope", "expires_in", "error", "error_description"].map((k) => [
+        k,
+        v.get(k) ?? "",
+      ]),
     );
   } else {
     try {
       out = JSON.parse(trimmed) as Record<string, unknown>;
     } catch (e) {
-      if (res.status < 300) throw new Error(`token endpoint: invalid response: ${(e as Error).message}`);
+      if (res.status < 300) throw new Error(`token endpoint: invalid response: ${(e as Error).message}`, { cause: e });
     }
   }
   const str = (k: string) => (typeof out[k] === "string" ? (out[k] as string) : "");

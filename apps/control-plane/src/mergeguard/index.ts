@@ -30,7 +30,10 @@ interface RpcRequest {
 
 function toCall(v: unknown): RpcRequest {
   const o = (typeof v === "object" && v !== null && !Array.isArray(v) ? v : {}) as Record<string, unknown>;
-  const params = (typeof o["params"] === "object" && o["params"] !== null ? o["params"] : {}) as Record<string, unknown>;
+  const params = (typeof o["params"] === "object" && o["params"] !== null ? o["params"] : {}) as Record<
+    string,
+    unknown
+  >;
   return {
     id: o["id"],
     hasId: "id" in o,
@@ -62,14 +65,16 @@ export function parse(body: string): { calls: RpcRequest[]; batch: boolean } {
 export function wrap(next: (req: Request) => Promise<Response>, p: Policy): (req: Request) => Promise<Response> {
   return async (req) => {
     if (req.method !== "POST" || req.body === null) return next(req);
-    if (Number(req.headers.get("content-length") ?? "0") > MAX_BODY) return new Response("the MCP request is too large\n", { status: 413 });
+    if (Number(req.headers.get("content-length") ?? "0") > MAX_BODY)
+      return new Response("the MCP request is too large\n", { status: 413 });
     let text: string;
     try {
       text = await req.text();
     } catch {
       return new Response("could not read the request\n", { status: 400 });
     }
-    if (new TextEncoder().encode(text).length > MAX_BODY) return new Response("the MCP request is too large\n", { status: 413 });
+    if (new TextEncoder().encode(text).length > MAX_BODY)
+      return new Response("the MCP request is too large\n", { status: 413 });
     const fresh = new Request(req, { body: text });
     const { calls, batch } = parse(text);
     const merges = calls.filter((c) => c.method === "tools/call" && isMergeTool(c.name));
@@ -87,12 +92,19 @@ export function refuse(calls: RpcRequest[], batch: boolean): Response {
   for (const c of calls) {
     if (!c.hasId) continue;
     if (c.method === "tools/call" && isMergeTool(c.name)) {
-      out.push({ jsonrpc: "2.0", id: c.id, result: { content: [{ type: "text", text: REFUSAL_TEXT }], isError: true } });
+      out.push({
+        jsonrpc: "2.0",
+        id: c.id,
+        result: { content: [{ type: "text", text: REFUSAL_TEXT }], isError: true },
+      });
     } else {
       out.push({
         jsonrpc: "2.0",
         id: c.id,
-        error: { code: -32600, message: "this batch has a merge call that the platform refused; send the other requests again without it" },
+        error: {
+          code: -32600,
+          message: "this batch has a merge call that the platform refused; send the other requests again without it",
+        },
       });
     }
   }
@@ -154,7 +166,8 @@ export function isMergeTool(name: string): boolean {
         if (is(i + 1, "request", "requests")) {
           // the noun "merge request"
         } else if (is(i + 1, "queue")) {
-          if (is(i - 1, "add", "enqueue") || (is(i - 1, "to") && is(i - 2, "add")) || is(i + 2, "add", "enqueue")) return true;
+          if (is(i - 1, "add", "enqueue") || (is(i - 1, "to") && is(i - 2, "add")) || is(i + 2, "add", "enqueue"))
+            return true;
         } else if (i === n - 1) {
           return true;
         } else if (target(i + 1)) {

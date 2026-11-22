@@ -32,7 +32,12 @@ export class SlackNameResolver implements NameResolver {
   }
 
   /** kind is channels, users or itemUsers. A channel name ignores a leading "#". */
-  async resolveNames(teamId: string, provider: string, kind: string, names: string[]): Promise<Record<string, string[]>> {
+  async resolveNames(
+    teamId: string,
+    provider: string,
+    kind: string,
+    names: string[],
+  ): Promise<Record<string, string[]>> {
     if (!equalFold(provider, PROVIDER)) throw new Error(`the Slack resolver cannot list ${provider} objects`);
     let list: string;
     switch (kind) {

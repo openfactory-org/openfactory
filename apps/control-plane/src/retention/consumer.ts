@@ -7,7 +7,9 @@ import type { RetentionRpc } from "./sweep";
 export type RetentionJob = Extract<JobMessage, { kind: "retention.sweep" }>;
 
 /** The DO binding of a DO name: `team:<t>`, `team:<t>|work:<tok>`, `|index`, `|ingress:`... */
-export function bindingOfDoName(name: string): "TEAM" | "WORK" | "INDEX" | "INGRESS" | "DISPATCH" | "ROUTER" | "BENCHMARK" | undefined {
+export function bindingOfDoName(
+  name: string,
+): "TEAM" | "WORK" | "INDEX" | "INGRESS" | "DISPATCH" | "ROUTER" | "BENCHMARK" | undefined {
   const bar = name.indexOf("|");
   if (bar < 0) return name.startsWith("team:") ? "TEAM" : undefined;
   const kind = name.slice(bar + 1).split(":")[0];

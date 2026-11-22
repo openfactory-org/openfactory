@@ -80,8 +80,7 @@ export function jsonText(v: unknown): CallToolResult {
   return textResult(JSON.stringify(v, null, 2));
 }
 
-const isObject = (v: unknown): v is Record<string, unknown> =>
-  typeof v === "object" && v !== null && !Array.isArray(v);
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 function rpcError(id: Id, code: number, message: string): RpcResponse {
   return { jsonrpc: "2.0", id, error: { code, message } };

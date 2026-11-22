@@ -33,7 +33,11 @@ export async function hmacSha256Hex(secret: Uint8Array, data: Uint8Array | strin
 }
 
 /** Checks a hex HMAC-SHA256 signature; an optional "sha256=" prefix is stripped. */
-export async function verifyHmacSha256Hex(secret: Uint8Array, body: Uint8Array | string, sig: string): Promise<boolean> {
+export async function verifyHmacSha256Hex(
+  secret: Uint8Array,
+  body: Uint8Array | string,
+  sig: string,
+): Promise<boolean> {
   if (secret.length === 0) return false;
   let s = sig.trim();
   if (s.startsWith("sha256=")) s = s.slice(7);

@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { OutboundMessage } from "@openfactory/core";
 import type { ResponderPlugin, SandboxPlugin } from "@openfactory/plugin-api";
-import { outboundToPlugin, pullRequestFromPlugin, pullRequestToPlugin, sourceFromPlugin, sourceToPlugin } from "./mappers";
+import {
+  outboundToPlugin,
+  pullRequestFromPlugin,
+  pullRequestToPlugin,
+  sourceFromPlugin,
+  sourceToPlugin,
+} from "./mappers";
 import { PluginResponder } from "./responder";
 import { adaptSandboxPlugin } from "./sandbox";
 
@@ -35,7 +41,14 @@ describe("mappers", () => {
     expect(sourceFromPlugin(sourceToPlugin(s))).toEqual(s);
     const pr = msg.pull_request!;
     expect(pullRequestFromPlugin(pullRequestToPlugin(pr))).toEqual(pr);
-    expect(pullRequestFromPlugin({ forge: "F", repo: "r", number: 1 })).toEqual({ forge: "F", repo: "r", number: 1, url: "", branch: "", state: "" });
+    expect(pullRequestFromPlugin({ forge: "F", repo: "r", number: 1 })).toEqual({
+      forge: "F",
+      repo: "r",
+      number: 1,
+      url: "",
+      branch: "",
+      state: "",
+    });
   });
 });
 
@@ -54,7 +67,13 @@ describe("PluginResponder", () => {
     await r.attachPullRequest("team_1", msg.source, msg.pull_request!);
     expect(calls[0]).toEqual(["reply", "slack", "team_1", outboundToPlugin(msg)]);
     expect(calls[1]).toEqual(["state", "slack", "team_1", sourceToPlugin(msg.source), "done"]);
-    expect(calls[2]).toEqual(["attach", "slack", "team_1", sourceToPlugin(msg.source), pullRequestToPlugin(msg.pull_request!)]);
+    expect(calls[2]).toEqual([
+      "attach",
+      "slack",
+      "team_1",
+      sourceToPlugin(msg.source),
+      pullRequestToPlugin(msg.pull_request!),
+    ]);
   });
 });
 
@@ -62,7 +81,10 @@ describe("adaptSandboxPlugin", () => {
   it("forwards every method and takes the plugin name as the id", async () => {
     const calls: string[] = [];
     const plugin = Object.fromEntries(
-      ["capabilities", "preflight", "start", "status", "cancel", "destroy", "list"].map((m) => [m, async (...a: unknown[]) => (calls.push(`${m}:${a.join(",")}`), m === "list" ? [] : undefined)]),
+      ["capabilities", "preflight", "start", "status", "cancel", "destroy", "list"].map((m) => [
+        m,
+        async (...a: unknown[]) => (calls.push(`${m}:${a.join(",")}`), m === "list" ? [] : undefined),
+      ]),
     ) as unknown as SandboxPlugin;
     const p = adaptSandboxPlugin("acme-sbx", plugin);
     expect(p.id).toBe("acme-sbx");
@@ -73,6 +95,14 @@ describe("adaptSandboxPlugin", () => {
     await p.cancel("t1", 30);
     await p.destroy("t1");
     expect(await p.list()).toEqual([]);
-    expect(calls).toEqual(["capabilities:", "preflight:[object Object]", "start:[object Object]", "status:t1", "cancel:t1,30", "destroy:t1", "list:"]);
+    expect(calls).toEqual([
+      "capabilities:",
+      "preflight:[object Object]",
+      "start:[object Object]",
+      "status:t1",
+      "cancel:t1,30",
+      "destroy:t1",
+      "list:",
+    ]);
   });
 });

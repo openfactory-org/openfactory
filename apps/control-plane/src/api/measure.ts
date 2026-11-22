@@ -36,6 +36,10 @@ export function parseSince(v: string | null, nowMs = Date.now()): number | undef
   const m = REL.exec(s);
   if (m) return nowMs - Number(m[1]) * { h: 3_600_000, d: 86_400_000, w: 604_800_000 }[m[2] as "h"];
   const t = Date.parse(s);
-  if (Number.isNaN(t)) throw new OfError("invalid_request", `query parameter "since" must be an RFC 3339 time, YYYY-MM-DD or a duration such as 7d`);
+  if (Number.isNaN(t))
+    throw new OfError(
+      "invalid_request",
+      `query parameter "since" must be an RFC 3339 time, YYYY-MM-DD or a duration such as 7d`,
+    );
   return t;
 }

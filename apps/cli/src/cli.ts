@@ -9,7 +9,7 @@ import { initCommand, schemaCommand, validateCommand } from "./commands/local.ts
 import { mcpCommand } from "./commands/mcp.ts";
 import { mcpRegistryCommand } from "./commands/mcpregistry.ts";
 import { runCommand } from "./commands/run.ts";
-import { machineCommand, netguardCommand, runnerCommand, serveCommand, vmInitCommand } from "./commands/runtime.ts";
+import { netguardCommand, runnerCommand, serveCommand, vmInitCommand } from "./commands/runtime.ts";
 import { secretCommand } from "./commands/secret.ts";
 import { webhookCommand } from "./commands/webhook.ts";
 import { workerCommand } from "./commands/worker.ts";
@@ -56,8 +56,10 @@ const root: Command = {
 (bootstrap, factory, run, work-item, inbox, secret, webhook, benchmark,
 mcp-registry, worker), validates factory definitions locally (validate,
 schema, init) and bridges the Factory MCP to stdio (mcp). The commands
-runner, netguard, worker, vm-init and machine run on sandboxes and worker
-hosts: they are part of openfactory-runtime, and this command passes them on.
+runner, netguard, vm-init and worker run on sandboxes and worker hosts: they
+are part of openfactory-runtime, and this command passes them on. The worker
+host commands are worker enroll, worker run, worker status, worker drain and
+worker doctor.
 
 Client commands read the server URL and API key from --server/--api-key or the
 OF_SERVER and OF_API_KEY environment variables.`,
@@ -68,7 +70,6 @@ OF_SERVER and OF_API_KEY environment variables.`,
     { ...runnerCommand },
     { ...workerCommand },
     { ...vmInitCommand },
-    { ...machineCommand },
     { ...serveCommand },
     { ...validateCommand, group: "local" },
     { ...schemaCommand, group: "local" },

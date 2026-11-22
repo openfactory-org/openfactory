@@ -47,7 +47,9 @@ describe("signatures", () => {
 
   it("limits the webhook body", async () => {
     expect(await readBody(new Request("https://x", { method: "POST", body: "hello" }))).toBe("hello");
-    await expect(readBody(new Request("https://x", { method: "POST", body: "hello" }), 3)).rejects.toBeInstanceOf(BodyTooLargeError);
+    await expect(readBody(new Request("https://x", { method: "POST", body: "hello" }), 3)).rejects.toBeInstanceOf(
+      BodyTooLargeError,
+    );
   });
 });
 
@@ -94,7 +96,9 @@ describe("selectIntegration", () => {
 
   it("takes the one record when there is no owner and fails with several", () => {
     expect(selectIntegration([org("org1", { id: "a" })], "azure_devops", "fac_1", "").id).toBe("a");
-    expect(() => selectIntegration([org("org1", { id: "a" }), org("org2", { id: "b" })], "azure_devops", "", "")).toThrow(/2 records/);
+    expect(() =>
+      selectIntegration([org("org1", { id: "a" }), org("org2", { id: "b" })], "azure_devops", "", ""),
+    ).toThrow(/2 records/);
   });
 });
 
@@ -124,14 +128,22 @@ describe("intakeVerified", () => {
 
   it("rejects an unverified delivery", async () => {
     const recs = [rec("a", "team_a", "acme", "sa")];
-    await expect(intakeVerified(recs, "gitlab", ["acme"], withSec("nope"))).rejects.toBeInstanceOf(DeliveryUnverifiedError);
-    await expect(intakeVerified(recs, "gitlab", ["unknown"], withSec("sa"))).rejects.toThrow(/no gitlab integration record for the owner/);
-    await expect(intakeVerified(recs, "github", ["acme"], withSec("sa"))).rejects.toBeInstanceOf(DeliveryUnverifiedError);
+    await expect(intakeVerified(recs, "gitlab", ["acme"], withSec("nope"))).rejects.toBeInstanceOf(
+      DeliveryUnverifiedError,
+    );
+    await expect(intakeVerified(recs, "gitlab", ["unknown"], withSec("sa"))).rejects.toThrow(
+      /no gitlab integration record for the owner/,
+    );
+    await expect(intakeVerified(recs, "github", ["acme"], withSec("sa"))).rejects.toBeInstanceOf(
+      DeliveryUnverifiedError,
+    );
   });
 
   it("rejects a delivery that records of two teams verify", async () => {
     const recs = [rec("a", "team_a", "acme", "same"), rec("b", "team_b", "acme", "same")];
-    await expect(intakeVerified(recs, "gitlab", ["acme"], withSec("same"))).rejects.toBeInstanceOf(DeliveryAmbiguousError);
+    await expect(intakeVerified(recs, "gitlab", ["acme"], withSec("same"))).rejects.toBeInstanceOf(
+      DeliveryAmbiguousError,
+    );
   });
 
   it("uses the only factory record of a team when the team has two without a team record", async () => {
@@ -142,7 +154,14 @@ describe("intakeVerified", () => {
 
 describe("integration secrets", () => {
   it("reads the secret named by the config of a record through the host scope", async () => {
-    const r: IntegrationRecord = { id: "i", teamId: "team_1", provider: "gitlab", name: "g", config: { webhook_secret_ref: "HOOK" }, secretRef: "TOKEN" };
+    const r: IntegrationRecord = {
+      id: "i",
+      teamId: "team_1",
+      provider: "gitlab",
+      name: "g",
+      config: { webhook_secret_ref: "HOOK" },
+      secretRef: "TOKEN",
+    };
     const host = new FakeHostApi({ integrations: [r], secrets: { team_1: { HOOK: "h", TOKEN: "t" } } });
     expect(secretScope(r)).toBe("team:team_1");
     expect(await integrationSecret(host, r, "webhook_secret_ref")).toBe("h");

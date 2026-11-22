@@ -3,7 +3,13 @@
 // TestMakeTaskFromRun.
 import { describe, expect, it } from "vitest";
 import {
-  CORRECTNESS_SCORER, aggregate, applyRepoSubstitutions, benchmarkState, correctnessScorerFor, formatRepoAtCommit, validateConfigurations,
+  CORRECTNESS_SCORER,
+  aggregate,
+  applyRepoSubstitutions,
+  benchmarkState,
+  correctnessScorerFor,
+  formatRepoAtCommit,
+  validateConfigurations,
   type Trial,
 } from "./benchmark";
 import { addSuiteTask, makeTaskFromRun } from "./benchmark-tasks";
@@ -14,21 +20,53 @@ const SHA = "0123456789abcdef0123456789abcdef01234567";
 const fin = new Date().toISOString();
 
 function trial(cfg: string, correct: boolean, cost: number, dur: number, scored: boolean): Trial {
-  const t: Trial = { id: "t", configuration: cfg, task: "x", repetition: 1, status: "finished", run_id: "r", finished_at: fin, cost_usd: cost, input_tokens: 0, output_tokens: 0, duration_ms: dur, scored };
+  const t: Trial = {
+    id: "t",
+    configuration: cfg,
+    task: "x",
+    repetition: 1,
+    status: "finished",
+    run_id: "r",
+    finished_at: fin,
+    cost_usd: cost,
+    input_tokens: 0,
+    output_tokens: 0,
+    duration_ms: dur,
+    scored,
+  };
   if (scored) t.scores = [{ scorer: CORRECTNESS_SCORER, score: correct ? 1 : 0, passed: correct }];
   return t;
 }
-const blank = (o: Partial<Trial>): Trial => ({ id: "t", configuration: "", task: "x", repetition: 1, status: "pending", cost_usd: 0, input_tokens: 0, output_tokens: 0, duration_ms: 0, scored: false, ...o });
+const blank = (o: Partial<Trial>): Trial => ({
+  id: "t",
+  configuration: "",
+  task: "x",
+  repetition: 1,
+  status: "pending",
+  cost_usd: 0,
+  input_tokens: 0,
+  output_tokens: 0,
+  duration_ms: 0,
+  scored: false,
+  ...o,
+});
 
 describe("aggregate", () => {
   it("summarizes configurations and recommends", () => {
     const configs = [{ name: "A" }, { name: "B" }, { name: "C" }];
     const trials: Trial[] = [
-      trial("A", true, 1, 100, true), trial("A", false, 3, 300, true), trial("A", true, 2, 200, true),
-      trial("B", true, 0.5, 50, true), trial("B", true, 0.5, 70, true), trial("B", false, 0.5, 90, false),
+      trial("A", true, 1, 100, true),
+      trial("A", false, 3, 300, true),
+      trial("A", true, 2, 200, true),
+      trial("B", true, 0.5, 50, true),
+      trial("B", true, 0.5, 70, true),
+      trial("B", false, 0.5, 90, false),
       blank({ configuration: "B", status: "running", run_id: "r" }),
       blank({ configuration: "C", status: "error", error: "boom" }),
-      { ...trial("B", false, 0, 0, true), scores: [{ scorer: CORRECTNESS_SCORER, score: 0, passed: false, error: "judge down" }] },
+      {
+        ...trial("B", false, 0, 0, true),
+        scores: [{ scorer: CORRECTNESS_SCORER, score: 0, passed: false, error: "judge down" }],
+      },
     ];
     const { summary, recommendations, total } = aggregate(configs, trials, [CORRECTNESS_SCORER]);
     const [a, b, c] = summary;
@@ -41,8 +79,15 @@ describe("aggregate", () => {
     expect(recommendations).toEqual({ overall: "B", lowest_cost: "B", most_efficient: "B" });
     expect(total).toBeCloseTo(7.5);
     expect(aggregate(configs.slice(0, 1), trials.slice(0, 3), [CORRECTNESS_SCORER]).recommendations).toEqual({});
-    expect(aggregate([], [trial("X", true, 2, 1, true), trial("Y", true, 1, 1, true)], [CORRECTNESS_SCORER]).recommendations.overall).toBe("Y");
-    const eq = aggregate([], [trial("X", true, 1, 1, true), trial("Y", false, 1, 1, true)], [CORRECTNESS_SCORER]).recommendations;
+    expect(
+      aggregate([], [trial("X", true, 2, 1, true), trial("Y", true, 1, 1, true)], [CORRECTNESS_SCORER]).recommendations
+        .overall,
+    ).toBe("Y");
+    const eq = aggregate(
+      [],
+      [trial("X", true, 1, 1, true), trial("Y", false, 1, 1, true)],
+      [CORRECTNESS_SCORER],
+    ).recommendations;
     expect(eq).toEqual({ overall: "X" });
   });
   it("derives the run state", () => {
@@ -58,7 +103,12 @@ describe("repo substitutions and rubric", () => {
       { codeForge: "GITHUB", owner: "acme", repo: "app", ref: SHA },
       { codeForge: "GITLAB", owner: "acme", repo: "app", ref: SHA },
     ];
-    const subs = [{ source: { codeForge: "GITHUB", owner: "Acme", name: "App" }, target: { codeForge: "GITHUB", owner: "bench", name: "app" } }];
+    const subs = [
+      {
+        source: { codeForge: "GITHUB", owner: "Acme", name: "App" },
+        target: { codeForge: "GITHUB", owner: "bench", name: "app" },
+      },
+    ];
     const got = applyRepoSubstitutions(refs, subs);
     expect(got[0]).toEqual({ codeForge: "GITHUB", owner: "bench", repo: "app", ref: SHA });
     expect(got[1]).toEqual(refs[1]);
@@ -80,7 +130,10 @@ describe("validateConfigurations", () => {
   const bad: [string, Parameters<typeof validateConfigurations>[0]][] = [
     ["too many", many],
     ["duplicate", [{ name: "a" }, { name: "a" }]],
-    ["model and harness", [{ name: "a", agents: [{ agent: "implement", model: "m", harness: { type: "codex", model: "m" } }] }]],
+    [
+      "model and harness",
+      [{ name: "a", agents: [{ agent: "implement", model: "m", harness: { type: "codex", model: "m" } }] }],
+    ],
     ["unknown agent", [{ name: "a", agents: [{ agent: "ghost", model: "m" }] }]],
     ["unknown machine", [{ name: "a", machine: "huge" }]],
   ];
@@ -88,7 +141,9 @@ describe("validateConfigurations", () => {
     expect(() => validateConfigurations(cfgs, agents, {})).toThrow();
   });
   it("accepts a valid pin", () => {
-    expect(() => validateConfigurations([{ name: "a", agents: [{ agent: "implement", model: "m" }] }], agents, {})).not.toThrow();
+    expect(() =>
+      validateConfigurations([{ name: "a", agents: [{ agent: "implement", model: "m" }] }], agents, {}),
+    ).not.toThrow();
   });
 });
 
@@ -121,7 +176,10 @@ describe("proposals", () => {
 });
 
 describe("makeTaskFromRun", () => {
-  const files = { "factory.yaml": "name: x\n", "benchmarks/fix/suite.yaml": "name: Fix\nagent: implement\ntasks:\n  - broken-link\n" };
+  const files = {
+    "factory.yaml": "name: x\n",
+    "benchmarks/fix/suite.yaml": "name: Fix\nagent: implement\ntasks:\n  - broken-link\n",
+  };
   const active = { definition: { benchmarks: [{ slug: "fix", name: "Fix", agent: "implement" }] }, files };
   it("builds the task, its file and the suite change", async () => {
     const w = new FakeWorld();

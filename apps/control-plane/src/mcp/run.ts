@@ -79,10 +79,10 @@ export const defaultRunBackend: McpRunBackend = {
     if (!claims || claims.run !== runId) return UNAUTHORIZED;
     const stub = env.WORK.getByName(doName.work(claims.team, partitionOf(runId)));
     const res = (await stub.runnerAuth(runId, claims.ses)) as unknown as
-      | { run: Parameters<typeof runViewOf>[0] }
-      | { error: { status: number; code: string; message: string } };
+      { run: Parameters<typeof runViewOf>[0] } | { error: { status: number; code: string; message: string } };
     if ("error" in res) {
-      if (res.error.status === 409) return { status: 409, code: "session_superseded", message: "a newer session exists" };
+      if (res.error.status === 409)
+        return { status: 409, code: "session_superseded", message: "a newer session exists" };
       if (res.error.status === 404) return { status: 404, code: "not_found", message: "run not found" };
       return UNAUTHORIZED;
     }
@@ -93,7 +93,10 @@ export const defaultRunBackend: McpRunBackend = {
     try {
       const snap = (await teamStub(env, run.teamId).configSnapshot(run.factoryId)) as Record<string, unknown> | null;
       const def = (snap?.definition ?? snap?.compiled ?? snap) as Record<string, unknown> | undefined;
-      const v = def?.allowAgentMerge ?? def?.allow_agent_merge ?? (def?.settings as Record<string, unknown> | undefined)?.allowAgentMerge;
+      const v =
+        def?.allowAgentMerge ??
+        def?.allow_agent_merge ??
+        (def?.settings as Record<string, unknown> | undefined)?.allowAgentMerge;
       return v === true;
     } catch {
       return false;
@@ -101,7 +104,9 @@ export const defaultRunBackend: McpRunBackend = {
   },
 
   async recordMergeCall(_env, run, server, tool, allowed) {
-    console.warn(JSON.stringify({ msg: "agent merge call", run: run.id, factory: run.factoryId, server, tool, allowed }));
+    console.warn(
+      JSON.stringify({ msg: "agent merge call", run: run.id, factory: run.factoryId, server, tool, allowed }),
+    );
   },
 
   async appendRunLog(env, run, content, data) {
@@ -142,7 +147,12 @@ export const defaultRunBackend: McpRunBackend = {
 };
 
 /** Go writeError: {"error":{"code","message"}}. */
-export function runError(status: number, code: string, message: string, headers: Record<string, string> = {}): Response {
+export function runError(
+  status: number,
+  code: string,
+  message: string,
+  headers: Record<string, string> = {},
+): Response {
   return new Response(JSON.stringify({ error: { code, message } }) + "\n", {
     status,
     headers: { "content-type": "application/json", ...headers },
@@ -150,7 +160,12 @@ export function runError(status: number, code: string, message: string, headers:
 }
 
 export function authErrorResponse(r: { status: number; code: string; message: string }): Response {
-  return runError(r.status, r.code, r.message, r.status === 401 ? { "www-authenticate": 'Bearer realm="openfactory-run"' } : {});
+  return runError(
+    r.status,
+    r.code,
+    r.message,
+    r.status === 401 ? { "www-authenticate": 'Bearer realm="openfactory-run"' } : {},
+  );
 }
 
 /** The bearer token of a run request (case-sensitive "Bearer " as in Go). */

@@ -16,7 +16,7 @@ let stale = 0;
 for (const [name, s] of Object.entries(generatedSchemas())) {
   const file = join(dir, name + '.schema.json');
   const want = goJSONIndent(s);
-  let got = '';
+  let got: string;
   try {
     got = readFileSync(file, 'utf8');
   } catch {

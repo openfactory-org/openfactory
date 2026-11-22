@@ -33,13 +33,22 @@ export interface IntegrationBackend {
   factoryIntegration(env: Env, run: RunView, provider: string, workspace: string): Promise<IntegrationRecord>;
   /** The decrypted credential of the record (IntegrationSecret). */
   credential(env: Env, run: RunView, rec: IntegrationRecord): Promise<string>;
-  linearQuery(rec: IntegrationRecord, token: string, query: string, variables: Record<string, unknown>): Promise<unknown>;
+  linearQuery(
+    rec: IntegrationRecord,
+    token: string,
+    query: string,
+    variables: Record<string, unknown>,
+  ): Promise<unknown>;
   linearCreateComment(rec: IntegrationRecord, token: string, issueId: string, body: string): Promise<void>;
   jiraRequest(rec: IntegrationRecord, token: string, method: string, path: string, body?: unknown): Promise<unknown>;
   jiraText(adf: unknown): string;
   markdownToADF(md: string): unknown;
   slackCall(rec: IntegrationRecord, token: string, method: string, params: Record<string, string>): Promise<unknown>;
-  slackPost(rec: IntegrationRecord, token: string, msg: { channel: string; text: string; thread_ts?: string; mrkdwn: boolean }): Promise<string>;
+  slackPost(
+    rec: IntegrationRecord,
+    token: string,
+    msg: { channel: string; text: string; thread_ts?: string; mrkdwn: boolean },
+  ): Promise<string>;
   /** Null when the Microsoft Teams bot is not configured. */
   teamsPost: ((rec: IntegrationRecord, channelId: string, rootId: string, text: string) => Promise<void>) | null;
 }
@@ -91,7 +100,15 @@ function schema(props: Record<string, [string, string]>, required: string[]): Re
 }
 
 function audit(c: Ctx, tool: string): void {
-  console.log(JSON.stringify({ msg: "built-in mcp tool call", provider: c.rec.provider, tool, run: c.run.id, factory: c.run.factoryId }));
+  console.log(
+    JSON.stringify({
+      msg: "built-in mcp tool call",
+      provider: c.rec.provider,
+      tool,
+      run: c.run.id,
+      factory: c.run.factoryId,
+    }),
+  );
 }
 
 /** trialOr: in trial mode, a write tool records the call in the run and answers success. */
@@ -118,7 +135,8 @@ function linearTools(c: Ctx, allowWrite: boolean): Tool<Ctx>[] {
   const tools: Tool<Ctx>[] = [
     {
       name: "linear_get_issue",
-      description: "Read a Linear issue (UUID or identifier such as ENG-42): title, state, assignee, labels, description and recent comments.",
+      description:
+        "Read a Linear issue (UUID or identifier such as ENG-42): title, state, assignee, labels, description and recent comments.",
       inputSchema: schema({ id: ["string", "Issue UUID or identifier, e.g. ENG-42"] }, ["id"]),
       handler: async (a) => {
         audit(c, "linear_get_issue");
@@ -142,7 +160,10 @@ function linearTools(c: Ctx, allowWrite: boolean): Tool<Ctx>[] {
       name: "linear_search_issues",
       description: "Search Linear issues by text.",
       inputSchema: schema(
-        { query: ["string", "Text to search for in issue titles and descriptions"], limit: ["integer", "Maximum results (default 10, at most 50)"] },
+        {
+          query: ["string", "Text to search for in issue titles and descriptions"],
+          limit: ["integer", "Maximum results (default 10, at most 50)"],
+        },
         ["query"],
       ),
       handler: async (a) => {
@@ -167,10 +188,14 @@ function linearTools(c: Ctx, allowWrite: boolean): Tool<Ctx>[] {
     tools.push({
       name: "linear_create_comment",
       description: "Post a Markdown comment on a Linear issue.",
-      inputSchema: schema({ issue_id: ["string", "Issue UUID or identifier, e.g. ENG-42"], body: ["string", "Markdown comment"] }, ["issue_id", "body"]),
+      inputSchema: schema(
+        { issue_id: ["string", "Issue UUID or identifier, e.g. ENG-42"], body: ["string", "Markdown comment"] },
+        ["issue_id", "body"],
+      ),
       handler: trialOr(c, "linear_create_comment", async (a) => {
         audit(c, "linear_create_comment");
-        if (str(a, "issue_id").trim() === "" || str(a, "body").trim() === "") return toolErr(new Error("issue_id and body are required"));
+        if (str(a, "issue_id").trim() === "" || str(a, "body").trim() === "")
+          return toolErr(new Error("issue_id and body are required"));
         try {
           await c.ib.linearCreateComment(c.rec, c.token, str(a, "issue_id"), str(a, "body"));
           return textResult(`Commented on ${str(a, "issue_id")}.`);
@@ -200,7 +225,8 @@ function jiraTools(c: Ctx, allowWrite: boolean): Tool<Ctx>[] {
   const tools: Tool<Ctx>[] = [
     {
       name: "jira_get_issue",
-      description: "Read a Jira issue by key (e.g. OPS-12): summary, status, assignee, description and recent comments.",
+      description:
+        "Read a Jira issue by key (e.g. OPS-12): summary, status, assignee, description and recent comments.",
       inputSchema: schema({ key: ["string", "Issue key, e.g. OPS-12"] }, ["key"]),
       handler: async (a) => {
         audit(c, "jira_get_issue");
@@ -224,7 +250,11 @@ function jiraTools(c: Ctx, allowWrite: boolean): Tool<Ctx>[] {
           if (f.assignee) out.assignee = f.assignee.displayName ?? "";
           let cs = f.comment?.comments ?? [];
           if (cs.length > 20) cs = cs.slice(cs.length - 20);
-          out.comments = cs.map((cm) => ({ Author: cm.author?.displayName ?? "", Created: cm.created ?? "", Body: c.ib.jiraText(cm.body) }));
+          out.comments = cs.map((cm) => ({
+            Author: cm.author?.displayName ?? "",
+            Created: cm.created ?? "",
+            Body: c.ib.jiraText(cm.body),
+          }));
           // Go marshals a map with sorted keys.
           return jsonText(Object.fromEntries(Object.entries(out).sort(([x], [y]) => (x < y ? -1 : 1))));
         } catch (e) {
@@ -236,7 +266,10 @@ function jiraTools(c: Ctx, allowWrite: boolean): Tool<Ctx>[] {
       name: "jira_search",
       description: "Search Jira issues with JQL.",
       inputSchema: schema(
-        { jql: ["string", "JQL query, e.g. project = OPS AND status != Done"], limit: ["integer", "Maximum results (default 10, at most 50)"] },
+        {
+          jql: ["string", "JQL query, e.g. project = OPS AND status != Done"],
+          limit: ["integer", "Maximum results (default 10, at most 50)"],
+        },
         ["jql"],
       ),
       handler: async (a) => {
@@ -265,14 +298,24 @@ function jiraTools(c: Ctx, allowWrite: boolean): Tool<Ctx>[] {
     tools.push({
       name: "jira_add_comment",
       description: "Add a Markdown comment to a Jira issue.",
-      inputSchema: schema({ key: ["string", "Issue key, e.g. OPS-12"], body: ["string", "Markdown comment"] }, ["key", "body"]),
+      inputSchema: schema({ key: ["string", "Issue key, e.g. OPS-12"], body: ["string", "Markdown comment"] }, [
+        "key",
+        "body",
+      ]),
       handler: trialOr(c, "jira_add_comment", async (a) => {
         audit(c, "jira_add_comment");
-        if (str(a, "key").trim() === "" || str(a, "body").trim() === "") return toolErr(new Error("key and body are required"));
+        if (str(a, "key").trim() === "" || str(a, "body").trim() === "")
+          return toolErr(new Error("key and body are required"));
         try {
-          await c.ib.jiraRequest(c.rec, c.token, "POST", `/rest/api/3/issue/${encodeURIComponent(str(a, "key"))}/comment`, {
-            body: c.ib.markdownToADF(str(a, "body")),
-          });
+          await c.ib.jiraRequest(
+            c.rec,
+            c.token,
+            "POST",
+            `/rest/api/3/issue/${encodeURIComponent(str(a, "key"))}/comment`,
+            {
+              body: c.ib.markdownToADF(str(a, "body")),
+            },
+          );
           return textResult(`Commented on ${str(a, "key")}.`);
         } catch (e) {
           return toolErr(e);
@@ -335,7 +378,10 @@ function slackTools(c: Ctx, allowWrite: boolean): Tool<Ctx>[] {
       name: "slack_channel_history",
       description: "Read recent messages of a Slack channel the app is a member of.",
       inputSchema: schema(
-        { channel: ["string", "Channel ID, e.g. C0123456"], limit: ["integer", "Maximum messages (default 20, at most 50)"] },
+        {
+          channel: ["string", "Channel ID, e.g. C0123456"],
+          limit: ["integer", "Maximum messages (default 20, at most 50)"],
+        },
         ["channel"],
       ),
       handler: async (a) => {
@@ -367,7 +413,8 @@ function slackTools(c: Ctx, allowWrite: boolean): Tool<Ctx>[] {
       ),
       handler: trialOr(c, "slack_post_message", async (a) => {
         audit(c, "slack_post_message");
-        if (str(a, "channel") === "" || str(a, "text").trim() === "") return toolErr(new Error("channel and text are required"));
+        if (str(a, "channel") === "" || str(a, "text").trim() === "")
+          return toolErr(new Error("channel and text are required"));
         try {
           const ts = await c.ib.slackPost(c.rec, c.token, {
             channel: str(a, "channel"),
@@ -394,7 +441,10 @@ function teamsTools(c: Ctx, allowWrite: boolean): Tool<Ctx>[] {
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
       handler: async () => {
         audit(c, "teams_list_channels");
-        const ids = (c.rec.config?.channel_ids ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+        const ids = (c.rec.config?.channel_ids ?? "")
+          .split(",")
+          .map((x) => x.trim())
+          .filter(Boolean);
         return jsonText({ channel_ids: ids, limited: ids.length > 0 });
       },
     },
@@ -414,7 +464,8 @@ function teamsTools(c: Ctx, allowWrite: boolean): Tool<Ctx>[] {
       ),
       handler: trialOr(c, "teams_post_message", async (a) => {
         audit(c, "teams_post_message");
-        if (str(a, "channel") === "" || str(a, "text").trim() === "") return toolErr(new Error("channel and text are required"));
+        if (str(a, "channel") === "" || str(a, "text").trim() === "")
+          return toolErr(new Error("channel and text are required"));
         if (!c.ib.teamsPost) return toolErr(new Error("the Microsoft Teams bot is not configured on this server"));
         try {
           await c.ib.teamsPost(c.rec, str(a, "channel"), str(a, "thread"), str(a, "text"));
@@ -433,11 +484,15 @@ export function integrationServer(c: Ctx, allowWrite: boolean): McpServer<Ctx> {
   let provider = c.rec.provider.toLowerCase();
   if (sameIntegrationProvider(provider, "teams")) provider = "teams";
   const tools =
-    provider === "linear" ? linearTools(c, allowWrite)
-    : provider === "jira" ? jiraTools(c, allowWrite)
-    : provider === "slack" ? slackTools(c, allowWrite)
-    : provider === "teams" ? teamsTools(c, allowWrite)
-    : [];
+    provider === "linear"
+      ? linearTools(c, allowWrite)
+      : provider === "jira"
+        ? jiraTools(c, allowWrite)
+        : provider === "slack"
+          ? slackTools(c, allowWrite)
+          : provider === "teams"
+            ? teamsTools(c, allowWrite)
+            : [];
   return {
     info: { name: "openfactory-" + provider, version: "1.0.0" },
     instructions: `Tools for the factory's ${provider} integration. They act as the integration's app identity.`,
@@ -457,7 +512,8 @@ export async function integrationContext(
   provider: string,
 ): Promise<{ server: McpServer<Ctx>; ctx: Ctx } | { response: Response }> {
   const id = BUILTIN_MCP_PREFIX + provider;
-  if (!builtinMCPProvider(id).known) return { response: runError(404, "not_found", "unknown built-in MCP server " + id) };
+  if (!builtinMCPProvider(id).known)
+    return { response: runError(404, "not_found", "unknown built-in MCP server " + id) };
   const { granted, allowWrite } = grantedTo(run.mcpServers, id);
   if (!granted) return { response: runError(403, "forbidden", "this run was not granted " + id) };
   let rec: IntegrationRecord;

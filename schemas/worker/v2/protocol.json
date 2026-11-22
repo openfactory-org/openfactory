@@ -175,7 +175,7 @@
       "properties": {"draining": {"type": "boolean"}}
     },
     "task": {
-      "description": "One session of one run, as a worker receives it. runner_image and tool_images are deprecated and ignored.",
+      "description": "One session of one run, as a worker receives it.",
       "type": "object",
       "required": ["task_id", "run_id", "session", "team_id", "image", "platform", "resources", "env", "max_session_seconds", "failure_retention_seconds"],
       "additionalProperties": false,
@@ -186,14 +186,6 @@
         "team_id": {"type": "string", "minLength": 1},
         "factory_id": {"type": "string"},
         "image": {"type": "string", "minLength": 1},
-        "runner_image": {"type": "string"},
-        "tool_images": {
-          "type": "array",
-          "items": {
-            "type": "object", "required": ["name", "image"], "additionalProperties": false,
-            "properties": {"name": {"type": "string"}, "image": {"type": "string"}}
-          }
-        },
         "platform": {
           "type": "object", "required": ["os", "arch"], "additionalProperties": false,
           "properties": {"os": {"const": "linux"}, "arch": {"enum": ["amd64", "arm64"]}, "user": {"type": "string"}}

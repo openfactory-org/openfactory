@@ -2150,23 +2150,7 @@
   "kind": "compile",
   "files": {
    "agents/foreman/agent.md": "---\nagentType: FOREMAN\n---\nCoordinate the work.\n",
-   "factory.yaml": "schemaVersion: v1\nname: test\nrepositories:\n  - owner: acme\n    name: api\nagentDefaults:\n  model: claude-opus-5-5\ncloudProviders:\n  aws:\n    roleArn: role\n"
-  },
-  "compiled": null,
-  "errors": [
-   {
-    "file": "factory.yaml",
-    "line": 10,
-    "field": "cloudProviders.aws.roleArn",
-    "message": "cloudProviders.aws.roleArn \"role\" is not an IAM role ARN"
-   }
-  ]
- },
- {
-  "kind": "compile",
-  "files": {
-   "agents/foreman/agent.md": "---\nagentType: FOREMAN\n---\nCoordinate the work.\n",
-   "factory.yaml": "schemaVersion: v1\nname: test\nrepositories:\n  - owner: acme\n    name: api\nagentDefaults:\n  model: claude-opus-5-5\ncloudProviders: {}\nproviders:\n  aws: {roleArn: \"arn:aws:iam::1:role/x\"}\n"
+   "factory.yaml": "schemaVersion: v1\nname: test\nrepositories:\n  - owner: acme\n    name: api\nagentDefaults:\n  model: claude-opus-5-5\ncloudProviders: {}\nproviders:\n  other: {id: \"x\"}\n"
   },
   "compiled": null,
   "errors": [
@@ -2177,72 +2161,6 @@
     "message": "unknown key \"providers\""
    }
   ]
- },
- {
-  "kind": "compile",
-  "files": {
-   "agents/foreman/agent.md": "---\nagentType: FOREMAN\n---\nCoordinate the work.\n",
-   "factory.yaml": "schemaVersion: v1\nname: test\nrepositories:\n  - owner: acme\n    name: api\nagentDefaults:\n  model: claude-opus-5-5\ncloudProviders:\n  aws:\n    roleArn: arn:aws:iam::123456789012:role/factory\nselfImprovement:\n  reviewerType: custom\n  reviewerEmails: [a@example.com]\n"
-  },
-  "compiled": {
-   "schemaVersion": "v1",
-   "name": "test",
-   "repositories": [
-    {
-     "codeForge": "GITHUB",
-     "owner": "acme",
-     "name": "api"
-    }
-   ],
-   "integrationsSet": false,
-   "cloudProviders": {
-    "aws": {
-     "roleArn": "arn:aws:iam::123456789012:role/factory"
-    }
-   },
-   "selfImprovement": {
-    "reviewerType": "custom",
-    "reviewerEmails": [
-     "a@example.com"
-    ]
-   },
-   "githubOnboardingNotices": true,
-   "factoryConfigChecks": "main",
-   "agents": [
-    {
-     "id": "",
-     "factory_id": "",
-     "name": "foreman",
-     "description": "",
-     "type": "FOREMAN",
-     "instructions": "Coordinate the work.",
-     "harness": {
-      "type": "claude",
-      "model": "claude-opus-5-5"
-     },
-     "network_policy": {
-      "restricted": false,
-      "allowed_hosts": [],
-      "denied_hosts": []
-     },
-     "spawnable_by": null
-    }
-   ],
-   "automations": [],
-   "machines": {},
-   "scorers": [],
-   "scorerDefaults": {
-    "harness": {
-     "type": "claude",
-     "model": "claude-opus-5-5"
-    },
-    "secrets": null,
-    "mcp_servers": null
-   },
-   "webhooks": [],
-   "benchmarks": [],
-   "skills": []
-  }
  },
  {
   "kind": "compile",

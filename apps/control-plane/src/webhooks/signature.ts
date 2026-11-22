@@ -23,7 +23,9 @@ const sigErr = (m: string) => new SignatureError(m);
 type Hash = "SHA-256" | "SHA-1";
 
 async function hmac(hash: Hash, key: Uint8Array, msg: Uint8Array | string): Promise<Uint8Array> {
-  const k = await crypto.subtle.importKey("raw", key as Uint8Array<ArrayBuffer>, { name: "HMAC", hash }, false, ["sign"]);
+  const k = await crypto.subtle.importKey("raw", key as Uint8Array<ArrayBuffer>, { name: "HMAC", hash }, false, [
+    "sign",
+  ]);
   const m = typeof msg === "string" ? utf8(msg) : msg;
   return new Uint8Array(await crypto.subtle.sign("HMAC", k, m as Uint8Array<ArrayBuffer>));
 }
@@ -85,7 +87,7 @@ export function standardWebhooksKey(secret: Uint8Array): Uint8Array {
   for (const [re, padded, url] of tries) {
     if (!re.test(s)) continue;
     if (padded && s.length % 4 !== 0) continue;
-    if (!padded && (s.length % 4 === 1)) continue;
+    if (!padded && s.length % 4 === 1) continue;
     let t = url ? s.replace(/-/g, "+").replace(/_/g, "/") : s;
     if (!padded) t += "=".repeat((4 - (t.length % 4)) % 4);
     try {
@@ -210,7 +212,9 @@ const SCHEMES: Record<string, Scheme> = {
     },
     async sign(secret, body, now) {
       const ts = String(Math.floor(now / 1000));
-      return new Headers({ "Stripe-Signature": `t=${ts},v1=` + toHex(await hmac("SHA-256", secret, cat(ts + ".", body))) });
+      return new Headers({
+        "Stripe-Signature": `t=${ts},v1=` + toHex(await hmac("SHA-256", secret, cat(ts + ".", body))),
+      });
     },
   },
   [SCHEME_VERCEL]: {
@@ -247,7 +251,14 @@ export function deliveryHeaders(name: string): string[] {
 }
 
 /** Checks a delivery's signature. Throws SignatureError. */
-export async function verify(scheme: string, secret: Uint8Array, h: Headers, body: Uint8Array, nowMs: number, tolMs = 0): Promise<void> {
+export async function verify(
+  scheme: string,
+  secret: Uint8Array,
+  h: Headers,
+  body: Uint8Array,
+  nowMs: number,
+  tolMs = 0,
+): Promise<void> {
   const sc = SCHEMES[scheme];
   if (!sc) throw sigErr(`unknown signature scheme "${scheme}"`);
   if (secret.length === 0) throw sigErr("no signing secret configured");
@@ -255,7 +266,13 @@ export async function verify(scheme: string, secret: Uint8Array, h: Headers, bod
 }
 
 /** The headers a sender with the scheme attaches (for test deliveries). */
-export async function sign(scheme: string, secret: Uint8Array, body: Uint8Array, nowMs: number, id = ""): Promise<Headers> {
+export async function sign(
+  scheme: string,
+  secret: Uint8Array,
+  body: Uint8Array,
+  nowMs: number,
+  id = "",
+): Promise<Headers> {
   const sc = SCHEMES[scheme];
   if (!sc) throw new Error(`unknown signature scheme "${scheme}"`);
   return sc.sign(secret, body, nowMs, id);

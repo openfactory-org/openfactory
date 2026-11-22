@@ -174,7 +174,7 @@ export interface AssignParams {
   worker?: WorkerExtras;
 }
 /**
- * One session of one run, as a worker receives it. runner_image and tool_images are deprecated and ignored.
+ * One session of one run, as a worker receives it.
  */
 export interface Task {
   task_id: TaskId;
@@ -183,11 +183,6 @@ export interface Task {
   team_id: string;
   factory_id?: string;
   image: string;
-  runner_image?: string;
-  tool_images?: {
-    name: string;
-    image: string;
-  }[];
   platform: {
     os: "linux";
     arch: "amd64" | "arm64";

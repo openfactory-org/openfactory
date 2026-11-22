@@ -11,7 +11,11 @@ const slack = (id: string, ws: string, over = {}) =>
 
 describe("select", () => {
   it("prefers the factory record, then the team record", () => {
-    const ints = [slack("t", "T1"), slack("f", "T1", { factory_id: "fac_1" }), slack("o", "T1", { factory_id: "fac_2" })];
+    const ints = [
+      slack("t", "T1"),
+      slack("f", "T1", { factory_id: "fac_1" }),
+      slack("o", "T1", { factory_id: "fac_2" }),
+    ];
     expect(select(ints, "slack", "fac_1", "T1").id).toBe("f");
     expect(select(ints, "slack", "fac_3", "t1").id).toBe("t");
     expect(select(ints, "slack", "", "T1").id).toBe("t");
@@ -61,7 +65,10 @@ describe("intake", () => {
 
   it("returns a disabled record with its error, and applies match", async () => {
     const s = new FakeStore();
-    s.integrations = [slack("a", "T1", { status: "auth_failed" }), slack("b", "T1", { config: { team_id: "T1", api_app_id: "A2" } })];
+    s.integrations = [
+      slack("a", "T1", { status: "auth_failed" }),
+      slack("b", "T1", { config: { team_id: "T1", api_app_id: "A2" } }),
+    ];
     const r = await intake(s, "slack", "T1", (i) => i.config?.["api_app_id"] !== "A2");
     expect(r.integration?.id).toBe("a");
     expect((r.error as OfError).code).toBe("integration_disabled");

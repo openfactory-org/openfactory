@@ -1,4 +1,4 @@
-// AWS Signature Version 4 for R2's S3 API. Port of
+// Signature Version 4 (SigV4) for the S3 API of R2. Port of
 // internal/objectstore/sigv4.go (header signing and query presigning),
 // hand-written on WebCrypto. R2 uses region "auto" and path-style URLs
 // https://<account>.r2.cloudflarestorage.com/<bucket>/<key>.
@@ -71,7 +71,10 @@ function canonicalHeaders(names: string[], host: string, h: Headers): string {
 }
 
 function amzDate(t: Date): string {
-  return t.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+  return t
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d{3}/, "");
 }
 
 export class SigV4 {
@@ -170,8 +173,17 @@ export async function presignR2(env: Env, i: PresignInput): Promise<string> {
   if (!cfg.r2AccountId) throw new Error("presign: OF_R2_ACCOUNT_ID is not set");
   const ttl = i.expiresSeconds ?? Math.floor(cfg.presignTtlMs / 1000);
   if (ttl < 1 || ttl > MAX_PRESIGN_SECONDS) throw new Error("R2 presign expiry must be 1..604800 s");
-  const url = new URL(`https://${r2Host(cfg.r2AccountId)}/${cfg.r2Bucket}/${i.key.split("/").map((p) => awsUriEncode(p, false)).join("/")}`);
-  const s = new SigV4({ accessKeyId: env.OF_R2_ACCESS_KEY_ID, secretAccessKey: env.OF_R2_SECRET_ACCESS_KEY }, "auto", "s3");
+  const url = new URL(
+    `https://${r2Host(cfg.r2AccountId)}/${cfg.r2Bucket}/${i.key
+      .split("/")
+      .map((p) => awsUriEncode(p, false))
+      .join("/")}`,
+  );
+  const s = new SigV4(
+    { accessKeyId: env.OF_R2_ACCESS_KEY_ID, secretAccessKey: env.OF_R2_SECRET_ACCESS_KEY },
+    "auto",
+    "s3",
+  );
   const extra = new Headers();
   if (i.contentType) extra.set("content-type", i.contentType);
   return s.presign(i.method, url, extra, i.now ?? new Date(), ttl);

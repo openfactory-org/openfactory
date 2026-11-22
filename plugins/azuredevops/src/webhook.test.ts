@@ -32,7 +32,9 @@ function req(user: string, pass: string, payload: unknown): Request {
   });
 }
 
-const hostWith = (o: { records?: IntegrationRecord[]; factories?: FakeFactory[]; repos?: Record<string, RepoRef[]> } = {}) =>
+const hostWith = (
+  o: { records?: IntegrationRecord[]; factories?: FakeFactory[]; repos?: Record<string, RepoRef[]> } = {},
+) =>
   new FakeHostApi({
     integrations: o.records ?? [rec()],
     factories: o.factories ?? [{ id: "fac_1", teamId: "team_1", alias: "payments", name: "Payments" }],
@@ -58,7 +60,10 @@ describe("handleWebhook", () => {
     expect(r.status).toBe(401);
     expect(r.headers?.["WWW-Authenticate"]).toContain("Basic");
     expect(r.events).toEqual([]);
-    const wrongUser = await handleWebhook(req("other", "pw", { eventType: "git.pullrequest.created", resource: pr }), hostWith());
+    const wrongUser = await handleWebhook(
+      req("other", "pw", { eventType: "git.pullrequest.created", resource: pr }),
+      hostWith(),
+    );
     expect(wrongUser.status).toBe(401);
     const none = await handleWebhook(
       new Request("https://cp.test/x", { method: "POST", body: JSON.stringify({ resourceContainers: containers }) }),
@@ -73,10 +78,19 @@ describe("handleWebhook", () => {
   });
 
   it("emits a pull request event with the repository ID", async () => {
-    const r = await handleWebhook(req("of", "pw", { id: "n1", eventType: "git.pullrequest.created", resource: pr }), hostWith());
+    const r = await handleWebhook(
+      req("of", "pw", { id: "n1", eventType: "git.pullrequest.created", resource: pr }),
+      hostWith(),
+    );
     expect(r.status).toBe(202);
     const ev = find(r.events, "pull_request_created")!;
-    expect(ev.attributes).toMatchObject({ repo: REPO_ID, base_branch: "main", head_branch: "f", pr_number: 11, author: "alice@contoso.com" });
+    expect(ev.attributes).toMatchObject({
+      repo: REPO_ID,
+      base_branch: "main",
+      head_branch: "f",
+      pr_number: 11,
+      author: "alice@contoso.com",
+    });
     expect(ev.source).toMatchObject({ repo: "proj/web", kind: "pull_request", number: 11 });
     expect(ev.deliveryId).toBe("n1:pull_request_created");
     expect(ev.actionKey).toBe("azure_devops:n1");
@@ -85,7 +99,10 @@ describe("handleWebhook", () => {
 
   it("routes a mention of a factory identity to the factory", async () => {
     const comment = {
-      comment: { content: `@<${FACTORY_IDENTITY.toUpperCase()}> please review`, author: { id: "u1", uniqueName: "alice@contoso.com" } },
+      comment: {
+        content: `@<${FACTORY_IDENTITY.toUpperCase()}> please review`,
+        author: { id: "u1", uniqueName: "alice@contoso.com" },
+      },
       pullRequest: pr,
     };
     const r = await handleWebhook(
@@ -100,22 +117,37 @@ describe("handleWebhook", () => {
 
   it("gives the two deliveries of one merge the same delivery ID and action key", async () => {
     const done = { ...pr, status: "completed" };
-    const a = await handleWebhook(req("of", "pw", { id: "n3", eventType: "git.pullrequest.updated", resource: done }), hostWith());
-    const b = await handleWebhook(req("of", "pw", { id: "n4", eventType: "git.pullrequest.merged", resource: done }), hostWith());
+    const a = await handleWebhook(
+      req("of", "pw", { id: "n3", eventType: "git.pullrequest.updated", resource: done }),
+      hostWith(),
+    );
+    const b = await handleWebhook(
+      req("of", "pw", { id: "n4", eventType: "git.pullrequest.merged", resource: done }),
+      hostWith(),
+    );
     const ea = find(a.events, "pull_request_merged")!;
     const eb = find(b.events, "pull_request_merged")!;
     expect(ea.deliveryId).toBe(`${REPO_ID}/11:merged`);
     expect(eb.deliveryId).toBe(ea.deliveryId);
     expect(eb.actionKey).toBe(ea.actionKey);
     // A merge attempt that did not complete gives no event.
-    const attempt = await handleWebhook(req("of", "pw", { id: "n5", eventType: "git.pullrequest.merged", resource: pr }), hostWith());
+    const attempt = await handleWebhook(
+      req("of", "pw", { id: "n5", eventType: "git.pullrequest.merged", resource: pr }),
+      hostWith(),
+    );
     expect(attempt.events).toEqual([]);
   });
 
   it("maps abandoned and updated pull requests", async () => {
-    const ab = await handleWebhook(req("of", "pw", { id: "a", eventType: "git.pullrequest.updated", resource: { ...pr, status: "abandoned" } }), hostWith());
+    const ab = await handleWebhook(
+      req("of", "pw", { id: "a", eventType: "git.pullrequest.updated", resource: { ...pr, status: "abandoned" } }),
+      hostWith(),
+    );
     expect(ab.events[0]!.type).toBe("pull_request_closed");
-    const up = await handleWebhook(req("of", "pw", { id: "b", eventType: "git.pullrequest.updated", resource: pr }), hostWith());
+    const up = await handleWebhook(
+      req("of", "pw", { id: "b", eventType: "git.pullrequest.updated", resource: pr }),
+      hostWith(),
+    );
     expect(up.events[0]!.type).toBe("pull_request_updated");
   });
 
@@ -137,12 +169,20 @@ describe("handleWebhook", () => {
         },
       },
     };
-    const r = await handleWebhook(req("of", "pw", { id: "n5", eventType: "workitem.updated", resource: wi }), hostWith());
+    const r = await handleWebhook(
+      req("of", "pw", { id: "n5", eventType: "workitem.updated", resource: wi }),
+      hostWith(),
+    );
     const as = find(r.events, "work_item_assigned")!;
     const lb = find(r.events, "work_item_labeled")!;
     expect(as.attributes?.["assignees"]).toEqual(["factory@contoso.com"]);
     expect(as.source).toMatchObject({ kind: "work_item", repo: "proj", number: 5, externalId: "5" });
-    expect(lb.attributes).toMatchObject({ added_labels: ["factory-ready"], author: "alice@contoso.com", work_item_type: "Bug", labels: ["a", "factory-ready"] });
+    expect(lb.attributes).toMatchObject({
+      added_labels: ["factory-ready"],
+      author: "alice@contoso.com",
+      work_item_type: "Bug",
+      labels: ["a", "factory-ready"],
+    });
   });
 
   it("emits comment and mention events of a work item", async () => {
@@ -155,17 +195,29 @@ describe("handleWebhook", () => {
       },
       revisedBy: { id: "u1", uniqueName: "alice@contoso.com" },
     };
-    const r = await handleWebhook(req("of", "pw", { id: "c1", eventType: "workitem.commented", resource: res }), hostWith());
+    const r = await handleWebhook(
+      req("of", "pw", { id: "c1", eventType: "workitem.commented", resource: res }),
+      hostWith(),
+    );
     expect(find(r.events, "work_item_commented")!.text).toContain("hi @bot");
-    expect(find(r.events, "work_item_mentioned")!.attributes).toMatchObject({ mentioned: [FACTORY_IDENTITY], alias: "payments" });
+    expect(find(r.events, "work_item_mentioned")!.attributes).toMatchObject({
+      mentioned: [FACTORY_IDENTITY],
+      alias: "payments",
+    });
   });
 
   it("ignores the activity of a factory identity", async () => {
     const comment = {
-      comment: { content: `@<${FACTORY_IDENTITY}> again`, author: { id: FACTORY_IDENTITY.toUpperCase(), uniqueName: "bot@contoso.com" } },
+      comment: {
+        content: `@<${FACTORY_IDENTITY}> again`,
+        author: { id: FACTORY_IDENTITY.toUpperCase(), uniqueName: "bot@contoso.com" },
+      },
       pullRequest: pr,
     };
-    const r = await handleWebhook(req("of", "pw", { id: "s", eventType: "ms.vss-code.git-pullrequest-comment-event", resource: comment }), hostWith());
+    const r = await handleWebhook(
+      req("of", "pw", { id: "s", eventType: "ms.vss-code.git-pullrequest-comment-event", resource: comment }),
+      hostWith(),
+    );
     expect(find(r.events, "pull_request_mentioned")).toBeUndefined();
     expect(r.events[0]!.attributes?.["actor_is_self"]).toBe(true);
   });
@@ -182,7 +234,11 @@ describe("handleWebhook", () => {
     };
     const r = await handleWebhook(req("of", "pw", { id: "p1", eventType: "git.push", resource: push }), hostWith());
     expect(r.events).toHaveLength(1);
-    expect(r.events[0]).toMatchObject({ type: "push", deliveryId: "p1:push:main", actionKey: "azure_devops:p1:push:main" });
+    expect(r.events[0]).toMatchObject({
+      type: "push",
+      deliveryId: "p1:push:main",
+      actionKey: "azure_devops:p1:push:main",
+    });
     expect(r.events[0]!.attributes).toMatchObject({ branch: "main", head_sha: "abc", repo: REPO_ID });
   });
 });
@@ -220,12 +276,46 @@ describe("work item routing", () => {
     type: string;
     want: string | undefined;
   }> = [
-    { name: "project with one factory", payload: { id: "r1", eventType: "workitem.created", resource: created("payments-proj") }, type: "work_item_created", want: "fac_pay" },
-    { name: "project with two factories", payload: { id: "r2", eventType: "workitem.created", resource: created("web-proj") }, type: "work_item_created", want: undefined },
-    { name: "unknown project", payload: { id: "r3", eventType: "workitem.created", resource: created("other") }, type: "work_item_created", want: undefined },
-    { name: "record of a factory", factory: "fac_web", payload: { id: "r4", eventType: "workitem.created", resource: created("web-proj") }, type: "work_item_created", want: "fac_web" },
-    { name: "team record wins at intake", factory: "fac_web", teamToo: true, payload: { id: "r6", eventType: "workitem.created", resource: created("web-proj") }, type: "work_item_created", want: undefined },
-    { name: "old config factory_id is not read", config: { factory_id: "fac_web" }, payload: { id: "r7", eventType: "workitem.created", resource: created("web-proj") }, type: "work_item_created", want: undefined },
+    {
+      name: "project with one factory",
+      payload: { id: "r1", eventType: "workitem.created", resource: created("payments-proj") },
+      type: "work_item_created",
+      want: "fac_pay",
+    },
+    {
+      name: "project with two factories",
+      payload: { id: "r2", eventType: "workitem.created", resource: created("web-proj") },
+      type: "work_item_created",
+      want: undefined,
+    },
+    {
+      name: "unknown project",
+      payload: { id: "r3", eventType: "workitem.created", resource: created("other") },
+      type: "work_item_created",
+      want: undefined,
+    },
+    {
+      name: "record of a factory",
+      factory: "fac_web",
+      payload: { id: "r4", eventType: "workitem.created", resource: created("web-proj") },
+      type: "work_item_created",
+      want: "fac_web",
+    },
+    {
+      name: "team record wins at intake",
+      factory: "fac_web",
+      teamToo: true,
+      payload: { id: "r6", eventType: "workitem.created", resource: created("web-proj") },
+      type: "work_item_created",
+      want: undefined,
+    },
+    {
+      name: "old config factory_id is not read",
+      config: { factory_id: "fac_web" },
+      payload: { id: "r7", eventType: "workitem.created", resource: created("web-proj") },
+      type: "work_item_created",
+      want: undefined,
+    },
     {
       name: "assigned to a factory identity",
       payload: {
@@ -233,7 +323,11 @@ describe("work item routing", () => {
         eventType: "workitem.updated",
         resource: {
           workItemId: 7,
-          fields: { "System.AssignedTo": { newValue: { id: FACTORY_IDENTITY.toUpperCase(), uniqueName: "builder@contoso.com" } } },
+          fields: {
+            "System.AssignedTo": {
+              newValue: { id: FACTORY_IDENTITY.toUpperCase(), uniqueName: "builder@contoso.com" },
+            },
+          },
           revisedBy: { id: "u1", uniqueName: "alice@contoso.com" },
           revision: { fields: { "System.TeamProject": "web-proj", "System.Title": "Bug" } },
         },
@@ -263,7 +357,9 @@ describe("helpers", () => {
   });
 
   it("extracts mention GUIDs from markdown and HTML, not from code", () => {
-    expect(extractMentions(`hi @<${FACTORY_IDENTITY.toUpperCase()}> and \`@<${REPO_ID}>\``)).toEqual([FACTORY_IDENTITY]);
+    expect(extractMentions(`hi @<${FACTORY_IDENTITY.toUpperCase()}> and \`@<${REPO_ID}>\``)).toEqual([
+      FACTORY_IDENTITY,
+    ]);
     expect(extractMentions(`<a data-vss-mention="version:2.0,${REPO_ID}">x</a>`)).toEqual([REPO_ID]);
   });
 

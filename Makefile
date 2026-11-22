@@ -88,6 +88,18 @@ naming: ## Check the product name and the glossary.
 go-allowlist: ## Fail when `go list ./...` differs from tools/go-allowlist.txt.
 	@go list ./... | sort | diff -u tools/go-allowlist.txt - || { echo "go package list differs from tools/go-allowlist.txt"; exit 1; }
 
+# Modules that the Go server used and the runtime must not build. The check
+# reads the built packages (go list -deps), not the module graph: modules such
+# as golang.org/x/oauth2 appear in `go list -m all` only through the module
+# graph of go-containerregistry and are never compiled. gopkg.in/yaml.v3 stays:
+# internal/machine/config parses /etc/openfactory/worker.yaml with it.
+GO_FORBIDDEN_DEPS := jackc/pgx|modernc.org/sqlite|hashicorp/go-plugin|google.golang.org/grpc|google.golang.org/protobuf|modelcontextprotocol/go-sdk|coreos/go-oidc|robfig/cron|golang.org/x/oauth2
+
+.PHONY: go-deps-check
+go-deps-check: ## Fail when a built Go package comes from a removed server dependency.
+	@out="$$(go list -deps -test ./... | grep -E '$(GO_FORBIDDEN_DEPS)' || true)"; \
+	if [ -n "$$out" ]; then echo "removed dependencies are built again:"; echo "$$out"; exit 1; fi
+
 .PHONY: go-allowlist-update
 go-allowlist-update: ## Rewrite tools/go-allowlist.txt from `go list ./...`.
 	go list ./... | sort > tools/go-allowlist.txt
@@ -130,7 +142,7 @@ dev: ## Run the control plane locally (wrangler dev).
 
 .PHONY: dev-worker
 dev-worker: build ## Run a dev process worker against the local control plane.
-	OF_SERVER=http://localhost:8787 ./bin/$(RUNTIME) worker --backend local --id dev
+	OF_SERVER=http://localhost:8787 ./bin/$(RUNTIME) worker --process --id dev
 
 .PHONY: dev-seed
 dev-seed: ## Fill the local control plane with sample data.
@@ -217,7 +229,7 @@ clean: ## Remove build output.
 # It does not run the image builds, the npm audit report or the Firecracker tests.
 # make -k ci shows all failures. The tools are listed in CONTRIBUTING.md.
 .PHONY: go-ci
-go-ci: fmt-check vet lint vuln test-race build naming go-allowlist ## Run the Go checks.
+go-ci: fmt-check vet lint vuln test-race build naming go-allowlist go-deps-check ## Run the Go checks.
 
 .PHONY: ci
 ci: node-ci go-ci shellcheck openapi-check ## Run every CI check locally.

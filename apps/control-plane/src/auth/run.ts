@@ -97,7 +97,8 @@ export async function verifySessionToken(keys: KeySet, token: string, nowMs = Da
   const i = rest.indexOf(".");
   const p = i < 0 ? "" : rest.slice(0, i);
   const s = i < 0 ? "" : rest.slice(i + 1);
-  if (i < 0 || p === "" || s === "" || s.includes(".")) throw new RunTokenError("malformed", "malformed token: wrong shape");
+  if (i < 0 || p === "" || s === "" || s.includes("."))
+    throw new RunTokenError("malformed", "malformed token: wrong shape");
   let c: SessionClaims;
   try {
     c = JSON.parse(fromUtf8(fromB64url(p))) as SessionClaims;
@@ -114,7 +115,8 @@ export async function verifySessionToken(keys: KeySet, token: string, nowMs = Da
     throw new RunTokenError("malformed", "malformed token: signature encoding");
   }
   if (!timingSafeEqual(sig, await hmacSha256(key, p))) throw new RunTokenError("bad_signature", "bad signature");
-  if (!c.team || !c.run || !c.sub || !(c.ses >= 1)) throw new RunTokenError("malformed", "malformed token: missing claims");
+  if (!c.team || !c.run || !c.sub || !(c.ses >= 1))
+    throw new RunTokenError("malformed", "malformed token: missing claims");
   const n = Math.floor(nowMs / 1000);
   if (n >= c.exp) throw new RunTokenError("expired", "token expired");
   if (c.iat > n + CLOCK_SKEW_S) throw new RunTokenError("not_yet_valid", "token not yet valid");
@@ -132,7 +134,8 @@ export async function hashBootstrap(token: string): Promise<string> {
   const rest = token.slice(BOOTSTRAP_PREFIX.length);
   const parts = rest.split(".");
   if (parts.length === 3) {
-    if (!parts[0] || !parts[1] || !/^[A-Za-z0-9_-]{43}$/.test(parts[2]!)) throw new RunTokenError("malformed", "malformed token: shape");
+    if (!parts[0] || !parts[1] || !/^[A-Za-z0-9_-]{43}$/.test(parts[2]!))
+      throw new RunTokenError("malformed", "malformed token: shape");
   } else {
     let b: Uint8Array;
     try {
@@ -194,7 +197,13 @@ export function runAuthErrorResponse(e: unknown): Response {
     });
   }
   if (err?.code === "conflict" && err.reason === "session_superseded") {
-    return new Response(body("session_superseded", "a newer session exists"), { status: 409, headers: { "content-type": "application/json" } });
+    return new Response(body("session_superseded", "a newer session exists"), {
+      status: 409,
+      headers: { "content-type": "application/json" },
+    });
   }
-  return new Response(body("internal", "could not check the token"), { status: 500, headers: { "content-type": "application/json" } });
+  return new Response(body("internal", "could not check the token"), {
+    status: 500,
+    headers: { "content-type": "application/json" },
+  });
 }

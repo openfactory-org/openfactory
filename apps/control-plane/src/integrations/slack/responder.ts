@@ -161,7 +161,12 @@ export class SlackResponder implements Responder, EventContextBuilder {
   }
 
   /** The record for a reply: the workspace of the source, the record of the factory first. factoryId "" falls back to factoryOf of the work item. */
-  private async integration(teamId: string, factoryId: string, workItemId: string, src: SourceRef): Promise<Integration> {
+  private async integration(
+    teamId: string,
+    factoryId: string,
+    workItemId: string,
+    src: SourceRef,
+  ): Promise<Integration> {
     let fid = factoryId;
     if (fid === "" && workItemId !== "" && this.deps.work?.factoryOf) {
       try {
@@ -199,7 +204,10 @@ export class SlackResponder implements Responder, EventContextBuilder {
     const c = new SlackClient(this.apiBaseUrl, tok, this.deps.fetch);
     let out: { messages?: ThreadMessage[] };
     try {
-      out = await c.call("conversations.replies", new URLSearchParams({ channel, ts: thread, limit: String(MAX_THREAD_MESSAGES) }));
+      out = await c.call(
+        "conversations.replies",
+        new URLSearchParams({ channel, ts: thread, limit: String(MAX_THREAD_MESSAGES) }),
+      );
     } catch (e) {
       return { files: [], omitted: [{ name: "context/thread.json", reason: errMessage(e) }] };
     }
@@ -238,7 +246,7 @@ export class SlackResponder implements Responder, EventContextBuilder {
 
   /** Reads a private file. The token goes only to the file host. */
   private async download(token: string, raw: string): Promise<Uint8Array> {
-    let ok = false;
+    let ok: boolean;
     try {
       const u = new URL(raw);
       ok = u.protocol === "https:" && u.host === FILE_HOST;

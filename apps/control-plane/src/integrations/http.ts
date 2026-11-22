@@ -61,7 +61,7 @@ export class ApiClient {
     try {
       return JSON.parse(text) as T;
     } catch (e) {
-      throw new Error(`decode ${method} ${redactUrl(this.url(path))} response: ${(e as Error).message}`);
+      throw new Error(`decode ${method} ${redactUrl(this.url(path))} response: ${(e as Error).message}`, { cause: e });
     }
   }
 

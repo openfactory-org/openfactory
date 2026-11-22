@@ -35,12 +35,25 @@ export interface WorkerMethods {
 
 export type WorkerMethod = keyof WorkerMethods;
 
-export const WORKER_METHODS: readonly WorkerMethod[] = ["task.assign", "task.status", "task.destroy", "task.cancel", "task.list", "drain"];
+export const WORKER_METHODS: readonly WorkerMethod[] = [
+  "task.assign",
+  "task.status",
+  "task.destroy",
+  "task.cancel",
+  "task.list",
+  "drain",
+];
 
 /** Error codes of a response frame. */
 export type WorkerErrorCode = NonNullable<ResponseFrame["error"]>["code"];
 
-export const WORKER_ERROR_CODES: readonly WorkerErrorCode[] = ["not_found", "at_capacity", "invalid_spec", "internal", "unknown_method"];
+export const WORKER_ERROR_CODES: readonly WorkerErrorCode[] = [
+  "not_found",
+  "at_capacity",
+  "invalid_spec",
+  "internal",
+  "unknown_method",
+];
 
 /** A frame that failed to decode. */
 export class FrameError extends Error {
@@ -70,18 +83,28 @@ export function decodeFrame(text: string | ArrayBuffer | ArrayBufferView): Worke
   const r = validateFrame(v);
   if (!r.valid) {
     const t = v !== null && typeof v === "object" ? String((v as { type?: unknown }).type ?? "") : "";
-    throw new FrameError(`worker-proto: invalid ${t || "frame"}: ${r.errors[0]?.instanceLocation ?? ""} ${r.errors[0]?.error ?? ""}`.trim(), r.errors);
+    throw new FrameError(
+      `worker-proto: invalid ${t || "frame"}: ${r.errors[0]?.instanceLocation ?? ""} ${r.errors[0]?.error ?? ""}`.trim(),
+      r.errors,
+    );
   }
   return r.value;
 }
 
 /** A request frame. */
-export function requestFrame<M extends WorkerMethod>(id: string, method: M, params: WorkerMethods[M]["params"]): RequestFrame {
+export function requestFrame<M extends WorkerMethod>(
+  id: string,
+  method: M,
+  params: WorkerMethods[M]["params"],
+): RequestFrame {
   return { type: "request", id, method, params } as RequestFrame;
 }
 
 /** A successful response frame. */
-export function responseFrame(id: string, result: StatusResult | TaskListResult | Record<string, never> = {}): ResponseFrame {
+export function responseFrame(
+  id: string,
+  result: StatusResult | TaskListResult | Record<string, never> = {},
+): ResponseFrame {
   return { type: "response", id, result };
 }
 
@@ -111,7 +134,10 @@ export const PING_FRAME: PingFrame = { type: "ping" };
 export const PONG_FRAME: PongFrame = { type: "pong" };
 
 /** Narrows a frame by its type. */
-export function isFrameType<T extends WorkerFrame["type"]>(f: WorkerFrame, type: T): f is Extract<WorkerFrame, { type: T }> {
+export function isFrameType<T extends WorkerFrame["type"]>(
+  f: WorkerFrame,
+  type: T,
+): f is Extract<WorkerFrame, { type: T }> {
   return f.type === type;
 }
 

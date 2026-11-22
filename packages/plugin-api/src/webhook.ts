@@ -37,7 +37,9 @@ function hex(buf: ArrayBuffer): string {
 
 export async function hmacSha256Hex(secret: string, data: string): Promise<string> {
   const enc = new TextEncoder();
-  const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, [
+    "sign",
+  ]);
   return hex(await crypto.subtle.sign("HMAC", key, enc.encode(data)));
 }
 
@@ -87,7 +89,10 @@ export class DeliveryAmbiguousError extends Error {
  * and "project/repo" gives "". "git" has no owner.
  */
 export function repoOwner(provider: string, repo: string): string {
-  const parts = repo.trim().replace(/^\/+|\/+$/g, "").split("/");
+  const parts = repo
+    .trim()
+    .replace(/^\/+|\/+$/g, "")
+    .split("/");
   switch (provider.toLowerCase()) {
     case "git":
       return "";
@@ -124,7 +129,9 @@ export function selectIntegration(
     throw noIntegration(`${provider}: ${t.length} records (${ids}) serve the owner "${owner}": keep one`);
   }
   if (owner === "") throw noIntegration(`no ${provider} integration record serves this repository`);
-  throw noIntegration(`no ${provider} integration record for the owner "${owner}": add a record with config.org "${owner}"`);
+  throw noIntegration(
+    `no ${provider} integration record for the owner "${owner}": add a record with config.org "${owner}"`,
+  );
 }
 
 class NoOwnerRecord extends Error {}

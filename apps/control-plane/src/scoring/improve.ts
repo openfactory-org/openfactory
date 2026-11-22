@@ -35,7 +35,9 @@ export function improvementSettings(
   defaults: { threshold?: number; analysisModel?: string },
 ): ImprovementSettings {
   const cfg: ImprovementSettings = {
-    threshold: clampThreshold(defaults.threshold && defaults.threshold > 0 ? defaults.threshold : DEFAULT_FAILED_RUN_THRESHOLD),
+    threshold: clampThreshold(
+      defaults.threshold && defaults.threshold > 0 ? defaults.threshold : DEFAULT_FAILED_RUN_THRESHOLD,
+    ),
     reviewerType: REVIEWER_ADMINS,
     reviewerEmails: [],
     analysisModel: "",
@@ -62,7 +64,8 @@ export function groupFailures(list: readonly Failure[]): Map<string, Failure[]> 
   const byRun = new Map<string, Map<string, Failure>>();
   for (const f of list) {
     const s = f.score;
-    if (s.passed || s.improvement_run_id || !s.agent_name || s.scorer_id !== f.scorer.id || !f.scorer.self_improvement) continue;
+    if (s.passed || s.improvement_run_id || !s.agent_name || s.scorer_id !== f.scorer.id || !f.scorer.self_improvement)
+      continue;
     let m = byRun.get(s.agent_name);
     if (!m) byRun.set(s.agent_name, (m = new Map()));
     const prev = m.get(s.run_id);
@@ -81,7 +84,12 @@ export function groupFailures(list: readonly Failure[]): Map<string, Failure[]> 
 }
 
 /** The trigger rule: enough failures, or the oldest one is old enough (maxFailureAgeMs <= 0 disables the age rule). */
-export function thresholdReached(failures: readonly Failure[], threshold: number, nowMs: number, maxFailureAgeMs: number): boolean {
+export function thresholdReached(
+  failures: readonly Failure[],
+  threshold: number,
+  nowMs: number,
+  maxFailureAgeMs: number,
+): boolean {
   if (failures.length >= threshold) return true;
   if (maxFailureAgeMs > 0 && failures.length > 0) return nowMs - ms(failures[0]!.score.created_at) >= maxFailureAgeMs;
   return false;
@@ -98,7 +106,11 @@ export interface UserLite {
  * custom (members whose email is listed), none (nobody). An unknown type is
  * admins. Ordered by user ID.
  */
-export function eligibleReviewers(users: readonly UserLite[], reviewerType: string, emails: readonly string[]): UserLite[] {
+export function eligibleReviewers(
+  users: readonly UserLite[],
+  reviewerType: string,
+  emails: readonly string[],
+): UserLite[] {
   let pool: UserLite[];
   switch (reviewerType) {
     case REVIEWER_NONE:
@@ -130,7 +142,10 @@ export function regressionsSection(failures: readonly Failure[], runUrl: (runId:
 }
 
 /** The tail of a run's conversation: the last assistant messages plus its result or error. */
-export async function runSummary(runs: Pick<RunsPort, "listMessages">, r: Pick<Run, "id" | "result" | "error">): Promise<string> {
+export async function runSummary(
+  runs: Pick<RunsPort, "listMessages">,
+  r: Pick<Run, "id" | "result" | "error">,
+): Promise<string> {
   let msgs: { role: string; content: string }[];
   try {
     msgs = await runs.listMessages(r.id);
@@ -144,7 +159,8 @@ export async function runSummary(runs: Pick<RunsPort, "listMessages">, r: Pick<R
   }
   parts.reverse();
   if (r.error) parts.push("ERROR: " + truncate(r.error, 1000));
-  else if (r.result && (parts.length === 0 || parts[parts.length - 1] !== r.result)) parts.push("RESULT: " + truncate(r.result, 1000));
+  else if (r.result && (parts.length === 0 || parts[parts.length - 1] !== r.result))
+    parts.push("RESULT: " + truncate(r.result, 1000));
   return truncate(parts.join("\n---\n"), MAX_FAILURE_EXCERPT);
 }
 
@@ -238,15 +254,18 @@ export async function improvementPrompt(p: PromptInput): Promise<string> {
   b += "## What to change\n\n";
   b += "Pick the smallest change that addresses the root cause:\n";
   b += `- The factory definition: the agent's instructions (\`agents/${agent}/agent.md\`), its skills (\`agents/${agent}/skills/*/SKILL.md\` or factory-wide \`skills/*/SKILL.md\`), its model/harness, or other configuration in \`factory.yaml\`.\n`;
-  b += "- Application code, when the failures are caused by the repository itself (missing scripts, broken tooling, unclear docs).\n\n";
-  b += "Do not weaken or edit the scorers to make failures disappear. Keep definition changes valid against the definition schema.\n\n";
+  b +=
+    "- Application code, when the failures are caused by the repository itself (missing scripts, broken tooling, unclear docs).\n\n";
+  b +=
+    "Do not weaken or edit the scorers to make failures disappear. Keep definition changes valid against the definition schema.\n\n";
 
   b += "## How to deliver\n\n";
   if (f.source === "git" && f.git_repo) {
     const branch = f.git_branch || "main";
     b += `The factory definition lives in \`${f.git_repo}\` (production branch \`${branch}\``;
     if (f.git_path) b += `, directory \`${f.git_path}\``;
-    b += "). Open a pull request against that branch for definition changes; definition checks validate it and merging applies it.\n";
+    b +=
+      "). Open a pull request against that branch for definition changes; definition checks validate it and merging applies it.\n";
   } else {
     b +=
       "The factory definition is managed by Open Factory (not in a git repository). For definition changes, call the factory tool `propose_definition_change` with the full new content of every changed file, keyed by path, and a short message. The tool checks the files and stores a proposed version; a reviewer sees the diff in the inbox and applies it with one approval. If the tool reports errors, fix the files and call it again. A rejection comes back to you as a message with the reason.\n";

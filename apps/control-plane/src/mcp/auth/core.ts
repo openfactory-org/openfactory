@@ -147,7 +147,8 @@ export function checkRedirectURI(raw: string): string {
       if (u.host === "") return "redirect_uri must have a host";
       break;
     case "http":
-      if (!isLoopback(u.hostname)) return "an http redirect_uri must use a loopback host (localhost, 127.0.0.1 or [::1])";
+      if (!isLoopback(u.hostname))
+        return "an http redirect_uri must use a loopback host (localhost, 127.0.0.1 or [::1])";
       break;
     case "javascript":
     case "data":
@@ -166,8 +167,12 @@ export function redirectAllowed(c: Client, redirect: string): boolean {
     const b = parseURL(redirect);
     if (!a || !b) continue;
     if (
-      a.scheme === "http" && b.scheme === "http" && isLoopback(a.hostname) && a.hostname === b.hostname &&
-      a.path === b.path && a.rawQuery === b.rawQuery
+      a.scheme === "http" &&
+      b.scheme === "http" &&
+      isLoopback(a.hostname) &&
+      a.hostname === b.hostname &&
+      a.path === b.path &&
+      a.rawQuery === b.rawQuery
     ) {
       return true;
     }

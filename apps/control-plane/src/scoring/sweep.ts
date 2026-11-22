@@ -10,8 +10,19 @@ import type { ScoringStore } from "./types";
  * self-improvement scorer. `store` is the local store of TeamDO. Returns true
  * when it should run again.
  */
-export async function scoringSweep(env: Env, teamId: string, store: ScoringStore, factoryIds: string[] = []): Promise<boolean> {
-  const svc = new ScoringService({ store, runs: workRunsPort(env, teamId), engine: workEngine(env, teamId), benchmarks: benchmarkPort(env, teamId), opts: scoringOptions(env) });
+export async function scoringSweep(
+  env: Env,
+  teamId: string,
+  store: ScoringStore,
+  factoryIds: string[] = [],
+): Promise<boolean> {
+  const svc = new ScoringService({
+    store,
+    runs: workRunsPort(env, teamId),
+    engine: workEngine(env, teamId),
+    benchmarks: benchmarkPort(env, teamId),
+    opts: scoringOptions(env),
+  });
   let pending = false;
   for (const id of factoryIds) {
     try {

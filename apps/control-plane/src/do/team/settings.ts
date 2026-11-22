@@ -47,7 +47,10 @@ export function setSetting(kit: TeamKit, k: string, v: unknown): void {
 // ---------- in-use helpers ----------
 
 /** Places of the active definitions of the team that `uses` reports, as "<place> of factory <name>". */
-export function teamResourceUses(kit: TeamKit, uses: (agents: AgentConfig[], automations: Automation[]) => string[]): string[] {
+export function teamResourceUses(
+  kit: TeamKit,
+  uses: (agents: AgentConfig[], automations: Automation[]) => string[],
+): string[] {
   const out: string[] = [];
   for (const f of listFactories(kit)) {
     if (!f.active_version_id) continue;
@@ -116,10 +119,19 @@ const IMAGE_REF_RE = new RegExp(
 );
 const ENV_VAR_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-function validateFields(b: JsonObject): { repos?: string[]; image?: string; env?: Record<string, string>; setup?: string[] } {
+function validateFields(b: JsonObject): {
+  repos?: string[];
+  image?: string;
+  env?: Record<string, string>;
+  setup?: string[];
+} {
   const repos = optStringArray(b, "repos");
   for (const r of repos ?? []) {
-    if (!validRepo(r.trim())) throw new OfError("invalid_request", `repo ${JSON.stringify(r)} must be [forge:]owner/name or an https:// repository URL`);
+    if (!validRepo(r.trim()))
+      throw new OfError(
+        "invalid_request",
+        `repo ${JSON.stringify(r)} must be [forge:]owner/name or an https:// repository URL`,
+      );
   }
   let image = optString(b, "image");
   if (image !== undefined) {
@@ -134,18 +146,31 @@ function validateFields(b: JsonObject): { repos?: string[]; image?: string; env?
   const env = optStringMap(b, "env_vars");
   for (const k of Object.keys(env ?? {}).sort()) {
     if (!ENV_VAR_RE.test(k)) {
-      throw new OfError("invalid_request", `env_vars: ${JSON.stringify(k)} is not a valid variable name (letters, digits and _, not starting with a digit)`);
+      throw new OfError(
+        "invalid_request",
+        `env_vars: ${JSON.stringify(k)} is not a valid variable name (letters, digits and _, not starting with a digit)`,
+      );
     }
     if (k.toUpperCase().startsWith("OF_")) {
-      throw new OfError("invalid_request", `env_vars: ${JSON.stringify(k)} starts with OF_, which is reserved for variables that the platform sets`);
+      throw new OfError(
+        "invalid_request",
+        `env_vars: ${JSON.stringify(k)} starts with OF_, which is reserved for variables that the platform sets`,
+      );
     }
   }
   const setup = optStringArray(b, "setup_commands");
-  return { ...(repos ? { repos } : {}), ...(image !== undefined ? { image } : {}), ...(env ? { env } : {}), ...(setup ? { setup } : {}) };
+  return {
+    ...(repos ? { repos } : {}),
+    ...(image !== undefined ? { image } : {}),
+    ...(env ? { env } : {}),
+    ...(setup ? { setup } : {}),
+  };
 }
 
 export function listEnvironments(kit: TeamKit): Environment[] {
-  return all<{ data: string }>(kit.sql, "SELECT data FROM environments ORDER BY created_ms, id").map((r) => JSON.parse(r.data) as Environment);
+  return all<{ data: string }>(kit.sql, "SELECT data FROM environments ORDER BY created_ms, id").map(
+    (r) => JSON.parse(r.data) as Environment,
+  );
 }
 
 export function getEnvironment(kit: TeamKit, id: string): Environment | undefined {
@@ -251,8 +276,12 @@ export const ops: Record<string, TeamOp> = {
       const uses = teamResourceUses(kit, (agents, automations) => [
         ...agents.filter((a) => a.environment_id === e.id).map((a) => "agent " + a.name),
         ...automations
-          .filter((au) => (au.overrides as { environmentId?: string | null; environment_id?: string | null } | undefined)?.environmentId === e.id ||
-            (au.overrides as { environment_id?: string | null } | undefined)?.environment_id === e.id)
+          .filter(
+            (au) =>
+              (au.overrides as { environmentId?: string | null; environment_id?: string | null } | undefined)
+                ?.environmentId === e.id ||
+              (au.overrides as { environment_id?: string | null } | undefined)?.environment_id === e.id,
+          )
           .map((au) => "automation " + au.name),
       ]);
       const err = inUseError("Environment", e.name, uses);

@@ -48,7 +48,7 @@ function classChar(p: string, i: number): [string, number] {
 
 /** Checks the whole pattern syntax (Go reports errors even after a mismatch). */
 function validate(p: string): void {
-  for (let i = 0; i < p.length; ) {
+  for (let i = 0; i < p.length;) {
     const c = p[i]!;
     if (c === "\\") {
       if (i + 1 >= p.length) throw new BadPatternError();
@@ -106,13 +106,8 @@ function matchHere(p: string, pi: number, s: string[], si: number): boolean {
       si++;
       continue;
     }
-    let lit = c;
-    if (c === "\\") {
-      pi++;
-      lit = p[pi]!;
-    }
-    const cp = p.codePointAt(pi)!;
-    lit = String.fromCodePoint(cp);
+    if (c === "\\") pi++;
+    const lit = String.fromCodePoint(p.codePointAt(pi)!);
     if (ch !== lit) return false;
     pi += lit.length;
     si++;

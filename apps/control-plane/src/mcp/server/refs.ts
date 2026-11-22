@@ -39,7 +39,12 @@ export function parsePullRequestURL(raw: string): PullRequestRef | null {
     for (let i = 0; i + 1 < segs.length; i++) {
       if (segs[i] === "pullrequest" && i >= 2 && segs[i - 2] === "_git") {
         if (!isInt(segs[i + 1])) return null;
-        return { ...base, forge: "AZURE_DEVOPS", repo: segs.slice(0, i - 2).join("/") + "/" + segs[i - 1], number: Number(segs[i + 1]) };
+        return {
+          ...base,
+          forge: "AZURE_DEVOPS",
+          repo: segs.slice(0, i - 2).join("/") + "/" + segs[i - 1],
+          number: Number(segs[i + 1]),
+        };
       }
     }
     return null;
@@ -81,7 +86,7 @@ export type RefPlan =
 export function planReference(ref: string, publicURL: string): RefPlan {
   const keys: string[] = [];
   let prURL = "";
-  let u: URL | null = null;
+  let u: URL | null;
   try {
     u = new URL(ref);
   } catch {
@@ -135,7 +140,15 @@ export function planReference(ref: string, publicURL: string): RefPlan {
 export interface WorkItemLike {
   id: string;
   source_key?: string;
-  source?: { provider?: string; kind?: string; repo?: string; number?: number; channel?: string; thread_id?: string; external_id?: string };
+  source?: {
+    provider?: string;
+    kind?: string;
+    repo?: string;
+    number?: number;
+    channel?: string;
+    thread_id?: string;
+    external_id?: string;
+  };
   pull_requests?: PullRequestRef[];
   updated_at?: string;
 }
@@ -149,7 +162,8 @@ export function matchesWorkItem(wi: WorkItemLike, keys: string[], prURL: string,
   const sk = sourceKey(wi);
   for (const k of keys) if (sk.toLowerCase() === k.toLowerCase()) return true;
   for (const pr of wi.pull_requests ?? []) {
-    if (prURL !== "" && (pr.url ?? "").replace(/\/+$/, "").toLowerCase() === prURL.replace(/\/+$/, "").toLowerCase()) return true;
+    if (prURL !== "" && (pr.url ?? "").replace(/\/+$/, "").toLowerCase() === prURL.replace(/\/+$/, "").toLowerCase())
+      return true;
     for (const k of keys) {
       if (`${pr.forge.toLowerCase()}:${pr.repo}#${pr.number}`.toLowerCase() === k.toLowerCase()) return true;
     }
@@ -186,7 +200,10 @@ export function cloneURL(forge: string, owner: string, name: string): string {
 }
 
 export function slug(s: string): string {
-  let out = s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  let out = s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
   if (out.length > 40) out = out.slice(0, 40).replace(/^-+|-+$/g, "");
   return out;
 }
@@ -203,7 +220,15 @@ export function splitRepo(full: string): [string, string] {
   return i < 0 ? ["", full] : [full.slice(0, i), full.slice(i + 1)];
 }
 
-export function repoSetupFor(forge: string, owner: string, name: string, branch: string, base: string, sid: string, existing: boolean): RepoSetup {
+export function repoSetupFor(
+  forge: string,
+  owner: string,
+  name: string,
+  branch: string,
+  base: string,
+  sid: string,
+  existing: boolean,
+): RepoSetup {
   const u = cloneURL(forge, owner, name);
   const wt = `../${name}-${sid}`;
   const commands = [`git clone ${u} ${name}  # skip if you already have a clone`, `cd ${name}`, "git fetch origin"];

@@ -1,5 +1,13 @@
 // In-memory ports for the scoring tests.
-import { OfError, type CompiledDefinition, type Run, type RepoStart, type Score, type Scorer, type WorkItem } from "@openfactory/core";
+import {
+  OfError,
+  type CompiledDefinition,
+  type Run,
+  type RepoStart,
+  type Score,
+  type Scorer,
+  type WorkItem,
+} from "@openfactory/core";
 import type { BenchmarkPort } from "./service";
 import type {
   DispatchRequest,
@@ -69,7 +77,13 @@ export class FakeWorld implements ScoringStore, RunsPort, EnginePort, BenchmarkP
   private seq = 0;
 
   constructor(public clock = new Clock()) {
-    this.factories.set("fac_1", { id: "fac_1", team_id: "team_1", name: "demo", source: "managed", active_version_id: "ver_1" });
+    this.factories.set("fac_1", {
+      id: "fac_1",
+      team_id: "team_1",
+      name: "demo",
+      source: "managed",
+      active_version_id: "ver_1",
+    });
     this.definition = { name: "demo", agents: [], benchmarks: [] } as unknown as CompiledDefinition;
   }
 
@@ -89,7 +103,10 @@ export class FakeWorld implements ScoringStore, RunsPort, EnginePort, BenchmarkP
     if (!f) throw new OfError("resource_not_found", `factory ${id} not found`);
     return f;
   }
-  async activeDefinition(): Promise<{ definition: CompiledDefinition; version: { versionId: string; files: Record<string, string> } } | null> {
+  async activeDefinition(): Promise<{
+    definition: CompiledDefinition;
+    version: { versionId: string; files: Record<string, string> };
+  } | null> {
     return this.definition ? { definition: this.definition, version: { versionId: "ver_1", files: this.files } } : null;
   }
   async listScorers(factoryId: string): Promise<Scorer[]> {
@@ -163,7 +180,8 @@ export class FakeWorld implements ScoringStore, RunsPort, EnginePort, BenchmarkP
 
   // EnginePort
   async dispatch(req: DispatchRequest, key?: string): Promise<{ workItemId?: string; runId: string }> {
-    if (this.failDispatchFor && req.agentName === this.failDispatchFor) throw new OfError("internal_error", "dispatch failed on purpose");
+    if (this.failDispatchFor && req.agentName === this.failDispatchFor)
+      throw new OfError("internal_error", "dispatch failed on purpose");
     if (this.holdPromise && this.dispatches.length >= this.holdAfter) {
       this.inFlight++;
       await this.holdPromise;
@@ -174,13 +192,35 @@ export class FakeWorld implements ScoringStore, RunsPort, EnginePort, BenchmarkP
     const wiId = `wi_${n}`;
     const runId = `run_disp${n}`;
     this.workItems.set(wiId, { id: wiId, factory_id: req.factoryId } as WorkItem);
-    this.put(run({ id: runId, work_item_id: wiId, factory_id: req.factoryId, agent_name: req.agentName ?? "foreman", state: "running", prompt: req.prompt, metadata: req.metadata ?? {}, triggered_by: req.triggeredBy ?? "" }));
+    this.put(
+      run({
+        id: runId,
+        work_item_id: wiId,
+        factory_id: req.factoryId,
+        agent_name: req.agentName ?? "foreman",
+        state: "running",
+        prompt: req.prompt,
+        metadata: req.metadata ?? {},
+        triggered_by: req.triggeredBy ?? "",
+      }),
+    );
     return { workItemId: wiId, runId };
   }
   async startJudge(req: JudgeRunRequest, runId: string): Promise<{ runId: string }> {
     this.judges.push({ req, runId });
     if (!this.runsById.has(runId)) {
-      this.put(run({ id: runId, factory_id: req.factoryId, agent_name: req.name, name: req.name, state: "queued", prompt: req.prompt, metadata: req.metadata ?? {}, triggered_by: req.triggeredBy ?? "" }));
+      this.put(
+        run({
+          id: runId,
+          factory_id: req.factoryId,
+          agent_name: req.name,
+          name: req.name,
+          state: "queued",
+          prompt: req.prompt,
+          metadata: req.metadata ?? {},
+          triggered_by: req.triggeredBy ?? "",
+        }),
+      );
     }
     return { runId };
   }
@@ -193,11 +233,19 @@ export class FakeWorld implements ScoringStore, RunsPort, EnginePort, BenchmarkP
     this.followUps.push(`${runId}: ${message} (${actor})`);
   }
   async resolveInbox(): Promise<void> {}
-  async applyDefinition(_f: string, files: Record<string, string>, actor: string, message: string): Promise<{ id: string }> {
+  async applyDefinition(
+    _f: string,
+    files: Record<string, string>,
+    actor: string,
+    message: string,
+  ): Promise<{ id: string }> {
     this.applied.push({ files, actor, message });
     return { id: "ver_applied" };
   }
-  async checkDefinition(_f: string, files: Record<string, string>): Promise<{ valid: boolean; errors: { file: string; message: string }[] }> {
+  async checkDefinition(
+    _f: string,
+    files: Record<string, string>,
+  ): Promise<{ valid: boolean; errors: { file: string; message: string }[] }> {
     return (files["factory.yaml"] ?? "").includes("INVALID")
       ? { valid: false, errors: [{ file: "factory.yaml", message: "broken on purpose" }] }
       : { valid: true, errors: [] };

@@ -261,7 +261,15 @@ export interface CompiledDefinition {
 
 export type AgentType = "FOREMAN" | "TRIAGE" | "SPEC" | "IMPLEMENT" | "REVIEW" | "VERIFY" | "CUSTOM";
 
-export const AGENT_TYPES: readonly AgentType[] = ["FOREMAN", "TRIAGE", "SPEC", "IMPLEMENT", "REVIEW", "VERIFY", "CUSTOM"];
+export const AGENT_TYPES: readonly AgentType[] = [
+  "FOREMAN",
+  "TRIAGE",
+  "SPEC",
+  "IMPLEMENT",
+  "REVIEW",
+  "VERIFY",
+  "CUSTOM",
+];
 
 export type HarnessType = "claude" | "codex" | "";
 
@@ -754,14 +762,7 @@ export interface RepoStart {
 // ---------- Inbox ----------
 
 export type InboxKind =
-  | "approval"
-  | "question"
-  | "handoff"
-  | "failure"
-  | "review"
-  | "spend_limit"
-  | "blocked"
-  | "answered";
+  "approval" | "question" | "handoff" | "failure" | "review" | "spend_limit" | "blocked" | "answered";
 
 /** Question types of an inbox question. */
 export const QUESTION_SINGLE_SELECT = "single_select";
@@ -832,12 +833,7 @@ export interface Attachment {
 // ---------- Secrets ----------
 
 export type SecretType =
-  | "generic"
-  | "anthropic_api_key"
-  | "anthropic_oauth_token"
-  | "openai_api_key"
-  | "docker_registry"
-  | (string & {});
+  "generic" | "anthropic_api_key" | "anthropic_oauth_token" | "openai_api_key" | "docker_registry" | (string & {});
 
 export interface Secret {
   id: string;

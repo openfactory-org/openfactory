@@ -35,7 +35,13 @@ export function normalizeProvider(p: string): string {
 /** Whether retrying cannot help. */
 export function permanent(err: unknown): boolean {
   if (err instanceof OfError) {
-    return ["resource_not_found", "invalid_request", "not_authorized", "operation_not_supported", "authentication_required"].includes(err.code);
+    return [
+      "resource_not_found",
+      "invalid_request",
+      "not_authorized",
+      "operation_not_supported",
+      "authentication_required",
+    ].includes(err.code);
   }
   if (err instanceof ApiError) return !err.temporary();
   const cause = (err as { cause?: unknown } | null)?.cause;
@@ -66,7 +72,8 @@ export class Router {
     const provider = normalizeProvider(msg.source.provider);
     const rs = this.responders.get(provider);
     if (!rs) {
-      if (!SILENT_PROVIDERS.has(provider)) console.warn("notify: no responder for provider", provider, msg.work_item_id);
+      if (!SILENT_PROVIDERS.has(provider))
+        console.warn("notify: no responder for provider", provider, msg.work_item_id);
       return "skipped";
     }
     if (!teamId) throw new OfError("invalid_request", "notify: cannot resolve team for work item");
@@ -143,7 +150,13 @@ export async function deliverNotice(env: Env, envelope: OutboxEnvelope<NoticeKin
     await routerFor(env).deliverOnce(teamId, msg);
   } catch (e) {
     if (!permanent(e)) throw e;
-    console.error("notify: outbound delivery failed", msg.source.provider, msg.work_item_id, msg.kind, (e as Error).message);
+    console.error(
+      "notify: outbound delivery failed",
+      msg.source.provider,
+      msg.work_item_id,
+      msg.kind,
+      (e as Error).message,
+    );
     if (failureHook) await failureHook(env, teamId, msg, e).catch((x) => console.warn("notify: failure hook", x));
   }
 }
@@ -160,7 +173,10 @@ export interface Route {
 }
 
 const ROUTE_INFO: Record<string, { kind: string; dest: string }> = {
-  slack: { kind: "chat", dest: "Replies in the Slack thread or DM where the work started (approval options as buttons)" },
+  slack: {
+    kind: "chat",
+    dest: "Replies in the Slack thread or DM where the work started (approval options as buttons)",
+  },
   teams: { kind: "chat", dest: "Replies in the Microsoft Teams channel thread where the work started" },
   linear: { kind: "tracker", dest: "Comments on the Linear issue, or activities in its agent session" },
   jira: { kind: "tracker", dest: "Comments on the Jira work item" },
@@ -182,7 +198,12 @@ export function routes(
   const avail = new Set((available ?? []).map(normalizeProvider));
   const deliverable = (p: string) => available === null || avail.has(p);
   const out: Route[] = [
-    { provider: "dashboard", kind: "inbox", deliverable: true, destination: "Factory inbox (approvals, questions, handoffs, failures) and the work item timeline" },
+    {
+      provider: "dashboard",
+      kind: "inbox",
+      deliverable: true,
+      destination: "Factory inbox (approvals, questions, handoffs, failures) and the work item timeline",
+    },
   ];
   const seen = new Set<string>();
   const add = (p0: string, settings?: Record<string, string> | null) => {

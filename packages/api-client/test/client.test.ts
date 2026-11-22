@@ -78,7 +78,9 @@ describe("transport", () => {
   it("retries 503 and then succeeds, with auth and user agent", async () => {
     const f = fakeFetch((_r, n) =>
       n <= 2
-        ? json({ code: "resource_unavailable", title: "busy", status: 503, retryable: true }, 503, { "Retry-After": "0" })
+        ? json({ code: "resource_unavailable", title: "busy", status: 503, retryable: true }, 503, {
+            "Retry-After": "0",
+          })
         : json({ uid: "fac_1", name: "ok" }),
     );
     const c = createOpenFactoryClient({ baseUrl: "https://of.test", apiKey: "k1", fetch: f.fetch, sleep: noSleep });
@@ -93,7 +95,9 @@ describe("transport", () => {
   it("does not retry a POST on 500 and retries a GET up to maxRetries", async () => {
     const f = fakeFetch(() => new Response("", { status: 500 }));
     const c = createOpenFactoryClient({ baseUrl: "https://of.test", fetch: f.fetch, sleep: noSleep });
-    await expect(c.request("POST", "runs", { body: { prompt: "x" } })).rejects.toSatisfy((e) => errorCode(e) === "internal_error");
+    await expect(c.request("POST", "runs", { body: { prompt: "x" } })).rejects.toSatisfy(
+      (e) => errorCode(e) === "internal_error",
+    );
     expect(f.calls).toHaveLength(1);
     const g = fakeFetch(() => new Response("", { status: 500 }));
     const c2 = createOpenFactoryClient({ baseUrl: "https://of.test", fetch: g.fetch, sleep: noSleep, maxRetries: 2 });
@@ -117,7 +121,17 @@ describe("errors", () => {
   it("parses problem documents and maps statuses", async () => {
     const f = fakeFetch((req) => {
       if (req.url.endsWith("/missing"))
-        return json({ type: "about:blank", code: "resource_not_found", title: "nope", detail: "factory fac_x", status: 404, request_id: "req_1" }, 404);
+        return json(
+          {
+            type: "about:blank",
+            code: "resource_not_found",
+            title: "nope",
+            detail: "factory fac_x",
+            status: 404,
+            request_id: "req_1",
+          },
+          404,
+        );
       if (req.url.endsWith("/nested")) return json({ error: { code: "not_authorized", message: "denied" } }, 403);
       return new Response("plain", { status: 401 });
     });
@@ -134,12 +148,16 @@ describe("errors", () => {
 
   it("unwraps typed client results", async () => {
     const f = fakeFetch((req) =>
-      req.url.endsWith("/me") ? json({ id: "usr_1", role: "user" }) : json({ code: "resource_not_found", title: "x", status: 404 }, 404),
+      req.url.endsWith("/me")
+        ? json({ id: "usr_1", role: "user" })
+        : json({ code: "resource_not_found", title: "x", status: 404 }, 404),
     );
     const c = createOpenFactoryClient({ baseUrl: "https://of.test", fetch: f.fetch, sleep: noSleep });
     const me = await unwrap(c.api.GET("/me"));
     expect(me).toMatchObject({ id: "usr_1" });
-    await expect(unwrap(c.api.GET("/factories/{uid}", { params: { path: { uid: "fac_x" } } }))).rejects.toSatisfy(isNotFound);
+    await expect(unwrap(c.api.GET("/factories/{uid}", { params: { path: { uid: "fac_x" } } }))).rejects.toSatisfy(
+      isNotFound,
+    );
   });
 });
 
@@ -219,7 +237,15 @@ describe("runs", () => {
 describe("SSE", () => {
   it("parses blocks across chunks, comments and CRLF", async () => {
     const events = [];
-    for await (const ev of readSSE(sseBody([": hello\n\n", "event: run\nid: 1\ndata: {\"a\"", ":1}\r\n\r\n", "data: x\ndata: y\n\n", "event: done\ndata:"]))) {
+    for await (const ev of readSSE(
+      sseBody([
+        ": hello\n\n",
+        'event: run\nid: 1\ndata: {"a"',
+        ":1}\r\n\r\n",
+        "data: x\ndata: y\n\n",
+        "event: done\ndata:",
+      ]),
+    )) {
       events.push(ev);
     }
     expect(events).toEqual([

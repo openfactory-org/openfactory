@@ -7,7 +7,8 @@ import { cfg, equalFold } from "../util";
 import { str } from "./context";
 import { INTEGRATION_PROVIDER, PROVIDER, describeGraphError, type TeamsHandler } from "./handler";
 
-const inScope = (teams: string[] | undefined, id: string): boolean => !teams || teams.length === 0 || teams.some((t) => equalFold(t, id));
+const inScope = (teams: string[] | undefined, id: string): boolean =>
+  !teams || teams.length === 0 || teams.some((t) => equalFold(t, id));
 
 /**
  * The bot needs ChannelSettings.Read.Group (channels) and TeamMember.Read.Group
@@ -32,11 +33,15 @@ export class TeamsNameResolver implements NameResolver {
     if (kind !== "channels" && kind !== "users") throw new Error(`the Teams resolver cannot resolve "${kind}"`);
     let all: Integration[];
     try {
-      all = (await this.h.deps.store.listIntegrations(teamId)).filter((i) => equalFold(i.provider, INTEGRATION_PROVIDER));
+      all = (await this.h.deps.store.listIntegrations(teamId)).filter((i) =>
+        equalFold(i.provider, INTEGRATION_PROVIDER),
+      );
     } catch (e) {
       throw new Error(`could not read the Teams integrations: ${(e as Error).message}`, { cause: e });
     }
-    const ints = all.filter((i) => integrationActive(i) && cfg(i, "team_id") !== "" && inScope(scope["team_ids"], cfg(i, "team_id")));
+    const ints = all.filter(
+      (i) => integrationActive(i) && cfg(i, "team_id") !== "" && inScope(scope["team_ids"], cfg(i, "team_id")),
+    );
     if (ints.length === 0) throw new Error("the team has no active Teams integration for these Microsoft teams");
     const keys = names.map((n) => {
       const k = n.trim().toLowerCase();

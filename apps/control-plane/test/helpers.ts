@@ -7,6 +7,7 @@ export async function call(
   method: string,
   path: string,
   opts: { key?: string; body?: unknown; headers?: Record<string, string> } = {},
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- tests read fields of many response shapes
 ): Promise<{ status: number; body: any; res: Response }> {
   const headers: Record<string, string> = { ...(opts.headers ?? {}) };
   if (opts.key) headers["authorization"] = `Bearer ${opts.key}`;
@@ -40,10 +41,14 @@ const forged = (userId: string) => ({
  */
 export function bootstrap(): Promise<{ key: string; userId: string }> {
   admin ??= (async () => {
-    const r = await call("POST", "/api/v1/bootstrap", { body: { team_name: "Acme", admin_email: "admin@example.com" } });
+    const r = await call("POST", "/api/v1/bootstrap", {
+      body: { team_name: "Acme", admin_email: "admin@example.com" },
+    });
     if (r.status === 201) return { key: r.body.key as string, userId: r.body.user.id as string };
     const team = env.TEAM.getByName("team:default");
-    const users = (await team.api(forged("x"), "listUsers", {}, undefined)) as { items: { id: string; role: string }[] };
+    const users = (await team.api(forged("x"), "listUsers", {}, undefined)) as {
+      items: { id: string; role: string }[];
+    };
     const a = users.items.find((u) => u.role === "admin")!;
     const k = (await team.api(forged(a.id), "createAPIKey", {}, { name: "test" })) as { body: { key: string } };
     return { key: k.body.key, userId: a.id };

@@ -12,7 +12,15 @@ import { errorJSON, jsonResponse, readBody, verifyHmacSha256Hex } from "../util/
 import { utf8 } from "../../lib/bytes";
 import * as A from "../eventattr";
 import { FORGE_NAME } from "./client";
-import { ALIAS_LABEL_PREFIX, PROVIDER, Normalizer, checkName, isDefinitionPath, normalizeRepo, type GhPayload } from "./events";
+import {
+  ALIAS_LABEL_PREFIX,
+  PROVIDER,
+  Normalizer,
+  checkName,
+  isDefinitionPath,
+  normalizeRepo,
+  type GhPayload,
+} from "./events";
 
 export const WEBHOOK_PATH = "/integrations/github/webhook";
 
@@ -75,7 +83,12 @@ async function allRecords(deps: GitHubWebhookDeps): Promise<Integration[]> {
   return out.filter((x) => x.provider.toLowerCase() === PROVIDER);
 }
 
-async function verifyRecord(deps: GitHubWebhookDeps, in_: Integration, body: Uint8Array, sig: string): Promise<boolean> {
+async function verifyRecord(
+  deps: GitHubWebhookDeps,
+  in_: Integration,
+  body: Uint8Array,
+  sig: string,
+): Promise<boolean> {
   const ref = in_.config?.["webhook_secret_ref"] ?? "";
   if (ref === "") return false;
   let sec: string | undefined;
@@ -95,7 +108,12 @@ async function verifyRecord(deps: GitHubWebhookDeps, in_: Integration, body: Uin
  * ping of an App (no installation, no repository) is checked with the records
  * of that app and gives no record (null).
  */
-export async function intake(deps: GitHubWebhookDeps, env: Envelope, body: Uint8Array, sig: string): Promise<Integration | null> {
+export async function intake(
+  deps: GitHubWebhookDeps,
+  env: Envelope,
+  body: Uint8Array,
+  sig: string,
+): Promise<Integration | null> {
   if (sig === "") throw new DeliveryUnverifiedError("no signature");
   const all = await allRecords(deps);
   const verify = (in_: Integration) => verifyRecord(deps, in_, body, sig);
@@ -115,7 +133,9 @@ export async function intake(deps: GitHubWebhookDeps, env: Envelope, body: Uint8
     const app = String(env.hook.app_id);
     for (const in_ of all) if (in_.config?.["app_id"] === app && (await verify(in_))) return null;
   }
-  throw new DeliveryUnverifiedError(`no github integration for installation/repository "${env.repository?.full_name ?? ""}"`);
+  throw new DeliveryUnverifiedError(
+    `no github integration for installation/repository "${env.repository?.full_name ?? ""}"`,
+  );
 }
 
 /** Events whose filters accept `paths`. */
@@ -184,7 +204,14 @@ export async function handleGitHubWebhook(req: Request, deps: GitHubWebhookDeps)
   return jsonResponse(202, { status: "accepted", events: evs.length });
 }
 
-async function process(deps: GitHubWebhookDeps, integ: Integration, repo: string, eventName: string, text: string, evs: Event[]): Promise<void> {
+async function process(
+  deps: GitHubWebhookDeps,
+  integ: Integration,
+  repo: string,
+  eventName: string,
+  text: string,
+  evs: Event[],
+): Promise<void> {
   const teamId = integ.team_id;
   let gf: Forge | null | undefined;
   const forgeOnce = async (): Promise<Forge | null> => {
@@ -192,7 +219,12 @@ async function process(deps: GitHubWebhookDeps, integ: Integration, repo: string
     gf = null;
     if (deps.resolver && repo !== "") {
       try {
-        gf = await deps.resolver.forge({ teamId, ...(integ.factory_id ? { factoryId: integ.factory_id } : {}), codeForge: FORGE_NAME, repo });
+        gf = await deps.resolver.forge({
+          teamId,
+          ...(integ.factory_id ? { factoryId: integ.factory_id } : {}),
+          codeForge: FORGE_NAME,
+          repo,
+        });
       } catch (e) {
         console.warn("github webhook: resolve forge", teamId, integ.id, repo, e);
       }
@@ -223,7 +255,15 @@ async function process(deps: GitHubWebhookDeps, integ: Integration, repo: string
     if ((ev.type === "check_suite_completed" || ev.type === "workflow_run_completed") && attrs[A.LinkedPRCount] === 1) {
       const num = attrs[A.PRNumber];
       const f = typeof num === "number" ? await forgeOnce() : null;
-      const details = f as (Forge & { getPullRequestDetails?(o: string, r: string, n: number): Promise<{ labels?: { name: string }[]; user?: { login?: string } }> }) | null;
+      const details = f as
+        | (Forge & {
+            getPullRequestDetails?(
+              o: string,
+              r: string,
+              n: number,
+            ): Promise<{ labels?: { name: string }[]; user?: { login?: string } }>;
+          })
+        | null;
       if (details?.getPullRequestDetails && typeof num === "number") {
         try {
           const pr = await details.getPullRequestDetails(owner, name, num);
@@ -242,7 +282,12 @@ async function process(deps: GitHubWebhookDeps, integ: Integration, repo: string
 }
 
 /** Sets factory_id from a factory:<alias> label or an @alias mention. */
-async function routeFactory(deps: GitHubWebhookDeps, ev: Event, slug: string, forgeOnce: () => Promise<Forge | null>): Promise<void> {
+async function routeFactory(
+  deps: GitHubWebhookDeps,
+  ev: Event,
+  slug: string,
+  forgeOnce: () => Promise<Forge | null>,
+): Promise<void> {
   const fs = deps.factories;
   if (!fs) return;
   const attrs = ev.attributes!;
@@ -282,7 +327,9 @@ async function routeFactory(deps: GitHubWebhookDeps, ev: Event, slug: string, fo
     return;
   }
   if (list.length === 0) {
-    await notice(`No factory is connected to this repository. Connect the repository to a factory or request access, then mention @${slug} again.`);
+    await notice(
+      `No factory is connected to this repository. Connect the repository to a factory or request access, then mention @${slug} again.`,
+    );
   } else if (list.length === 1) {
     const f = list[0]!;
     ev.factory_id = f.id;
@@ -296,7 +343,9 @@ async function routeFactory(deps: GitHubWebhookDeps, ev: Event, slug: string, fo
     }
   } else {
     const names = list.map((f) => "`" + ALIAS_LABEL_PREFIX + (f.alias ?? "") + "`").join(", ");
-    await notice(`Several factories can handle this repository. Add one of these labels and mention @${slug} again: ${names}`);
+    await notice(
+      `Several factories can handle this repository. Add one of these labels and mention @${slug} again: ${names}`,
+    );
   }
 }
 
@@ -336,7 +385,12 @@ async function definitionPush(deps: GitHubWebhookDeps, teamId: string, text: str
   }
 }
 
-async function definitionPR(deps: GitHubWebhookDeps, teamId: string, text: string, forgeOnce: () => Promise<Forge | null>): Promise<void> {
+async function definitionPR(
+  deps: GitHubWebhookDeps,
+  teamId: string,
+  text: string,
+  forgeOnce: () => Promise<Forge | null>,
+): Promise<void> {
   let p: GhPayload;
   try {
     p = JSON.parse(text) as GhPayload;
@@ -383,7 +437,11 @@ async function definitionPR(deps: GitHubWebhookDeps, teamId: string, text: strin
       const gf = await forgeOnce();
       if (gf) {
         try {
-          await gf.setCommitStatus(owner, name, pr.head?.sha ?? "", { context: check, state: "success", description: "No factory definition changes" });
+          await gf.setCommitStatus(owner, name, pr.head?.sha ?? "", {
+            context: check,
+            state: "success",
+            description: "No factory definition changes",
+          });
         } catch (e) {
           console.warn("github webhook: publish definition check", repo, e);
         }
@@ -452,8 +510,10 @@ async function installationLifecycle(
   }
   let n = 0;
   for (const r of await deps.integrations.list(in_.team_id, PROVIDER)) {
-    if (r.provider.toLowerCase() !== PROVIDER || r.config?.["installation_id"] !== in_.config?.["installation_id"]) continue;
-    if (r.id !== in_.id && (r.config?.["webhook_secret_ref"] ?? "") !== "" && !(await verifyRecord(deps, r, body, sig))) continue;
+    if (r.provider.toLowerCase() !== PROVIDER || r.config?.["installation_id"] !== in_.config?.["installation_id"])
+      continue;
+    if (r.id !== in_.id && (r.config?.["webhook_secret_ref"] ?? "") !== "" && !(await verifyRecord(deps, r, body, sig)))
+      continue;
     try {
       if (await deps.integrations.setStatus(r.id, status, reason)) n++;
     } catch (e) {

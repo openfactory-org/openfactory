@@ -86,6 +86,9 @@ export function mergeMetadata(
 export function checkNoMetadataEnv(env: Readonly<Record<string, string>> | null | undefined): void {
   const bad = sortStrings(Object.keys(env ?? {}).filter((k) => k.toUpperCase().startsWith(METADATA_ENV_PREFIX)));
   if (bad.length > 0) {
-    throw new OfError("invalid_request", `the ${METADATA_ENV_PREFIX} prefix is reserved for run metadata: ${bad.join(", ")}`);
+    throw new OfError(
+      "invalid_request",
+      `the ${METADATA_ENV_PREFIX} prefix is reserved for run metadata: ${bad.join(", ")}`,
+    );
   }
 }

@@ -43,6 +43,8 @@ jobs:
         run: npm run build
       - name: Validate example definitions
         run: npm run validate-examples
+      - name: Test ledger covers every deleted Go test
+        run: npm run check:ledger
 
   contract:
     name: Contract suite
@@ -76,8 +78,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Format, vet, race tests, linux builds, naming, package list
-        run: make fmt-check vet test-race build-linux naming go-allowlist
+      - name: Format, vet, race tests, linux builds, naming, package list, removed dependencies
+        run: make fmt-check vet test-race build-linux naming go-allowlist go-deps-check
 
   golangci-lint:
     name: golangci-lint

@@ -35,12 +35,14 @@ const DAY_MS = 86_400_000;
 
 export type MWorkItem = Pick<WorkItem, "id" | "stage" | "created_at"> &
   Partial<Pick<WorkItem, "completed_at" | "updated_at" | "pull_requests" | "local_owner">>;
-export type MEvent = Pick<WorkItemEvent, "kind" | "created_at"> & Partial<Pick<WorkItemEvent, "data" | "id" | "work_item_id">>;
+export type MEvent = Pick<WorkItemEvent, "kind" | "created_at"> &
+  Partial<Pick<WorkItemEvent, "data" | "id" | "work_item_id">>;
 export type MRun = Pick<Run, "id" | "state" | "created_at"> &
   Partial<Pick<Run, "work_item_id" | "agent_name" | "usage" | "triggered_by" | "source" | "source_ref">> & {
     config?: { name?: string; harness?: { model?: string } };
   };
-export type MInbox = Pick<InboxItem, "kind" | "created_at"> & Partial<Pick<InboxItem, "id" | "work_item_id" | "resolved" | "resolved_at">>;
+export type MInbox = Pick<InboxItem, "kind" | "created_at"> &
+  Partial<Pick<InboxItem, "id" | "work_item_id" | "resolved" | "resolved_at">>;
 export type MScorer = Pick<Scorer, "id"> & Partial<Pick<Scorer, "slug" | "name">>;
 export type MScore = Pick<Score, "scorer_id" | "created_at"> & Partial<Pick<Score, "label" | "passed">>;
 
@@ -172,7 +174,14 @@ export interface Dashboard {
       reviewed: number;
     };
   };
-  human_wait: { items: number; pending: number; total_ms: number; median_ms: number; p90_ms: number; by_kind: Record<string, number> };
+  human_wait: {
+    items: number;
+    pending: number;
+    total_ms: number;
+    median_ms: number;
+    p90_ms: number;
+    by_kind: Record<string, number>;
+  };
   runs: {
     total: number;
     by_agent: Record<string, number>;
@@ -238,7 +247,11 @@ export function sessionSeconds(s: MSession, untilMs: number): number {
 // ---------- Autonomy ----------
 
 /** The autonomy definition of the package documentation. */
-export function isAutonomous(w: Pick<MWorkItem, "local_owner">, events: readonly MEvent[], inbox: readonly Pick<MInbox, "kind">[]): boolean {
+export function isAutonomous(
+  w: Pick<MWorkItem, "local_owner">,
+  events: readonly MEvent[],
+  inbox: readonly Pick<MInbox, "kind">[],
+): boolean {
   if (w.local_owner) return false;
   for (const it of inbox) {
     if (it.kind === "question" || it.kind === "handoff" || it.kind === "failure") return false;
@@ -303,7 +316,8 @@ export function stageDurations(w: MWorkItem, events: readonly MEvent[]): Record<
 
 // ---------- Pull requests ----------
 
-type PRRef = Pick<PullRequestRef, "repo" | "number"> & Partial<Pick<PullRequestRef, "forge" | "url" | "state" | "branch">>;
+type PRRef = Pick<PullRequestRef, "repo" | "number"> &
+  Partial<Pick<PullRequestRef, "forge" | "url" | "state" | "branch">>;
 
 export function prKey(pr: PRRef): string {
   if (pr.repo && pr.number) return `${pr.forge ?? ""}|${pr.repo}#${pr.number}`.toLowerCase();
@@ -312,7 +326,9 @@ export function prKey(pr: PRRef): string {
 
 /** The key of Data.facts for a pull request. */
 export function prFactsKey(pr: PRRef): string {
-  return sourceKey(pullRequestSource({ forge: "", url: "", branch: "", state: "", ...pr } as PullRequestRef)).toLowerCase();
+  return sourceKey(
+    pullRequestSource({ forge: "", url: "", branch: "", state: "", ...pr } as PullRequestRef),
+  ).toLowerCase();
 }
 
 interface LinkTimes {
@@ -518,7 +534,8 @@ function buildPRFacts(db: Dashboard, prs: readonly PREntry[], since: number, unt
       if (factsSince === undefined || t < factsSince) factsSince = t;
     }
     if (!f || !f.merged_at) {
-      if (!f && p.state.toLowerCase() === "merged" && inWindow(p.openedMs, since, until)) db.autonomy.merged_prs_without_facts++;
+      if (!f && p.state.toLowerCase() === "merged" && inWindow(p.openedMs, since, until))
+        db.autonomy.merged_prs_without_facts++;
       continue;
     }
     const merged = ms(f.merged_at);
@@ -551,7 +568,8 @@ function buildPRFacts(db: Dashboard, prs: readonly PREntry[], since: number, unt
 
 const runAgent = (r: MRun): string => r.agent_name || r.config?.name || "(unknown)";
 const runModel = (r: MRun): string => r.config?.harness?.model || "(default)";
-const runSource = (r: MRun): string => runSourceAndRef({ source: r.source, source_ref: r.source_ref, triggered_by: r.triggered_by }).source;
+const runSource = (r: MRun): string =>
+  runSourceAndRef({ source: r.source, source_ref: r.source_ref, triggered_by: r.triggered_by }).source;
 
 /** The source of a run for the metrics ("API" for an empty or unknown triggered_by). */
 export { runSource };
@@ -563,7 +581,12 @@ function sortedEvents(ev: readonly MEvent[] | undefined): MEvent[] {
 }
 
 /** Derives the dashboard from raw data for [since, until). */
-export function build(factoryId: string, input: MetricsData | null | undefined, sinceMs: number, untilMs: number): Dashboard {
+export function build(
+  factoryId: string,
+  input: MetricsData | null | undefined,
+  sinceMs: number,
+  untilMs: number,
+): Dashboard {
   const d = input ?? emptyData();
   const since = sinceMs;
   const until = untilMs;
@@ -599,7 +622,14 @@ export function build(factoryId: string, input: MetricsData | null | undefined, 
       p90_ms: 0,
       mean_ms: 0,
       stage_median_ms: {},
-      pull_requests: { count: 0, start_to_merge_ms: 0, start_to_pr_ms: 0, pr_to_first_review_ms: 0, first_review_to_merge_ms: 0, reviewed: 0 },
+      pull_requests: {
+        count: 0,
+        start_to_merge_ms: 0,
+        start_to_pr_ms: 0,
+        pr_to_first_review_ms: 0,
+        first_review_to_merge_ms: 0,
+        reviewed: 0,
+      },
     },
     human_wait: { items: 0, pending: 0, total_ms: 0, median_ms: 0, p90_ms: 0, by_kind: {} },
     runs: { total: 0, by_agent: {}, by_state: {}, by_agent_state: {}, by_model: {}, by_source: {} },
@@ -728,7 +758,9 @@ export function build(factoryId: string, input: MetricsData | null | undefined, 
   db.pull_requests.median_cost_usd = medianFloat(prCosts);
   db.pull_requests.median_time_to_pr_ms = median(timeToPR);
   // Stable sort: cost descending, then opened earlier first.
-  expensive.sort((a, b) => (a.cost_usd !== b.cost_usd ? b.cost_usd - a.cost_usd : Date.parse(a.opened_at) - Date.parse(b.opened_at)));
+  expensive.sort((a, b) =>
+    a.cost_usd !== b.cost_usd ? b.cost_usd - a.cost_usd : Date.parse(a.opened_at) - Date.parse(b.opened_at),
+  );
   db.pull_requests.most_expensive = expensive.slice(0, MOST_EXPENSIVE_LIMIT);
   db.pull_requests.by_size = sizeBuckets(sizeCosts);
   buildPRFacts(db, prs, since, until);

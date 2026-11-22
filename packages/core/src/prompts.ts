@@ -31,7 +31,10 @@ function canSpawn(target: AgentRef, caller: Pick<AgentConfig, "name" | "type">):
 }
 
 /** The agents that caller may start, sorted by name. */
-export function spawnableAgents<T extends AgentRef>(caller: Pick<AgentConfig, "name" | "type">, agents: readonly T[]): T[] {
+export function spawnableAgents<T extends AgentRef>(
+  caller: Pick<AgentConfig, "name" | "type">,
+  agents: readonly T[],
+): T[] {
   return agents.filter((a) => canSpawn(a, caller)).sort((a, b) => compareBytes(a.name, b.name));
 }
 

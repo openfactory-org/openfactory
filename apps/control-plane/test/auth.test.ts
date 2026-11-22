@@ -23,7 +23,6 @@ describe("bootstrap, me, users, API keys (internal/api platform_test ports)", ()
     expect((await call("GET", "/api/v1/me", { key: "garbage" })).status).toBe(401);
   });
 
-
   it("creates users, enforces roles and keeps the last admin", async () => {
     const { key, userId } = await bootstrap();
     const e = email("Ed");
@@ -50,7 +49,10 @@ describe("bootstrap, me, users, API keys (internal/api platform_test ports)", ()
 
   it("lists own keys for non-admins and revokes keys", async () => {
     const { key } = await bootstrap();
-    const u = await call("POST", "/api/v1/users", { key, body: { email: email("u"), role: "user", create_api_key: true } });
+    const u = await call("POST", "/api/v1/users", {
+      key,
+      body: { email: email("u"), role: "user", create_api_key: true },
+    });
     const userKey = u.body.key as string;
     const k2 = await call("POST", "/api/v1/api-keys", { key: userKey, body: { name: "laptop" } });
     expect(k2.status).toBe(201);
@@ -60,7 +62,9 @@ describe("bootstrap, me, users, API keys (internal/api platform_test ports)", ()
     expect(all.body.items.length).toBeGreaterThanOrEqual(3);
     const adminKeyId = all.body.items.find((k: { user_id: string }) => k.user_id !== u.body.user.id).id;
     expect((await call("DELETE", `/api/v1/api-keys/${adminKeyId}`, { key: userKey })).status).toBe(403);
-    expect((await call("POST", "/api/v1/api-keys", { key: userKey, body: { name: "x", user_id: "usr_other" } })).status).toBe(403);
+    expect(
+      (await call("POST", "/api/v1/api-keys", { key: userKey, body: { name: "x", user_id: "usr_other" } })).status,
+    ).toBe(403);
     expect((await call("DELETE", `/api/v1/api-keys/${k2.body.api_key.id}`, { key: userKey })).status).toBe(204);
     expect((await call("GET", "/api/v1/me", { key: k2.body.key })).status).toBe(401);
   });
@@ -94,14 +98,19 @@ describe("sessions and CSRF (internal/auth auth_test ports)", () => {
     const login = await call("POST", "/auth/session", { body: { api_key: key }, headers: { "x-of-csrf": "1" } });
     expect(login.status).toBe(200);
     const setCookie = login.res.headers.get("set-cookie")!;
-    expect(setCookie).toMatch(/^of_session=[A-Za-z0-9_-]+; Path=\/; Expires=.*; Max-Age=604800; HttpOnly; SameSite=Lax$/);
+    expect(setCookie).toMatch(
+      /^of_session=[A-Za-z0-9_-]+; Path=\/; Expires=.*; Max-Age=604800; HttpOnly; SameSite=Lax$/,
+    );
     const cookie = setCookie.split(";")[0]!;
     const me = await call("GET", "/api/v1/me", { headers: { cookie } });
     expect(me.status).toBe(200);
     expect(me.body.role).toBe("admin");
     const noCsrf = await call("POST", "/api/v1/api-keys", { headers: { cookie }, body: { name: "x" } });
     expect(noCsrf.status).toBe(403);
-    const withOrigin = await call("POST", "/api/v1/api-keys", { headers: { cookie, origin: "http://localhost" }, body: { name: "x" } });
+    const withOrigin = await call("POST", "/api/v1/api-keys", {
+      headers: { cookie, origin: "http://localhost" },
+      body: { name: "x" },
+    });
     expect(withOrigin.status).toBe(201);
     const tampered = await call("GET", "/api/v1/me", { headers: { cookie: cookie.slice(0, -2) + "xx" } });
     expect(tampered.status).toBe(401);
@@ -113,7 +122,10 @@ describe("sessions and CSRF (internal/auth auth_test ports)", () => {
   it("ends a session when its API key is deleted", async () => {
     const { key } = await bootstrap();
     const k2 = await call("POST", "/api/v1/api-keys", { key, body: { name: "login" } });
-    const login = await call("POST", "/auth/session", { body: { api_key: k2.body.key }, headers: { "x-of-csrf": "1" } });
+    const login = await call("POST", "/auth/session", {
+      body: { api_key: k2.body.key },
+      headers: { "x-of-csrf": "1" },
+    });
     const cookie = login.res.headers.get("set-cookie")!.split(";")[0]!;
     expect((await call("GET", "/api/v1/me", { headers: { cookie } })).status).toBe(200);
     await call("DELETE", `/api/v1/api-keys/${k2.body.api_key.id}`, { key });

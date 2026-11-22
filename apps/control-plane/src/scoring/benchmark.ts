@@ -91,7 +91,8 @@ export function trialDone(t: Pick<Trial, "status" | "scored" | "run_id">): boole
 export const trialRunFinished = (t: Pick<Trial, "status">): boolean =>
   t.status === "finished" || t.status === "blocked" || t.status === "cancelled" || t.status === "error";
 
-export const trialScore = (t: Pick<Trial, "scores">, key: string): TrialScore | undefined => t.scores?.find((s) => s.scorer === key);
+export const trialScore = (t: Pick<Trial, "scores">, key: string): TrialScore | undefined =>
+  t.scores?.find((s) => s.scorer === key);
 
 /** A scorer used by a benchmark run, copied so that later edits do not change past results. */
 export interface BenchmarkScorer extends JudgeExec {
@@ -184,8 +185,23 @@ export function aggregate(
     let r = byName.get(name);
     if (!r) {
       r = {
-        name, trials: 0, finished: 0, blocked: 0, errored: 0, scored: 0, passed: 0, pass_rate: 0, scorer_averages: {}, overall: 0,
-        total_cost_usd: 0, avg_cost_usd: 0, avg_duration_ms: 0, median_duration_ms: 0, input_tokens: 0, output_tokens: 0, judge_cost_usd: 0,
+        name,
+        trials: 0,
+        finished: 0,
+        blocked: 0,
+        errored: 0,
+        scored: 0,
+        passed: 0,
+        pass_rate: 0,
+        scorer_averages: {},
+        overall: 0,
+        total_cost_usd: 0,
+        avg_cost_usd: 0,
+        avg_duration_ms: 0,
+        median_duration_ms: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        judge_cost_usd: 0,
       };
       byName.set(name, r);
       order.push(name);
@@ -262,7 +278,11 @@ function recommend(results: readonly ConfigurationResult[]): Recommendations {
   const eps = 1e-9;
   let best = cands[0]!;
   for (const c of cands.slice(1)) {
-    if (c.overall > best.overall + eps || (Math.abs(c.overall - best.overall) <= eps && c.avg_cost_usd < best.avg_cost_usd - eps)) best = c;
+    if (
+      c.overall > best.overall + eps ||
+      (Math.abs(c.overall - best.overall) <= eps && c.avg_cost_usd < best.avg_cost_usd - eps)
+    )
+      best = c;
   }
   rec.overall = best.name;
   let cheapest = cands[0]!;
@@ -305,24 +325,35 @@ export function validateConfigurations(
     if (c.name.trim() === "") bad("configuration name is required");
     if (names.has(c.name)) bad(`duplicate configuration name ${JSON.stringify(c.name)}`);
     names.add(c.name);
-    if (c.machine && !(machines && c.machine in machines)) bad(`configuration ${JSON.stringify(c.name)}: unknown machine ${JSON.stringify(c.machine)}`);
+    if (c.machine && !(machines && c.machine in machines))
+      bad(`configuration ${JSON.stringify(c.name)}: unknown machine ${JSON.stringify(c.machine)}`);
     const pinned = new Set<string>();
     for (const p of c.agents ?? []) {
       if (!p.agent) bad(`configuration ${JSON.stringify(c.name)}: agent is required`);
-      if (known.size > 0 && !known.has(p.agent)) bad(`configuration ${JSON.stringify(c.name)}: unknown agent ${JSON.stringify(p.agent)}`);
-      if (pinned.has(p.agent)) bad(`configuration ${JSON.stringify(c.name)} lists agent ${JSON.stringify(p.agent)} more than once`);
+      if (known.size > 0 && !known.has(p.agent))
+        bad(`configuration ${JSON.stringify(c.name)}: unknown agent ${JSON.stringify(p.agent)}`);
+      if (pinned.has(p.agent))
+        bad(`configuration ${JSON.stringify(c.name)} lists agent ${JSON.stringify(p.agent)} more than once`);
       pinned.add(p.agent);
       const hasModel = !!p.model;
       const hasHarness = !!p.harness;
-      if (hasModel === hasHarness) bad(`configuration ${JSON.stringify(c.name)} agent ${JSON.stringify(p.agent)}: set exactly one of model or harness`);
+      if (hasModel === hasHarness)
+        bad(
+          `configuration ${JSON.stringify(c.name)} agent ${JSON.stringify(p.agent)}: set exactly one of model or harness`,
+        );
       if (hasHarness && (!p.harness!.type || !p.harness!.model)) {
-        bad(`configuration ${JSON.stringify(c.name)} agent ${JSON.stringify(p.agent)}: harness requires type and model`);
+        bad(
+          `configuration ${JSON.stringify(c.name)} agent ${JSON.stringify(p.agent)}: harness requires type and model`,
+        );
       }
     }
   }
 }
 
-export function findSuite(suites: readonly BenchmarkSuite[] | null | undefined, slug: string): BenchmarkSuite | undefined {
+export function findSuite(
+  suites: readonly BenchmarkSuite[] | null | undefined,
+  slug: string,
+): BenchmarkSuite | undefined {
   const list = suites ?? [];
   return list.find((s) => s.slug === slug) ?? list.find((s) => s.name === slug);
 }
@@ -351,7 +382,13 @@ export function formatRepoAtCommit(r: RepoAtCommit): string {
   return `${host}:${r.owner}/${r.repo}@${r.ref}`;
 }
 
-export function trialPrompt(suite: BenchmarkSuite, cfg: BenchmarkConfiguration, task: BenchmarkTask, t: Pick<Trial, "repetition" | "starting_repo_refs">, reps: number): string {
+export function trialPrompt(
+  suite: BenchmarkSuite,
+  cfg: BenchmarkConfiguration,
+  task: BenchmarkTask,
+  t: Pick<Trial, "repetition" | "starting_repo_refs">,
+  reps: number,
+): string {
   let b = task.prompt.trim();
   b += "\n\n---\n";
   b += `Benchmark trial: suite ${JSON.stringify(suite.name)}, configuration ${JSON.stringify(cfg.name)}, task ${JSON.stringify(task.slug)}, repetition ${t.repetition} of ${reps}.\n`;
@@ -362,7 +399,8 @@ export function trialPrompt(suite: BenchmarkSuite, cfg: BenchmarkConfiguration, 
   b +=
     "This trial runs in trial mode: the write tools of the integrations (tracker comments, chat messages) and your updates are recorded in this run. They do not reach the real services.\n";
   if (task.trackerSeed !== undefined && task.trackerSeed !== null) {
-    b += "Tracker start state: the tracker of this trial starts with this state. Treat it as the current state of the tracker:\n\n```yaml\n";
+    b +=
+      "Tracker start state: the tracker of this trial starts with this state. Treat it as the current state of the tracker:\n\n```yaml\n";
     b += yamlStringify(task.trackerSeed);
     b += "```\n";
   }
@@ -423,7 +461,10 @@ export function trialDispatch(
 }
 
 /** Replaces each repository that matches a substitution source (ignoring case) with its target. Commits stay. */
-export function applyRepoSubstitutions(refs: readonly RepoAtCommit[] | undefined, subs: readonly RepoSubstitution[] | undefined): RepoAtCommit[] {
+export function applyRepoSubstitutions(
+  refs: readonly RepoAtCommit[] | undefined,
+  subs: readonly RepoSubstitution[] | undefined,
+): RepoAtCommit[] {
   if (!refs || refs.length === 0) return [];
   const out = refs.map((r) => ({ ...r }));
   for (const r of out) {
@@ -444,8 +485,12 @@ export function applyRepoSubstitutions(refs: readonly RepoAtCommit[] | undefined
 }
 
 /** The built-in Correctness Scorer of a task: it judges a trial against the task's successCriteria. */
-export function correctnessScorerFor(task: Pick<BenchmarkTask, "title" | "prompt" | "successCriteria">, model: string): BenchmarkScorer {
-  let r = "You are the Correctness Scorer for a benchmark trial. Decide whether the agent's work satisfies the task's correctness criteria.\n\n";
+export function correctnessScorerFor(
+  task: Pick<BenchmarkTask, "title" | "prompt" | "successCriteria">,
+  model: string,
+): BenchmarkScorer {
+  let r =
+    "You are the Correctness Scorer for a benchmark trial. Decide whether the agent's work satisfies the task's correctness criteria.\n\n";
   r += `Task: ${task.title}\n\nTask prompt:\n${task.prompt.trim()}\n\n`;
   r += `Correctness criteria (what a successful trial must do):\n${task.successCriteria.trim()}\n\n`;
   r +=
@@ -464,7 +509,10 @@ export function correctnessScorerFor(task: Pick<BenchmarkTask, "title" | "prompt
 }
 
 /** The scorers of a trial: the Correctness Scorer of its task, then the extra scorers of the benchmark. */
-export function trialScorers(res: Pick<BenchmarkResults, "suite" | "correctness_model" | "correctness_judge" | "scorers">, t: Pick<Trial, "task">): BenchmarkScorer[] {
+export function trialScorers(
+  res: Pick<BenchmarkResults, "suite" | "correctness_model" | "correctness_judge" | "scorers">,
+  t: Pick<Trial, "task">,
+): BenchmarkScorer[] {
   const task = res.suite.tasks?.find((tk) => tk.slug === t.task);
   const cs = correctnessScorerFor(task ?? { title: "", prompt: "", successCriteria: "" }, res.correctness_model);
   Object.assign(cs, res.correctness_judge);

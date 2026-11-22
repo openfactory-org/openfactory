@@ -221,7 +221,8 @@ export function resolvePolicy(ref: string): ResolveResult {
     return { error: `policy reference ${goQuote(ref)} must have the form <policy-name>@<version-selector>` };
   }
   const bp = builtins.find((b) => b.name === name);
-  if (!bp) return { error: `unknown built-in policy ${goQuote(name)} (available: ${builtins.map((b) => b.name).join(", ")})` };
+  if (!bp)
+    return { error: `unknown built-in policy ${goQuote(name)} (available: ${builtins.map((b) => b.name).join(", ")})` };
   const vs = sortedVersions(bp);
   let chosen: Semver | null = null;
   if (sel === "latest") {
@@ -239,7 +240,9 @@ export function resolvePolicy(ref: string): ResolveResult {
   } else {
     const want = parseSemver(sel);
     if (want === null) {
-      return { error: `policy reference ${goQuote(ref)}: invalid version selector ${goQuote(sel)} (use an exact version, ^range, or latest)` };
+      return {
+        error: `policy reference ${goQuote(ref)}: invalid version selector ${goQuote(sel)} (use an exact version, ^range, or latest)`,
+      };
     }
     chosen = vs.find((v) => equal(v, want)) ?? null;
   }
@@ -326,7 +329,7 @@ export function ipString(ip: number[]): string {
   for (let i = 0; i < 16; i += 2) groups.push((ip[i]! << 8) | ip[i + 1]!);
   let bestStart = -1;
   let bestLen = 0;
-  for (let i = 0; i < 8; ) {
+  for (let i = 0; i < 8;) {
     if (groups[i] !== 0) {
       i++;
       continue;
@@ -378,7 +381,13 @@ export function normalizeHost(h: string): HostResult {
   s = s.toLowerCase();
   if (new TextEncoder().encode(s).length > 253) return { error: `host ${goQuote(h)} is longer than 253 characters` };
   for (const label of s.split(".")) {
-    if (label === "" || label.length > 63 || !/^[a-z0-9_-]+$/.test(label) || label.startsWith("-") || label.endsWith("-")) {
+    if (
+      label === "" ||
+      label.length > 63 ||
+      !/^[a-z0-9_-]+$/.test(label) ||
+      label.startsWith("-") ||
+      label.endsWith("-")
+    ) {
       return { error: `host ${goQuote(h)} is not a valid hostname` };
     }
   }

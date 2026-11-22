@@ -27,3 +27,4 @@ packages/api-client/src/schema.d.ts
 .claude/
 **/test/golden/
 tools/test-ledger.json
+**/*.generated.ts

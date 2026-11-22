@@ -35,6 +35,15 @@ After you change the file, redeploy with `npx wrangler deploy -c apps/control-pl
 | `OF_OIDC_ISSUER_URL` | none | The issuer URL for dashboard sign-in. See [OIDC login](oidc.md). |
 | `OF_OIDC_CLIENT_ID` | none | The OIDC client ID. Required with an issuer. |
 | `OF_LOG_LEVEL` | `info` | The log level. |
+| `OF_MAX_SANDBOXES` | `0` (no limit) | Most open sessions on the built-in providers. A queued run waits at the limit. Sessions on workers do not count. |
+| `OF_MAX_ORCHESTRATION_DEPTH` | `1` | Depth limit of a run tree. A root run has depth 0. A run at depth `d` can start child runs with `run_agents` only if `d` is less than this value. |
+| `OF_OBJECT_STORE_RETENTION` | `0` (keep forever) | Age after which run data in R2 is deleted, a duration such as `720h`. `0` or empty keeps run data forever. See [Object storage](object-storage.md). |
+| `OF_CORRECTNESS_MODEL` | empty | Model of the built-in correctness judge. Empty uses the built-in default. See [Measure and improve](../measure-and-improve.md). |
+| `OF_ANALYSIS_MODEL` | empty | Model of the self-improvement failure analysis. Empty uses the built-in default. |
+| `OF_IMPROVEMENT_AGENT` | empty | Agent that runs self-improvement. Empty uses the built-in default. |
+| `OF_CLOUD_ID_ISSUER_URL` | empty (`OF_PUBLIC_URL`) | Issuer URL (`iss` claim) of the [cloud identity](../definition-reference.md#cloudproviders) tokens of runs. Cloud providers read its `/.well-known/` documents. Do not confuse it with `OF_OIDC_ISSUER_URL`, the identity provider for dashboard sign-in. |
+| `OF_DAYTONA_TIER` | `3` | Tier of the Daytona organization, `1` to `4`. The control plane refuses tiers 1 and 2. See [Sandbox providers](../sandbox-providers.md). |
+| `OF_DAYTONA_TARGET` | empty (account default) | Daytona shared region: `eu` or `us`. |
 
 Durations use the form `90s`, `15m`, `4h` or `1h30m`.
 
@@ -48,6 +57,8 @@ Durations use the form `90s`, `15m`, `4h` or `1h30m`.
 | `OF_SECRET_KEY_PREVIOUS`, `OF_SIGNING_KEY_PREVIOUS` | no | Comma-separated old keys, read only. See [Key rotation](#key-rotation). |
 | `OF_OIDC_CLIENT_SECRET` | no | The OIDC client secret. A PKCE public client needs none. |
 | `OF_CLOUD_ID_KEY` | no | The P-256 private key that signs the [cloud identity](../definition-reference.md#cloudproviders) tokens of runs. |
+| `OF_DAYTONA_API_KEY` | no | API key of the `daytona` sandbox provider. Without it, `daytona` is not available. |
+| `OF_BOATDEV_API_KEY` | no | API key (`boat_...`) of the `boatdev` sandbox provider. Without it, `boatdev` is not available. |
 
 The optional OIDC settings (`OF_OIDC_REDIRECT_URL`, `OF_OIDC_SCOPES`, `OF_OIDC_ALLOWED_DOMAINS`, `OF_OIDC_GROUPS_CLAIM`, `OF_OIDC_ADMIN_GROUPS`, `OF_OIDC_EDITOR_GROUPS`, `OF_OIDC_DEFAULT_ROLE`, `OF_OIDC_DISPLAY_NAME`, `OF_OIDC_REQUIRE_VERIFIED_EMAIL`) are read from the same variables. See [OIDC login](oidc.md).
 

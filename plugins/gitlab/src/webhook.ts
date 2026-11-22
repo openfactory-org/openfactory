@@ -147,7 +147,11 @@ export function normalize(
 
   const labels = (p.labels ?? []).map((l) => l.title);
   let kind = p.object_kind ?? "";
-  if (kind === "") kind = eventHeader.replaceAll(" ", "_").replace(/_Hook$/, "").toLowerCase();
+  if (kind === "")
+    kind = eventHeader
+      .replaceAll(" ", "_")
+      .replace(/_Hook$/, "")
+      .toLowerCase();
   const oa = p.object_attributes ?? {};
 
   switch (kind) {
@@ -293,7 +297,7 @@ export function normalize(
   return out;
 }
 
-export interface WebhookOptions extends NormalizeOptions {}
+export type WebhookOptions = NormalizeOptions;
 
 /** POST /plugins/gitlab/webhook. The sender gets `status`, the events go to IngressDO. */
 export async function handleWebhook(req: Request, host: HostApi, opts: WebhookOptions = {}): Promise<WebhookResult> {

@@ -110,7 +110,16 @@ function sweep(kit: TeamKit, nowMs: number): void {
 
 function audit(action: string, outcome: string, g: Partial<Grant>, detail?: Record<string, string>): void {
   console.log(
-    JSON.stringify({ msg: "audit", action, outcome, user_id: g.user_id, team_id: g.team_id, client_id: g.client_id, sign_in_id: g.id, ...detail }),
+    JSON.stringify({
+      msg: "audit",
+      action,
+      outcome,
+      user_id: g.user_id,
+      team_id: g.team_id,
+      client_id: g.client_id,
+      sign_in_id: g.id,
+      ...detail,
+    }),
   );
 }
 
@@ -158,7 +167,10 @@ export function register(kit: TeamKit, body: unknown, nowMs: number): Outcome {
   const strs = (v: unknown) => (Array.isArray(v) ? v : v == null ? [] : null);
   const grants = strs(o.grant_types);
   if (
-    uris === null || !uris.every((x) => typeof x === "string") || grants === null || !grants.every((x) => typeof x === "string") ||
+    uris === null ||
+    !uris.every((x) => typeof x === "string") ||
+    grants === null ||
+    !grants.every((x) => typeof x === "string") ||
     (o.client_name != null && typeof o.client_name !== "string") ||
     (o.token_endpoint_auth_method != null && typeof o.token_endpoint_auth_method !== "string")
   ) {
@@ -173,17 +185,32 @@ export function register(kit: TeamKit, body: unknown, nowMs: number): Outcome {
   }
   const m = (o.token_endpoint_auth_method as string | undefined) ?? "";
   if (m !== "" && m !== "none") {
-    return oauthError(400, "invalid_client_metadata", "only public clients are supported: token_endpoint_auth_method must be none");
+    return oauthError(
+      400,
+      "invalid_client_metadata",
+      "only public clients are supported: token_endpoint_auth_method must be none",
+    );
   }
   for (const g of grants as string[]) {
-    if (g !== "authorization_code" && g !== "refresh_token") return oauthError(400, "invalid_client_metadata", "unsupported grant type " + g);
+    if (g !== "authorization_code" && g !== "refresh_token")
+      return oauthError(400, "invalid_client_metadata", "unsupported grant type " + g);
   }
   let name = ((o.client_name as string | undefined) ?? "").trim();
   if (name.length > 100) name = name.slice(0, 100);
   if (name === "") name = "MCP client";
-  const c: Client = { client_id: randomToken("ofc_"), client_name: name, redirect_uris: uris as string[], created_at: iso(nowMs) };
+  const c: Client = {
+    client_id: randomToken("ofc_"),
+    client_name: name,
+    redirect_uris: uris as string[],
+    created_at: iso(nowMs),
+  };
   kit.tx(() => {
-    kit.sql.exec("INSERT INTO mcpauth_clients (id, created_ms, data) VALUES (?, ?, ?)", c.client_id, nowMs, JSON.stringify(c));
+    kit.sql.exec(
+      "INSERT INTO mcpauth_clients (id, created_ms, data) VALUES (?, ?, ?)",
+      c.client_id,
+      nowMs,
+      JSON.stringify(c),
+    );
   });
   return {
     kind: "json",
@@ -233,7 +260,11 @@ export function authorize(kit: TeamKit, input: AuthorizeInput): Outcome {
     const c = getClient(kit, get("client_id"));
     // Errors before the redirect URI is known go to the user, not to the client.
     if (!c) {
-      return page(400, "Unknown MCP client", "This client is not registered. Remove the server from your MCP client and add it again.");
+      return page(
+        400,
+        "Unknown MCP client",
+        "This client is not registered. Remove the server from your MCP client and add it again.",
+      );
     }
     let redirect = get("redirect_uri");
     if (redirect === "" && c.redirect_uris.length === 1) redirect = c.redirect_uris[0]!;
@@ -253,7 +284,13 @@ export function authorize(kit: TeamKit, input: AuthorizeInput): Outcome {
       return fail("invalid_target", "the resource is not this server's Factory MCP endpoint");
     }
     const sc = get("scope");
-    if (sc !== "" && sc.split(/\s+/).filter(Boolean).some((x) => x !== SCOPE)) {
+    if (
+      sc !== "" &&
+      sc
+        .split(/\s+/)
+        .filter(Boolean)
+        .some((x) => x !== SCOPE)
+    ) {
       return fail("invalid_scope", "the only scope is " + SCOPE);
     }
     const u = input.userId ? getUser(kit, input.userId) : undefined;
@@ -329,8 +366,22 @@ export async function consent(kit: TeamKit, input: ConsentInput): Promise<Outcom
       return page(403, "Not allowed", "Sign in to the dashboard as the same user and start again.");
     }
     if (input.decision !== "allow") {
-      audit("mcp.signin.authorize", "failure", { user_id: u.id, team_id: kit.teamId(), client_id: req.client_id }, { reason: "denied" });
-      return { kind: "redirect", location: errorRedirect(req.redirect_uri, req.state ?? "", input.publicURL, "access_denied", "the user denied the request") };
+      audit(
+        "mcp.signin.authorize",
+        "failure",
+        { user_id: u.id, team_id: kit.teamId(), client_id: req.client_id },
+        { reason: "denied" },
+      );
+      return {
+        kind: "redirect",
+        location: errorRedirect(
+          req.redirect_uri,
+          req.state ?? "",
+          input.publicURL,
+          "access_denied",
+          "the user denied the request",
+        ),
+      };
     }
     const rec: CodeRecord = {
       client_id: req.client_id,
@@ -380,8 +431,10 @@ async function exchangeCode(kit: TeamKit, f: Record<string, string>, now: number
     const r = first<{ data: string }>(kit.sql, "SELECT data FROM mcpauth_codes WHERE hash = ?", codeHash);
     if (r) kit.sql.exec("DELETE FROM mcpauth_codes WHERE hash = ?", codeHash); // a code works once
     const rec = r ? (JSON.parse(r.data) as CodeRecord) : undefined;
-    if (!rec || !(now < ms(rec.expires))) return oauthError(400, "invalid_grant", "the code is unknown, used or expired");
-    if ((f.client_id ?? "") !== rec.client_id) return oauthError(400, "invalid_grant", "the code was issued to another client");
+    if (!rec || !(now < ms(rec.expires)))
+      return oauthError(400, "invalid_grant", "the code is unknown, used or expired");
+    if ((f.client_id ?? "") !== rec.client_id)
+      return oauthError(400, "invalid_grant", "the code was issued to another client");
     if ((f.redirect_uri ?? "") !== "" && f.redirect_uri !== rec.redirect_uri) {
       return oauthError(400, "invalid_grant", "redirect_uri does not match the authorization request");
     }
@@ -418,9 +471,11 @@ async function refresh(kit: TeamKit, f: Record<string, string>, now: number): Pr
     if (!g) return oauthError(400, "invalid_grant", "the refresh token is unknown, used or revoked");
     if (!active(g, now)) return oauthError(400, "invalid_grant", "the sign-in ended; sign in again");
     const cid = f.client_id ?? "";
-    if (cid !== "" && cid !== g.client_id) return oauthError(400, "invalid_grant", "the refresh token was issued to another client");
+    if (cid !== "" && cid !== g.client_id)
+      return oauthError(400, "invalid_grant", "the refresh token was issued to another client");
     const u = getUser(kit, g.user_id);
-    if (!u || u.team_id !== g.team_id) return oauthError(400, "invalid_grant", "the user of this sign-in no longer exists");
+    if (!u || u.team_id !== g.team_id)
+      return oauthError(400, "invalid_grant", "the user of this sign-in no longer exists");
     return issue(kit, g, t, now);
   });
 }
@@ -453,7 +508,11 @@ function revokeRecord(kit: TeamKit, g: GrantRecord, now: number): void {
  * Verify: checks an access token hash and returns the principal of its user
  * (kind "factory_mcp"). The user must still exist in the team of the sign-in.
  */
-export function verify(kit: TeamKit, accessHash: string, now: number): { principal: Principal; grantId: string } | null {
+export function verify(
+  kit: TeamKit,
+  accessHash: string,
+  now: number,
+): { principal: Principal; grantId: string } | null {
   return kit.tx(() => {
     const g = grantByHash(kit, "access_hash", accessHash);
     if (!g || !(now < ms(g.access_expires)) || !active(g, now)) return null;

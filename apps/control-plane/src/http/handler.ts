@@ -78,7 +78,7 @@ export function callMeta(ctx: RouteContext): CallMeta {
 /** Path params plus query params prefixed with "?" (TeamDO.api convention). */
 export function opParams(ctx: RouteContext): Record<string, string> {
   const out: Record<string, string> = { ...ctx.params };
-  for (const [k, v] of ctx.url.searchParams) if (!(("?" + k) in out)) out["?" + k] = v;
+  for (const [k, v] of ctx.url.searchParams) if (!("?" + k in out)) out["?" + k] = v;
   return out;
 }
 
@@ -88,7 +88,15 @@ interface OpResponseLike {
   headers?: Record<string, string>;
 }
 interface OpErrorLike {
-  $error: { code: string; detail: string; reason?: string; provider?: string; authUrl?: string; setupUrl?: string; extra?: Record<string, unknown> };
+  $error: {
+    code: string;
+    detail: string;
+    reason?: string;
+    provider?: string;
+    authUrl?: string;
+    setupUrl?: string;
+    extra?: Record<string, unknown>;
+  };
 }
 
 /** Turns the result of a DO api() call into a Response (or throws its OfError). */

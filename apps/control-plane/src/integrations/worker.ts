@@ -26,15 +26,18 @@ export function rpcStore(env: Env, teamId = "default"): IntegrationStore {
   return {
     listIntegrations: (_team) => call<Integration[]>("integrations.list"),
     getIntegration: (id) => call<Integration | null>("integrations.get", { id }),
-    setIntegrationStatus: async (id, status, reason) => (await call<{ changed: boolean }>("integrationsSetStatus", {}, { id, status, reason })).changed,
-    findExternalIdentity: (provider, external_id) => call<ExternalIdentity | null>("identity.find", { provider, external_id }),
+    setIntegrationStatus: async (id, status, reason) =>
+      (await call<{ changed: boolean }>("integrationsSetStatus", {}, { id, status, reason })).changed,
+    findExternalIdentity: (provider, external_id) =>
+      call<ExternalIdentity | null>("identity.find", { provider, external_id }),
     getUser: (id) => call<User | null>("identity.user", { id }),
     getUserByEmail: (email) => call<User | null>("identity.userByEmail", { email }),
     linkExternalIdentity: async (x) => (await call<{ linked: boolean }>("identity.link", {}, x)).linked,
     upsertExternalIdentity: async (x) => {
       await call("identity.upsert", {}, x);
     },
-    getFactoryIntegrations: (factory_id) => call<Record<string, Record<string, string>>>("factorySettings", { factory_id }),
+    getFactoryIntegrations: (factory_id) =>
+      call<Record<string, Record<string, string>>>("factorySettings", { factory_id }),
     kvGet: (key) => call<string | null>("kv.get", { key }),
     kvSet: async (key, value) => {
       await call("kv.set", { key, value });
@@ -55,6 +58,10 @@ export function rpcSecrets(env: Env, teamId = "default"): SecretReader {
 }
 
 /** Dependencies for the handlers of the default team. `rest` supplies publish and the optional parts. */
-export function integrationDeps(env: Env, rest: Pick<IntegrationDeps, "publish"> & Partial<IntegrationDeps>, teamId = "default"): IntegrationDeps {
+export function integrationDeps(
+  env: Env,
+  rest: Pick<IntegrationDeps, "publish"> & Partial<IntegrationDeps>,
+  teamId = "default",
+): IntegrationDeps {
   return { store: rpcStore(env, teamId), secrets: rpcSecrets(env, teamId), ...rest };
 }

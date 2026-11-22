@@ -22,7 +22,11 @@ export async function gcmSeal(key: Uint8Array, plain: Uint8Array, aad: Uint8Arra
   const k = await crypto.subtle.importKey("raw", key as Uint8Array<ArrayBuffer>, "AES-GCM", false, ["encrypt"]);
   const nonce = randomBytes(NONCE);
   const ct = new Uint8Array(
-    await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce, additionalData: aad as Uint8Array<ArrayBuffer> }, k, plain as Uint8Array<ArrayBuffer>),
+    await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv: nonce, additionalData: aad as Uint8Array<ArrayBuffer> },
+      k,
+      plain as Uint8Array<ArrayBuffer>,
+    ),
   );
   return concat(nonce, ct);
 }
@@ -32,7 +36,11 @@ export async function gcmOpen(key: Uint8Array, sealed: Uint8Array, aad: Uint8Arr
   const k = await crypto.subtle.importKey("raw", key as Uint8Array<ArrayBuffer>, "AES-GCM", false, ["decrypt"]);
   return new Uint8Array(
     await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: sealed.subarray(0, NONCE) as Uint8Array<ArrayBuffer>, additionalData: aad as Uint8Array<ArrayBuffer> },
+      {
+        name: "AES-GCM",
+        iv: sealed.subarray(0, NONCE) as Uint8Array<ArrayBuffer>,
+        additionalData: aad as Uint8Array<ArrayBuffer>,
+      },
       k,
       sealed.subarray(NONCE) as Uint8Array<ArrayBuffer>,
     ),

@@ -27,13 +27,15 @@ export function parseRetention(v: string | undefined): number {
   let total = 0;
   let pos = 0;
   for (let m = re.exec(s); m !== null; m = re.exec(s)) {
-    if (m.index !== pos) throw new Error(`OF_OBJECT_STORE_RETENTION ${JSON.stringify(v)}: want a duration such as 720h (0 keeps forever)`);
+    if (m.index !== pos)
+      throw new Error(`OF_OBJECT_STORE_RETENTION ${JSON.stringify(v)}: want a duration such as 720h (0 keeps forever)`);
     pos = re.lastIndex;
     const n = Number(m[1]);
     const unit = { ns: 1e-6, us: 1e-3, µs: 1e-3, ms: 1, s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 }[m[2] as "ms"];
     total += n * unit;
   }
-  if (pos !== s.length || total < 0) throw new Error(`OF_OBJECT_STORE_RETENTION ${JSON.stringify(v)}: want a duration such as 720h (0 keeps forever)`);
+  if (pos !== s.length || total < 0)
+    throw new Error(`OF_OBJECT_STORE_RETENTION ${JSON.stringify(v)}: want a duration such as 720h (0 keeps forever)`);
   return Math.round(total);
 }
 
@@ -54,7 +56,11 @@ export interface PrefixDeleteResult {
  * Deletes the objects under a prefix, at most `budget` in one call. Deletes are
  * idempotent, so a repeated call is safe. Call again until `done`.
  */
-export async function deletePrefix(bucket: R2Bucket, prefix: string, budget = DEFAULT_STEP_BUDGET): Promise<PrefixDeleteResult> {
+export async function deletePrefix(
+  bucket: R2Bucket,
+  prefix: string,
+  budget = DEFAULT_STEP_BUDGET,
+): Promise<PrefixDeleteResult> {
   let deleted = 0;
   while (deleted < budget) {
     const page = await bucket.list({ prefix, limit: Math.min(R2_DELETE_BATCH, budget - deleted) });
@@ -169,11 +175,20 @@ export interface IndexRetention {
   chunk: number;
 }
 
-export const DEFAULT_INDEX_RETENTION: IndexRetention = { eventsDays: 400, inboxDays: 400, deadLetterDays: 30, chunk: 1000 };
+export const DEFAULT_INDEX_RETENTION: IndexRetention = {
+  eventsDays: 400,
+  inboxDays: 400,
+  deadLetterDays: 30,
+  chunk: 1000,
+};
 
 /** Deletes up to `chunk` rows with a rowid subquery (SQLite has no DELETE ... LIMIT in DO SQL). Returns the rows deleted. */
 function deleteChunk(sql: SqlStorage, table: string, where: string, args: unknown[], chunk: number): number {
-  return sql.exec(`DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} WHERE ${where} LIMIT ?)`, ...args, chunk).rowsWritten;
+  return sql.exec(
+    `DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} WHERE ${where} LIMIT ?)`,
+    ...args,
+    chunk,
+  ).rowsWritten;
 }
 
 export interface SqlPruneResult {
@@ -183,7 +198,11 @@ export interface SqlPruneResult {
 }
 
 /** One bounded step of IndexDO retention. Call inside one transaction. */
-export function pruneIndex(sql: SqlStorage, nowMs: number, policy: IndexRetention = DEFAULT_INDEX_RETENTION): SqlPruneResult {
+export function pruneIndex(
+  sql: SqlStorage,
+  nowMs: number,
+  policy: IndexRetention = DEFAULT_INDEX_RETENTION,
+): SqlPruneResult {
   const deleted: Record<string, number> = {};
   const run = (name: string, table: string, where: string, args: unknown[]): void => {
     const n = deleteChunk(sql, table, where, args, policy.chunk);
@@ -201,7 +220,12 @@ export function pruneIndex(sql: SqlStorage, nowMs: number, policy: IndexRetentio
 }
 
 /** TeamDO: the metadata rows of attachments, by the time of upload. Returns the rows deleted. */
-export function pruneAttachmentRows(sql: SqlStorage, nowMs: number, olderThanMs: number, chunk = 1000): { deleted: number; more: boolean } {
+export function pruneAttachmentRows(
+  sql: SqlStorage,
+  nowMs: number,
+  olderThanMs: number,
+  chunk = 1000,
+): { deleted: number; more: boolean } {
   if (olderThanMs <= 0) return { deleted: 0, more: false };
   const n = deleteChunk(sql, "attachments", "created_ms < ?", [nowMs - olderThanMs], chunk);
   return { deleted: n, more: n >= chunk };

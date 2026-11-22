@@ -1,6 +1,15 @@
 // Trigger filter parsing and evaluation. Port of internal/triggers/filter.go.
 import { compareBytes } from "@openfactory/core";
-import { CATALOG, KEY_PAYLOAD, KEY_SKIP_BOTS, SKIP_BOTS_ALL, SKIP_BOTS_NONE, SKIP_BOTS_SELF, type CmpKind, type FieldSpec } from "./catalog";
+import {
+  CATALOG,
+  KEY_PAYLOAD,
+  KEY_SKIP_BOTS,
+  SKIP_BOTS_ALL,
+  SKIP_BOTS_NONE,
+  SKIP_BOTS_SELF,
+  type CmpKind,
+  type FieldSpec,
+} from "./catalog";
 import { matchGlob, validateGlob } from "./glob";
 import { decodeJSON, isNum, isObj, kindOf, toJVal, validatePayloadPattern, type JVal } from "./payload";
 import { ProviderGitHub, ProviderSchedule } from "./attributes";
@@ -58,7 +67,8 @@ export function parseFilter(provider: string, event: string, raw: unknown, mode:
   if (!ps) throw filterErr(`unknown provider ${goQ(provider)}`);
   const es = Object.prototype.hasOwnProperty.call(ps.events, event) ? ps.events[event] : undefined;
   if (!es) throw filterErr(`unknown event ${goQ(event)} for provider ${goQ(provider)}`);
-  if (mode === "author" && es.notAuthorable) throw filterErr(`event ${provider}.${event} is not available for authoring automations`);
+  if (mode === "author" && es.notAuthorable)
+    throw filterErr(`event ${provider}.${event} is not available for authoring automations`);
   const pf: ParsedFilter = { conds: [], skipBots: provider === ProviderGitHub ? SKIP_BOTS_ALL : "" };
   const v = filterValue(raw);
   let obj: { [k: string]: JVal } = {};
@@ -66,13 +76,15 @@ export function parseFilter(provider: string, event: string, raw: unknown, mode:
     if (!isObj(v)) throw filterErr("filter must be an object");
     obj = v;
   }
-  if (provider === ProviderSchedule && mode === "author" && Object.keys(obj).length > 0) throw filterErr("schedule triggers accept no filter");
+  if (provider === ProviderSchedule && mode === "author" && Object.keys(obj).length > 0)
+    throw filterErr("schedule triggers accept no filter");
   const names = Object.keys(obj).sort(compareBytes);
   const seenNative = new Map<string, string>();
   for (const key of names) {
     const val = obj[key]!;
     if (key === KEY_SKIP_BOTS) {
-      if (!es.keys.includes(KEY_SKIP_BOTS)) throw filterErr(`key ${goQ(key)} is not supported for ${provider}.${event}`);
+      if (!es.keys.includes(KEY_SKIP_BOTS))
+        throw filterErr(`key ${goQ(key)} is not supported for ${provider}.${event}`);
       const sb = parseSkipBots(val);
       if (sb !== "") pf.skipBots = sb;
       continue;
@@ -103,7 +115,9 @@ export function parseFilter(provider: string, event: string, raw: unknown, mode:
   for (const k of es.keys) {
     const spec = ps.fields[k];
     if (!spec?.required) continue;
-    const found = pf.conds.some((c) => ((c.spec.native === undefined && c.key === k) || c.spec.native === k) && c.in.length > 0);
+    const found = pf.conds.some(
+      (c) => ((c.spec.native === undefined && c.key === k) || c.spec.native === k) && c.in.length > 0,
+    );
     if (!found) throw filterErr(`key ${goQ(k)} is required for ${provider}.${event}`);
   }
   return pf;
@@ -136,8 +150,10 @@ function parseCondition(key: string, spec: FieldSpec, raw: JVal): Condition {
   c.in = parseValues(key, spec, inRaw);
   c.notIn = parseValues(key, spec, notInRaw);
   if (spec.inOnly && c.notIn.length > 0) throw filterErr(`key ${goQ(key)} supports only in`);
-  if (spec.exactlyOne && c.in.length !== 1 && (c.in.length > 0 || spec.required)) throw filterErr(`key ${goQ(key)} requires exactly one value`);
-  for (const v of c.in) if (c.notIn.includes(v)) throw filterErr(`key ${goQ(key)} lists ${goQ(v)} in both in and not_in`);
+  if (spec.exactlyOne && c.in.length !== 1 && (c.in.length > 0 || spec.required))
+    throw filterErr(`key ${goQ(key)} requires exactly one value`);
+  for (const v of c.in)
+    if (c.notIn.includes(v)) throw filterErr(`key ${goQ(key)} lists ${goQ(v)} in both in and not_in`);
   return c;
 }
 
@@ -161,7 +177,8 @@ function parseValue(key: string, spec: FieldSpec, v: JVal): string {
   if (spec.cmp === "int") {
     if (!isNum(v)) throw filterErr(`key ${goQ(key)} takes integers, not ${kindOf(v)}`);
     const n = v.$num;
-    if (!/^[+-]?\d+$/.test(n) || BigInt(n) <= 0n || BigInt(n) > INT64_MAX) throw filterErr(`key ${goQ(key)} takes positive integers (got ${n})`);
+    if (!/^[+-]?\d+$/.test(n) || BigInt(n) <= 0n || BigInt(n) > INT64_MAX)
+      throw filterErr(`key ${goQ(key)} takes positive integers (got ${n})`);
     return BigInt(n).toString();
   }
   let s: string;
@@ -245,7 +262,11 @@ function anyMatch(k: CmpKind, patterns: string[], values: string[]): boolean {
 }
 
 /** The normalized values of the named attributes (union); present = at least one key exists. */
-export function collect(attrs: Record<string, unknown>, names: string[], k: CmpKind): { values: string[]; present: boolean } {
+export function collect(
+  attrs: Record<string, unknown>,
+  names: string[],
+  k: CmpKind,
+): { values: string[]; present: boolean } {
   const values: string[] = [];
   let present = false;
   for (const n of names) {
@@ -256,7 +277,7 @@ export function collect(attrs: Record<string, unknown>, names: string[], k: CmpK
     try {
       vs = toStrings(raw);
     } catch (e) {
-      throw new Error(`attribute ${goQ(n)}: ${(e as Error).message}`);
+      throw new Error(`attribute ${goQ(n)}: ${(e as Error).message}`, { cause: e });
     }
     for (let v of vs) {
       v = k === "int" ? canonicalInt(v) : normalize(k, v);
@@ -302,8 +323,15 @@ function scalarString(v: unknown): string {
       return v ? "true" : "false";
   }
   if (isNum(v)) return v.$num;
-  if (typeof v === "object" && v !== null && typeof (v as { isLosslessNumber?: unknown }).isLosslessNumber === "boolean") return String(v);
-  throw new Error(`unsupported attribute value type ${v === null ? "nil" : Array.isArray(v) ? "[]interface {}" : "map[string]interface {}"}`);
+  if (
+    typeof v === "object" &&
+    v !== null &&
+    typeof (v as { isLosslessNumber?: unknown }).isLosslessNumber === "boolean"
+  )
+    return String(v);
+  throw new Error(
+    `unsupported attribute value type ${v === null ? "nil" : Array.isArray(v) ? "[]interface {}" : "map[string]interface {}"}`,
+  );
 }
 
 /** Go attrBool: true for a bool true or a string strconv.ParseBool accepts as true. */

@@ -56,7 +56,14 @@ describe("handleWebhook", () => {
       object_kind: "merge_request",
       user: alice,
       project,
-      object_attributes: { iid: 3, title: "T", action: "open", target_branch: "main", source_branch: "f", url: "https://gl/mr/3" },
+      object_attributes: {
+        iid: 3,
+        title: "T",
+        action: "open",
+        target_branch: "main",
+        source_branch: "f",
+        url: "https://gl/mr/3",
+      },
       labels: [{ title: "bug" }],
     });
     expect(r.status).toBe(202);
@@ -119,7 +126,12 @@ describe("handleWebhook", () => {
   });
 
   it("ignores a branch deletion and a note update", async () => {
-    const del = await post(host(), "Push Hook", "tok", { object_kind: "push", ref: "refs/heads/x", after: "0000", project });
+    const del = await post(host(), "Push Hook", "tok", {
+      object_kind: "push",
+      ref: "refs/heads/x",
+      after: "0000",
+      project,
+    });
     expect(del.events).toEqual([]);
     const upd = await post(host(), "Note Hook", "tok", {
       object_kind: "note",
@@ -140,9 +152,15 @@ describe("handleWebhook", () => {
   });
 
   it("picks the team whose secret verifies, whatever the order", async () => {
-    for (const order of [["team_1", "team_2"], ["team_2", "team_1"]]) {
+    for (const order of [
+      ["team_1", "team_2"],
+      ["team_2", "team_1"],
+    ]) {
       const recs = order.map((t) => ({ ...rec, id: `int_${t}`, teamId: t }));
-      const h = new FakeHostApi({ integrations: recs, secrets: { team_1: { GL_HOOK: "s1" }, team_2: { GL_HOOK: "s2" } } });
+      const h = new FakeHostApi({
+        integrations: recs,
+        secrets: { team_1: { GL_HOOK: "s1" }, team_2: { GL_HOOK: "s2" } },
+      });
       const r = await post(h, "Push Hook", "s2", { object_kind: "push", ref: "refs/heads/m", after: "abc", project });
       expect(r.status).toBe(202);
       expect(r.events[0]!.teamId).toBe("team_2");
@@ -169,7 +187,10 @@ describe("normalize", () => {
   });
 
   it("shares one action key between the events of a delivery", () => {
-    const body = JSON.stringify({ ...note("DiffNote"), object_attributes: { ...note("DiffNote").object_attributes, note: "hi @payments" } });
+    const body = JSON.stringify({
+      ...note("DiffNote"),
+      object_attributes: { ...note("DiffNote").object_attributes, note: "hi @payments" },
+    });
     const r2 = { ...rec, config: { factory_bots: "payments=pay" } };
     const evs = normalize(r2, "Note Hook", "uuid-1", body);
     expect(evs.length).toBe(2);
@@ -188,15 +209,29 @@ describe("normalize", () => {
   });
 
   it("maps issue and pipeline events", () => {
-    const issue = normalize(rec, "Issue Hook", "", JSON.stringify({
-      object_kind: "issue", project: { path_with_namespace: "acme/api" },
-      object_attributes: { iid: 5, title: "Bug", description: "d", url: "u", action: "open" }, labels: [{ title: "x" }],
-    }));
+    const issue = normalize(
+      rec,
+      "Issue Hook",
+      "",
+      JSON.stringify({
+        object_kind: "issue",
+        project: { path_with_namespace: "acme/api" },
+        object_attributes: { iid: 5, title: "Bug", description: "d", url: "u", action: "open" },
+        labels: [{ title: "x" }],
+      }),
+    );
     expect(issue[0]).toMatchObject({ type: "issue", text: "Bug\n\nd", source: { kind: "issue", number: 5 } });
-    const pl = normalize(rec, "Pipeline Hook", "", JSON.stringify({
-      object_kind: "pipeline", project: { path_with_namespace: "acme/api" },
-      object_attributes: { id: 7, ref: "main", sha: "s", status: "success", url: "u" }, merge_request: { iid: 3 },
-    }));
+    const pl = normalize(
+      rec,
+      "Pipeline Hook",
+      "",
+      JSON.stringify({
+        object_kind: "pipeline",
+        project: { path_with_namespace: "acme/api" },
+        object_attributes: { id: 7, ref: "main", sha: "s", status: "success", url: "u" },
+        merge_request: { iid: 3 },
+      }),
+    );
     expect(pl[0]!.attributes).toMatchObject({ conclusion: "success", pr_number: 3, branch: "main" });
     expect(pl[0]!.source?.externalId).toBe("acme/api/pipeline/7");
   });

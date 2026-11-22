@@ -34,7 +34,12 @@ describe("sql", () => {
       ];
       expect(await applyMigrations(state.storage, "t", list)).toEqual([1, 2]);
       expect(await applyMigrations(state.storage, "t", list)).toEqual([]);
-      expect(await applyMigrations(state.storage, "t", [...list, { version: 3, name: "c", sql: "CREATE TABLE x3 (k INTEGER)" }])).toEqual([3]);
+      expect(
+        await applyMigrations(state.storage, "t", [
+          ...list,
+          { version: 3, name: "c", sql: "CREATE TABLE x3 (k INTEGER)" },
+        ]),
+      ).toEqual([3]);
       expect(schemaSnapshot(state.storage.sql)).toContain("CREATE TABLE x3");
       await expect(applyMigrations(state.storage, "t", [list[1]!, list[0]!])).rejects.toThrow(/increase/);
     });
@@ -43,7 +48,9 @@ describe("sql", () => {
   it("rolls back a failed migration", async () => {
     await runInDurableObject(fresh(), async (_i, state) => {
       await expect(
-        applyMigrations(state.storage, "bad", [{ version: 1, name: "x", sql: "CREATE TABLE y1 (a); SELECT nope FROM nothing" }]),
+        applyMigrations(state.storage, "bad", [
+          { version: 1, name: "x", sql: "CREATE TABLE y1 (a); SELECT nope FROM nothing" },
+        ]),
       ).rejects.toThrow();
       const t = state.storage.sql.exec("SELECT name FROM sqlite_master WHERE name = 'y1'").toArray();
       expect(t).toHaveLength(0);
@@ -65,7 +72,11 @@ describe("sql", () => {
 });
 
 describe("outbox", () => {
-  const mk = (state: DurableObjectState, deliver: (e: OutboxEnvelope, r: OutboxRow) => Promise<unknown>, dead: OutboxRow[] = []) => {
+  const mk = (
+    state: DurableObjectState,
+    deliver: (e: OutboxEnvelope, r: OutboxRow) => Promise<unknown>,
+    dead: OutboxRow[] = [],
+  ) => {
     let now = 1_000_000;
     const ob = new Outbox({
       storage: state.storage,
@@ -85,9 +96,27 @@ describe("outbox", () => {
         got.push(e.msgId);
       });
       state.storage.transactionSync(() => {
-        ob.enqueue({ dest: "custom:x", kind: "index.project", msgId: "a", lane: "L", payload: { entity: "run", id: "1", version: 1, summary: null } });
-        ob.enqueue({ dest: "custom:x", kind: "index.project", msgId: "b", lane: "L", payload: { entity: "run", id: "1", version: 2, summary: null } });
-        ob.enqueue({ dest: "custom:x", kind: "index.project", msgId: "a", lane: "L", payload: { entity: "run", id: "1", version: 9, summary: null } });
+        ob.enqueue({
+          dest: "custom:x",
+          kind: "index.project",
+          msgId: "a",
+          lane: "L",
+          payload: { entity: "run", id: "1", version: 1, summary: null },
+        });
+        ob.enqueue({
+          dest: "custom:x",
+          kind: "index.project",
+          msgId: "b",
+          lane: "L",
+          payload: { entity: "run", id: "1", version: 2, summary: null },
+        });
+        ob.enqueue({
+          dest: "custom:x",
+          kind: "index.project",
+          msgId: "a",
+          lane: "L",
+          payload: { entity: "run", id: "1", version: 9, summary: null },
+        });
       });
       expect(ob.pendingCount()).toBe(2);
       await ob.drain();
@@ -229,7 +258,13 @@ describe("timers and BaseDO", () => {
       }),
     );
     const index = env.INDEX.getByName("team:libdeliver|index");
-    const env1 = { msgId: "m1", kind: "index.deadLetter", lane: "", origin: "team:x", payload: { originDO: "team:x", msgId: "orig", kind: "k", lane: "", error: "e", attempts: 12 } } as const;
+    const env1 = {
+      msgId: "m1",
+      kind: "index.deadLetter",
+      lane: "",
+      origin: "team:x",
+      payload: { originDO: "team:x", msgId: "orig", kind: "k", lane: "", error: "e", attempts: 12 },
+    } as const;
     expect(await index.receive(env1 as never)).toEqual({ ok: true });
     await runInDurableObject(index, async (_i, state) => {
       expect(state.storage.sql.exec("SELECT COUNT(*) AS n FROM dead_letters").one().n).toBe(1);

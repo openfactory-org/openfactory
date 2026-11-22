@@ -18,7 +18,12 @@ export class JiraNameResolver implements NameResolver {
     this.lists = new NameLists(deps.now ? () => deps.now!().getTime() : undefined);
   }
 
-  async resolveNames(teamId: string, provider: string, kind: string, names: string[]): Promise<Record<string, string[]>> {
+  async resolveNames(
+    teamId: string,
+    provider: string,
+    kind: string,
+    names: string[],
+  ): Promise<Record<string, string[]>> {
     if (!equalFold(provider, PROVIDER)) throw new Error(`the Jira resolver cannot list ${provider} objects`);
     if (kind !== "projects" && kind !== "statuses") throw new Error(`the Jira resolver cannot resolve "${kind}"`);
     let all: Integration[];
@@ -59,10 +64,15 @@ export class JiraNameResolver implements NameResolver {
       throw new Error(`Jira integration credential: ${(e as Error).message}`, { cause: e });
     }
     try {
-      return await this.lists.lookup(`${in_.id}/${kind}`, keys, () => (kind === "projects" ? listProjects(api) : listStatuses(api)));
+      return await this.lists.lookup(`${in_.id}/${kind}`, keys, () =>
+        kind === "projects" ? listProjects(api) : listStatuses(api),
+      );
     } catch (e) {
       if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
-        throw new Error(`Jira refused the credential of the integration, so the ${kind} cannot be listed: ${e.message}`, { cause: e });
+        throw new Error(
+          `Jira refused the credential of the integration, so the ${kind} cannot be listed: ${e.message}`,
+          { cause: e },
+        );
       }
       throw e;
     }

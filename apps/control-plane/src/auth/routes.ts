@@ -11,7 +11,15 @@ import { errorResponse, json, opResult } from "../http/handler";
 import type { Identity } from "../do/team/auth";
 import { apiKeyPrincipal } from "./authenticate";
 import { parseKey } from "./apikeys";
-import { finishLogin, LoginFailure, OIDC_FLOW_TTL_MS, oidcConfigFromEnv, safeReturnTo, startLogin, type OIDCFlow } from "./oidc";
+import {
+  finishLogin,
+  LoginFailure,
+  OIDC_FLOW_TTL_MS,
+  oidcConfigFromEnv,
+  safeReturnTo,
+  startLogin,
+  type OIDCFlow,
+} from "./oidc";
 import { clearSessionCookie, issueSessionCookie, loadFlow, readSession, saveFlow } from "./session";
 
 export const LOGIN_ERROR_URL = "/login";
@@ -51,7 +59,7 @@ const csrfProblem = () => new OfError("not_authorized", "missing X-OF-CSRF: 1 he
 
 async function sessionLogin(req: Request, env: Env, instance: string): Promise<Response> {
   if (!csrfOk(req, serverConfig(env).origin)) throw csrfProblem();
-  let key = "";
+  let key: string;
   try {
     const text = await req.text();
     if (text.length > 4 << 10) throw new Error("too large");
@@ -68,9 +76,20 @@ async function sessionLogin(req: Request, env: Env, instance: string): Promise<R
     audit("auth.session", "failure", { provider: "api_key", reason: (e as Error).message });
     throw e;
   }
-  const cookie = await issueSessionCookie(env, { u: p.userId ?? p.id, t: p.teamId, p: "api_key", k: p.keyId ?? "", kp: parseKey(key)?.prefix ?? "" });
+  const cookie = await issueSessionCookie(env, {
+    u: p.userId ?? p.id,
+    t: p.teamId,
+    p: "api_key",
+    k: p.keyId ?? "",
+    kp: parseKey(key)?.prefix ?? "",
+  });
   audit("auth.session", "success", { provider: "api_key", user_id: p.userId, team_id: p.teamId, api_key_id: p.keyId });
-  const me = await env.TEAM.getByName(doName.team(p.teamId)).api({ requestId: instance, principal: p }, "authMe", {}, undefined);
+  const me = await env.TEAM.getByName(doName.team(p.teamId)).api(
+    { requestId: instance, principal: p },
+    "authMe",
+    {},
+    undefined,
+  );
   const res = opResult(me);
   const body = (await res.json()) as Record<string, unknown>;
   return json({ ...body, auth_method: "session", provider: "api_key", login_providers: loginProviders(env) }, 200, {
@@ -101,7 +120,10 @@ async function oidcLogin(req: Request, env: Env, url: URL): Promise<Response> {
     const cookie = await saveFlow(env, "oidc", flow, OIDC_FLOW_TTL_MS);
     return redirect(to, [cookie], 302);
   } catch (e) {
-    return failLogin("oidc", e instanceof LoginFailure ? e : new LoginFailure("provider_unavailable", (e as Error).message));
+    return failLogin(
+      "oidc",
+      e instanceof LoginFailure ? e : new LoginFailure("provider_unavailable", (e as Error).message),
+    );
   }
 }
 
@@ -109,7 +131,12 @@ async function oidcCallback(req: Request, env: Env, url: URL): Promise<Response>
   const c = oidcConfigFromEnv(env);
   if (!c) return new Response("not found\n", { status: 404 });
   const { value: flow, clear } = await loadFlow<OIDCFlow>(env, req, "oidc");
-  if (!flow) return failLogin("oidc", new LoginFailure("invalid_state", "login flow cookie missing (expired, or cookies blocked)"), [clear]);
+  if (!flow)
+    return failLogin(
+      "oidc",
+      new LoginFailure("invalid_state", "login flow cookie missing (expired, or cookies blocked)"),
+      [clear],
+    );
   let id: Identity;
   try {
     id = await finishLogin(c, url.searchParams, flow);
@@ -117,13 +144,25 @@ async function oidcCallback(req: Request, env: Env, url: URL): Promise<Response>
     return failLogin("oidc", e, [clear]);
   }
   try {
-    const out = (await env.TEAM.getByName(doName.team(DEFAULT_TEAM)).api({ requestId: "" }, "authProvision", {}, id)) as {
+    const out = (await env.TEAM.getByName(doName.team(DEFAULT_TEAM)).api(
+      { requestId: "" },
+      "authProvision",
+      {},
+      id,
+    )) as {
       $error?: { code: string; detail: string; reason?: string };
       user: { id: string; team_id: string; role: string };
     };
-    if (out.$error) throw new OfError("invalid_request", out.$error.detail, out.$error.reason ? { reason: out.$error.reason } : {});
+    if (out.$error)
+      throw new OfError("invalid_request", out.$error.detail, out.$error.reason ? { reason: out.$error.reason } : {});
     const cookie = await issueSessionCookie(env, { u: out.user.id, t: out.user.team_id, p: "oidc" });
-    audit("auth.login", "success", { provider: "oidc", user_id: out.user.id, team_id: out.user.team_id, subject: id.subject, role: out.user.role });
+    audit("auth.login", "success", {
+      provider: "oidc",
+      user_id: out.user.id,
+      team_id: out.user.team_id,
+      subject: id.subject,
+      role: out.user.role,
+    });
     return redirect(safeReturnTo(flow.r), [clear, cookie]);
   } catch (e) {
     return failLogin("oidc", e, [clear]);

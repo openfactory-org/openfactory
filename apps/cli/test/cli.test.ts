@@ -72,7 +72,6 @@ describe("command tree", () => {
       "runner",
       "netguard",
       "vm-init",
-      "machine",
     ]) {
       expect(have, want).toContain(want);
     }

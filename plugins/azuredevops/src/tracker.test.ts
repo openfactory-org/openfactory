@@ -57,7 +57,12 @@ function tracker(current: string, relations: unknown) {
       return {};
     },
   });
-  const c = new AzureDevOpsClient({ organization: "contoso", baseUrl: "https://ado.test", token: "pat", fetch: m.fetch });
+  const c = new AzureDevOpsClient({
+    organization: "contoso",
+    baseUrl: "https://ado.test",
+    token: "pat",
+    fetch: m.fetch,
+  });
   return { c, patches };
 }
 
@@ -82,12 +87,18 @@ describe("work item tracker", () => {
     expect(first.patches[0]!.ops[0]).toMatchObject({
       op: "add",
       path: "/relations/-",
-      value: { rel: "ArtifactLink", url: "vstfs:///Git/PullRequestId/proj-1%2Frepo-1%2F11", attributes: { name: "Pull Request" } },
+      value: {
+        rel: "ArtifactLink",
+        url: "vstfs:///Git/PullRequestId/proj-1%2Frepo-1%2F11",
+        attributes: { name: "Pull Request" },
+      },
     });
     const second = tracker("Active", [{ rel: "ArtifactLink", url: "vstfs:///Git/PullRequestId/proj-1%2Frepo-1%2F11" }]);
     await second.c.attachPullRequestToWorkItem("proj", 7, pr);
     expect(second.patches).toHaveLength(0);
-    const err = await first.c.attachPullRequestToWorkItem("proj", 7, { forge: "AZURE_DEVOPS", repo: "proj/web", number: 0 }).catch((e: unknown) => e);
+    const err = await first.c
+      .attachPullRequestToWorkItem("proj", 7, { forge: "AZURE_DEVOPS", repo: "proj/web", number: 0 })
+      .catch((e: unknown) => e);
     expect(toPluginError(err).code).toBe("invalid_request");
     expect((err as Error).message).toContain("number");
   });

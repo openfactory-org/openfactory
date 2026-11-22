@@ -116,7 +116,10 @@ export function isBotUser(u: GhUser | undefined): boolean {
 /** The alias of the first "factory:<alias>" label. */
 export function aliasFromLabels(labels: string[]): string {
   for (const l of labels) {
-    if (l.length > ALIAS_LABEL_PREFIX.length && l.slice(0, ALIAS_LABEL_PREFIX.length).toLowerCase() === ALIAS_LABEL_PREFIX) {
+    if (
+      l.length > ALIAS_LABEL_PREFIX.length &&
+      l.slice(0, ALIAS_LABEL_PREFIX.length).toLowerCase() === ALIAS_LABEL_PREFIX
+    ) {
       return l.slice(ALIAS_LABEL_PREFIX.length).trim();
     }
   }
@@ -166,7 +169,7 @@ export class Normalizer {
     try {
       p = JSON.parse(body) as GhPayload;
     } catch (e) {
-      throw new Error(`github: decode ${eventName} payload: ${(e as Error).message}`);
+      throw new Error(`github: decode ${eventName} payload: ${(e as Error).message}`, { cause: e });
     }
     if (typeof p !== "object" || p === null) throw new Error(`github: decode ${eventName} payload: not an object`);
     const now = this.opts.now ?? Date.now;
@@ -220,7 +223,11 @@ export class Normalizer {
     });
     const issueAttrs = (is: GhIssue): Record<string, unknown> => {
       const labels = labelNames(is.labels);
-      const a: Record<string, unknown> = { [A.Labels]: labels, [A.Assignees]: logins(is.assignees), [A.Author]: is.user?.login ?? "" };
+      const a: Record<string, unknown> = {
+        [A.Labels]: labels,
+        [A.Assignees]: logins(is.assignees),
+        [A.Author]: is.user?.login ?? "",
+      };
       const alias = aliasFromLabels(labels);
       if (alias) a[A.Alias] = alias;
       return a;
@@ -382,14 +389,31 @@ export class Normalizer {
         const branch = p.ref!.slice("refs/heads/".length);
         const paths: string[] = [];
         for (const c of p.commits ?? []) paths.push(...(c.added ?? []), ...(c.modified ?? []), ...(c.removed ?? []));
-        const src: SourceRef = { provider: PROVIDER, kind: "push", url: p.compare ?? "", repo, external_id: repo + "@" + after, title: branch };
-        emit("push", src, p.head_commit?.message ?? "", { [A.Branch]: branch, [A.Paths]: stringSet(...paths), [A.HeadSHA]: after });
+        const src: SourceRef = {
+          provider: PROVIDER,
+          kind: "push",
+          url: p.compare ?? "",
+          repo,
+          external_id: repo + "@" + after,
+          title: branch,
+        };
+        emit("push", src, p.head_commit?.message ?? "", {
+          [A.Branch]: branch,
+          [A.Paths]: stringSet(...paths),
+          [A.HeadSHA]: after,
+        });
         break;
       }
       case "check_suite": {
         const cs = p.check_suite;
         if (!cs) return [];
-        const src: SourceRef = { provider: PROVIDER, kind: "check_suite", repo, external_id: `${repo}/check_suite/${cs.id}`, title: cs.head_branch ?? "" };
+        const src: SourceRef = {
+          provider: PROVIDER,
+          kind: "check_suite",
+          repo,
+          external_id: `${repo}/check_suite/${cs.id}`,
+          title: cs.head_branch ?? "",
+        };
         const a = ciAttrs(cs.head_branch ?? "", cs.head_sha ?? "", cs.pull_requests);
         if (p.action === "completed") {
           a[A.Conclusion] = cs.conclusion ?? "";
@@ -402,7 +426,14 @@ export class Normalizer {
       case "check_run": {
         const cr = p.check_run;
         if (!cr || p.action !== "rerequested" || !this.ownsApp(cr.app)) return [];
-        const src: SourceRef = { provider: PROVIDER, kind: "check_run", url: cr.html_url ?? "", repo, external_id: `${repo}/check_run/${cr.id}`, title: cr.name ?? "" };
+        const src: SourceRef = {
+          provider: PROVIDER,
+          kind: "check_run",
+          url: cr.html_url ?? "",
+          repo,
+          external_id: `${repo}/check_run/${cr.id}`,
+          title: cr.name ?? "",
+        };
         const a = ciAttrs(cr.check_suite?.head_branch ?? "", cr.head_sha ?? "", cr.pull_requests);
         a["check_name"] = cr.name ?? "";
         emit("check_run_rerequested", src, "", a);
@@ -411,7 +442,14 @@ export class Normalizer {
       case "workflow_run": {
         const wr = p.workflow_run;
         if (!wr || p.action !== "completed") return [];
-        const src: SourceRef = { provider: PROVIDER, kind: "workflow_run", url: wr.html_url ?? "", repo, external_id: `${repo}/workflow_run/${wr.id}`, title: wr.name ?? "" };
+        const src: SourceRef = {
+          provider: PROVIDER,
+          kind: "workflow_run",
+          url: wr.html_url ?? "",
+          repo,
+          external_id: `${repo}/workflow_run/${wr.id}`,
+          title: wr.name ?? "",
+        };
         const a = ciAttrs(wr.head_branch ?? "", wr.head_sha ?? "", wr.pull_requests);
         a[A.Conclusion] = wr.conclusion ?? "";
         a[A.Workflow] = wr.name ?? "";
@@ -422,7 +460,14 @@ export class Normalizer {
         const state = (p.state ?? "").toLowerCase();
         if (state !== "success" && state !== "failure" && state !== "error") return [];
         const ctx = p.context ?? "";
-        const src: SourceRef = { provider: PROVIDER, kind: "commit", url: p.target_url ?? "", repo, external_id: `${repo}@${p.sha ?? ""}/${ctx}`, title: ctx };
+        const src: SourceRef = {
+          provider: PROVIDER,
+          kind: "commit",
+          url: p.target_url ?? "",
+          repo,
+          external_id: `${repo}@${p.sha ?? ""}/${ctx}`,
+          title: ctx,
+        };
         const branches = (p.branches ?? []).map((b) => b.name);
         emit("commit_status", src, p.description ?? "", {
           [A.CommitState]: state,
@@ -466,7 +511,18 @@ export function checkName(gitPath: string): string {
   return `${DEFINITION_CHECK_NAME} (${p})`;
 }
 
-const DEFINITION_ROOTS = ["factory.yaml", "factory.yml", "agents", "automations", "runners", "routers", "benchmarks", "scorers", "webhooks", "skills"];
+const DEFINITION_ROOTS = [
+  "factory.yaml",
+  "factory.yml",
+  "agents",
+  "automations",
+  "runners",
+  "routers",
+  "benchmarks",
+  "scorers",
+  "webhooks",
+  "skills",
+];
 
 /** Whether a repository path belongs to a definition stored at gitPath. */
 export function isDefinitionPath(gitPath: string, p: string): boolean {

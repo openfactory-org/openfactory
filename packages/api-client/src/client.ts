@@ -124,7 +124,7 @@ export class OpenFactoryClient {
     try {
       return JSON.parse(text) as T;
     } catch (err) {
-      throw new Error(`openfactory: decode response: ${String(err)}`);
+      throw new Error(`openfactory: decode response: ${String(err)}`, { cause: err });
     }
   }
 
@@ -178,7 +178,11 @@ export class OpenFactoryClient {
 
   /** Uploads a file for the messages of a run. Use the attachment_id in a message. */
   async uploadAttachment(name: string, data: BodyInit, contentType = "application/octet-stream"): Promise<Attachment> {
-    return this.request<Attachment>("POST", "attachments", { query: { name }, body: data, headers: { "Content-Type": contentType } });
+    return this.request<Attachment>("POST", "attachments", {
+      query: { name },
+      body: data,
+      headers: { "Content-Type": contentType },
+    });
   }
 
   /**
@@ -233,7 +237,12 @@ export async function unwrap<T>(p: Promise<{ data?: T; error?: unknown; response
 export async function pollUntil<T>(
   fn: () => Promise<T>,
   done: (v: T) => boolean,
-  opts: { intervalMs?: number; timeoutMs?: number; signal?: AbortSignal; sleep?: (ms: number, s?: AbortSignal | null) => Promise<void> } = {},
+  opts: {
+    intervalMs?: number;
+    timeoutMs?: number;
+    signal?: AbortSignal;
+    sleep?: (ms: number, s?: AbortSignal | null) => Promise<void>;
+  } = {},
 ): Promise<T> {
   const interval = opts.intervalMs && opts.intervalMs > 0 ? opts.intervalMs : 2000;
   const wait = opts.sleep ?? sleep;
@@ -322,7 +331,8 @@ async function* runEventStream(
     }
     if (opts.signal?.aborted) throw opts.signal.reason ?? failure;
     // The connection ended before "done": reconnect from the last seq.
-    if (retries >= maxRetries) throw failure instanceof ApiError || failure instanceof Error ? failure : new Error(String(failure));
+    if (retries >= maxRetries)
+      throw failure instanceof ApiError || failure instanceof Error ? failure : new Error(String(failure));
     await wait(backoffMs(retries, 0, copts), opts.signal);
     retries++;
   }

@@ -5,7 +5,15 @@
 // GitHub is built in. GitLab and Azure DevOps are plugin Workers behind
 // service bindings (PLUGIN_GITLAB, PLUGIN_AZUREDEVOPS). The generic git forge
 // is not available on Workers (it shelled out to git).
-import { OfError, integrationActive, integrationStatus, type Integration, type OutboundMessage, type PullRequestRef, type SourceRef } from "@openfactory/core";
+import {
+  OfError,
+  integrationActive,
+  integrationStatus,
+  type Integration,
+  type OutboundMessage,
+  type PullRequestRef,
+  type SourceRef,
+} from "@openfactory/core";
 import type { ForgePlugin, ForgeTarget as PluginTarget } from "@openfactory/plugin-api";
 import { GitHubClient, parseInstallationId, type TokenCache } from "./github/client";
 import { AZURE_DEVOPS, GIT, GITHUB, GITLAB, type Forge, type ForgeLookup, type ForgeResolver } from "./forge";
@@ -111,12 +119,17 @@ export class Resolver implements ForgeResolver {
   /** The record that serves a forge action (no status check). */
   async select(l: ForgeLookup): Promise<Integration> {
     const provider = integrationProvider(l.codeForge);
-    const ints = (await this.opts.integrations.list(l.teamId, provider)).filter((x) => x.provider.toLowerCase() === provider);
+    const ints = (await this.opts.integrations.list(l.teamId, provider)).filter(
+      (x) => x.provider.toLowerCase() === provider,
+    );
     try {
       return selectIntegration(ints, provider, l.factoryId ?? "", repoOwner(provider, l.repo));
     } catch (e) {
       const err = e as OfError;
-      throw new OfError(err.code, `forge: team ${l.teamId}, repository ${l.repo}: ${err.detail}`, { cause: e, ...(err.reason ? { reason: err.reason } : {}) });
+      throw new OfError(err.code, `forge: team ${l.teamId}, repository ${l.repo}: ${err.detail}`, {
+        cause: e,
+        ...(err.reason ? { reason: err.reason } : {}),
+      });
     }
   }
 
@@ -135,14 +148,19 @@ export class Resolver implements ForgeResolver {
     const c = this.cache.get(in_.id);
     if (c && this.now() < c.expires) return c.forge;
     const f = await this.build(in_);
-    this.cache.set(in_.id, { forge: f, teamId: in_.team_id, expires: this.now() + (this.opts.cacheTtlMs ?? 10 * 60_000) });
+    this.cache.set(in_.id, {
+      forge: f,
+      teamId: in_.team_id,
+      expires: this.now() + (this.opts.cacheTtlMs ?? 10 * 60_000),
+    });
     return f;
   }
 
   private async secret(in_: Integration, name: string): Promise<string> {
     if (!name) return "";
     const v = await this.opts.secrets.get(in_.team_id, "", name);
-    if (v === undefined) throw new OfError("resource_not_found", `forge: integration ${in_.id} secret ${name}: not found`);
+    if (v === undefined)
+      throw new OfError("resource_not_found", `forge: integration ${in_.id} secret ${name}: not found`);
     return v;
   }
 
@@ -167,7 +185,9 @@ export class Resolver implements ForgeResolver {
       try {
         inst = parseInstallationId(cfg["installation_id"]);
       } catch (e) {
-        throw new Error(`forge: github integration ${in_.id}: invalid installation_id: ${(e as Error).message}`);
+        throw new Error(`forge: github integration ${in_.id}: invalid installation_id: ${(e as Error).message}`, {
+          cause: e,
+        });
       }
       const base = {
         baseURL: cfg["base_url"] ?? "",
@@ -191,7 +211,14 @@ export class Resolver implements ForgeResolver {
         "forge: the generic git forge is not available on this server; use a GitHub, GitLab or Azure DevOps integration",
       );
     }
-    const t: PluginTarget = { provider, integrationId: in_.id, teamId: in_.team_id, config: { ...cfg }, token: "", userToken: false };
+    const t: PluginTarget = {
+      provider,
+      integrationId: in_.id,
+      teamId: in_.team_id,
+      config: { ...cfg },
+      token: "",
+      userToken: false,
+    };
     if (this.plugin(provider)) t.token = await this.secret(in_, in_.secret_ref ?? "");
     return this.pluginForge(t);
   }
@@ -212,7 +239,9 @@ export class Resolver implements ForgeResolver {
         { reason: "plugin_not_installed" },
       );
     }
-    throw new OfError("feature_not_available", `forge: unsupported provider "${t.provider}" (no plugin serves it)`, { reason: "plugin_not_installed" });
+    throw new OfError("feature_not_available", `forge: unsupported provider "${t.provider}" (no plugin serves it)`, {
+      reason: "plugin_not_installed",
+    });
   }
 
   /**
@@ -221,7 +250,8 @@ export class Resolver implements ForgeResolver {
    * external_authentication_required; there is no silent fallback.
    */
   async forgeForUser(l: ForgeLookup, userId: string): Promise<{ forge: Forge; userToken: boolean }> {
-    if (!userId || !this.opts.userTokens || !supportsUserTokens(l.codeForge)) return { forge: await this.forge(l), userToken: false };
+    if (!userId || !this.opts.userTokens || !supportsUserTokens(l.codeForge))
+      return { forge: await this.forge(l), userToken: false };
     const provider = integrationProvider(l.codeForge);
     const in_ = await this.select(l);
     if (!integrationActive(in_)) throw disabledError(in_);
@@ -245,7 +275,14 @@ export class Resolver implements ForgeResolver {
       return { forge: f, userToken: true };
     }
     return {
-      forge: this.pluginForge({ provider, integrationId: in_.id, teamId: l.teamId, config: { ...cfg }, token: tok, userToken: true }),
+      forge: this.pluginForge({
+        provider,
+        integrationId: in_.id,
+        teamId: l.teamId,
+        config: { ...cfg },
+        token: tok,
+        userToken: true,
+      }),
       userToken: true,
     };
   }
@@ -261,7 +298,8 @@ export class Resolver implements ForgeResolver {
     }
     const l: ForgeLookup = { teamId, codeForge, repo: pr.repo };
     const { forge: uf } = await this.forgeForUser(l, userId);
-    if (!uf.login) throw new OfError("operation_not_supported", `${codeForge.toLowerCase()} cannot read the login of a user`);
+    if (!uf.login)
+      throw new OfError("operation_not_supported", `${codeForge.toLowerCase()} cannot read the login of a user`);
     let login: string;
     try {
       login = await uf.login();
@@ -270,7 +308,8 @@ export class Resolver implements ForgeResolver {
       throw new Error(`read the forge login of user ${userId}: ${(e as Error).message}`, { cause: e });
     }
     const tf = await this.forge(l);
-    if (!tf.requestReviewers) throw new OfError("operation_not_supported", `${codeForge.toLowerCase()} cannot request a review`);
+    if (!tf.requestReviewers)
+      throw new OfError("operation_not_supported", `${codeForge.toLowerCase()} cannot request a review`);
     await tf.requestReviewers(owner, repo, pr.number, [login]);
   }
 }
@@ -299,8 +338,22 @@ export class PluginForge implements Forge {
   defaultBranch(owner: string, repo: string) {
     return this.p.defaultBranch(this.t, owner, repo);
   }
-  async createPullRequest(r: { owner: string; repo: string; head: string; base: string; title: string; body: string; draft?: boolean }) {
-    const pr = await this.p.createPullRequest(this.t, r.owner, r.repo, { head: r.head, base: r.base, title: r.title, body: r.body, draft: !!r.draft });
+  async createPullRequest(r: {
+    owner: string;
+    repo: string;
+    head: string;
+    base: string;
+    title: string;
+    body: string;
+    draft?: boolean;
+  }) {
+    const pr = await this.p.createPullRequest(this.t, r.owner, r.repo, {
+      head: r.head,
+      base: r.base,
+      title: r.title,
+      body: r.body,
+      draft: !!r.draft,
+    });
     return { url: "", branch: "", state: "", ...pr } as PullRequestRef;
   }
   async getPullRequest(owner: string, repo: string, number: number) {
@@ -323,7 +376,12 @@ export class PluginForge implements Forge {
   commentWorkItem(project: string, id: number, body: string) {
     return this.p.commentWorkItem(this.t, project, id, body);
   }
-  setCommitStatus(owner: string, repo: string, sha: string, st: { context: string; state: string; description?: string; targetUrl?: string }) {
+  setCommitStatus(
+    owner: string,
+    repo: string,
+    sha: string,
+    st: { context: string; state: string; description?: string; targetUrl?: string },
+  ) {
     return this.p.setCommitStatus(this.t, owner, repo, sha, st as Parameters<ForgePlugin["setCommitStatus"]>[4]);
   }
   async getFiles(owner: string, repo: string, ref: string, path: string) {
@@ -336,8 +394,19 @@ export class PluginForge implements Forge {
   resolveThread(owner: string, repo: string, number: number, threadRef: string) {
     return this.p.resolveThread(this.t, owner, repo, number, threadRef);
   }
-  submitReview(r: { owner: string; repo: string; number: number; event?: string; body: string; comments?: { path: string; line: number; side?: string; body: string }[] }) {
-    return this.p.submitReview(this.t, r.owner, r.repo, r.number, { event: r.event ?? "", body: r.body, comments: r.comments ?? [] } as never);
+  submitReview(r: {
+    owner: string;
+    repo: string;
+    number: number;
+    event?: string;
+    body: string;
+    comments?: { path: string; line: number; side?: string; body: string }[];
+  }) {
+    return this.p.submitReview(this.t, r.owner, r.repo, r.number, {
+      event: r.event ?? "",
+      body: r.body,
+      comments: r.comments ?? [],
+    } as never);
   }
   markReady(owner: string, repo: string, number: number) {
     return this.p.markReady(this.t, owner, repo, number);
@@ -361,11 +430,22 @@ export class PluginForge implements Forge {
       ...(th.path ? { path: th.path } : {}),
       ...(th.line ? { line: th.line } : {}),
       resolved: th.resolved,
-      comments: th.comments.map((c) => ({ id: c.id, author: c.author, body: c.body, path: c.path ?? "", line: c.line ?? 0, created_at: c.createdAt })),
+      comments: th.comments.map((c) => ({
+        id: c.id,
+        author: c.author,
+        body: c.body,
+        path: c.path ?? "",
+        line: c.line ?? 0,
+        created_at: c.createdAt,
+      })),
     };
   }
   async fileDiff(owner: string, repo: string, number: number, path: string) {
-    return (await this.p.getFileDiff(this.t, owner, repo, number, path)) as { path: string; patch: string; truncated?: boolean };
+    return (await this.p.getFileDiff(this.t, owner, repo, number, path)) as {
+      path: string;
+      patch: string;
+      truncated?: boolean;
+    };
   }
 }
 
@@ -398,8 +478,14 @@ export class ForgeResponder implements Responder {
     if (issue.kind !== "work_item" || !issue.number || !issue.repo) {
       throw new OfError("operation_not_supported", `${this.p}: ${issue.kind} is not a tracker issue`);
     }
-    const f = await this.resolver.forge({ teamId, ...(factoryId ? { factoryId } : {}), codeForge: forgeFromProvider(this.p), repo: issue.repo });
-    if (!f.setWorkItemState || !f.attachPullRequestToWorkItem) throw new OfError("operation_not_supported", `forge ${f.name()} has no work items`);
+    const f = await this.resolver.forge({
+      teamId,
+      ...(factoryId ? { factoryId } : {}),
+      codeForge: forgeFromProvider(this.p),
+      repo: issue.repo,
+    });
+    if (!f.setWorkItemState || !f.attachPullRequestToWorkItem)
+      throw new OfError("operation_not_supported", `forge ${f.name()} has no work items`);
     return f;
   }
 

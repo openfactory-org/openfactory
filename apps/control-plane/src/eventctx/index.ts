@@ -115,7 +115,9 @@ async function runBuilders(ev: Event, builders: Builder[]): Promise<{ files: Fil
     try {
       const r = await Promise.race([
         bl.eventContext(ev),
-        new Promise<never>((_, rej) => setTimeout(() => rej(new Error("context deadline exceeded")), BUILDER_TIMEOUT_MS)),
+        new Promise<never>((_, rej) =>
+          setTimeout(() => rej(new Error("context deadline exceeded")), BUILDER_TIMEOUT_MS),
+        ),
       ]);
       omitted.push(...(r.omitted ?? []));
       files.push(...r.files);
@@ -127,7 +129,12 @@ async function runBuilders(ev: Event, builders: Builder[]): Promise<{ files: Fil
 }
 
 /** Builds the event context of a message. withContext runs the builders (first message of a run). */
-export async function build(messageId: string, ev: Event | null | undefined, withContext: boolean, builders: Builder[] = []): Promise<Bundle | null> {
+export async function build(
+  messageId: string,
+  ev: Event | null | undefined,
+  withContext: boolean,
+  builders: Builder[] = [],
+): Promise<Bundle | null> {
   if (!ev || messageId === "") return null;
   const dir = messageDir(messageId);
   const env: Envelope = {
@@ -207,7 +214,8 @@ export function promptSection(b: Bundle | null | undefined): string {
   s += "- `envelope.json`: the provider, the event type, the sender, the trust and the source.\n";
   if (b.envelope.payload_bytes > 0) {
     s += "- `payload.json`: the body of the provider request";
-    if (b.envelope.payload_truncated) s += ` (cut to ${MAX_PAYLOAD_BYTES >> 10} KiB of ${b.envelope.payload_bytes} bytes)`;
+    if (b.envelope.payload_truncated)
+      s += ` (cut to ${MAX_PAYLOAD_BYTES >> 10} KiB of ${b.envelope.payload_bytes} bytes)`;
     s += ".\n";
   }
   for (const f of b.envelope.context_files ?? []) s += `- \`${f}\`\n`;
@@ -217,12 +225,24 @@ export function promptSection(b: Bundle | null | undefined): string {
 
 /** JSON of a bundle (file data as base64, the Go []byte encoding). */
 export function encode(b: Bundle): string {
-  return JSON.stringify({ message_id: b.message_id, envelope: b.envelope, files: b.files.map((f) => ({ path: f.path, data: b64(f.data) })) });
+  return JSON.stringify({
+    message_id: b.message_id,
+    envelope: b.envelope,
+    files: b.files.map((f) => ({ path: f.path, data: b64(f.data) })),
+  });
 }
 
 export function decode(s: string): Bundle {
-  const raw = JSON.parse(s) as { message_id: string; envelope: Envelope; files: { path: string; data: string }[] | null };
-  return { message_id: raw.message_id, envelope: raw.envelope, files: (raw.files ?? []).map((f) => ({ path: f.path, data: fromB64(f.data) })) };
+  const raw = JSON.parse(s) as {
+    message_id: string;
+    envelope: Envelope;
+    files: { path: string; data: string }[] | null;
+  };
+  return {
+    message_id: raw.message_id,
+    envelope: raw.envelope,
+    files: (raw.files ?? []).map((f) => ({ path: f.path, data: fromB64(f.data) })),
+  };
 }
 
 /** R2 key prefix of stored bundles. */
@@ -363,7 +383,14 @@ export function textOfDoc(v: unknown): string {
 function jiraIssue(ev: Event): File[] {
   const p = payloadObj(ev) as { issue?: { key?: string; fields?: Record<string, unknown> } | null } | null;
   if (!p?.issue) return [];
-  const f = (p.issue.fields ?? {}) as { summary?: string; description?: unknown; status?: Named; assignee?: Named; project?: Named; labels?: string[] };
+  const f = (p.issue.fields ?? {}) as {
+    summary?: string;
+    description?: unknown;
+    status?: Named;
+    assignee?: Named;
+    project?: Named;
+    labels?: string[];
+  };
   const is: Issue = {
     key: p.issue.key ?? "",
     title: f.summary ?? "",
@@ -392,19 +419,37 @@ function reviewFiles(rc: ReviewComment, hunk: string): File[] {
   const clean: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(rc)) if (v !== undefined && v !== "" && v !== 0) clean[k] = v;
   const out: File[] = [{ path: "review_comment.json", data: indentJSON(clean) }];
-  if (hunk.trim() !== "") out.push({ path: "diff.patch", data: utf8(`--- a/${rc.path ?? ""}\n+++ b/${rc.path ?? ""}\n${hunk}\n`) });
+  if (hunk.trim() !== "")
+    out.push({ path: "diff.patch", data: utf8(`--- a/${rc.path ?? ""}\n+++ b/${rc.path ?? ""}\n${hunk}\n`) });
   return out;
 }
 
 function githubReviewComment(ev: Event): File[] {
   const p = payloadObj(ev) as { comment?: Record<string, unknown> | null } | null;
   const c = p?.comment as
-    | { body?: string; path?: string; diff_hunk?: string; line?: number | null; commit_id?: string; in_reply_to_id?: number; html_url?: string; user?: { login?: string } }
+    | {
+        body?: string;
+        path?: string;
+        diff_hunk?: string;
+        line?: number | null;
+        commit_id?: string;
+        in_reply_to_id?: number;
+        html_url?: string;
+        user?: { login?: string };
+      }
     | null
     | undefined;
   if (!c || (!c.path && !c.diff_hunk)) return [];
   return reviewFiles(
-    { author: c.user?.login ?? "", body: c.body ?? "", path: c.path ?? "", line: c.line ?? 0, commit_id: c.commit_id ?? "", in_reply_to_id: c.in_reply_to_id ?? 0, url: c.html_url ?? "" },
+    {
+      author: c.user?.login ?? "",
+      body: c.body ?? "",
+      path: c.path ?? "",
+      line: c.line ?? 0,
+      commit_id: c.commit_id ?? "",
+      in_reply_to_id: c.in_reply_to_id ?? 0,
+      url: c.html_url ?? "",
+    },
     c.diff_hunk ?? "",
   );
 }
@@ -412,12 +457,24 @@ function githubReviewComment(ev: Event): File[] {
 function gitlabNote(ev: Event): File[] {
   const p = payloadObj(ev) as {
     user?: { username?: string };
-    object_attributes?: { note?: string; url?: string; commit_id?: string; position?: { new_path?: string; new_line?: number } | null } | null;
+    object_attributes?: {
+      note?: string;
+      url?: string;
+      commit_id?: string;
+      position?: { new_path?: string; new_line?: number } | null;
+    } | null;
   } | null;
   const a = p?.object_attributes;
   if (!a?.position) return [];
   return reviewFiles(
-    { author: p?.user?.username ?? "", body: a.note ?? "", path: a.position.new_path ?? "", line: a.position.new_line ?? 0, commit_id: a.commit_id ?? "", url: a.url ?? "" },
+    {
+      author: p?.user?.username ?? "",
+      body: a.note ?? "",
+      path: a.position.new_path ?? "",
+      line: a.position.new_line ?? 0,
+      commit_id: a.commit_id ?? "",
+      url: a.url ?? "",
+    },
     "",
   );
 }
@@ -431,7 +488,12 @@ function payloadBuilder(provider: string, fn: (ev: Event) => File[]): Builder {
 
 /** Builders that read context the payload already has. */
 export function defaultBuilders(): Builder[] {
-  return [payloadBuilder("linear", linearIssue), payloadBuilder("jira", jiraIssue), payloadBuilder("github", githubReviewComment), payloadBuilder("gitlab", gitlabNote)];
+  return [
+    payloadBuilder("linear", linearIssue),
+    payloadBuilder("jira", jiraIssue),
+    payloadBuilder("github", githubReviewComment),
+    payloadBuilder("gitlab", gitlabNote),
+  ];
 }
 
 // ---------- review thread builder ----------
@@ -440,7 +502,10 @@ const REVIEW_THREAD_FILE = "review_thread.json";
 const FILE_DIFF_FILE = "file_diff.patch";
 
 function oneLine(s: string): string {
-  const t = s.split(/\s+/).filter((x) => x).join(" ");
+  const t = s
+    .split(/\s+/)
+    .filter((x) => x)
+    .join(" ");
   const r = Array.from(t);
   return r.length > 300 ? r.slice(0, 299).join("") + "…" : t;
 }
@@ -451,7 +516,10 @@ function readReason(what: string, err: unknown): string {
 }
 
 function payloadPath(ev: Event): string {
-  const p = payloadObj(ev) as { comment?: { path?: string } | null; object_attributes?: { position?: { new_path?: string; old_path?: string } | null } | null } | null;
+  const p = payloadObj(ev) as {
+    comment?: { path?: string } | null;
+    object_attributes?: { position?: { new_path?: string; old_path?: string } | null } | null;
+  } | null;
   if (!p) return "";
   if (p.comment?.path) return p.comment.path;
   const pos = p.object_attributes?.position;
@@ -508,7 +576,8 @@ export function reviewBuilders(src: ForgeResolver | null): Builder[] {
     provider: () => provider!,
     async eventContext(ev: Event) {
       const s = ev.source;
-      if (!s.thread_ref || !s.number || s.number <= 0 || !s.repo || (s.kind && s.kind !== "pull_request")) return { files: [] };
+      if (!s.thread_ref || !s.number || s.number <= 0 || !s.repo || (s.kind && s.kind !== "pull_request"))
+        return { files: [] };
       const i = s.repo.indexOf("/");
       const owner = i > 0 ? s.repo.slice(0, i) : "";
       const repo = i > 0 ? s.repo.slice(i + 1) : "";
@@ -523,7 +592,13 @@ export function reviewBuilders(src: ForgeResolver | null): Builder[] {
       if (!src) return leftOut("no forge client: no forge source");
       let f;
       try {
-        f = await src.forge({ teamId: ev.team_id, ...(ev.factory_id ? { factoryId: ev.factory_id } : {}), codeForge: codeForge!, repo: s.repo, scope: [s.repo] });
+        f = await src.forge({
+          teamId: ev.team_id,
+          ...(ev.factory_id ? { factoryId: ev.factory_id } : {}),
+          codeForge: codeForge!,
+          repo: s.repo,
+          scope: [s.repo],
+        });
       } catch (e) {
         return leftOut("no forge client: " + oneLine((e as Error).message));
       }
@@ -535,7 +610,11 @@ export function reviewBuilders(src: ForgeResolver | null): Builder[] {
         const th = await f.reviewThread(owner, repo, s.number, s.thread_ref);
         const { data, dropped } = threadFile(th);
         files.push({ path: REVIEW_THREAD_FILE, data });
-        if (dropped > 0) omitted.push({ name: "context/" + REVIEW_THREAD_FILE, reason: `${dropped} older comments are left out (limit ${MAX_REVIEW_FILE_BYTES >> 10} KiB)` });
+        if (dropped > 0)
+          omitted.push({
+            name: "context/" + REVIEW_THREAD_FILE,
+            reason: `${dropped} older comments are left out (limit ${MAX_REVIEW_FILE_BYTES >> 10} KiB)`,
+          });
         if (th.path) path = th.path;
       } catch (e) {
         omitted.push({ name: "context/" + REVIEW_THREAD_FILE, reason: readReason("the review thread", e) });
@@ -553,7 +632,11 @@ export function reviewBuilders(src: ForgeResolver | null): Builder[] {
       }
       const { data, left } = diffFile(path, d.patch);
       files.push({ path: FILE_DIFF_FILE, data });
-      if (left > 0) omitted.push({ name: "context/" + FILE_DIFF_FILE, reason: `cut at ${MAX_REVIEW_FILE_BYTES >> 10} KiB, ${left} bytes of the diff are left out` });
+      if (left > 0)
+        omitted.push({
+          name: "context/" + FILE_DIFF_FILE,
+          reason: `cut at ${MAX_REVIEW_FILE_BYTES >> 10} KiB, ${left} bytes of the diff are left out`,
+        });
       else if (d.truncated) omitted.push({ name: "context/" + FILE_DIFF_FILE, reason: "the forge cut the diff" });
       return { files, omitted };
     },

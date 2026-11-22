@@ -52,7 +52,6 @@ const forwarded = (use: string, short: string): Command => ({
 export const runnerCommand = forwarded("runner", "Run one session of a run inside a sandbox");
 export const netguardCommand = forwarded("netguard", "Run the egress proxy that enforces a network policy");
 export const vmInitCommand = forwarded("vm-init", "Run the init process of a microVM worker");
-export const machineCommand = forwarded("machine", "Run the self-hosted machine agent");
 
 export const serveCommand: Command = {
   use: "serve",

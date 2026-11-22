@@ -20,7 +20,11 @@ export function cloneAgentConfig(c: AgentConfig): AgentConfig {
 }
 
 /** Applies sparse execution overrides to an agent configuration. */
-export function applyOverrides(cfg: AgentConfig, ov: Overrides | null | undefined, machines: Record<string, MachineSpec> | null | undefined): AgentConfig {
+export function applyOverrides(
+  cfg: AgentConfig,
+  ov: Overrides | null | undefined,
+  machines: Record<string, MachineSpec> | null | undefined,
+): AgentConfig {
   const out = cloneAgentConfig(cfg);
   if (!ov) return out;
   if (ov.harness && ov.model) throw new OfError("invalid_request", "set at most one of model and harness");
@@ -53,7 +57,8 @@ export function applyOverrides(cfg: AgentConfig, ov: Overrides | null | undefine
   }
   if (ov.worker_host !== undefined && ov.worker_host !== null) out.worker_host = ov.worker_host;
   if (ov.idle_timeout_minutes !== undefined && ov.idle_timeout_minutes !== null) {
-    if (ov.idle_timeout_minutes < 0 || ov.idle_timeout_minutes > 60) throw new OfError("invalid_request", "idle_timeout_minutes must be between 0 and 60");
+    if (ov.idle_timeout_minutes < 0 || ov.idle_timeout_minutes > 60)
+      throw new OfError("invalid_request", "idle_timeout_minutes must be between 0 and 60");
     out.idle_timeout_minutes = ov.idle_timeout_minutes;
     out.idle_timeout_set = true;
   }
@@ -61,7 +66,10 @@ export function applyOverrides(cfg: AgentConfig, ov: Overrides | null | undefine
 }
 
 /** Adds the factory-wide secrets and MCP servers to cfg. */
-export function withFactoryWide(cfg: AgentConfig, rt: Pick<FactoryRuntimeLike, "secrets" | "mcp_servers"> | null | undefined): AgentConfig {
+export function withFactoryWide(
+  cfg: AgentConfig,
+  rt: Pick<FactoryRuntimeLike, "secrets" | "mcp_servers"> | null | undefined,
+): AgentConfig {
   if (!rt) return cfg;
   for (const s of rt.secrets ?? []) {
     cfg.secrets ??= [];
@@ -79,13 +87,22 @@ export function withFactoryWide(cfg: AgentConfig, rt: Pick<FactoryRuntimeLike, "
 export function resolveAgent(rt: FactoryRuntimeLike, name: string | undefined): AgentConfig {
   const agents = rt.agents ?? [];
   const a = name ? agents.find((x) => x.name === name) : agents.find((x) => x.type === "FOREMAN");
-  if (!a) throw new OfError("invalid_request", name ? `agent ${JSON.stringify(name)} does not exist` : "the factory has no foreman agent");
+  if (!a)
+    throw new OfError(
+      "invalid_request",
+      name ? `agent ${JSON.stringify(name)} does not exist` : "the factory has no foreman agent",
+    );
   return a;
 }
 
 async function stableId(prefix: string, factoryId: string, name: string): Promise<string> {
-  const d = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${factoryId}\x00${prefix}\x00${name}`)));
-  return `${prefix}_${[...d].map((x) => x.toString(16).padStart(2, "0")).join("").slice(0, 20)}`;
+  const d = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${factoryId}\x00${prefix}\x00${name}`)),
+  );
+  return `${prefix}_${[...d]
+    .map((x) => x.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 20)}`;
 }
 
 function judgeSkillContent(files: Record<string, string>): string {
@@ -104,7 +121,10 @@ export async function judgeConfig(rt: FactoryRuntimeLike, req: JudgeRunRequest):
   if (!req.factoryId) throw new OfError("invalid_request", "factory id is required");
   if (req.prompt.trim() === "") throw new OfError("invalid_request", "prompt is required");
   if (!req.harness.type || !req.harness.model) {
-    throw new OfError("invalid_request", "the judge needs a harness with a type and a model (set harness or model on the scorer, scorerDefaults or agentDefaults)");
+    throw new OfError(
+      "invalid_request",
+      "the judge needs a harness with a type and a model (set harness or model on the scorer, scorerDefaults or agentDefaults)",
+    );
   }
   const name = req.name || "scorer";
   const cfg = {
@@ -131,7 +151,8 @@ export async function judgeConfig(rt: FactoryRuntimeLike, req: JudgeRunRequest):
   }
   if (req.machine) {
     const spec = rt.machines?.[req.machine];
-    if (!spec) throw new OfError("invalid_request", `machine ${JSON.stringify(req.machine)} is not defined in the factory`);
+    if (!spec)
+      throw new OfError("invalid_request", `machine ${JSON.stringify(req.machine)} is not defined in the factory`);
     const m: MachineSpec = structuredClone(spec);
     if (!m.name) m.name = req.machine;
     cfg.machine = m;

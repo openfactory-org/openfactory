@@ -269,11 +269,11 @@ export class AzureDevOpsClient {
   async replyInThread(project: string, repo: string, number: number, threadRef: string, body: string): Promise<void> {
     const id = threadId(threadRef);
     await this.wrap(`reply in thread ${id} of pull request ${number}`, () =>
-      this.api.send(
-        "POST",
-        withVersion(`${repoAPI(project, repo)}/pullRequests/${number}/threads/${id}/comments`),
-        { parentCommentId: 1, content: body, commentType: 1 },
-      ),
+      this.api.send("POST", withVersion(`${repoAPI(project, repo)}/pullRequests/${number}/threads/${id}/comments`), {
+        parentCommentId: 1,
+        content: body,
+        commentType: 1,
+      }),
     );
   }
 

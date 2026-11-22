@@ -104,7 +104,8 @@ export function addPush(f: PullRequestFacts, p: PullRequestPush): boolean {
 }
 
 function factsEqual(a: PullRequestFacts, b: PullRequestFacts): boolean {
-  const eqT = (x?: string, y?: string): boolean => (x === undefined) === (y === undefined) && (x === undefined || msOf(x) === msOf(y!));
+  const eqT = (x?: string, y?: string): boolean =>
+    (x === undefined) === (y === undefined) && (x === undefined || msOf(x) === msOf(y!));
   return (
     (a.url ?? "") === (b.url ?? "") &&
     (a.head_branch ?? "") === (b.head_branch ?? "") &&
@@ -185,10 +186,16 @@ export class FactsBook {
       }
     }
     if (isSynchronizeEvent(ev)) {
-      addPush(f, { at, actor: ev.actor.handle, kind: actorKind(ev.actor), sha: attrString(ev, "head_sha") || undefined });
+      addPush(f, {
+        at,
+        actor: ev.actor.handle,
+        kind: actorKind(ev.actor),
+        sha: attrString(ev, "head_sha") || undefined,
+      });
     } else if (isReviewEvent(ev)) {
       // The first review by someone other than the opener and the product's own bot.
-      if (!f.first_review_at && !ev.actor.is_self && lower(ev.actor.handle) !== lower(f.opener ?? "")) f.first_review_at = at;
+      if (!f.first_review_at && !ev.actor.is_self && lower(ev.actor.handle) !== lower(f.opener ?? ""))
+        f.first_review_at = at;
     }
     if (isMergedEvent(ev) && !f.merged_at) {
       f.merged_at = attrTime(ev, "merged_at") ?? at;
@@ -206,7 +213,8 @@ export class FactsBook {
     const repo = (ev.source as Partial<SourceRef>).repo ?? "";
     if (branch === "" || repo === "") return;
     for (const f of this.byId.values()) {
-      if (f.team_id !== ev.team_id || lower(f.provider) !== lower(ev.provider) || lower(f.repo) !== lower(repo)) continue;
+      if (f.team_id !== ev.team_id || lower(f.provider) !== lower(ev.provider) || lower(f.repo) !== lower(repo))
+        continue;
       if (f.head_branch !== branch || !pullRequestOpen(f)) continue;
       if (f.opened_at && msOf(at) < msOf(f.opened_at)) continue;
       const push: PullRequestPush = { at, actor: ev.actor.handle, kind: actorKind(ev.actor) };

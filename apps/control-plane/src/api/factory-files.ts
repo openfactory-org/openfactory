@@ -7,7 +7,8 @@ import { json, type Handler } from "../http/handler";
 const CACHE = { "cache-control": "public, max-age=300" };
 
 function documents(version: string): Record<string, string> {
-  if (version !== schemaVersions().current) throw new OfError("resource_not_found", `schema version ${version} not found`);
+  if (version !== schemaVersions().current)
+    throw new OfError("resource_not_found", `schema version ${version} not found`);
   return schemas();
 }
 
@@ -20,7 +21,12 @@ export const listSchemaVersions: Handler = async () => {
 /** GET /factory-files/schemas/{version}: every document, keyed by file name. */
 export const getSchemaVersion: Handler = async (_r, _e, ctx) => {
   const docs = documents(ctx.params["version"]!);
-  const body = "{" + Object.entries(docs).map(([k, v]) => `${JSON.stringify(k)}:${v.trim()}`).join(",") + "}\n";
+  const body =
+    "{" +
+    Object.entries(docs)
+      .map(([k, v]) => `${JSON.stringify(k)}:${v.trim()}`)
+      .join(",") +
+    "}\n";
   return new Response(body, { headers: { "content-type": "application/json", ...CACHE } });
 };
 
@@ -30,7 +36,8 @@ export const getSchemaDocument: Handler = async (_r, _e, ctx) => {
   const d = ctx.params["document"]!;
   for (const cand of [d, d + ".schema.json", d + ".json"]) {
     const doc = docs[cand];
-    if (doc !== undefined) return new Response(doc, { headers: { "content-type": "application/schema+json", ...CACHE } });
+    if (doc !== undefined)
+      return new Response(doc, { headers: { "content-type": "application/schema+json", ...CACHE } });
   }
   throw new OfError("resource_not_found", `schema document ${d} not found`);
 };

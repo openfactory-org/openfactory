@@ -145,7 +145,8 @@ describe("transcripts", () => {
     w.put(run({ id: "grand", parent_run_id: "child", agent_name: "review" }));
     w.say("grand", "assistant", "LGTM grandchild");
     const tr = await buildTranscript(w, root, true, 4000, 200_000);
-    for (const want of ["=== Run root", "m3", "done", "=== Child run child", "go test", "LGTM grandchild"]) expect(tr).toContain(want);
+    for (const want of ["=== Run root", "m3", "done", "=== Child run child", "go test", "LGTM grandchild"])
+      expect(tr).toContain(want);
     const plain = await buildTranscript(w, root, false, 4000, 200_000);
     expect(plain).not.toContain("go test");
   });
@@ -192,7 +193,12 @@ describe("judge runs", () => {
     finishJudge(w, runId, "succeeded", 'The tests ran.\n{"label": "tests_run", "rationale": "go test passed"}', 0.25);
     await svc.handleRunUpdate(runId);
     expect(w.scores).toHaveLength(1);
-    expect(w.scores[0]).toMatchObject({ label: "tests_run", passed: true, judge_run_id: runId, judge_usage: { cost_usd: 0.25 } });
+    expect(w.scores[0]).toMatchObject({
+      label: "tests_run",
+      passed: true,
+      judge_run_id: runId,
+      judge_usage: { cost_usd: 0.25 },
+    });
     // The judge run is never scored, and a repeated update changes nothing.
     await svc.handleRunUpdate(runId);
     expect(w.scores).toHaveLength(1);
@@ -225,7 +231,16 @@ describe("judge runs", () => {
   });
 
   it("stops a judge that waits for input after its answer", async () => {
-    w.scorers.push(scorer({ id: "sc_1", slug: "s", labels: [{ value: "ok", score: 1 }, { value: "bad", score: 0 }] }));
+    w.scorers.push(
+      scorer({
+        id: "sc_1",
+        slug: "s",
+        labels: [
+          { value: "ok", score: 1 },
+          { value: "bad", score: 0 },
+        ],
+      }),
+    );
     const r = finished(w, "run_i", "implement", "succeeded", "done");
     const { judge_run_id: judgeId } = await svc.scoreRun("s", r.id);
     finishJudge(w, judgeId!, "idle", '{"label": "ok", "rationale": "fine"}', 0.1);
@@ -242,9 +257,31 @@ describe("judge runs", () => {
   });
 
   it("uses the passing score and keeps the improvement run of a replaced score", async () => {
-    w.scorers.push(scorer({ id: "sc_1", slug: "s", passing_score: 0.5, labels: [{ value: "meh", score: 0.4 }, { value: "ok", score: 0.6 }] }));
+    w.scorers.push(
+      scorer({
+        id: "sc_1",
+        slug: "s",
+        passing_score: 0.5,
+        labels: [
+          { value: "meh", score: 0.4 },
+          { value: "ok", score: 0.6 },
+        ],
+      }),
+    );
     const r = finished(w, "run_e", "implement", "succeeded", "x");
-    w.scores.push({ id: "score_old", factory_id: "fac_1", scorer_id: "sc_1", run_id: r.id, agent_name: "implement", label: "meh", score: 0.4, passed: false, rationale: "", created_at: w.clock.iso(), improvement_run_id: "run_imp" });
+    w.scores.push({
+      id: "score_old",
+      factory_id: "fac_1",
+      scorer_id: "sc_1",
+      run_id: r.id,
+      agent_name: "implement",
+      label: "meh",
+      score: 0.4,
+      passed: false,
+      rationale: "",
+      created_at: w.clock.iso(),
+      improvement_run_id: "run_imp",
+    });
     const { judge_run_id } = await svc.scoreRun("s", r.id);
     finishJudge(w, judge_run_id!, "succeeded", '{"label":"ok"}', 0);
     await svc.handleRunUpdate(judge_run_id!);
@@ -267,7 +304,9 @@ describe("judge runs", () => {
     const trial = w.put(run({ id: "run_t", agent_name: "implement", metadata: { benchmark_run: "bench_1" } }));
     await svc.handleRunUpdate(trial.id);
     expect(w.benchRuns).toEqual([["bench_1", "run_t"]]);
-    const judge = w.put(run({ id: "run_jt", metadata: { judge: "trial", judge_benchmark: "bench_1", judge_trial: "trial_1" } }));
+    const judge = w.put(
+      run({ id: "run_jt", metadata: { judge: "trial", judge_benchmark: "bench_1", judge_trial: "trial_1" } }),
+    );
     await svc.handleRunUpdate(judge.id);
     expect(w.benchJudges).toEqual([["bench_1", "run_jt"]]);
   });
@@ -295,7 +334,10 @@ describe("self-improvement", () => {
   };
 
   it("starts one run at the threshold and marks the failures", async () => {
-    w.definition = { name: "demo", selfImprovement: { failedRunThreshold: 3, reviewerType: "custom", reviewerEmails: ["DEV@example.com"] } } as never;
+    w.definition = {
+      name: "demo",
+      selfImprovement: { failedRunThreshold: 3, reviewerType: "custom", reviewerEmails: ["DEV@example.com"] },
+    } as never;
     w.files = {
       "factory.yaml": "name: demo\n",
       "agents/implement/agent.md": "Always write code.",
@@ -303,7 +345,10 @@ describe("self-improvement", () => {
       "agents/review/agent.md": "Review things.",
       "scorers/tests-run/scorer.md": "Did the agent run tests?",
     };
-    w.scorers.push(scorer({ id: "sc_si", slug: "tests-run", self_improvement: true }), scorer({ id: "sc_plain", slug: "other" }));
+    w.scorers.push(
+      scorer({ id: "sc_si", slug: "tests-run", self_improvement: true }),
+      scorer({ id: "sc_plain", slug: "other" }),
+    );
     await failRun("run_1", "implement", "skipped tests in attempt 1");
     await failRun("run_2", "implement", "skipped tests in attempt 2");
     expect(w.dispatches).toHaveLength(0);
@@ -318,9 +363,20 @@ describe("self-improvement", () => {
     expect(req.source.provider).toBe("self_improvement");
     expect(key).toMatch(/^improve:fac_1:implement:[0-9a-f]{64}$/);
     for (const want of [
-      "`implement`", "run_1", "run_3", "no test evidence", "Regressions addressed", "https://factory.example.com/runs/run_2",
-      "Always write code.", "Run tests first.", "Did the agent run tests?", "pull request", "propose_definition_change", "ERROR: boom",
-    ]) expect(req.prompt).toContain(want);
+      "`implement`",
+      "run_1",
+      "run_3",
+      "no test evidence",
+      "Regressions addressed",
+      "https://factory.example.com/runs/run_2",
+      "Always write code.",
+      "Run tests first.",
+      "Did the agent run tests?",
+      "pull request",
+      "propose_definition_change",
+      "ERROR: boom",
+    ])
+      expect(req.prompt).toContain(want);
     expect(req.prompt).not.toContain("Review things.");
     // Every failure of the self-improvement scorer is marked.
     for (const s of w.scores) {
@@ -328,7 +384,9 @@ describe("self-improvement", () => {
     }
     expect(w.inbox).toHaveLength(0);
     // The track records the reviewer chosen from the custom list.
-    const track = JSON.parse([...w.kv.entries()].find(([k]) => k.startsWith("scoring:improve:wi:"))![1]) as { reviewer_id: string };
+    const track = JSON.parse([...w.kv.entries()].find(([k]) => k.startsWith("scoring:improve:wi:"))![1]) as {
+      reviewer_id: string;
+    };
     expect(track.reviewer_id).toBe("u_dev");
 
     // One more failure is below the threshold again.
@@ -342,8 +400,18 @@ describe("self-improvement", () => {
   });
 
   it("counts distinct runs, triggers on age and reviews the pull request", async () => {
-    w.factories.set("fac_1", { id: "fac_1", team_id: "team_1", name: "demo", source: "git", git_repo: "github.com/acme/def", active_version_id: "ver_1" });
-    w.scorers.push(scorer({ id: "sc_a", slug: "a", self_improvement: true }), scorer({ id: "sc_b", slug: "b", self_improvement: true }));
+    w.factories.set("fac_1", {
+      id: "fac_1",
+      team_id: "team_1",
+      name: "demo",
+      source: "git",
+      git_repo: "github.com/acme/def",
+      active_version_id: "ver_1",
+    });
+    w.scorers.push(
+      scorer({ id: "sc_a", slug: "a", self_improvement: true }),
+      scorer({ id: "sc_b", slug: "b", self_improvement: true }),
+    );
     const r = finished(w, "run_1", "implement", "succeeded", "nope");
     await svc.handleRunUpdate(r.id);
     for (const j of [...w.judges]) {
@@ -359,13 +427,28 @@ describe("self-improvement", () => {
     const imp = started[0]!;
     // The run opens a pull request. When its turn ends, the reviewer gets the item.
     w.workItems.set(imp.work_item_id!, {
-      id: imp.work_item_id!, factory_id: "fac_1",
-      pull_requests: [{ forge: "GITHUB", repo: "acme/def", number: 7, url: "https://github.com/acme/def/pull/7", branch: "", state: "open" }],
+      id: imp.work_item_id!,
+      factory_id: "fac_1",
+      pull_requests: [
+        {
+          forge: "GITHUB",
+          repo: "acme/def",
+          number: 7,
+          url: "https://github.com/acme/def/pull/7",
+          branch: "",
+          state: "open",
+        },
+      ],
     } as never);
     imp.state = "idle";
     await svc.handleRunUpdate(imp.id);
     expect(w.inbox).toHaveLength(1);
-    expect(w.inbox[0]).toMatchObject({ assignee_id: "u_admin", kind: "review", run_id: imp.id, work_item_id: imp.work_item_id });
+    expect(w.inbox[0]).toMatchObject({
+      assignee_id: "u_admin",
+      kind: "review",
+      run_id: imp.id,
+      work_item_id: imp.work_item_id,
+    });
     expect(w.inbox[0]!.body).toContain("acme/def#7");
     expect(w.inbox[0]!.body).toContain("Regressions addressed");
     // The same pull request does not create a second item.
@@ -377,9 +460,13 @@ describe("self-improvement", () => {
     const asked: string[] = [];
     let fail = "";
     svc = new ScoringService({
-      store: w, runs: w, engine: w, benchmarks: w,
+      store: w,
+      runs: w,
+      engine: w,
+      benchmarks: w,
       opts: {
-        now: w.clock.now, randomInt: () => 0,
+        now: w.clock.now,
+        randomInt: () => 0,
         requestReview: async (_t, pr, user) => {
           asked.push(`${user}@${pr.repo}`);
           if (fail) throw new Error(fail);
@@ -428,14 +515,17 @@ describe("improvement settings and reviewers", () => {
   it("defaults the reviewer type and takes the analysis model from the definition, then the server", () => {
     expect(improvementSettings(null, {}).reviewerType).toBe("admins");
     expect(improvementSettings(null, { analysisModel: "server-model" }).analysisModel).toBe("server-model");
-    expect(improvementSettings({ selfImprovement: { analysisModel: "def-model" } }, { analysisModel: "server-model" }).analysisModel).toBe("def-model");
+    expect(
+      improvementSettings({ selfImprovement: { analysisModel: "def-model" } }, { analysisModel: "server-model" })
+        .analysisModel,
+    ).toBe("def-model");
   });
 
   const users = [
     { id: "b", email: "B@x.com", role: "admin" },
     { id: "a", email: "a@x.com", role: "editor" },
     { id: "c", email: "c@x.com", role: "user" },
-  ] as (Pick<User, "id" | "email" | "role">)[];
+  ] as Pick<User, "id" | "email" | "role">[];
   const reviewer: [string, string[], string][] = [
     ["admins", [], "b"],
     ["", [], "b"],
@@ -445,6 +535,10 @@ describe("improvement settings and reviewers", () => {
     ["none", [], ""],
   ];
   it.each(reviewer)("%s %j gives %j", (type, emails, want) => {
-    expect(eligibleReviewers(users, type, emails).map((u) => u.id).join(",")).toBe(want);
+    expect(
+      eligibleReviewers(users, type, emails)
+        .map((u) => u.id)
+        .join(","),
+    ).toBe(want);
   });
 });

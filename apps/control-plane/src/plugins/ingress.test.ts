@@ -1,13 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PLUGIN_API_VERSION, type HostApi, type PluginEvent, type WebhookResult } from "@openfactory/plugin-api";
 import { FakeHostApi } from "@openfactory/plugin-api/testing";
-import {
-  forwardPluginWebhook,
-  pluginWebhookName,
-  toDeliveries,
-  webhookResponse,
-  type PluginDelivery,
-} from "./ingress";
+import { forwardPluginWebhook, pluginWebhookName, toDeliveries, webhookResponse, type PluginDelivery } from "./ingress";
 import { eventDedupeKey, eventToCore } from "./mappers";
 import { loadPlugins, type PluginStub } from "./registry";
 
@@ -27,7 +21,10 @@ const ev = (over: Partial<PluginEvent> = {}): PluginEvent => ({
   ...over,
 });
 
-async function registryWith(handle: PluginStub["handleWebhook"], roles: Array<"forge" | "ingress"> = ["forge", "ingress"]) {
+async function registryWith(
+  handle: PluginStub["handleWebhook"],
+  roles: Array<"forge" | "ingress"> = ["forge", "ingress"],
+) {
   const stub = {
     info: async () => ({ name: "gitlab", version: "1", apiVersion: PLUGIN_API_VERSION, roles }),
     ping: async () => {},
@@ -36,9 +33,13 @@ async function registryWith(handle: PluginStub["handleWebhook"], roles: Array<"f
   return loadPlugins({ PLUGIN_GITLAB: stub }, { log: () => {} });
 }
 
-const post = (path = "/plugins/gitlab/webhook") => new Request("https://cp.test" + path, { method: "POST", body: "{}" });
+const post = (path = "/plugins/gitlab/webhook") =>
+  new Request("https://cp.test" + path, { method: "POST", body: "{}" });
 
-function opts(registry: Awaited<ReturnType<typeof registryWith>>, deliver: (d: PluginDelivery[]) => Promise<void> = async () => {}) {
+function opts(
+  registry: Awaited<ReturnType<typeof registryWith>>,
+  deliver: (d: PluginDelivery[]) => Promise<void> = async () => {},
+) {
   return { registry, host: () => new FakeHostApi() as HostApi, deliver, log: () => {} };
 }
 
@@ -59,9 +60,18 @@ describe("forwardPluginWebhook", () => {
     const delivered: PluginDelivery[][] = [];
     const reg = await registryWith(async (_req, host) => {
       expect(host).toBeDefined();
-      return { status: 202, headers: { "content-type": "application/json", "x-evil": "1" }, body: '{"status":"accepted"}', events: [ev()] };
+      return {
+        status: 202,
+        headers: { "content-type": "application/json", "x-evil": "1" },
+        body: '{"status":"accepted"}',
+        events: [ev()],
+      };
     });
-    const res = await forwardPluginWebhook("gitlab", post(), opts(reg, async (d) => void delivered.push(d)));
+    const res = await forwardPluginWebhook(
+      "gitlab",
+      post(),
+      opts(reg, async (d) => void delivered.push(d)),
+    );
     expect(res.status).toBe(202);
     expect(await res.text()).toBe('{"status":"accepted"}');
     expect(res.headers.get("x-evil")).toBeNull();
@@ -69,14 +79,25 @@ describe("forwardPluginWebhook", () => {
     expect(delivered).toHaveLength(1);
     expect(delivered[0]![0]).toMatchObject({
       dedupeKey: "gitlab:d1:push",
-      event: { id: "evt_1", team_id: "team_1", provider: "gitlab", type: "push", delivery_id: "d1:push", action_key: "gitlab:d1" },
+      event: {
+        id: "evt_1",
+        team_id: "team_1",
+        provider: "gitlab",
+        type: "push",
+        delivery_id: "d1:push",
+        action_key: "gitlab:d1",
+      },
     });
   });
 
   it("answers the sender without delivering when there are no events", async () => {
     let called = false;
     const reg = await registryWith(async () => ({ status: 401, body: "no", events: [] }));
-    const res = await forwardPluginWebhook("gitlab", post(), opts(reg, async () => void (called = true)));
+    const res = await forwardPluginWebhook(
+      "gitlab",
+      post(),
+      opts(reg, async () => void (called = true)),
+    );
     expect(res.status).toBe(401);
     expect(called).toBe(false);
   });
@@ -104,14 +125,22 @@ describe("forwardPluginWebhook", () => {
 
   it("answers 503 when the events cannot be stored, so the sender retries", async () => {
     const reg = await registryWith(async () => ({ status: 202, events: [ev()] }));
-    const res = await forwardPluginWebhook("gitlab", post(), opts(reg, async () => Promise.reject(new Error("do down"))));
+    const res = await forwardPluginWebhook(
+      "gitlab",
+      post(),
+      opts(reg, async () => Promise.reject(new Error("do down"))),
+    );
     expect(res.status).toBe(503);
   });
 });
 
 describe("webhookResponse", () => {
   it("keeps allowed headers, repairs a bad status and omits a body for 204", async () => {
-    const r = webhookResponse({ status: 401, headers: { "WWW-Authenticate": 'Basic realm="x"', "Set-Cookie": "a=b" }, body: "x" });
+    const r = webhookResponse({
+      status: 401,
+      headers: { "WWW-Authenticate": 'Basic realm="x"', "Set-Cookie": "a=b" },
+      body: "x",
+    });
     expect(r.headers.get("www-authenticate")).toBe('Basic realm="x"');
     expect(r.headers.get("set-cookie")).toBeNull();
     expect(webhookResponse({ status: 99 } as WebhookResult).status).toBe(502);
@@ -123,7 +152,12 @@ describe("webhookResponse", () => {
 describe("events", () => {
   it("drops an event without a team, provider or type and gives ids to events without one", () => {
     const logs: string[] = [];
-    const out = toDeliveries([ev({ teamId: "" }), ev({ type: "" }), ev({ id: "", deliveryId: "" })], "gitlab", undefined, (m) => logs.push(m));
+    const out = toDeliveries(
+      [ev({ teamId: "" }), ev({ type: "" }), ev({ id: "", deliveryId: "" })],
+      "gitlab",
+      undefined,
+      (m) => logs.push(m),
+    );
     expect(out).toHaveLength(1);
     expect(out[0]!.event.id).toMatch(/^evt_/);
     expect(out[0]!.dedupeKey).toBe(out[0]!.event.id);

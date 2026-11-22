@@ -28,13 +28,25 @@ async function aes(key: Uint8Array<ArrayBuffer>, usage: "encrypt" | "decrypt"): 
   return crypto.subtle.importKey("raw", key, "AES-GCM", false, [usage]);
 }
 
-async function seal(key: Uint8Array<ArrayBuffer>, plain: Uint8Array<ArrayBuffer>, ad: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
+async function seal(
+  key: Uint8Array<ArrayBuffer>,
+  plain: Uint8Array<ArrayBuffer>,
+  ad: Uint8Array<ArrayBuffer>,
+): Promise<Uint8Array<ArrayBuffer>> {
   const nonce = randomBytes(NONCE);
-  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce, additionalData: ad }, await aes(key, "encrypt"), plain);
+  const ct = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: nonce, additionalData: ad },
+    await aes(key, "encrypt"),
+    plain,
+  );
   return concat(nonce, new Uint8Array(ct));
 }
 
-async function open(key: Uint8Array<ArrayBuffer>, sealed: Uint8Array, ad: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
+async function open(
+  key: Uint8Array<ArrayBuffer>,
+  sealed: Uint8Array,
+  ad: Uint8Array<ArrayBuffer>,
+): Promise<Uint8Array<ArrayBuffer>> {
   if (sealed.length < NONCE) throw new Error("ciphertext too short");
   const pt = await crypto.subtle.decrypt(
     { name: "AES-GCM", iv: sealed.slice(0, NONCE), additionalData: ad },
@@ -46,8 +58,20 @@ async function open(key: Uint8Array<ArrayBuffer>, sealed: Uint8Array, ad: Uint8A
 
 /** Encrypts and decrypts envelopes with the Worker's KEKs. */
 export interface Encrypter {
-  encrypt(teamId: string, factoryId: string, name: string, type: string, value: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>>;
-  decrypt(teamId: string, factoryId: string, name: string, type: string, envelope: Uint8Array): Promise<Uint8Array<ArrayBuffer>>;
+  encrypt(
+    teamId: string,
+    factoryId: string,
+    name: string,
+    type: string,
+    value: Uint8Array<ArrayBuffer>,
+  ): Promise<Uint8Array<ArrayBuffer>>;
+  decrypt(
+    teamId: string,
+    factoryId: string,
+    name: string,
+    type: string,
+    envelope: Uint8Array,
+  ): Promise<Uint8Array<ArrayBuffer>>;
 }
 
 export async function localEncrypter(env: Pick<Env, "OF_SECRET_KEY" | "OF_SECRET_KEY_PREVIOUS">): Promise<Encrypter> {
@@ -83,7 +107,10 @@ export async function localEncrypter(env: Pick<Env, "OF_SECRET_KEY" | "OF_SECRET
       const rest = env.subarray(4 + n);
       if (rest.length < w) throw new Error("secrets: malformed ciphertext");
       const kek = keys.get(version);
-      if (!kek) throw new Error(`secrets: ciphertext was encrypted with a different master key (key version "${version}" is not configured)`);
+      if (!kek)
+        throw new Error(
+          `secrets: ciphertext was encrypted with a different master key (key version "${version}" is not configured)`,
+        );
       let dek: Uint8Array<ArrayBuffer>;
       try {
         dek = await open(kek, rest.subarray(0, w), WRAP_AAD);

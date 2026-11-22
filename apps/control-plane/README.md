@@ -29,6 +29,10 @@ npx wrangler dev -c apps/control-plane/wrangler.jsonc
 npm run cf-types -w @openfactory/control-plane       # writes src/worker-configuration.d.ts
 ```
 
+## Package
+
+`npm run build -w @openfactory/control-plane` writes the npm package to `dist/`: ESM bundles of `src/index.ts` and `src/builder.ts` (`dist/index.js`, `dist/builder.js`, `dist/chunks/`) and type declarations (`dist/dts/`). The private workspace packages are bundled, and their declarations are in `dist/dts/vendor/`. The `dependencies` of `package.json` stay external. The build then runs `wrangler deploy --dry-run` into `.wrangler/dry-run`. A custom build imports the package and has its own `wrangler.jsonc`; see `examples/control-plane-builder`.
+
 ## Rules
 
 - One `ctx.storage.transactionSync` per request or alarm step. No `await` inside it. Effects leave through the outbox.

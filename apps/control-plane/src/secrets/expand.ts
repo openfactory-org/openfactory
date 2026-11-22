@@ -28,7 +28,10 @@ export async function expandWith(s: string, lookup: SecretLookup): Promise<strin
   return s.replace(PLACEHOLDER_RE, (_m, n: string) => values.get(n)!);
 }
 
-export async function expandMap(m: Record<string, string> | undefined, lookup: SecretLookup): Promise<Record<string, string> | undefined> {
+export async function expandMap(
+  m: Record<string, string> | undefined,
+  lookup: SecretLookup,
+): Promise<Record<string, string> | undefined> {
   if (!m) return undefined;
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(m)) {

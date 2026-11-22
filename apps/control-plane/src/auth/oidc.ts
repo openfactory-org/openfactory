@@ -144,7 +144,10 @@ export function discover(issuer: string, fetcher: typeof fetch = fetch) {
       });
       if (!res.ok) throw new Error(`oidc discovery: ${res.status}`);
       const d = (await res.json()) as Discovery;
-      if (d.issuer !== issuer) throw new Error(`oidc: issuer did not match the issuer returned by provider, expected "${issuer}" got "${d.issuer}"`);
+      if (d.issuer !== issuer)
+        throw new Error(
+          `oidc: issuer did not match the issuer returned by provider, expected "${issuer}" got "${d.issuer}"`,
+        );
       return { d, jwks: createRemoteJWKSet(new URL(d.jwks_uri)) };
     })();
     p.catch(() => discoveries.delete(issuer));
@@ -178,7 +181,12 @@ export async function startLogin(c: OIDCConfig, returnTo: string): Promise<{ flo
 }
 
 /** Finishes a login (exchange): verifies state, code, ID token, nonce and at_hash. */
-export async function finishLogin(c: OIDCConfig, query: URLSearchParams, flow: OIDCFlow, nowMs?: number): Promise<Identity> {
+export async function finishLogin(
+  c: OIDCConfig,
+  query: URLSearchParams,
+  flow: OIDCFlow,
+  nowMs?: number,
+): Promise<Identity> {
   const err = query.get("error");
   if (err) {
     throw new LoginFailure(
@@ -196,12 +204,26 @@ export async function finishLogin(c: OIDCConfig, query: URLSearchParams, flow: O
   } catch (e) {
     throw new LoginFailure("provider_unavailable", (e as Error).message);
   }
-  const form = new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: c.redirectUrl, code_verifier: flow.v });
-  const headers: Record<string, string> = { "content-type": "application/x-www-form-urlencoded", accept: "application/json" };
+  const form = new URLSearchParams({
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: c.redirectUrl,
+    code_verifier: flow.v,
+  });
+  const headers: Record<string, string> = {
+    "content-type": "application/x-www-form-urlencoded",
+    accept: "application/json",
+  };
   if (c.clientSecret) {
-    headers["authorization"] = "Basic " + btoa(`${encodeURIComponent(c.clientId)}:${encodeURIComponent(c.clientSecret)}`);
+    headers["authorization"] =
+      "Basic " + btoa(`${encodeURIComponent(c.clientId)}:${encodeURIComponent(c.clientSecret)}`);
   } else form.set("client_id", c.clientId);
-  const res = await fetch(disc.d.token_endpoint, { method: "POST", headers, body: form, signal: AbortSignal.timeout(15_000) });
+  const res = await fetch(disc.d.token_endpoint, {
+    method: "POST",
+    headers,
+    body: form,
+    signal: AbortSignal.timeout(15_000),
+  });
   if (!res.ok) throw new LoginFailure("provider_error", `token exchange: ${res.status}`);
   const tok = (await res.json()) as { id_token?: string; access_token?: string };
   if (!tok.id_token) throw new LoginFailure("provider_error", "token response without id_token");
@@ -214,11 +236,13 @@ export async function finishLogin(c: OIDCConfig, query: URLSearchParams, flow: O
     throw new LoginFailure("provider_error", `verify id_token: ${(e as Error).message}`);
   }
   const nonce = typeof payload["nonce"] === "string" ? (payload["nonce"] as string) : "";
-  if (nonce === "" || !timingSafeEqual(nonce, flow.n)) throw new LoginFailure("nonce_mismatch", "id_token nonce does not match");
+  if (nonce === "" || !timingSafeEqual(nonce, flow.n))
+    throw new LoginFailure("nonce_mismatch", "id_token nonce does not match");
   const atHash = payload["at_hash"];
   if (typeof atHash === "string" && atHash !== "") {
     const h = await sha256(utf8(tok.access_token ?? ""));
-    if (b64url(h.subarray(0, 16)) !== atHash) throw new LoginFailure("provider_error", "at_hash: access token hash does not match value in ID token");
+    if (b64url(h.subarray(0, 16)) !== atHash)
+      throw new LoginFailure("provider_error", "at_hash: access token hash does not match value in ID token");
   }
   return identityFromClaims(c, String(payload.sub ?? ""), payload as Record<string, unknown>);
 }

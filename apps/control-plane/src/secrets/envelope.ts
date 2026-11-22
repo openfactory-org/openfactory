@@ -69,9 +69,12 @@ export class Envelopes {
     } catch (e) {
       if (e instanceof OfError && e.code === "resource_not_found") {
         // Not a not-found error: callers would read it as a missing secret.
-        throw new Error(`secrets: ciphertext was encrypted with a different master key (key version "${p.version}" is not configured)`);
+        throw new Error(
+          `secrets: ciphertext was encrypted with a different master key (key version "${p.version}" is not configured)`,
+          { cause: e },
+        );
       }
-      throw new Error(`secrets: cannot unwrap data key: ${(e as Error).message}`);
+      throw new Error(`secrets: cannot unwrap data key: ${(e as Error).message}`, { cause: e });
     }
   }
 

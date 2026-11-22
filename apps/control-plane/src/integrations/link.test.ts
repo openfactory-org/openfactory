@@ -37,7 +37,8 @@ function setup(opts: { prover?: boolean; admin?: boolean } = {}) {
 }
 
 const tokenOf = (url: string): string => url.slice(url.lastIndexOf("/") + 1);
-const formReq = (url: string, csrf: string) => new Request(url, { method: "POST", body: new URLSearchParams({ csrf }) });
+const formReq = (url: string, csrf: string) =>
+  new Request(url, { method: "POST", body: new URLSearchParams({ csrf }) });
 const csrfOf = (html: string): string => /name="csrf" value="([^"]+)"/.exec(html)![1]!;
 
 describe("Linker private link without a provider sign-in", () => {
@@ -56,22 +57,37 @@ describe("Linker private link without a provider sign-in", () => {
     expect(bad.status).toBe(403);
     const ok = (await t.linker.handle(formReq("https://of.example.com" + path, csrfOf(html))))!;
     expect(ok.status).toBe(200);
-    expect(t.store.identities.get("slack|U1")).toEqual({ user_id: "usr_a", provider: "slack", external_id: "U1", handle: "alice" });
-    expect(t.audit.map((a) => [a.action, a.outcome, a.method])).toEqual([["account.link", "success", "private_message"]]);
+    expect(t.store.identities.get("slack|U1")).toEqual({
+      user_id: "usr_a",
+      provider: "slack",
+      external_id: "U1",
+      handle: "alice",
+    });
+    expect(t.audit.map((a) => [a.action, a.outcome, a.method])).toEqual([
+      ["account.link", "success", "private_message"],
+    ]);
   });
 
   it("rejects a tampered token, an expired token, a wrong team and a signed-out visitor", async () => {
     const t = setup();
     const url = await t.linker.privateUrl("team_1", "slack", "U1", "");
     const tok = tokenOf(url);
-    expect((await t.linker.handle(new Request("https://x/integrations/link/" + tok.slice(0, -2) + "xx")))!.status).toBe(400);
+    expect((await t.linker.handle(new Request("https://x/integrations/link/" + tok.slice(0, -2) + "xx")))!.status).toBe(
+      400,
+    );
     t.setUser(user({ id: "usr_z", team_id: "team_9" }));
     expect((await t.linker.handle(new Request("https://x/integrations/link/" + tok)))!.status).toBe(403);
     t.setUser(null);
     const redirect = (await t.linker.handle(new Request("https://x/integrations/link/" + tok)))!;
     expect(redirect.status).toBe(302);
     expect(redirect.headers.get("Location")).toContain("/login?next=");
-    const later = new Linker({ store: t.store, key: "k", publicUrl: "https://of.example.com", currentUser: async () => user(), now: () => new Date(NOW.getTime() + 25 * 3600_000) });
+    const later = new Linker({
+      store: t.store,
+      key: "k",
+      publicUrl: "https://of.example.com",
+      currentUser: async () => user(),
+      now: () => new Date(NOW.getTime() + 25 * 3600_000),
+    });
     expect((await later.handle(new Request("https://x/integrations/link/" + tok)))!.status).toBe(400);
   });
 
@@ -109,7 +125,9 @@ describe("Linker with a provider sign-in", () => {
     acct = 99;
     const html2 = await (await t.linker.handle(new Request("https://x" + path)))!.text();
     const loc2 = new URL((await t.linker.handle(formReq("https://x" + path, csrfOf(html2))))!.headers.get("Location")!);
-    const mismatch = (await t.linker.handle(new Request(`https://x/integrations/link-callback?code=c1&state=${loc2.searchParams.get("state")}`)))!;
+    const mismatch = (await t.linker.handle(
+      new Request(`https://x/integrations/link-callback?code=c1&state=${loc2.searchParams.get("state")}`),
+    ))!;
     expect(mismatch.status).toBe(403);
     expect(t.store.identities.size).toBe(0);
     expect(t.audit.at(-1)).toMatchObject({ outcome: "failure", reason: "account mismatch" });
@@ -117,7 +135,9 @@ describe("Linker with a provider sign-in", () => {
 
   it("rejects a forged state", async () => {
     const t = setup({ prover: true });
-    expect((await t.linker.handle(new Request("https://x/integrations/link-callback?state=abc.def&code=c")))!.status).toBe(400);
+    expect(
+      (await t.linker.handle(new Request("https://x/integrations/link-callback?state=abc.def&code=c")))!.status,
+    ).toBe(400);
   });
 });
 
@@ -164,7 +184,11 @@ describe("unlink, link by email and removal", () => {
 describe("prover defaults", () => {
   const secrets = new FakeSecrets({ CS: "client-secret" });
   const rec = (provider: string, config: Record<string, string> = {}) =>
-    integration({ id: "int_1", provider, config: { oauth_client_id: "cid", oauth_client_secret_ref: "CS", ...config } });
+    integration({
+      id: "int_1",
+      provider,
+      config: { oauth_client_id: "cid", oauth_client_secret_ref: "CS", ...config },
+    });
 
   it("builds the authorization URL of each provider", async () => {
     const url = async (provider: string, config?: Record<string, string>) =>
@@ -179,7 +203,11 @@ describe("prover defaults", () => {
     expect(linear.searchParams.get("scope")).toBe("read");
     const jira = await url("jira");
     expect(jira.searchParams.get("audience")).toBe("api.atlassian.com");
-    expect((await url("github", { oauth_scopes: "a, b", oauth_authorize_url: "https://ghe/auth?x=1" })).searchParams.get("scope")).toBe("a b");
+    expect(
+      (await url("github", { oauth_scopes: "a, b", oauth_authorize_url: "https://ghe/auth?x=1" })).searchParams.get(
+        "scope",
+      ),
+    ).toBe("a b");
   });
 
   it("needs a client ID, and the endpoints of an unknown provider", async () => {
@@ -189,13 +217,18 @@ describe("prover defaults", () => {
 
   it("exchanges Jira with a JSON body and Linear with a GraphQL user-info request", async () => {
     const ff = new FakeFetch();
-    ff.on("auth.atlassian.com/oauth/token", () => ({ access_token: "t" })).on("api.atlassian.com/me", () => ({ account_id: "acc-1", name: "J" }));
+    ff.on("auth.atlassian.com/oauth/token", () => ({ access_token: "t" })).on("api.atlassian.com/me", () => ({
+      account_id: "acc-1",
+      name: "J",
+    }));
     const j = await (await proverFromIntegration(secrets, rec("jira"), ff.fetch))!.exchange("code", "https://of/cb");
     expect(j).toEqual({ externalId: "acc-1", handle: "J" });
     expect(ff.calls[0]!.headers.get("Content-Type")).toBe("application/json");
     expect(ff.json(0)["client_secret"]).toBe("client-secret");
     const ff2 = new FakeFetch();
-    ff2.on("oauth/token", () => ({ access_token: "t" })).on("graphql", () => ({ data: { viewer: { id: "u-1", name: "L" } } }));
+    ff2
+      .on("oauth/token", () => ({ access_token: "t" }))
+      .on("graphql", () => ({ data: { viewer: { id: "u-1", name: "L" } } }));
     const l = await (await proverFromIntegration(secrets, rec("linear"), ff2.fetch))!.exchange("code", "https://of/cb");
     expect(l).toEqual({ externalId: "u-1", handle: "L" });
     expect(ff2.calls[1]!.method).toBe("POST");

@@ -89,7 +89,8 @@ export function createTransport(opts: TransportOptions = {}): typeof fetch {
   const base = opts.fetch ?? ((...a: Parameters<typeof fetch>) => globalThis.fetch(...a));
   const maxRetries = opts.maxRetries ?? 3;
   const wait = opts.sleep ?? sleep;
-  const ua = opts.userAgent === null ? null : (opts.userAgent ? opts.userAgent + " " : "") + "openfactory-ts/" + CLIENT_VERSION;
+  const ua =
+    opts.userAgent === null ? null : (opts.userAgent ? opts.userAgent + " " : "") + "openfactory-ts/" + CLIENT_VERSION;
   const transport = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const req = new Request(input, init);
     if (opts.apiKey && !req.headers.has("Authorization")) req.headers.set("Authorization", "Bearer " + opts.apiKey);

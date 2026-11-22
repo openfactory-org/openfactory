@@ -35,7 +35,11 @@ export interface McpBackends {
   factory: FactoryMcpBackend;
 }
 
-const backends: McpBackends = { run: defaultRunBackend, integrations: unavailableIntegrations, factory: defaultFactoryBackend };
+const backends: McpBackends = {
+  run: defaultRunBackend,
+  integrations: unavailableIntegrations,
+  factory: defaultFactoryBackend,
+};
 
 /** Replaces backends (wiring of the integration clients; fakes in tests). */
 export function setMcpBackends(b: Partial<McpBackends>): void {
@@ -43,7 +47,11 @@ export function setMcpBackends(b: Partial<McpBackends>): void {
 }
 
 export function resetMcpBackends(): void {
-  Object.assign(backends, { run: defaultRunBackend, integrations: unavailableIntegrations, factory: defaultFactoryBackend });
+  Object.assign(backends, {
+    run: defaultRunBackend,
+    integrations: unavailableIntegrations,
+    factory: defaultFactoryBackend,
+  });
 }
 
 const FACTORY_SERVER: McpServer<FactoryCtx> = {
@@ -59,7 +67,10 @@ function unauthorized(env: Env, path: string, desc: string): Response {
   const md = env.OF_PUBLIC_URL ? `, resource_metadata="${resourceMetadataURL(env, path)}"` : "";
   return new Response(desc + "\n", {
     status: 401,
-    headers: { "www-authenticate": `Bearer error="invalid_token", error_description="${desc}"${md}`, "content-type": "text/plain" },
+    headers: {
+      "www-authenticate": `Bearer error="invalid_token", error_description="${desc}"${md}`,
+      "content-type": "text/plain",
+    },
   });
 }
 
@@ -82,7 +93,12 @@ async function factoryPrincipal(request: Request, env: Env): Promise<Principal |
 async function serveFactory(request: Request, env: Env, path: string): Promise<Response> {
   const p = await factoryPrincipal(request, env);
   if (typeof p === "string") return unauthorized(env, path, p);
-  const ctx: FactoryCtx = { env, principal: p, backend: backends.factory, publicURL: (env.OF_PUBLIC_URL ?? "").replace(/\/+$/, "") };
+  const ctx: FactoryCtx = {
+    env,
+    principal: p,
+    backend: backends.factory,
+    publicURL: (env.OF_PUBLIC_URL ?? "").replace(/\/+$/, ""),
+  };
   return serveMcp(request, FACTORY_SERVER, ctx);
 }
 
@@ -93,7 +109,13 @@ function twoSegments(rest: string): [string, string] | null {
   return [decodeURIComponent(parts[0]!), decodeURIComponent(parts[1]!)];
 }
 
-async function serveRunEndpoint(request: Request, env: Env, kind: "proxy" | "integration", a: string, b: string): Promise<Response> {
+async function serveRunEndpoint(
+  request: Request,
+  env: Env,
+  kind: "proxy" | "integration",
+  a: string,
+  b: string,
+): Promise<Response> {
   const runId = kind === "proxy" ? a : b;
   const param = kind === "proxy" ? b : a; // serverId or provider
   const auth = await backends.run.authenticate(env, runId, runToken(request));
@@ -109,7 +131,11 @@ async function serveRunEndpoint(request: Request, env: Env, kind: "proxy" | "int
   if (kind === "proxy") return serveProxy(request, env, rt, backends.run, run, param, guarded.text);
   const ic = await integrationContext(env, backends.run, backends.integrations, run, param);
   if ("response" in ic) return ic.response;
-  const replay = new Request(request.url, { method: request.method, headers: request.headers, body: request.method === "POST" ? guarded.text : null });
+  const replay = new Request(request.url, {
+    method: request.method,
+    headers: request.headers,
+    body: request.method === "POST" ? guarded.text : null,
+  });
   return serveMcp(replay, ic.server, ic.ctx);
 }
 
@@ -124,13 +150,18 @@ export async function handleMcpRequest(request: Request, env: Env): Promise<Resp
     if (path === FACTORY_MCP_PATH || path === FACTORY_MCP_ALIAS_PATH) return await serveFactory(request, env, path);
     if (path.startsWith(PROXY_PATH_PREFIX)) {
       const seg = twoSegments(path.slice(PROXY_PATH_PREFIX.length));
-      return seg ? await serveRunEndpoint(request, env, "proxy", seg[0], seg[1]) : runError(404, "not_found", "not found");
+      return seg
+        ? await serveRunEndpoint(request, env, "proxy", seg[0], seg[1])
+        : runError(404, "not_found", "not found");
     }
     if (path.startsWith(INTEGRATION_PATH_PREFIX)) {
       const seg = twoSegments(path.slice(INTEGRATION_PATH_PREFIX.length));
-      return seg ? await serveRunEndpoint(request, env, "integration", seg[0], seg[1]) : runError(404, "not_found", "not found");
+      return seg
+        ? await serveRunEndpoint(request, env, "integration", seg[0], seg[1])
+        : runError(404, "not_found", "not found");
     }
-    if (path.startsWith("/.well-known/oauth-") || path.startsWith("/oauth/")) return await handleOAuthRequest(request, env);
+    if (path.startsWith("/.well-known/oauth-") || path.startsWith("/oauth/"))
+      return await handleOAuthRequest(request, env);
   } catch (e) {
     console.error("mcp: internal error", request.method, path, e);
     return runError(500, "internal", "internal error");

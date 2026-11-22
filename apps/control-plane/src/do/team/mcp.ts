@@ -46,7 +46,8 @@ const STATE_TTL_MS = 10 * 60 * 1000;
 
 type JsonObject = Record<string, unknown>;
 
-const obj = (v: unknown): JsonObject => (typeof v === "object" && v !== null && !Array.isArray(v) ? (v as JsonObject) : {});
+const obj = (v: unknown): JsonObject =>
+  typeof v === "object" && v !== null && !Array.isArray(v) ? (v as JsonObject) : {};
 const s = (o: JsonObject, k: string): string => (typeof o[k] === "string" ? (o[k] as string) : "");
 /** Clock of internal ops: the Worker passes `now` (tests move it); else Date.now(). */
 const nowOf = (o: JsonObject): number => (typeof o.now === "number" ? o.now : Date.now());
@@ -65,7 +66,8 @@ function integrationProviders(kit: TeamKit): string[] {
 
 function signedInUser(call: OpCall, what: string): string {
   const p = call.principal();
-  if (p.kind !== "user" && p.kind !== "factory_mcp") throw new OfError("not_authorized", `${what} needs a signed-in user`);
+  if (p.kind !== "user" && p.kind !== "factory_mcp")
+    throw new OfError("not_authorized", `${what} needs a signed-in user`);
   return p.userId ?? p.id;
 }
 
@@ -273,12 +275,21 @@ const internalOps: Record<string, TeamOp> = {
     const o = obj(call.body);
     const id = newId("conn");
     kit.tx(() => {
-      kit.sql.exec("INSERT INTO mcp_connections (id, provider, created_ms) VALUES (?, ?, ?)", id, s(o, "provider"), nowOf(o));
+      kit.sql.exec(
+        "INSERT INTO mcp_connections (id, provider, created_ms) VALUES (?, ?, ?)",
+        id,
+        s(o, "provider"),
+        nowOf(o),
+      );
     });
     return { id };
   },
   "mcp.connection.get": (kit, call) => {
-    const r = first<{ provider: string }>(kit.sql, "SELECT provider FROM mcp_connections WHERE id = ?", s(obj(call.body), "id"));
+    const r = first<{ provider: string }>(
+      kit.sql,
+      "SELECT provider FROM mcp_connections WHERE id = ?",
+      s(obj(call.body), "id"),
+    );
     return r ? { provider: r.provider } : null;
   },
 
@@ -347,7 +358,10 @@ function mcpEnvelopes(table: string, keyCol: string, nameOf: (key: string) => st
   return {
     name: table,
     list: (k) =>
-      all<{ key: string; envelope: string }>(k.sql, `SELECT ${keyCol} AS key, envelope FROM ${table} WHERE envelope != ''`).map((r) => ({
+      all<{ key: string; envelope: string }>(
+        k.sql,
+        `SELECT ${keyCol} AS key, envelope FROM ${table} WHERE envelope != ''`,
+      ).map((r) => ({
         key: r.key,
         id: { teamId: k.teamId(), factoryId: "", name: nameOf(r.key), type },
         envelope: fromB64(r.envelope),
@@ -364,7 +378,13 @@ function mcpEnvelopes(table: string, keyCol: string, nameOf: (key: string) => st
 type ServerMap = Record<string, MCPServer> | undefined;
 
 /** Port of engine/preflight.go preflightMCPServers: managedId references must name a registered server. */
-function preflightMCPServers(kit: TeamKit, _f: unknown, def: CompiledDefinition, _files: Record<string, string>, chk: DefinitionCheck): void {
+function preflightMCPServers(
+  kit: TeamKit,
+  _f: unknown,
+  def: CompiledDefinition,
+  _files: Record<string, string>,
+  chk: DefinitionCheck,
+): void {
   const refs: { file: string; name: string; id: string }[] = [];
   const add = (file: string, m: ServerMap) => {
     for (const n of Object.keys(m ?? {}).sort()) {
@@ -374,8 +394,10 @@ function preflightMCPServers(kit: TeamKit, _f: unknown, def: CompiledDefinition,
   };
   add("factory.yaml", def.mcpServers);
   for (const a of def.agents ?? []) add(`agents/${a.name}/agent.md`, (a as { mcpServers?: ServerMap }).mcpServers);
-  for (const au of def.automations ?? []) add(`automations/${au.name}/automation.md`, (au.overrides as { mcpServers?: ServerMap } | undefined)?.mcpServers);
-  for (const sc of def.scorers ?? []) add(`scorers/${(sc as { slug: string }).slug}/scorer.md`, (sc as { mcpServers?: ServerMap }).mcpServers);
+  for (const au of def.automations ?? [])
+    add(`automations/${au.name}/automation.md`, (au.overrides as { mcpServers?: ServerMap } | undefined)?.mcpServers);
+  for (const sc of def.scorers ?? [])
+    add(`scorers/${(sc as { slug: string }).slug}/scorer.md`, (sc as { mcpServers?: ServerMap }).mcpServers);
   if (def.scorerDefaults) add("factory.yaml", (def.scorerDefaults as { mcpServers?: ServerMap }).mcpServers);
   if (refs.length === 0) return;
   const known = reg.knownRefs(kit);
@@ -399,12 +421,14 @@ function preflightMCPServers(kit: TeamKit, _f: unknown, def: CompiledDefinition,
  */
 export function mcpServerUses(kit: TeamKit, id: string, name: string): string[] {
   const refs = [id, name];
-  const selects = (m: ServerMap) => Object.values(m ?? {}).some((srv) => !!srv.managedId && refs.includes(srv.managedId));
+  const selects = (m: ServerMap) =>
+    Object.values(m ?? {}).some((srv) => !!srv.managedId && refs.includes(srv.managedId));
   return teamResourceUses(kit, (agents, automations) => {
     const out: string[] = [];
     for (const a of agents) if (selects((a as { mcpServers?: ServerMap }).mcpServers)) out.push("agent " + a.name);
     for (const au of automations) {
-      if (selects((au.overrides as { mcpServers?: ServerMap } | undefined)?.mcpServers)) out.push("automation " + au.name);
+      if (selects((au.overrides as { mcpServers?: ServerMap } | undefined)?.mcpServers))
+        out.push("automation " + au.name);
     }
     return out;
   });

@@ -106,7 +106,13 @@ export function checkNameFree(kit: TeamKit, name: string, exceptId: string): voi
 }
 
 /** setStatus: records the OAuth state of a server (message capped at 500 bytes). */
-export function setStatus(kit: TeamKit, serverId: string, status: string, msg: string, nowMs: number): RegisteredMCPServer | undefined {
+export function setStatus(
+  kit: TeamKit,
+  serverId: string,
+  status: string,
+  msg: string,
+  nowMs: number,
+): RegisteredMCPServer | undefined {
   const m = getServer(kit, serverId);
   if (!m?.oauth) return m;
   m.oauth.status = status;
@@ -119,7 +125,12 @@ export function setStatus(kit: TeamKit, serverId: string, status: string, msg: s
   return m;
 }
 
-export function markConnected(kit: TeamKit, serverId: string, userId: string, nowMs: number): RegisteredMCPServer | undefined {
+export function markConnected(
+  kit: TeamKit,
+  serverId: string,
+  userId: string,
+  nowMs: number,
+): RegisteredMCPServer | undefined {
   const m = getServer(kit, serverId);
   if (!m?.oauth) return m;
   const now = new Date(nowMs).toISOString();
@@ -236,7 +247,13 @@ export function createServer(kit: TeamKit, body: unknown, actorId: string, nowMs
   const o = bodyObject(body);
   if (optString(o, "name") === undefined) throw new OfError("invalid_request", "name is required");
   const now = new Date(nowMs).toISOString();
-  const m: RegisteredMCPServer = { id: newId("mcp"), team_id: kit.teamId(), name: "", created_at: now, updated_at: now };
+  const m: RegisteredMCPServer = {
+    id: newId("mcp"),
+    team_id: kit.teamId(),
+    name: "",
+    created_at: now,
+    updated_at: now,
+  };
   if (actorId) m.created_by = actorId;
   applyRequest(m, o);
   const warning = defaultConnection(m);
@@ -272,7 +289,9 @@ export function updateServer(kit: TeamKit, ref: string, body: unknown, nowMs: nu
 }
 
 /** Built-in servers in list responses. `providers` are the team's integration providers. */
-export function builtinList(providers: readonly string[]): { managed_id: string; provider: string; configured: boolean }[] {
+export function builtinList(
+  providers: readonly string[],
+): { managed_id: string; provider: string; configured: boolean }[] {
   return BUILTIN_MCP_PROVIDERS.map((p) => ({
     managed_id: BUILTIN_MCP_PREFIX + p,
     provider: p,
@@ -298,13 +317,17 @@ export function resolveManaged(kit: TeamKit, sandboxURL: string, run: RunRef, ma
   const b = builtinMCPProvider(managedId);
   if (managedId.startsWith(BUILTIN_MCP_PREFIX)) {
     if (!b.known) throw new OfError("invalid_request", `unknown built-in MCP server "${managedId}"`);
-    if (base === "") throw new OfError("internal_error", "built-in MCP servers need the server's public URL (OF_PUBLIC_URL)");
+    if (base === "")
+      throw new OfError("internal_error", "built-in MCP servers need the server's public URL (OF_PUBLIC_URL)");
     return { url: `${base}${INTEGRATION_PATH_PREFIX}${b.provider}/${run.id}` };
   }
   const m = lookup(kit, managedId);
   if (proxied(m)) {
     if (base === "") {
-      throw new OfError("internal_error", `MCP server "${m.name}" is proxied, which needs the server's public URL (OF_PUBLIC_URL)`);
+      throw new OfError(
+        "internal_error",
+        `MCP server "${m.name}" is proxied, which needs the server's public URL (OF_PUBLIC_URL)`,
+      );
     }
     if (m.oauth && m.oauth.status !== MCP_OAUTH_CONNECTED) {
       throw new OfError(
@@ -327,7 +350,10 @@ export function resolveManaged(kit: TeamKit, sandboxURL: string, run: RunRef, ma
  * grantedTo: whether the run declares an MCP server whose managedId selects
  * one of refs, and whether any such declaration allows writes.
  */
-export function grantedTo(mcpServers: Record<string, MCPServer> | undefined, ...refs: string[]): { granted: boolean; allowWrite: boolean } {
+export function grantedTo(
+  mcpServers: Record<string, MCPServer> | undefined,
+  ...refs: string[]
+): { granted: boolean; allowWrite: boolean } {
   let granted = false;
   let allowWrite = false;
   for (const srv of Object.values(mcpServers ?? {})) {

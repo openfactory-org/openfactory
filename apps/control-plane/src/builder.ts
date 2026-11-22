@@ -48,7 +48,13 @@ export function cronHooksList(): readonly CronHook[] {
 import { DEFAULT_TEAM, doName } from "@openfactory/core";
 import { OfError } from "@openfactory/core";
 import type { CallMeta } from "./contracts/do-messages";
-import { forwardPluginWebhook, loadPlugins, pluginWebhookName, PluginHost, type PluginHostBackend } from "./plugins/index";
+import {
+  forwardPluginWebhook,
+  loadPlugins,
+  pluginWebhookName,
+  PluginHost,
+  type PluginHostBackend,
+} from "./plugins/index";
 import { b64url, sha256 } from "./lib/bytes";
 import { opResult } from "./http/handler";
 
@@ -75,7 +81,9 @@ export function pluginHostBackend(env: Env): PluginHostBackend {
     },
     listFactories: () => teamOp(env, "factories.list"),
     getFactory: async (factoryId) => {
-      const f = await teamOp<{ id: string; teamId: string; alias: string; name: string }>(env, "factories.get", { factory_id: factoryId });
+      const f = await teamOp<{ id: string; teamId: string; alias: string; name: string }>(env, "factories.get", {
+        factory_id: factoryId,
+      });
       return { id: f.id, teamId: f.teamId, alias: f.alias, name: f.name };
     },
     getFactoryRepos: async (factoryId) =>

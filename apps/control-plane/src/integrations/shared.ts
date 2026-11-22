@@ -65,7 +65,9 @@ export async function autoRespondToThreadReplies(
   factoryId: string,
   provider: string,
 ): Promise<boolean> {
-  const v = (await factorySetting(store, factoryId, provider, SETTING_AUTO_RESPOND_TO_THREAD_REPLIES)).trim().toLowerCase();
+  const v = (await factorySetting(store, factoryId, provider, SETTING_AUTO_RESPOND_TO_THREAD_REPLIES))
+    .trim()
+    .toLowerCase();
   return v !== "false" && v !== "0" && v !== "no";
 }
 

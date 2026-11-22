@@ -1,9 +1,9 @@
 // Trigger catalog and trigger parser. Port of internal/definition/triggers.go.
 
-import { validateCron } from './cron.ts';
-import { goQuote, goTrimSpace } from './gofmt.ts';
-import type { Schedule, Trigger } from './types.ts';
-import { type Doc, indexPath, isNull, put, resolve, sprintNode, toValue, type YNode } from './yamlnode.ts';
+import { validateCron } from "./cron.ts";
+import { goQuote, goTrimSpace } from "./gofmt.ts";
+import type { Schedule, Trigger } from "./types.ts";
+import { type Doc, indexPath, isNull, put, resolve, sprintNode, toValue, type YNode } from "./yamlnode.ts";
 
 /** How a filter key's values are validated. */
 export const ValueKind = {
@@ -33,7 +33,7 @@ export interface AliasSpec {
   kind: ValueKind;
 }
 
-export type FilterRule = 'optional' | 'required' | 'forbidden';
+export type FilterRule = "optional" | "required" | "forbidden";
 
 export interface ProviderSpec {
   events: Map<string, string[]>;
@@ -45,21 +45,21 @@ export interface ProviderSpec {
   filter: FilterRule;
 }
 
-export const PROVIDER_GITHUB = 'github';
-export const PROVIDER_GITLAB = 'gitlab';
-export const PROVIDER_AZURE_DEVOPS = 'azure_devops';
-export const PROVIDER_SLACK = 'slack';
-export const PROVIDER_TEAMS = 'microsoft_teams';
-export const PROVIDER_LINEAR = 'linear';
-export const PROVIDER_JIRA = 'jira';
-export const PROVIDER_SCHEDULE = 'schedule';
-export const PROVIDER_WEBHOOK = 'webhook';
+export const PROVIDER_GITHUB = "github";
+export const PROVIDER_GITLAB = "gitlab";
+export const PROVIDER_AZURE_DEVOPS = "azure_devops";
+export const PROVIDER_SLACK = "slack";
+export const PROVIDER_TEAMS = "microsoft_teams";
+export const PROVIDER_LINEAR = "linear";
+export const PROVIDER_JIRA = "jira";
+export const PROVIDER_SCHEDULE = "schedule";
+export const PROVIDER_WEBHOOK = "webhook";
 
 /** WEBHOOK_UID_PREFIX starts the UIDs that the server gives to webhooks. */
-export const WEBHOOK_UID_PREFIX = 'whk_';
+export const WEBHOOK_UID_PREFIX = "whk_";
 
-export const SCHEDULE_CONCURRENCY_ALLOW = 'allow';
-export const SCHEDULE_CONCURRENCY_SKIP = 'skip';
+export const SCHEDULE_CONCURRENCY_ALLOW = "allow";
+export const SCHEDULE_CONCURRENCY_SKIP = "skip";
 
 function spec(p: Partial<ProviderSpec> & { events: Map<string, string[]> }): ProviderSpec {
   return {
@@ -68,7 +68,7 @@ function spec(p: Partial<ProviderSpec> & { events: Map<string, string[]> }): Pro
     managed: new Set(),
     unavailable: new Map(),
     requireKeys: [],
-    filter: 'optional',
+    filter: "optional",
     ...p,
   };
 }
@@ -85,168 +85,257 @@ function buildTriggerCatalog(): Map<string, ProviderSpec> {
   const cat = new Map<string, ProviderSpec>();
 
   const gh = new Map<string, string[]>();
-  events(gh, ['issue_created'], 'repos', 'labels', 'assignees', 'authors', 'keywords', 'skip_bots');
-  events(gh, ['issue_labeled', 'issue_assigned', 'pull_request_assigned'], 'repos', 'labels', 'assignees', 'authors', 'skip_bots');
-  events(gh, ['issue_commented', 'pull_request_commented'], 'repos', 'labels', 'authors', 'keywords', 'skip_bots');
-  events(gh, ['issue_mentioned', 'pull_request_mentioned'], 'repos', 'mentioned', 'labels', 'authors', 'keywords', 'skip_bots');
+  events(gh, ["issue_created"], "repos", "labels", "assignees", "authors", "keywords", "skip_bots");
   events(
     gh,
-    ['pull_request_opened', 'pull_request_ready', 'pull_request_reopened'],
-    'repos',
-    'base_branches',
-    'pr_numbers',
-    'paths',
-    'assignees',
-    'authors',
-    'labels',
-    'keywords',
-    'skip_bots',
+    ["issue_labeled", "issue_assigned", "pull_request_assigned"],
+    "repos",
+    "labels",
+    "assignees",
+    "authors",
+    "skip_bots",
+  );
+  events(gh, ["issue_commented", "pull_request_commented"], "repos", "labels", "authors", "keywords", "skip_bots");
+  events(
+    gh,
+    ["issue_mentioned", "pull_request_mentioned"],
+    "repos",
+    "mentioned",
+    "labels",
+    "authors",
+    "keywords",
+    "skip_bots",
   );
   events(
     gh,
-    ['pull_request_closed', 'pull_request_dequeued', 'pull_request_enqueued', 'pull_request_labeled', 'pull_request_merged', 'pull_request_synchronized'],
-    'repos',
-    'base_branches',
-    'pr_numbers',
-    'paths',
-    'assignees',
-    'authors',
-    'labels',
-    'skip_bots',
+    ["pull_request_opened", "pull_request_ready", "pull_request_reopened"],
+    "repos",
+    "base_branches",
+    "pr_numbers",
+    "paths",
+    "assignees",
+    "authors",
+    "labels",
+    "keywords",
+    "skip_bots",
   );
-  events(gh, ['pull_request_review_requested'], 'repos', 'reviewers', 'reviewer_teams', 'authors', 'skip_bots');
-  events(gh, ['pull_request_review_submitted'], 'repos', 'mentioned', 'labels', 'review_states', 'authors', 'keywords', 'skip_bots');
-  events(gh, ['push'], 'repos', 'branches', 'paths', 'skip_bots');
-  events(gh, ['check_suite_completed'], 'repos', 'conclusions', 'branches', 'labels', 'authors', 'skip_bots');
-  events(gh, ['workflow_run_completed'], 'repos', 'conclusions', 'branches', 'workflows', 'labels', 'authors', 'skip_bots');
-  events(gh, ['commit_status'], 'repos', 'states', 'contexts', 'skip_bots');
-  events(gh, ['check_run_rerequested', 'check_suite_rerequested'], 'repos', 'skip_bots');
+  events(
+    gh,
+    [
+      "pull_request_closed",
+      "pull_request_dequeued",
+      "pull_request_enqueued",
+      "pull_request_labeled",
+      "pull_request_merged",
+      "pull_request_synchronized",
+    ],
+    "repos",
+    "base_branches",
+    "pr_numbers",
+    "paths",
+    "assignees",
+    "authors",
+    "labels",
+    "skip_bots",
+  );
+  events(gh, ["pull_request_review_requested"], "repos", "reviewers", "reviewer_teams", "authors", "skip_bots");
+  events(
+    gh,
+    ["pull_request_review_submitted"],
+    "repos",
+    "mentioned",
+    "labels",
+    "review_states",
+    "authors",
+    "keywords",
+    "skip_bots",
+  );
+  events(gh, ["push"], "repos", "branches", "paths", "skip_bots");
+  events(gh, ["check_suite_completed"], "repos", "conclusions", "branches", "labels", "authors", "skip_bots");
+  events(
+    gh,
+    ["workflow_run_completed"],
+    "repos",
+    "conclusions",
+    "branches",
+    "workflows",
+    "labels",
+    "authors",
+    "skip_bots",
+  );
+  events(gh, ["commit_status"], "repos", "states", "contexts", "skip_bots");
+  events(gh, ["check_run_rerequested", "check_suite_rerequested"], "repos", "skip_bots");
   cat.set(
     PROVIDER_GITHUB,
     spec({
       events: gh,
       keys: new Map<string, KeySpec>([
-        ['skip_bots', { kind: ValueKind.SkipBots }],
-        ['pr_numbers', { kind: ValueKind.Int }],
-        ['review_states', { kind: ValueKind.Enum, values: ['approved', 'changes_requested', 'commented'] }],
+        ["skip_bots", { kind: ValueKind.SkipBots }],
+        ["pr_numbers", { kind: ValueKind.Int }],
+        ["review_states", { kind: ValueKind.Enum, values: ["approved", "changes_requested", "commented"] }],
       ]),
       aliases: new Map([
-        ['baseBranches', alias('base_branches', ValueKind.String, true)],
-        ['prNumbers', alias('pr_numbers', ValueKind.String, true)],
+        ["baseBranches", alias("base_branches", ValueKind.String, true)],
+        ["prNumbers", alias("pr_numbers", ValueKind.String, true)],
       ]),
     }),
   );
 
   const gl = new Map<string, string[]>();
-  events(gl, ['bot_mentioned'], 'repos');
-  events(gl, ['merge_request'], 'repos', 'actions', 'base_branches');
-  events(gl, ['push'], 'repos', 'branches');
-  cat.set(PROVIDER_GITLAB, spec({ events: gl, managed: new Set(['mentioned']) }));
+  events(gl, ["bot_mentioned"], "repos");
+  events(gl, ["merge_request"], "repos", "actions", "base_branches");
+  events(gl, ["push"], "repos", "branches");
+  cat.set(PROVIDER_GITLAB, spec({ events: gl, managed: new Set(["mentioned"]) }));
 
   const ado = new Map<string, string[]>();
   events(
     ado,
-    ['pull_request_created', 'pull_request_updated', 'pull_request_commented', 'pull_request_closed', 'pull_request_merged'],
-    'repos',
-    'base_branches',
+    [
+      "pull_request_created",
+      "pull_request_updated",
+      "pull_request_commented",
+      "pull_request_closed",
+      "pull_request_merged",
+    ],
+    "repos",
+    "base_branches",
   );
-  events(ado, ['pull_request_mentioned'], 'repos', 'mentioned');
-  events(ado, ['work_item_created', 'work_item_assigned', 'work_item_labeled'], 'work_item_types', 'labels', 'assignees', 'authors');
-  events(ado, ['work_item_mentioned'], 'mentioned');
+  events(ado, ["pull_request_mentioned"], "repos", "mentioned");
+  events(
+    ado,
+    ["work_item_created", "work_item_assigned", "work_item_labeled"],
+    "work_item_types",
+    "labels",
+    "assignees",
+    "authors",
+  );
+  events(ado, ["work_item_mentioned"], "mentioned");
   cat.set(
     PROVIDER_AZURE_DEVOPS,
     spec({
       events: ado,
       keys: new Map([
-        ['repos', { kind: ValueKind.UUID }],
-        ['mentioned', { kind: ValueKind.UUID }],
+        ["repos", { kind: ValueKind.UUID }],
+        ["mentioned", { kind: ValueKind.UUID }],
       ]),
-      managed: new Set(['source_repos']),
-      unavailable: new Map([['push', 'azure_devops push events are not available for factory automations']]),
+      managed: new Set(["source_repos"]),
+      unavailable: new Map([["push", "azure_devops push events are not available for factory automations"]]),
     }),
   );
 
   const lin = new Map<string, string[]>();
-  const issueKeys = ['team_ids', 'project_ids', 'labels', 'state_ids', 'assignee_ids', 'mentioned_user_ids', 'creator_ids'];
-  events(lin, ['issue_labeled', 'issue_created', 'issue_assigned', 'issue_state_changed'], ...issueKeys);
-  events(lin, ['comment_created'], 'team_ids', 'project_ids', 'labels', 'state_ids', 'issue_ids', 'mentioned_user_ids', 'creator_ids');
-  events(lin, ['agent_session_created'], 'team_ids', 'project_ids', 'labels', 'creator_ids', 'keywords');
+  const issueKeys = [
+    "team_ids",
+    "project_ids",
+    "labels",
+    "state_ids",
+    "assignee_ids",
+    "mentioned_user_ids",
+    "creator_ids",
+  ];
+  events(lin, ["issue_labeled", "issue_created", "issue_assigned", "issue_state_changed"], ...issueKeys);
+  events(
+    lin,
+    ["comment_created"],
+    "team_ids",
+    "project_ids",
+    "labels",
+    "state_ids",
+    "issue_ids",
+    "mentioned_user_ids",
+    "creator_ids",
+  );
+  events(lin, ["agent_session_created"], "team_ids", "project_ids", "labels", "creator_ids", "keywords");
   cat.set(
     PROVIDER_LINEAR,
     spec({
       events: lin,
-      keys: new Map(['team_ids', 'project_ids', 'state_ids', 'issue_ids', 'assignee_ids', 'creator_ids'].map((k) => [k, { kind: ValueKind.UUID }])),
+      keys: new Map(
+        ["team_ids", "project_ids", "state_ids", "issue_ids", "assignee_ids", "creator_ids"].map((k) => [
+          k,
+          { kind: ValueKind.UUID },
+        ]),
+      ),
       aliases: new Map([
-        ['teams', alias('team_ids', ValueKind.NameAlias)],
-        ['projects', alias('project_ids', ValueKind.NameAlias)],
-        ['states', alias('state_ids', ValueKind.NameAlias)],
-        ['issues', alias('issue_ids', ValueKind.NameAliasInt)],
+        ["teams", alias("team_ids", ValueKind.NameAlias)],
+        ["projects", alias("project_ids", ValueKind.NameAlias)],
+        ["states", alias("state_ids", ValueKind.NameAlias)],
+        ["issues", alias("issue_ids", ValueKind.NameAliasInt)],
       ]),
     }),
   );
 
   const sl = new Map<string, string[]>();
-  events(sl, ['app_mention', 'message_dm', 'message_im', 'message_mpim', 'message_posted'], 'channel_ids', 'user_ids', 'keywords');
-  events(sl, ['reaction_added'], 'channel_ids', 'user_ids', 'keywords', 'emojis', 'item_user_ids');
-  events(sl, ['member_joined_channel'], 'channel_ids', 'user_ids');
+  events(
+    sl,
+    ["app_mention", "message_dm", "message_im", "message_mpim", "message_posted"],
+    "channel_ids",
+    "user_ids",
+    "keywords",
+  );
+  events(sl, ["reaction_added"], "channel_ids", "user_ids", "keywords", "emojis", "item_user_ids");
+  events(sl, ["member_joined_channel"], "channel_ids", "user_ids");
   cat.set(
     PROVIDER_SLACK,
     spec({
       events: sl,
       aliases: new Map([
-        ['channels', alias('channel_ids', ValueKind.NameAlias)],
-        ['users', alias('user_ids', ValueKind.NameAlias)],
-        ['itemUsers', alias('item_user_ids', ValueKind.NameAlias)],
+        ["channels", alias("channel_ids", ValueKind.NameAlias)],
+        ["users", alias("user_ids", ValueKind.NameAlias)],
+        ["itemUsers", alias("item_user_ids", ValueKind.NameAlias)],
       ]),
     }),
   );
 
   const jr = new Map<string, string[]>();
-  events(jr, ['issue_created', 'issue_labeled'], 'project_keys', 'labels');
-  events(jr, ['status_changed'], 'project_keys', 'status_ids');
-  events(jr, ['agent_session_created'], 'project_keys', 'labels', 'keywords');
+  events(jr, ["issue_created", "issue_labeled"], "project_keys", "labels");
+  events(jr, ["status_changed"], "project_keys", "status_ids");
+  events(jr, ["agent_session_created"], "project_keys", "labels", "keywords");
   cat.set(
     PROVIDER_JIRA,
     spec({
       events: jr,
       aliases: new Map([
-        ['projects', alias('project_keys', ValueKind.NameAlias)],
-        ['statuses', alias('status_ids', ValueKind.NameAlias)],
+        ["projects", alias("project_keys", ValueKind.NameAlias)],
+        ["statuses", alias("status_ids", ValueKind.NameAlias)],
       ]),
     }),
   );
 
   const tm = new Map<string, string[]>();
-  events(tm, ['app_mention', 'message_posted'], 'team_ids', 'channel_ids', 'user_ids', 'keywords');
+  events(tm, ["app_mention", "message_posted"], "team_ids", "channel_ids", "user_ids", "keywords");
   cat.set(
     PROVIDER_TEAMS,
     spec({
       events: tm,
       keys: new Map([
-        ['team_ids', { kind: ValueKind.InOnlyOne }],
-        ['channel_ids', { kind: ValueKind.InOnlyMany }],
-        ['user_ids', { kind: ValueKind.UUID }],
+        ["team_ids", { kind: ValueKind.InOnlyOne }],
+        ["channel_ids", { kind: ValueKind.InOnlyMany }],
+        ["user_ids", { kind: ValueKind.UUID }],
       ]),
       aliases: new Map([
-        ['channels', alias('channel_ids', ValueKind.NameAlias)],
-        ['users', alias('user_ids', ValueKind.NameAlias)],
+        ["channels", alias("channel_ids", ValueKind.NameAlias)],
+        ["users", alias("user_ids", ValueKind.NameAlias)],
       ]),
-      filter: 'required',
-      requireKeys: ['team_ids', 'channel_ids'],
+      filter: "required",
+      requireKeys: ["team_ids", "channel_ids"],
     }),
   );
 
-  cat.set(PROVIDER_SCHEDULE, spec({ events: new Map([['cron_fired', []]]), managed: new Set(['schedule_ids']), filter: 'forbidden' }));
+  cat.set(
+    PROVIDER_SCHEDULE,
+    spec({ events: new Map([["cron_fired", []]]), managed: new Set(["schedule_ids"]), filter: "forbidden" }),
+  );
   cat.set(
     PROVIDER_WEBHOOK,
     spec({
-      events: new Map([['received', ['webhook_ids', 'payload']]]),
+      events: new Map([["received", ["webhook_ids", "payload"]]]),
       keys: new Map([
-        ['webhook_ids', { kind: ValueKind.WebhookIDs }],
-        ['payload', { kind: ValueKind.Payload }],
+        ["webhook_ids", { kind: ValueKind.WebhookIDs }],
+        ["payload", { kind: ValueKind.Payload }],
       ]),
-      filter: 'required',
-      requireKeys: ['webhook_ids'],
+      filter: "required",
+      requireKeys: ["webhook_ids"],
     }),
   );
   return cat;
@@ -256,21 +345,21 @@ export const triggerCatalog = buildTriggerCatalog();
 
 /** normalizeProvider maps an authored provider name to its canonical form. */
 export function normalizeProvider(p: string): string {
-  return p === 'teams' || p === 'microsoft_teams' ? PROVIDER_TEAMS : p;
+  return p === "teams" || p === "microsoft_teams" ? PROVIDER_TEAMS : p;
 }
 
 function integrationFor(provider: string): string {
   switch (provider) {
     case PROVIDER_SLACK:
-      return 'slack';
+      return "slack";
     case PROVIDER_TEAMS:
-      return 'microsoft-teams';
+      return "microsoft-teams";
     case PROVIDER_LINEAR:
-      return 'linear';
+      return "linear";
     case PROVIDER_JIRA:
-      return 'jira';
+      return "jira";
   }
-  return '';
+  return "";
 }
 
 /** EventSpec describes one authorable provider event and its filter keys. */
@@ -303,7 +392,7 @@ export function triggerProviders(): string[] {
   return [...triggerCatalog.keys()].sort();
 }
 
-export const uuidPattern = '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$';
+export const uuidPattern = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$";
 const uuidRe = new RegExp(uuidPattern);
 
 /** TriggerEnv is the definition context a trigger is validated against. */
@@ -315,24 +404,24 @@ export interface TriggerEnv {
 }
 
 function knownWebhooks(env: TriggerEnv): string {
-  if (env.webhooks.size === 0) return 'none; add webhooks/<name>.yaml';
-  return [...env.webhooks].sort().join(', ');
+  if (env.webhooks.size === 0) return "none; add webhooks/<name>.yaml";
+  return [...env.webhooks].sort().join(", ");
 }
 
 export function parseTrigger(c: Doc, n: YNode | null, path: string, env: TriggerEnv): [Trigger, boolean] {
-  const t: Trigger = { provider: '', event: '' };
+  const t: Trigger = { provider: "", event: "" };
   const m = c.mapping(n, path);
   if (m === null) return [t, false];
   try {
     let ok = true;
-    const pv = m.require('provider');
-    const ev = m.require('event');
-    const fv = m.get('filter');
-    const sv = m.get('schedule');
-    const cv = m.get('concurrency');
+    const pv = m.require("provider");
+    const ev = m.require("event");
+    const fv = m.get("filter");
+    const sv = m.get("schedule");
+    const cv = m.get("concurrency");
     if (pv === null || ev === null) return [t, false];
-    const [provider, good] = c.nonEmptyStr(pv, path + '.provider');
-    const [event, good2] = c.nonEmptyStr(ev, path + '.event');
+    const [provider, good] = c.nonEmptyStr(pv, path + ".provider");
+    const [event, good2] = c.nonEmptyStr(ev, path + ".event");
     if (!good || !good2) return [t, false];
     t.provider = normalizeProvider(provider);
     t.event = event;
@@ -340,50 +429,54 @@ export function parseTrigger(c: Doc, n: YNode | null, path: string, env: Trigger
     if (!ps) {
       c.errf(
         pv,
-        path + '.provider',
+        path + ".provider",
         `unknown trigger provider ${goQuote(provider)} (expected one of github, gitlab, azure_devops, slack, teams, linear, jira, schedule, webhook)`,
       );
       return [t, false];
     }
     const why = ps.unavailable.get(event);
     if (why !== undefined) {
-      c.errf(ev, path + '.event', why);
+      c.errf(ev, path + ".event", why);
       return [t, false];
     }
     const keys = ps.events.get(event);
     if (keys === undefined) {
       const names = [...ps.events.keys()].sort();
-      c.errf(ev, path + '.event', `unknown ${provider} event ${goQuote(event)} (expected one of ${names.join(', ')})`);
+      c.errf(ev, path + ".event", `unknown ${provider} event ${goQuote(event)} (expected one of ${names.join(", ")})`);
       return [t, false];
     }
     const integ = integrationFor(t.provider);
-    if (integ !== '' && env.integrationsSet && !env.integrations.has(integ)) {
-      c.errf(pv, path + '.provider', `${provider} triggers require the ${integ} integration; add it to integrations in factory.yaml`);
+    if (integ !== "" && env.integrationsSet && !env.integrations.has(integ)) {
+      c.errf(
+        pv,
+        path + ".provider",
+        `${provider} triggers require the ${integ} integration; add it to integrations in factory.yaml`,
+      );
       ok = false;
     }
 
     if (t.provider === PROVIDER_SCHEDULE) {
       if (sv === null || isNull(sv)) {
-        c.errf(m.node, path + '.schedule', `${path}.schedule is required for schedule/cron_fired triggers`);
+        c.errf(m.node, path + ".schedule", `${path}.schedule is required for schedule/cron_fired triggers`);
         ok = false;
       } else {
-        const s = parseSchedule(c, sv, path + '.schedule');
+        const s = parseSchedule(c, sv, path + ".schedule");
         if (s !== null) t.schedule = s;
         else ok = false;
       }
     } else if (sv !== null && !isNull(sv)) {
-      c.errf(sv, path + '.schedule', `${path}.schedule is only valid for schedule/cron_fired triggers`);
+      c.errf(sv, path + ".schedule", `${path}.schedule is only valid for schedule/cron_fired triggers`);
       ok = false;
     }
     if (cv !== null && !isNull(cv)) {
-      const [v, g] = c.nonEmptyStr(cv, path + '.concurrency');
+      const [v, g] = c.nonEmptyStr(cv, path + ".concurrency");
       if (!g) {
         ok = false;
       } else if (t.provider !== PROVIDER_SCHEDULE) {
-        c.errf(cv, path + '.concurrency', `${path}.concurrency is only valid for schedule/cron_fired triggers`);
+        c.errf(cv, path + ".concurrency", `${path}.concurrency is only valid for schedule/cron_fired triggers`);
         ok = false;
       } else if (v !== SCHEDULE_CONCURRENCY_ALLOW && v !== SCHEDULE_CONCURRENCY_SKIP) {
-        c.errf(cv, path + '.concurrency', `${path}.concurrency must be allow or skip, got ${goQuote(v)}`);
+        c.errf(cv, path + ".concurrency", `${path}.concurrency must be allow or skip, got ${goQuote(v)}`);
         ok = false;
       } else {
         t.concurrency = v;
@@ -391,16 +484,16 @@ export function parseTrigger(c: Doc, n: YNode | null, path: string, env: Trigger
     }
 
     const hasFilter = fv !== null && !isNull(fv);
-    if (ps.filter === 'forbidden' && fv !== null) {
-      c.errf(fv, path + '.filter', `${provider} triggers accept no filter`);
+    if (ps.filter === "forbidden" && fv !== null) {
+      c.errf(fv, path + ".filter", `${provider} triggers accept no filter`);
       return [t, false];
     }
-    if (ps.filter === 'required' && !hasFilter) {
-      c.errf(m.node, path + '.filter', `${path}.filter is required for ${provider}/${event} triggers`);
+    if (ps.filter === "required" && !hasFilter) {
+      c.errf(m.node, path + ".filter", `${path}.filter is required for ${provider}/${event} triggers`);
       return [t, false];
     }
     if (!hasFilter) return [t, ok];
-    const [filter, fgood] = parseFilter(c, fv, path + '.filter', t.provider, ps, keys, env);
+    const [filter, fgood] = parseFilter(c, fv, path + ".filter", t.provider, ps, keys, env);
     if (!fgood) return [t, false];
     if (filter !== null && Object.keys(filter).length > 0) t.filter = filter;
     return [t, ok];
@@ -413,20 +506,20 @@ function parseSchedule(c: Doc, n: YNode, path: string): Schedule | null {
   const m = c.mapping(n, path);
   if (m === null) return null;
   try {
-    const s: Schedule = { cron: '' };
-    const nv = m.get('name');
+    const s: Schedule = { cron: "" };
+    const nv = m.get("name");
     if (nv !== null && !isNull(nv)) {
-      const [name, ok] = c.nonEmptyStr(nv, path + '.name');
+      const [name, ok] = c.nonEmptyStr(nv, path + ".name");
       if (!ok) return null;
       s.name = name;
     }
-    const v = m.require('cron');
+    const v = m.require("cron");
     if (v === null) return null;
-    const [expr, ok] = c.nonEmptyStr(v, path + '.cron');
+    const [expr, ok] = c.nonEmptyStr(v, path + ".cron");
     if (!ok) return null;
     const err = validateCron(expr);
     if (err !== null) {
-      c.errf(v, path + '.cron', `${path + '.cron'} ${goQuote(expr)}: ${err}`);
+      c.errf(v, path + ".cron", `${path + ".cron"} ${goQuote(expr)}: ${err}`);
       return null;
     }
     s.cron = goTrimSpace(expr);
@@ -487,7 +580,11 @@ function parseFilter(
       continue;
     }
     if (!keys.includes(key)) {
-      c.errf(kn, f, `unknown filter key ${goQuote(key)} for ${provider} triggers (accepted: ${acceptedKeys(ps, keys).join(', ')})`);
+      c.errf(
+        kn,
+        f,
+        `unknown filter key ${goQuote(key)} for ${provider} triggers (accepted: ${acceptedKeys(ps, keys).join(", ")})`,
+      );
       ok = false;
       continue;
     }
@@ -501,7 +598,7 @@ function parseFilter(
       if (Object.hasOwn(out, a) && s.native === rk) present = true;
     }
     if (!present && ok) {
-      c.errf(m.node, path + '.' + rk, `${path}.${rk} is required`);
+      c.errf(m.node, path + "." + rk, `${path}.${rk} is required`);
       ok = false;
     }
   }
@@ -512,7 +609,7 @@ function validateMatcher(c: Doc, n0: YNode | null, path: string, ks: KeySpec, en
   const n = resolve(n0);
   if (isNull(n) || n === null) return [null, true];
   if (ks.kind === ValueKind.SkipBots) {
-    const [s, ok] = c.enum(n, path, 'all', 'self', 'none');
+    const [s, ok] = c.enum(n, path, "all", "self", "none");
     return ok ? [s, true] : [null, false];
   }
   if (ks.kind === ValueKind.Payload) {
@@ -521,12 +618,13 @@ function validateMatcher(c: Doc, n0: YNode | null, path: string, ks: KeySpec, en
     return [toValue(n), true];
   }
   const plainOnly = ks.kind === ValueKind.NameAlias || ks.kind === ValueKind.NameAliasInt;
-  const inOnly = ks.kind === ValueKind.InOnlyOne || ks.kind === ValueKind.InOnlyMany || ks.kind === ValueKind.WebhookIDs;
+  const inOnly =
+    ks.kind === ValueKind.InOnlyOne || ks.kind === ValueKind.InOnlyMany || ks.kind === ValueKind.WebhookIDs;
   let inNode: YNode | null = null;
   let notInNode: YNode | null = null;
-  if (n.kind === 'seq') {
+  if (n.kind === "seq") {
     inNode = n;
-  } else if (n.kind === 'map') {
+  } else if (n.kind === "map") {
     if (plainOnly) {
       c.errf(n, path, `${path} accepts only a plain list of names`);
       return [null, false];
@@ -534,17 +632,17 @@ function validateMatcher(c: Doc, n0: YNode | null, path: string, ks: KeySpec, en
     const m = c.mapping(n, path);
     if (m === null) return [null, false];
     for (const k of m.order) {
-      if (k === 'in') {
+      if (k === "in") {
         inNode = m.get(k);
-      } else if (k === 'not_in') {
+      } else if (k === "not_in") {
         notInNode = m.get(k);
         if (inOnly) {
-          c.errf(m.keyNode(k), path + '.not_in', `${path} supports only in`);
+          c.errf(m.keyNode(k), path + ".not_in", `${path} supports only in`);
           return [null, false];
         }
       } else {
         m.get(k);
-        c.errf(m.keyNode(k), path + '.' + k, `unknown matcher operator ${goQuote(k)} (expected in or not_in)`);
+        c.errf(m.keyNode(k), path + "." + k, `unknown matcher operator ${goQuote(k)} (expected in or not_in)`);
         return [null, false];
       }
     }
@@ -564,9 +662,9 @@ function validateMatcher(c: Doc, n0: YNode | null, path: string, ks: KeySpec, en
     });
     return vals;
   };
-  const inPath = n.kind === 'map' ? path + '.in' : path;
+  const inPath = n.kind === "map" ? path + ".in" : path;
   const inVals = collect(inNode, inPath);
-  const notIn = collect(notInNode, path + '.not_in');
+  const notIn = collect(notInNode, path + ".not_in");
   if (!ok) return [null, false];
   for (const a of inVals) {
     for (const b of notIn) {
@@ -589,23 +687,36 @@ function validateMatcher(c: Doc, n0: YNode | null, path: string, ks: KeySpec, en
     return [null, false];
   }
   if (inVals.length === 0 && notIn.length === 0) return [null, true];
-  if (n.kind === 'seq') return [inVals, true];
+  if (n.kind === "seq") return [inVals, true];
   const out: Record<string, unknown> = {};
-  if (inVals.length > 0) out['in'] = inVals;
-  if (notIn.length > 0) out['not_in'] = notIn;
+  if (inVals.length > 0) out["in"] = inVals;
+  if (notIn.length > 0) out["not_in"] = notIn;
   return [out, true];
 }
 
-function validateValue(c: Doc, n: YNode, path: string, ks: KeySpec, env: TriggerEnv): [string | number | null, boolean] {
+function validateValue(
+  c: Doc,
+  n: YNode,
+  path: string,
+  ks: KeySpec,
+  env: TriggerEnv,
+): [string | number | null, boolean] {
   if (ks.kind === ValueKind.Int || ks.kind === ValueKind.NameAliasInt) {
     const [i, ok] = c.integer(n, path);
     if (ok && i <= 0) {
-      c.errf(n, path, ks.kind === ValueKind.Int ? `${path} must be a positive integer` : `${path} must be a positive issue number such as 42`);
+      c.errf(
+        n,
+        path,
+        ks.kind === ValueKind.Int
+          ? `${path} must be a positive integer`
+          : `${path} must be a positive issue number such as 42`,
+      );
       return [null, false];
     }
     return [i, ok];
   }
-  let [s, ok] = c.nonEmptyStr(n, path);
+  const [s0, ok] = c.nonEmptyStr(n, path);
+  let s = s0;
   if (!ok) return [null, false];
   switch (ks.kind) {
     case ValueKind.UUID:
@@ -616,7 +727,7 @@ function validateValue(c: Doc, n: YNode, path: string, ks: KeySpec, env: Trigger
       break;
     case ValueKind.Enum:
       if (!(ks.values ?? []).includes(s)) {
-        c.errf(n, path, `${path} must be one of ${(ks.values ?? []).join(', ')} (got ${goQuote(s)})`);
+        c.errf(n, path, `${path} must be one of ${(ks.values ?? []).join(", ")} (got ${goQuote(s)})`);
         return [null, false];
       }
       break;
@@ -624,7 +735,7 @@ function validateValue(c: Doc, n: YNode, path: string, ks: KeySpec, env: Trigger
       s = goTrimSpace(s);
       break;
     case ValueKind.WebhookIDs:
-      if (s.endsWith('.yaml') || s.endsWith('.yml') || s.includes('/')) {
+      if (s.endsWith(".yaml") || s.endsWith(".yml") || s.includes("/")) {
         c.errf(n, path, `${path} takes a webhook UID or webhook name, not a file name (got ${goQuote(s)})`);
         return [null, false];
       }
@@ -648,7 +759,7 @@ function validatePayloadPattern(c: Doc, n0: YNode, path: string, depth: number, 
     c.errf(n, path, `payload pattern nests deeper than ${MAX_PATTERN_DEPTH} levels`);
     return false;
   }
-  if (n.kind !== 'map') {
+  if (n.kind !== "map") {
     c.errf(n, path, `${path} must be an object`);
     return false;
   }
@@ -657,14 +768,14 @@ function validatePayloadPattern(c: Doc, n0: YNode, path: string, depth: number, 
   let ok = true;
   for (const k of m.order) {
     const v = resolve(m.get(k))!;
-    const f = path + '.' + k;
-    if (v.kind === 'seq') {
+    const f = path + "." + k;
+    if (v.kind === "seq") {
       leaves.n++;
       if (!checkPatternValues(c, v, f)) ok = false;
-    } else if (v.kind === 'map' && isOperatorObject(v)) {
+    } else if (v.kind === "map" && isOperatorObject(v)) {
       leaves.n++;
       if (!checkOperatorObject(c, v, f)) ok = false;
-    } else if (v.kind === 'map') {
+    } else if (v.kind === "map") {
       if (v.content.length === 0) {
         c.errf(v, f, `${f} must not be an empty object`);
         ok = false;
@@ -672,7 +783,11 @@ function validatePayloadPattern(c: Doc, n0: YNode, path: string, depth: number, 
       }
       if (!validatePayloadPattern(c, v, f, depth + 1, leaves)) ok = false;
     } else {
-      c.errf(v, f, `${f} must be a list of allowed values, an operator object (in, not_in, exists) or a nested pattern`);
+      c.errf(
+        v,
+        f,
+        `${f} must be a list of allowed values, an operator object (in, not_in, exists) or a nested pattern`,
+      );
       ok = false;
     }
     if (leaves.n > MAX_PATTERN_LEAVES) {
@@ -687,7 +802,7 @@ function isOperatorObject(n: YNode): boolean {
   if (n.content.length === 0) return false;
   for (let i = 0; i < n.content.length; i += 2) {
     const k = resolve(n.content[i])?.value;
-    if (k !== 'in' && k !== 'not_in' && k !== 'exists') return false;
+    if (k !== "in" && k !== "not_in" && k !== "exists") return false;
   }
   return true;
 }
@@ -699,8 +814,8 @@ function checkPatternValues(c: Doc, n: YNode, path: string): boolean {
   }
   for (let i = 0; i < n.content.length; i++) {
     const it = resolve(n.content[i])!;
-    if (it.kind !== 'scalar') {
-      c.errf(it, indexPath(path, i), 'payload pattern values must be strings, numbers, booleans or null');
+    if (it.kind !== "scalar") {
+      c.errf(it, indexPath(path, i), "payload pattern values must be strings, numbers, booleans or null");
       return false;
     }
   }
@@ -716,10 +831,10 @@ function checkOperatorObject(c: Doc, n: YNode, path: string): boolean {
   let ok = true;
   for (const k of m.order) {
     const v = m.get(k);
-    if (k === 'in' || k === 'not_in') {
+    if (k === "in" || k === "not_in") {
       if (isNull(v)) continue;
       const rv = resolve(v)!;
-      if (rv.kind !== 'seq') {
+      if (rv.kind !== "seq") {
         c.errf(rv, `${path}.${k}`, `${path}.${k} must be a list`);
         ok = false;
         continue;
@@ -729,10 +844,10 @@ function checkOperatorObject(c: Doc, n: YNode, path: string): boolean {
         continue;
       }
       const vals = rv.content.map((x) => sprintNode(x));
-      if (k === 'in') inVals = vals;
+      if (k === "in") inVals = vals;
       else notIn = vals;
-    } else if (k === 'exists') {
-      const [b, good] = c.boolean(v, path + '.exists');
+    } else if (k === "exists") {
+      const [b, good] = c.boolean(v, path + ".exists");
       if (!good) ok = false;
       existsFalse = good && !b;
     }

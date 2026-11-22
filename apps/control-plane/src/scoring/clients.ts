@@ -49,9 +49,13 @@ export function systemMeta(teamId: string, requestId = `scoring-${crypto.randomU
 /** Throws the OfError of a `$error` result of a DO api() call, else returns the body. */
 export function unwrapOp<T = unknown>(out: unknown): T {
   if (typeof out === "object" && out !== null) {
-    const e = (out as { $error?: { code: string; detail: string; reason?: string; extra?: Record<string, unknown> } }).$error;
+    const e = (out as { $error?: { code: string; detail: string; reason?: string; extra?: Record<string, unknown> } })
+      .$error;
     if (e && typeof e === "object") {
-      throw new OfError(e.code as never, e.detail, { ...(e.reason ? { reason: e.reason } : {}), ...(e.extra ? { extra: e.extra } : {}) });
+      throw new OfError(e.code as never, e.detail, {
+        ...(e.reason ? { reason: e.reason } : {}),
+        ...(e.extra ? { extra: e.extra } : {}),
+      });
     }
     const r = out as { $status?: number; body?: unknown };
     if (typeof r.$status === "number") return r.body as T;
@@ -79,7 +83,9 @@ export async function listAllMessages(
 ): Promise<Pick<RunMessage, "role" | "content" | "seq">[]> {
   const compacted = await readCompactedMessages(env.DATA, runId);
   const after = compacted.length > 0 ? compacted[compacted.length - 1]!.seq : 0;
-  const out = unwrapOp<{ messages: RunMessage[] }>(await work.api(meta, "listRunMessages", { runId, after: String(after) }, undefined));
+  const out = unwrapOp<{ messages: RunMessage[] }>(
+    await work.api(meta, "listRunMessages", { runId, after: String(after) }, undefined),
+  );
   return [...compacted, ...(out.messages ?? [])];
 }
 
@@ -91,7 +97,9 @@ export function workRunsPort(env: Env, teamId: string): RunsPort {
       return notFoundToNull(stubOf(runId).getRun(runId) as Promise<Run>);
     },
     async getWorkItem(id) {
-      return notFoundToNull(Promise.resolve(stubOf(id).api(meta, "getWorkItem", { id }, undefined)).then((o) => unwrapOp<WorkItem>(o)));
+      return notFoundToNull(
+        Promise.resolve(stubOf(id).api(meta, "getWorkItem", { id }, undefined)).then((o) => unwrapOp<WorkItem>(o)),
+      );
     },
     async listChildren(runId) {
       const out = unwrapOp<{ runs: Run[] }>(await stubOf(runId).api(meta, "listRunChildren", { runId }, undefined));
@@ -102,9 +110,9 @@ export function workRunsPort(env: Env, teamId: string): RunsPort {
     },
     async loadStartCommits(runId) {
       try {
-        const out = unwrapOp<{ start_commits: { codeForge: string; owner: string; repo: string; ref: string; resolved?: boolean }[] }>(
-          await stubOf(runId).api(meta, "getRunStartCommits", { runId }, undefined),
-        );
+        const out = unwrapOp<{
+          start_commits: { codeForge: string; owner: string; repo: string; ref: string; resolved?: boolean }[];
+        }>(await stubOf(runId).api(meta, "getRunStartCommits", { runId }, undefined));
         return (out.start_commits ?? []).map((s) => ({ ...s }));
       } catch (e) {
         if (toOfError(e).error.code === "feature_not_available") return [];
@@ -116,7 +124,12 @@ export function workRunsPort(env: Env, teamId: string): RunsPort {
       const out: { id: string; run_id?: string; work_item_id?: string }[] = [];
       let cursor = "";
       for (let page = 0; page < 20; page++) {
-        const r = (await idx.list(meta, "inbox", { factory_id: factoryId, resolved: "false", limit: "200", ...(cursor ? { cursor } : {}) })) as {
+        const r = (await idx.list(meta, "inbox", {
+          factory_id: factoryId,
+          resolved: "false",
+          limit: "200",
+          ...(cursor ? { cursor } : {}),
+        })) as {
           items: { id: string; run_id?: string; work_item_id?: string }[];
           page_info: { has_next_page: boolean; next_cursor?: string };
         };
@@ -136,8 +149,16 @@ export function workEngine(env: Env, teamId: string): EnginePort {
   const team = () => env.TEAM.getByName(doName.team(teamId));
   const runtime = async (factoryId: string): Promise<FactoryRuntimeLike> => {
     // TeamDO.configSnapshot: { agents, runtime: { machines, secrets, mcp_servers, ... }, ... }
-    const s = (await team().configSnapshot(factoryId)) as { agents: FactoryRuntimeLike["agents"]; runtime?: Partial<FactoryRuntimeLike> };
-    return { agents: s.agents, machines: s.runtime?.machines ?? null, secrets: s.runtime?.secrets ?? null, mcp_servers: s.runtime?.mcp_servers ?? null };
+    const s = (await team().configSnapshot(factoryId)) as {
+      agents: FactoryRuntimeLike["agents"];
+      runtime?: Partial<FactoryRuntimeLike>;
+    };
+    return {
+      agents: s.agents,
+      machines: s.runtime?.machines ?? null,
+      secrets: s.runtime?.secrets ?? null,
+      mcp_servers: s.runtime?.mcp_servers ?? null,
+    };
   };
   return {
     async dispatch(req: DispatchRequest, key?: string) {
@@ -195,11 +216,22 @@ export function workEngine(env: Env, teamId: string): EnginePort {
     },
     async resolveInbox(inboxId, resolution, actor) {
       const work = env.WORK.getByName(workDOName(teamId, inboxId));
-      unwrapOp(await work.api({ ...meta, principal: { ...systemPrincipal(teamId), userId: actor } }, "resolveInbox", { id: inboxId }, { resolution }));
+      unwrapOp(
+        await work.api(
+          { ...meta, principal: { ...systemPrincipal(teamId), userId: actor } },
+          "resolveInbox",
+          { id: inboxId },
+          { resolution },
+        ),
+      );
     },
     async applyDefinition(factoryId, files, actor, message) {
       const out = unwrapOp<{ id?: string; version?: { id: string } }>(
-        await team().definitionApply({ ...meta, principal: { ...systemPrincipal(teamId), userId: actor } }, factoryId, { files, author: actor, message }),
+        await team().definitionApply({ ...meta, principal: { ...systemPrincipal(teamId), userId: actor } }, factoryId, {
+          files,
+          author: actor,
+          message,
+        }),
       );
       return { id: out.id ?? out.version?.id ?? "" };
     },
@@ -247,7 +279,11 @@ export function remoteStore(env: Env, teamId: string): ScoringStore {
     unwrapOp<T>(await env.TEAM.getByName(doName.team(teamId)).api(meta, "scoring.store", {}, { method, args }));
   return {
     getFactory: (id) => call<FactoryInfo>("getFactory", id),
-    activeDefinition: (id) => call<{ definition: CompiledDefinition; version: { versionId: string; files: Record<string, string> } } | null>("activeDefinition", id),
+    activeDefinition: (id) =>
+      call<{ definition: CompiledDefinition; version: { versionId: string; files: Record<string, string> } } | null>(
+        "activeDefinition",
+        id,
+      ),
     listScorers: (id) => call<Scorer[]>("listScorers", id),
     getScore: (s, r) => call<Score | null>("getScore", s, r),
     putScore: (sc) => call<Score>("putScore", sc),

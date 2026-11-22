@@ -7,14 +7,18 @@ import { describe, expect, it, vi } from "vitest";
 import type { CallMeta } from "../../contracts/do-messages";
 import { CORRECTNESS_SCORER, type BenchmarkResults, type BenchmarkScorer } from "../../scoring/benchmark";
 import { FakeWorld, finishJudge, run } from "../../scoring/testkit";
-import { BenchmarkDO, DISPATCH_CHUNK, type BenchmarkPlan, type BenchmarkRunJson } from "./index";
+import type { BenchmarkDO } from "./index";
+import { DISPATCH_CHUNK, type BenchmarkPlan, type BenchmarkRunJson } from "./index";
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
 const editor: CallMeta = {
   requestId: "t",
   principal: { kind: "user", id: "u1", userId: "u1", teamId: "default", role: "editor", factoryRoles: {} },
 };
-const reader: CallMeta = { requestId: "t", principal: { kind: "user", id: "u2", userId: "u2", teamId: "default", role: "user", factoryRoles: {} } };
+const reader: CallMeta = {
+  requestId: "t",
+  principal: { kind: "user", id: "u2", userId: "u2", teamId: "default", role: "user", factoryRoles: {} },
+};
 
 const suite: BenchmarkSuite = {
   slug: "fix",
@@ -55,7 +59,13 @@ function plan(over: Partial<BenchmarkPlan> = {}): BenchmarkPlan {
     suite,
     configurations: [
       { name: "Baseline", agents: [{ agent: "implement", model: "model-big" }] },
-      { name: "Candidate", agents: [{ agent: "implement", harness: { type: "claude-code", model: "model-small" } }, { agent: "review", model: "model-review" }] },
+      {
+        name: "Candidate",
+        agents: [
+          { agent: "implement", harness: { type: "claude-code", model: "model-small" } },
+          { agent: "review", model: "model-review" },
+        ],
+      },
     ],
     repetitions: 1,
     correctness_model: "claude-sonnet-4-5",
@@ -82,14 +92,28 @@ async function setup(p: BenchmarkPlan = plan(), scorers: BenchmarkScorer[] = [])
         id,
         factoryId: "fac_1",
         plan: { ...(over.plan ?? p), ...(scorers.length ? { scorers } : {}) },
-        repoSubstitutions: [{ source: { codeForge: "GITHUB", owner: "acme", name: "app" }, target: { codeForge: "GITHUB", owner: "acme-bench", name: "app-fork" } }],
+        repoSubstitutions: [
+          {
+            source: { codeForge: "GITHUB", owner: "acme", name: "app" },
+            target: { codeForge: "GITHUB", owner: "acme-bench", name: "app-fork" },
+          },
+        ],
       }),
     );
   const get = () => call((i) => i.get(editor));
   /** Waits until the alarm steps have dispatched every trial. */
   const dispatchAll = () =>
-    vi.waitFor(async () => expect((await get()).results.trials.every((x) => x.status !== "pending")).toBe(true), { timeout: 5000, interval: 20 });
-  const finishTrial = (runId: string, state: "succeeded" | "failed" | "idle", msg: string, cost: number, durMin: number) => {
+    vi.waitFor(async () => expect((await get()).results.trials.every((x) => x.status !== "pending")).toBe(true), {
+      timeout: 5000,
+      interval: 20,
+    });
+  const finishTrial = (
+    runId: string,
+    state: "succeeded" | "failed" | "idle",
+    msg: string,
+    cost: number,
+    durMin: number,
+  ) => {
     const r = world.runsById.get(runId)!;
     r.state = state;
     r.finished_at = new Date(Date.parse(r.created_at) + durMin * 60_000).toISOString();
@@ -103,7 +127,13 @@ async function setup(p: BenchmarkPlan = plan(), scorers: BenchmarkScorer[] = [])
       const r = world.runsById.get(j.runId)!;
       if (r.state !== "queued") continue;
       const tr = j.req.files["transcript.md"] ?? "";
-      const label = j.req.name.includes("correctness") ? (tr.includes("fixed") ? "correct" : "incorrect") : tr.includes("go test") ? "tests_run" : "tests_skipped";
+      const label = j.req.name.includes("correctness")
+        ? tr.includes("fixed")
+          ? "correct"
+          : "incorrect"
+        : tr.includes("go test")
+          ? "tests_run"
+          : "tests_skipped";
       finishJudge(world, j.runId, "succeeded", `{"label": "${label}", "rationale": "r"}`, 0.1);
       await call((i) => i.trialJudgeUpdate(j.runId));
     }
@@ -129,7 +159,11 @@ describe("BenchmarkDO", () => {
     expect(new Set(t.world.dispatches.map((d) => d.key)).size).toBe(8);
 
     for (const { req } of t.world.dispatches) {
-      expect(req).toMatchObject({ agentName: "implement", triggeredBy: `benchmark:${t.id}`, source: { provider: "benchmark" } });
+      expect(req).toMatchObject({
+        agentName: "implement",
+        triggeredBy: `benchmark:${t.id}`,
+        source: { provider: "benchmark" },
+      });
       expect(req.metadata).toMatchObject({ benchmark_run: t.id, trial_mode: "true" });
       if (req.metadata!["benchmark_configuration"] === "Baseline") {
         expect(req.overrides).toEqual({ model: "model-big" });
@@ -161,7 +195,15 @@ describe("BenchmarkDO", () => {
       }
       if (i === 0) {
         // A descendant (it inherits the trial metadata) counts toward the cost and its own update is ignored.
-        const child = t.world.put(run({ id: "child_of_trial", parent_run_id: tr.run_id!, agent_name: "review", metadata: { benchmark_run: t.id, benchmark_trial: tr.id }, usage: { cost_usd: 1, input_tokens: 5, output_tokens: 5, duration_ms: 0 } }));
+        const child = t.world.put(
+          run({
+            id: "child_of_trial",
+            parent_run_id: tr.run_id!,
+            agent_name: "review",
+            metadata: { benchmark_run: t.id, benchmark_trial: tr.id },
+            usage: { cost_usd: 1, input_tokens: 5, output_tokens: 5, duration_ms: 0 },
+          }),
+        );
         await t.call((x) => x.trialRunUpdate(child.id));
       }
       const r = t.finishTrial(tr.run_id!, "succeeded", msg, cost, dur);
@@ -177,7 +219,15 @@ describe("BenchmarkDO", () => {
     expect(b.finished_at).toBeTruthy();
     const res = b.results;
     const [base, cand] = res.summary;
-    expect(base).toMatchObject({ name: "Baseline", trials: 4, scored: 4, passed: 4, pass_rate: 1, median_duration_ms: 600_000, input_tokens: 405 });
+    expect(base).toMatchObject({
+      name: "Baseline",
+      trials: 4,
+      scored: 4,
+      passed: 4,
+      pass_rate: 1,
+      median_duration_ms: 600_000,
+      input_tokens: 405,
+    });
     expect(base!.total_cost_usd).toBeCloseTo(9);
     expect(base!.avg_cost_usd).toBeCloseTo(2.25);
     expect(base!.scorer_averages).toMatchObject({ [CORRECTNESS_SCORER]: 1, "tests-run": 1 });
@@ -200,7 +250,9 @@ describe("BenchmarkDO", () => {
     expect(b.results.trials.map((x) => x.id)).toEqual(a.results.trials.map((x) => x.id));
     const rows = await t.call(async (i) => {
       const sql = (i as unknown as { sql: SqlStorage }).sql;
-      return sql.exec<{ kind: string; msg_id: string }>("SELECT kind, msg_id FROM outbox WHERE kind = 'index.project'").toArray();
+      return sql
+        .exec<{ kind: string; msg_id: string }>("SELECT kind, msg_id FROM outbox WHERE kind = 'index.project'")
+        .toArray();
     });
     expect(rows.length).toBeGreaterThanOrEqual(1);
     expect(rows[0]!.msg_id).toBe(`bench:${t.id}:1`);
@@ -208,7 +260,9 @@ describe("BenchmarkDO", () => {
 
   it("requires the editor role to start and the user role to read", async () => {
     const t = await setup();
-    await expect(t.call((i) => i.start(reader, { id: t.id, factoryId: "fac_1", plan: plan() }))).rejects.toThrow(/editor/);
+    await expect(t.call((i) => i.start(reader, { id: t.id, factoryId: "fac_1", plan: plan() }))).rejects.toThrow(
+      /editor/,
+    );
     await t.start();
     expect((await t.call((i) => i.get(reader))).id).toBe(t.id);
     await expect(t.call((i) => i.cancel(reader))).rejects.toThrow(/editor/);
@@ -251,7 +305,15 @@ describe("BenchmarkDO", () => {
     const started = await t.start();
     const tr = started.results.trials[0]!;
     // The run exists (idempotent dispatch) and ends before the DO commits the dispatch.
-    const r = t.world.put(run({ id: "run_early", agent_name: "implement", state: "succeeded", metadata: { benchmark_run: t.id, benchmark_trial: tr.id }, finished_at: t.world.clock.iso() }));
+    const r = t.world.put(
+      run({
+        id: "run_early",
+        agent_name: "implement",
+        state: "succeeded",
+        metadata: { benchmark_run: t.id, benchmark_trial: tr.id },
+        finished_at: t.world.clock.iso(),
+      }),
+    );
     t.world.say(r.id, "assistant", "fixed");
     await t.call((i) => i.trialRunUpdate(r.id));
     const trial = (await t.get()).results.trials[0]!;
@@ -260,7 +322,12 @@ describe("BenchmarkDO", () => {
   });
 
   it("cancels: pending trials at once, runs in chunks, late results ignored", async () => {
-    const t = await setup(plan({ configurations: [{ name: "a" }, { name: "b" }, { name: "c" }], suite: { ...suite, tasks: suite.tasks!.map((x) => ({ ...x })) } }));
+    const t = await setup(
+      plan({
+        configurations: [{ name: "a" }, { name: "b" }, { name: "c" }],
+        suite: { ...suite, tasks: suite.tasks!.map((x) => ({ ...x })) },
+      }),
+    );
     t.world.hold(DISPATCH_CHUNK);
     await t.start();
     await vi.waitFor(() => expect(t.world.inFlight).toBeGreaterThan(0), { timeout: 3000, interval: 10 });
@@ -277,7 +344,12 @@ describe("BenchmarkDO", () => {
     // The dispatch that was in flight finishes; its run is cancelled too and no more are started.
     t.world.releaseHold();
     const running = mid.filter((x) => x.status === "running" && x.id !== done.id).map((x) => x.run_id!);
-    await vi.waitFor(() => { for (const id of running) expect(t.world.cancels.some((c) => c.startsWith(id))).toBe(true); }, { timeout: 5000, interval: 20 });
+    await vi.waitFor(
+      () => {
+        for (const id of running) expect(t.world.cancels.some((c) => c.startsWith(id))).toBe(true);
+      },
+      { timeout: 5000, interval: 20 },
+    );
     await vi.waitFor(() => expect(t.world.inFlight).toBe(0), { timeout: 5000 });
     expect(t.world.dispatches.length).toBeLessThanOrEqual(DISPATCH_CHUNK + 1);
     // A late completion changes nothing; the scored trial is kept.
@@ -304,7 +376,10 @@ describe("BenchmarkDO", () => {
     expect(t.world.judges).toHaveLength(1);
     const view = await t.call((i) => i.cancel(editor));
     expect(view.results.trials[0]!.scores![0]).toMatchObject({ pending: false, error: "cancelled" });
-    await vi.waitFor(() => expect(t.world.cancels.some((c) => c.startsWith(t.world.judges[0]!.runId))).toBe(true), { timeout: 5000, interval: 20 });
+    await vi.waitFor(() => expect(t.world.cancels.some((c) => c.startsWith(t.world.judges[0]!.runId))).toBe(true), {
+      timeout: 5000,
+      interval: 20,
+    });
   });
 
   it("fails when no trial can be dispatched", async () => {

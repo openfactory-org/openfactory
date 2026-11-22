@@ -35,8 +35,12 @@ describe("work item references", () => {
       pull_requests: [{ forge: "GITHUB", repo: "acme/api", number: 4, url: "", branch: "", state: "" }],
       created_at: "2026-01-01T00:00:00Z",
     } as Pick<WorkItem, "source" | "references" | "pull_requests" | "created_at">;
-    expect(workItemAddRef(w, { kind: "issue", key: "", source: { provider: "linear", kind: "", external_id: "ENG-1" } })).toBe(true);
-    expect(workItemAddRef(w, { kind: "issue", key: "", source: { provider: "linear", kind: "", external_id: "ENG-1" } })).toBe(false);
+    expect(
+      workItemAddRef(w, { kind: "issue", key: "", source: { provider: "linear", kind: "", external_id: "ENG-1" } }),
+    ).toBe(true);
+    expect(
+      workItemAddRef(w, { kind: "issue", key: "", source: { provider: "linear", kind: "", external_id: "ENG-1" } }),
+    ).toBe(false);
     expect(workItemAddRef(w, { kind: "issue", key: "", source: { provider: "", kind: "" } })).toBe(false);
     const refs = workItemRefs(w);
     expect(refs.map((r) => [r.kind, r.key])).toEqual([
@@ -67,7 +71,10 @@ describe("work item references", () => {
 
 describe("run sources", () => {
   it("prefers the stored source and falls back to triggered_by", () => {
-    expect(runSourceAndRef({ triggered_by: "automation:a1", source: "SCHEDULE", source_ref: "a1" })).toEqual({ source: "SCHEDULE", ref: "a1" });
+    expect(runSourceAndRef({ triggered_by: "automation:a1", source: "SCHEDULE", source_ref: "a1" })).toEqual({
+      source: "SCHEDULE",
+      ref: "a1",
+    });
     const fallback: Record<string, string> = {
       "automation:a1": "AUTOMATION",
       "schedule:a1": "SCHEDULE",
@@ -102,12 +109,24 @@ describe("outbox partition keys", () => {
     const pr: SourceRef = { provider: "forge", kind: "pull_request", repo: "acme/api", number: 7 };
     const k = outboxPartitionKey(TOPIC_INBOUND_EVENT, { kind: "event", event: { team_id: "team1", source: pr } });
     expect(k).not.toBe("");
-    expect(outboxPartitionKey(TOPIC_INBOUND_EVENT, { kind: "event", event: { team_id: "team2", source: pr } })).not.toBe(k);
-    expect(outboxPartitionKey(TOPIC_INBOUND_EVENT, { kind: "event", event: { team_id: "team1", source: { provider: "", kind: "" } } })).toBe("");
-    const n = outboxPartitionKey(TOPIC_OUTBOUND_NOTICE, { kind: "notice", notice: { work_item_id: "wi1", source: pr } });
+    expect(
+      outboxPartitionKey(TOPIC_INBOUND_EVENT, { kind: "event", event: { team_id: "team2", source: pr } }),
+    ).not.toBe(k);
+    expect(
+      outboxPartitionKey(TOPIC_INBOUND_EVENT, {
+        kind: "event",
+        event: { team_id: "team1", source: { provider: "", kind: "" } },
+      }),
+    ).toBe("");
+    const n = outboxPartitionKey(TOPIC_OUTBOUND_NOTICE, {
+      kind: "notice",
+      notice: { work_item_id: "wi1", source: pr },
+    });
     expect(n).not.toBe("");
     expect(n).not.toBe(k);
-    expect(outboxPartitionKey(TOPIC_OUTBOUND_NOTICE, { kind: "notice", notice: { work_item_id: "", source: pr } })).not.toBe("");
+    expect(
+      outboxPartitionKey(TOPIC_OUTBOUND_NOTICE, { kind: "notice", notice: { work_item_id: "", source: pr } }),
+    ).not.toBe("");
     expect(outboxPartitionKey("jobs", { kind: "key", key: "abc" })).toBe("jobs|abc");
     expect(outboxPartitionKey("jobs", { kind: "none" })).toBe("");
   });
@@ -139,7 +158,11 @@ describe("identity", () => {
   });
 
   it("builds principals", () => {
-    expect(userPrincipal({ id: "sa_1", name: "", email: "x@y", kind: "service_account" })).toEqual({ type: "service_account", id: "sa_1", name: "x@y" });
+    expect(userPrincipal({ id: "sa_1", name: "", email: "x@y", kind: "service_account" })).toEqual({
+      type: "service_account",
+      id: "sa_1",
+      name: "x@y",
+    });
     expect(userPrincipal({ id: "", name: "", email: "" })).toBeNull();
   });
 });

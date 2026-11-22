@@ -12,7 +12,17 @@
 //   through the ScoringStore port.
 import { OfError, base32, isOfError, type Run, type Score, type Scorer, type WorkItem } from "@openfactory/core";
 import { buildTranscript } from "./transcript";
-import { improvementPrompt, improvementSettings, groupFailures, eligibleReviewers, regressionsSection, REVIEWER_NONE, thresholdReached, type Failure, type ImprovementSettings } from "./improve";
+import {
+  improvementPrompt,
+  improvementSettings,
+  groupFailures,
+  eligibleReviewers,
+  regressionsSection,
+  REVIEWER_NONE,
+  thresholdReached,
+  type Failure,
+  type ImprovementSettings,
+} from "./improve";
 import { isJudgeRun, judgeAnswer, judgeRequest, scorerExec, scorerName, treeUsage } from "./judge";
 import { resolveLabel, shouldSample } from "./sample";
 import { oneLine } from "./text";
@@ -111,8 +121,10 @@ export class ScoringService {
     const o = deps.opts ?? {};
     this.o = {
       ...o,
-      maxTranscriptBytes: o.maxTranscriptBytes && o.maxTranscriptBytes > 0 ? o.maxTranscriptBytes : DEFAULT_MAX_TRANSCRIPT_BYTES,
-      maxFailureAgeMs: o.maxFailureAgeMs === undefined || o.maxFailureAgeMs === 0 ? DEFAULT_MAX_FAILURE_AGE_MS : o.maxFailureAgeMs,
+      maxTranscriptBytes:
+        o.maxTranscriptBytes && o.maxTranscriptBytes > 0 ? o.maxTranscriptBytes : DEFAULT_MAX_TRANSCRIPT_BYTES,
+      maxFailureAgeMs:
+        o.maxFailureAgeMs === undefined || o.maxFailureAgeMs === 0 ? DEFAULT_MAX_FAILURE_AGE_MS : o.maxFailureAgeMs,
     };
   }
 
@@ -253,7 +265,8 @@ export class ScoringService {
 
   async findScorer(factoryId: string, idOrSlug: string): Promise<Scorer> {
     const scorers = await this.store.listScorers(factoryId);
-    const sc = scorers.find((s) => s.id === idOrSlug) ?? scorers.find((s) => s.slug === idOrSlug || s.name === idOrSlug);
+    const sc =
+      scorers.find((s) => s.id === idOrSlug) ?? scorers.find((s) => s.slug === idOrSlug || s.name === idOrSlug);
     if (!sc) throw new OfError("resource_not_found", `scorer ${JSON.stringify(idOrSlug)} not found`);
     return sc;
   }
@@ -294,7 +307,18 @@ export class ScoringService {
       await this.startScoreJudge(sc, run, judgeId);
     }
     return {
-      score: { id: "", scorer_id: sc.id, run_id: run.id, agent_name: run.agent_name ?? "", label: "", score: 0, passed: false, rationale: "", created_at: "", judge_run_id: judgeId },
+      score: {
+        id: "",
+        scorer_id: sc.id,
+        run_id: run.id,
+        agent_name: run.agent_name ?? "",
+        label: "",
+        score: 0,
+        passed: false,
+        rationale: "",
+        created_at: "",
+        judge_run_id: judgeId,
+      },
       created: false,
     };
   }
@@ -344,13 +368,23 @@ export class ScoringService {
     await this.stopJudge(judge);
     if (!answer) {
       await this.setMarker(scorerId, runId, { ...marker, active: false });
-      this.log("error", "judge run gave no label", { scorer: sc.slug, run_id: runId, judge_run_id: judge.id, err: jerr });
+      this.log("error", "judge run gave no label", {
+        scorer: sc.slug,
+        run_id: runId,
+        judge_run_id: judge.id,
+        err: jerr,
+      });
       return;
     }
     const l = resolveLabel(sc.labels, answer.label);
     if (!l) {
       await this.setMarker(scorerId, runId, { ...marker, active: false });
-      this.log("error", "judge run returned an undeclared label", { scorer: sc.slug, run_id: runId, judge_run_id: judge.id, label: answer.label });
+      this.log("error", "judge run returned an undeclared label", {
+        scorer: sc.slug,
+        run_id: runId,
+        judge_run_id: judge.id,
+        label: answer.label,
+      });
       return;
     }
     const existing = await this.store.getScore(sc.id, runId);
@@ -371,7 +405,13 @@ export class ScoringService {
     if (existing?.improvement_run_id) score.improvement_run_id = existing.improvement_run_id;
     await this.store.putScore(score);
     await this.setMarker(scorerId, runId, { ...marker, active: false });
-    this.log("info", "run scored", { scorer: sc.slug, run_id: runId, judge_run_id: judge.id, label: score.label, passed: score.passed });
+    this.log("info", "run scored", {
+      scorer: sc.slug,
+      run_id: runId,
+      judge_run_id: judge.id,
+      label: score.label,
+      passed: score.passed,
+    });
     if (!score.passed && sc.self_improvement && scored.agent_name) {
       try {
         await this.checkAgent(scored.factory_id, scored.agent_name, false);
@@ -387,7 +427,8 @@ export class ScoringService {
     try {
       await this.engine.cancel(judge.id, "scoring");
     } catch (e) {
-      if (!(isOfError(e) && e.code === "resource_not_found")) this.log("warn", "stop judge run", { judge_run_id: judge.id, err: String(e) });
+      if (!(isOfError(e) && e.code === "resource_not_found"))
+        this.log("warn", "stop judge run", { judge_run_id: judge.id, err: String(e) });
     }
   }
 
@@ -480,7 +521,12 @@ export class ScoringService {
       runUrl: (id) => this.runUrl(id),
       runsPort: this.runs,
     });
-    const idempotencyKey = `improve:${f.id}:${agent}:${await sha256Hex(failures.map((x) => x.score.id).sort().join(","))}`;
+    const idempotencyKey = `improve:${f.id}:${agent}:${await sha256Hex(
+      failures
+        .map((x) => x.score.id)
+        .sort()
+        .join(","),
+    )}`;
     const req: DispatchRequest = {
       factoryId: f.id,
       prompt,
@@ -501,7 +547,10 @@ export class ScoringService {
     if (!run) throw new OfError("internal_error", "dispatch self-improvement run: the engine returned no run");
     const errs: string[] = [];
     try {
-      await this.store.markScoresImproved(failures.map((x) => x.score.id), run.id);
+      await this.store.markScoresImproved(
+        failures.map((x) => x.score.id),
+        run.id,
+      );
     } catch (e) {
       errs.push(`mark scores: ${errMsg(e)}`);
     }
@@ -527,7 +576,12 @@ export class ScoringService {
         errs.push(`record self-improvement run: ${errMsg(e)}`);
       }
     }
-    this.log("info", "self-improvement run started", { factory_id: f.id, agent, run_id: run.id, failures: failures.length });
+    this.log("info", "self-improvement run started", {
+      factory_id: f.id,
+      agent,
+      run_id: run.id,
+      failures: failures.length,
+    });
     if (errs.length > 0) this.log("error", "self-improvement bookkeeping", { run_id: run.id, err: errs.join("; ") });
     return run;
   }
@@ -536,7 +590,8 @@ export class ScoringService {
   async pickReviewer(cfg: Pick<ImprovementSettings, "reviewerType" | "reviewerEmails">): Promise<string> {
     if (cfg.reviewerType === REVIEWER_NONE) return "";
     const pool = eligibleReviewers(await this.store.listUsers(), cfg.reviewerType, cfg.reviewerEmails);
-    if (pool.length === 0) throw new Error(`no eligible reviewers for reviewerType ${JSON.stringify(cfg.reviewerType)}`);
+    if (pool.length === 0)
+      throw new Error(`no eligible reviewers for reviewerType ${JSON.stringify(cfg.reviewerType)}`);
     return pool[this.randomInt(pool.length)]!.id;
   }
 
@@ -548,7 +603,12 @@ export class ScoringService {
     }
     try {
       const active = await this.store.activeDefinition(run.factory_id);
-      return await this.pickReviewer(improvementSettings(active?.definition, { threshold: this.o.defaultFailedRunThreshold, analysisModel: this.o.analysisModel ?? "" }));
+      return await this.pickReviewer(
+        improvementSettings(active?.definition, {
+          threshold: this.o.defaultFailedRunThreshold,
+          analysisModel: this.o.analysisModel ?? "",
+        }),
+      );
     } catch {
       return "";
     }
@@ -594,7 +654,12 @@ export class ScoringService {
     if (errs.length > 0) throw new OfError("internal_error", errs.join("; "));
   }
 
-  private async createPRReviewItem(f: FactoryInfo, wi: WorkItem, track: ImprovementTrack, pr: NonNullable<WorkItem["pull_requests"]>[number]): Promise<void> {
+  private async createPRReviewItem(
+    f: FactoryInfo,
+    wi: WorkItem,
+    track: ImprovementTrack,
+    pr: NonNullable<WorkItem["pull_requests"]>[number],
+  ): Promise<void> {
     const ref = pr.repo && pr.number ? `${pr.repo}#${pr.number}` : pr.url;
     let note = "No reviewer was chosen: reviewerType is none, or no team member is eligible.";
     if (track.reviewer_id) {
@@ -606,7 +671,12 @@ export class ScoringService {
           await this.o.requestReview(f.team_id, pr, track.reviewer_id);
           note += " A review is requested from the reviewer on the pull request.";
         } catch (e) {
-          this.log("warn", "self-improvement: review request failed", { factory_id: f.id, pull_request: ref, reviewer: track.reviewer_id, err: String(e) });
+          this.log("warn", "self-improvement: review request failed", {
+            factory_id: f.id,
+            pull_request: ref,
+            reviewer: track.reviewer_id,
+            err: String(e),
+          });
           note += ` A review could not be requested on the forge (${oneLine(errMsg(e))}). Add the reviewer on the pull request by hand.`;
         }
       }
@@ -634,7 +704,9 @@ async function inboxIdFor(workItemId: string, ref: string): Promise<string> {
   // `inb_` + the partition token of the work item + 12 characters of a hash.
   const m = /^[a-z]+_([wib][a-z2-7]{15})/.exec(workItemId);
   const token = m?.[1] ?? "w" + base32(new TextEncoder().encode(workItemId)).slice(0, 15).padEnd(15, "a");
-  const d = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`inbox|${workItemId}|${ref}`)));
+  const d = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`inbox|${workItemId}|${ref}`)),
+  );
   return `inb_${token}${base32(d).slice(0, 12)}`;
 }
 

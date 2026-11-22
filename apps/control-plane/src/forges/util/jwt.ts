@@ -28,8 +28,24 @@ function der(tag: number, content: Uint8Array): Uint8Array {
 
 // version INTEGER 0, AlgorithmIdentifier { rsaEncryption, NULL }
 const PKCS8_PREFIX = Uint8Array.of(
-  0x02, 0x01, 0x00,
-  0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00,
+  0x02,
+  0x01,
+  0x00,
+  0x30,
+  0x0d,
+  0x06,
+  0x09,
+  0x2a,
+  0x86,
+  0x48,
+  0x86,
+  0xf7,
+  0x0d,
+  0x01,
+  0x01,
+  0x01,
+  0x05,
+  0x00,
 );
 
 /** Wraps a PKCS#1 RSAPrivateKey DER in a PKCS#8 PrivateKeyInfo DER. */
@@ -61,7 +77,7 @@ export async function parseRSAPrivateKey(pem: string): Promise<CryptoKey> {
     try {
       return await tryImport(pkcs1ToPkcs8(block.der));
     } catch (e) {
-      throw new Error(`private key: ${(e as Error).message}`);
+      throw new Error(`private key: ${(e as Error).message}`, { cause: e });
     }
   }
   try {
@@ -71,7 +87,7 @@ export async function parseRSAPrivateKey(pem: string): Promise<CryptoKey> {
     try {
       return await tryImport(pkcs1ToPkcs8(block.der));
     } catch (e) {
-      throw new Error(`private key: ${(e as Error).message}`);
+      throw new Error(`private key: ${(e as Error).message}`, { cause: e });
     }
   }
 }
@@ -79,7 +95,11 @@ export async function parseRSAPrivateKey(pem: string): Promise<CryptoKey> {
 const jsonB64 = (v: unknown): string => b64url(utf8(JSON.stringify(v)));
 
 /** A compact JWS signed with RS256. Header keys alg and typ are set. */
-export async function signRS256(key: CryptoKey, claims: unknown, header: Record<string, unknown> = {}): Promise<string> {
+export async function signRS256(
+  key: CryptoKey,
+  claims: unknown,
+  header: Record<string, unknown> = {},
+): Promise<string> {
   const h = { ...header, alg: "RS256", typ: "JWT" };
   const signing = jsonB64(h) + "." + jsonB64(claims);
   const sig = new Uint8Array(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, utf8(signing)));
@@ -108,7 +128,7 @@ export class JWT {
       try {
         return fromB64url(s);
       } catch (e) {
-        throw new Error(`jwt ${what}: ${(e as Error).message}`);
+        throw new Error(`jwt ${what}: ${(e as Error).message}`, { cause: e });
       }
     };
     const json = (b: Uint8Array, what: string): Record<string, unknown> => {
@@ -117,7 +137,7 @@ export class JWT {
         if (typeof v !== "object" || v === null || Array.isArray(v)) throw new Error("not an object");
         return v as Record<string, unknown>;
       } catch (e) {
-        throw new Error(`jwt ${what}: ${(e as Error).message}`);
+        throw new Error(`jwt ${what}: ${(e as Error).message}`, { cause: e });
       }
     };
     const h = json(dec(parts[0]!, "header"), "header");
@@ -144,7 +164,8 @@ export class JWT {
 
   async verifyHS256(secret: Uint8Array): Promise<void> {
     if (this.headerString("alg") !== "HS256") throw new Error(`jwt: unexpected alg "${this.headerString("alg")}"`);
-    if (!timingSafeEqual(await hmacSha256(secret, this.signing), this.signature)) throw new Error("jwt: invalid signature");
+    if (!timingSafeEqual(await hmacSha256(secret, this.signing), this.signature))
+      throw new Error("jwt: invalid signature");
   }
 
   /** Checks exp and nbf with a clock skew (ms). */

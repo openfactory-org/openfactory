@@ -48,14 +48,22 @@ function validHeaderName(s: string): boolean {
   return /^[A-Za-z0-9!#$%&'*+\-.^_`|~]+$/.test(s);
 }
 
-const CREDENTIAL_HEADERS = new Set(
-  ["authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key", "api-key", ...signatureHeaders().map((h) => h.toLowerCase())],
-);
+const CREDENTIAL_HEADERS = new Set([
+  "authorization",
+  "proxy-authorization",
+  "cookie",
+  "set-cookie",
+  "x-api-key",
+  "api-key",
+  ...signatureHeaders().map((h) => h.toLowerCase()),
+]);
 
 export function isCredentialHeader(name: string): boolean {
   const l = name.toLowerCase();
   if (CREDENTIAL_HEADERS.has(l)) return true;
-  return ["signature", "secret", "token", "password", "api-key", "apikey", "credential", "authorization"].some((f) => l.includes(f));
+  return ["signature", "secret", "token", "password", "api-key", "apikey", "credential", "authorization"].some((f) =>
+    l.includes(f),
+  );
 }
 
 /** Go http.CanonicalHeaderKey. */
@@ -79,7 +87,9 @@ export function redactHeaders(h: Headers): Record<string, string> {
 }
 
 /** Checks auth mode, signature scheme, secret name and delivery ID header. Throws invalid_request. */
-export function validateConfig(w: Pick<Webhook, "auth_mode" | "signature_scheme" | "secret_name" | "delivery_id_header">): void {
+export function validateConfig(
+  w: Pick<Webhook, "auth_mode" | "signature_scheme" | "secret_name" | "delivery_id_header">,
+): void {
   const errs: string[] = [];
   const mode = w.auth_mode || AUTH_TOKEN;
   const scheme = w.signature_scheme ?? "";
@@ -87,14 +97,16 @@ export function validateConfig(w: Pick<Webhook, "auth_mode" | "signature_scheme"
     if (scheme !== "") errs.push("signatureScheme is only valid with authMode signature");
   } else if (mode === AUTH_SIGNATURE) {
     if (scheme === "") errs.push("signatureScheme is required for authMode signature");
-    else if (!schemeKnown(scheme)) errs.push(`unknown signatureScheme "${scheme}" (allowed: ${signatureSchemes().join(", ")})`);
+    else if (!schemeKnown(scheme))
+      errs.push(`unknown signatureScheme "${scheme}" (allowed: ${signatureSchemes().join(", ")})`);
   } else {
     errs.push(`unknown authMode "${w.auth_mode}" (allowed: token, url_token, signature)`);
   }
   if ((w.secret_name ?? "").trim() === "") errs.push("secretName is required");
   const h = w.delivery_id_header ?? "";
   if (h !== "") {
-    if (h.length > MAX_DELIVERY_ID_HEADER_LEN) errs.push(`deliveryIdHeader must be at most ${MAX_DELIVERY_ID_HEADER_LEN} characters`);
+    if (h.length > MAX_DELIVERY_ID_HEADER_LEN)
+      errs.push(`deliveryIdHeader must be at most ${MAX_DELIVERY_ID_HEADER_LEN} characters`);
     else if (!validHeaderName(h)) errs.push(`deliveryIdHeader "${h}" is not a valid HTTP header name`);
     else if (isCredentialHeader(h)) errs.push(`deliveryIdHeader "${h}" carries credentials and cannot be used`);
   }
@@ -128,7 +140,10 @@ export interface FilterTestResult {
  * against a stored delivery. The delivery body may be raw JSON text (exact
  * numbers). Throws for an invalid filter.
  */
-export function testFilter(filter: unknown, d: Pick<WebhookDelivery, "webhook_id" | "status" | "body"> & { bodyText?: string }): FilterTestResult {
+export function testFilter(
+  filter: unknown,
+  d: Pick<WebhookDelivery, "webhook_id" | "status" | "body"> & { bodyText?: string },
+): FilterTestResult {
   validateTrigger({ provider: ProviderWebhook, event: EventWebhookReceived, filter });
   const v = filterValue(filter);
   const parts: Record<string, unknown> = isObj(v) ? { ...v } : {};

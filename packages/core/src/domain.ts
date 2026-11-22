@@ -187,7 +187,8 @@ export function integrationActive(i: Pick<Integration, "status">): boolean {
 
 /** The config key of a chat or tracker record that names its workspace, or "". */
 export function integrationWorkspaceKey(provider: string): string {
-  if (sameIntegrationProvider(provider, "slack") || sameIntegrationProvider(provider, "microsoft_teams")) return "team_id";
+  if (sameIntegrationProvider(provider, "slack") || sameIntegrationProvider(provider, "microsoft_teams"))
+    return "team_id";
   if (sameIntegrationProvider(provider, "linear")) return "organization_id";
   if (sameIntegrationProvider(provider, "jira")) return "site";
   return "";
@@ -266,7 +267,9 @@ export function pullRequestSource(pr: PullRequestRef): SourceRef {
  * The references of a work item: the stored ones, and the source and the pull
  * requests when they are not stored. The source comes first.
  */
-export function workItemRefs(w: Pick<WorkItem, "source" | "references" | "pull_requests" | "created_at">): WorkItemRef[] {
+export function workItemRefs(
+  w: Pick<WorkItem, "source" | "references" | "pull_requests" | "created_at">,
+): WorkItemRef[] {
   const out: WorkItemRef[] = [];
   const seen = new Set<string>();
   const add = (r: WorkItemRef): void => {
@@ -285,7 +288,10 @@ export function workItemRefs(w: Pick<WorkItem, "source" | "references" | "pull_r
 }
 
 /** Reports whether a reference of the work item has the key. */
-export function workItemHasRef(w: Pick<WorkItem, "source" | "references" | "pull_requests" | "created_at">, key: string): boolean {
+export function workItemHasRef(
+  w: Pick<WorkItem, "source" | "references" | "pull_requests" | "created_at">,
+  key: string,
+): boolean {
   if (key === "") return false;
   return workItemRefs(w).some((r) => r.key === key);
 }
@@ -360,7 +366,10 @@ export function runSourceOf(triggeredBy: string): { source: RunSource; ref: stri
 }
 
 /** The source of a run and its reference: the stored fields, else derived from triggered_by. */
-export function runSourceAndRef(r: Pick<Run, "source" | "source_ref" | "triggered_by">): { source: RunSource; ref: string } {
+export function runSourceAndRef(r: Pick<Run, "source" | "source_ref" | "triggered_by">): {
+  source: RunSource;
+  ref: string;
+} {
   if (r.source) return { source: r.source, ref: r.source_ref ?? "" };
   return runSourceOf(r.triggered_by ?? "");
 }

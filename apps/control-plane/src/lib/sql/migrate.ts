@@ -35,7 +35,8 @@ async function sha256Hex(s: string): Promise<string> {
 export function checkMigrations(list: readonly Migration[]): void {
   let last = 0;
   for (const m of list) {
-    if (!Number.isInteger(m.version) || m.version <= 0) throw new Error(`migration ${m.name}: bad version ${m.version}`);
+    if (!Number.isInteger(m.version) || m.version <= 0)
+      throw new Error(`migration ${m.name}: bad version ${m.version}`);
     if (m.version <= last) throw new Error(`migration ${m.version}_${m.name}: versions must increase (after ${last})`);
     last = m.version;
   }

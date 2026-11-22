@@ -82,12 +82,13 @@ export function parseJwt(tok: string): Jwt {
     const claims = JSON.parse(dec.decode(b64urlDecode(parts[1]!))) as Record<string, unknown>;
     return new Jwt(header, claims, parts[0] + "." + parts[1], b64urlDecode(parts[2]!));
   } catch (e) {
-    throw new Error(`jwt: ${(e as Error).message}`);
+    throw new Error(`jwt: ${(e as Error).message}`, { cause: e });
   }
 }
 
 export async function signHS256(secret: string | Uint8Array, claims: unknown): Promise<string> {
-  const signing = b64urlEncode(JSON.stringify({ alg: "HS256", typ: "JWT" })) + "." + b64urlEncode(JSON.stringify(claims));
+  const signing =
+    b64urlEncode(JSON.stringify({ alg: "HS256", typ: "JWT" })) + "." + b64urlEncode(JSON.stringify(claims));
   return signing + "." + b64urlEncode(await hmacSha256(secret, signing));
 }
 

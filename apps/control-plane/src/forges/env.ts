@@ -11,7 +11,13 @@ import { Resolver, type IntegrationSource, type SecretSource, type UserTokenSour
 
 const meta = (requestId = "forge"): CallMeta => ({ requestId });
 
-async function teamOp(env: Env, teamId: string, op: string, params: Record<string, string>, body?: unknown): Promise<unknown> {
+async function teamOp(
+  env: Env,
+  teamId: string,
+  op: string,
+  params: Record<string, string>,
+  body?: unknown,
+): Promise<unknown> {
   const out = await env.TEAM.getByName(doName.team(teamId)).api(meta(), op, params, body);
   if (typeof out === "object" && out !== null && "$error" in out) {
     const e = (out as { $error: { code: string; detail: string } }).$error;
@@ -24,12 +30,14 @@ async function teamOp(env: Env, teamId: string, op: string, params: Record<strin
 export function teamIntegrations(env: Env): IntegrationSource {
   return {
     async list(teamId, provider) {
-      const out = (await teamOp(env, teamId, "integrationsForProvider", provider ? { "?provider": provider } : {})) as { items?: Integration[] } | undefined;
+      const out = (await teamOp(env, teamId, "integrationsForProvider", provider ? { "?provider": provider } : {})) as
+        { items?: Integration[] } | undefined;
       return out?.items ?? [];
     },
     async setStatus(id, status, reason) {
       // The core has one team; integration IDs are unique inside it.
-      const out = (await teamOp(env, "default", "integrationsSetStatus", {}, { id, status, reason })) as { changed?: boolean } | boolean | undefined;
+      const out = (await teamOp(env, "default", "integrationsSetStatus", {}, { id, status, reason })) as
+        { changed?: boolean } | boolean | undefined;
       return typeof out === "boolean" ? out : !!out?.changed;
     },
   };
@@ -38,7 +46,8 @@ export function teamIntegrations(env: Env): IntegrationSource {
 export function teamSecrets(env: Env): SecretSource {
   return {
     async get(teamId, factoryId, name) {
-      const out = (await teamOp(env, teamId, "secretsGet", {}, { factory_id: factoryId, name })) as { found?: boolean; value?: string } | undefined;
+      const out = (await teamOp(env, teamId, "secretsGet", {}, { factory_id: factoryId, name })) as
+        { found?: boolean; value?: string } | undefined;
       return out?.found ? (out.value ?? "") : undefined;
     },
   };
@@ -47,7 +56,8 @@ export function teamSecrets(env: Env): SecretSource {
 export function teamUserTokens(env: Env): UserTokenSource {
   return {
     async get(teamId, userId, codeForge) {
-      const out = (await teamOp(env, teamId, "userForgeTokenGet", {}, { user_id: userId, forge: codeForge })) as { token?: string } | undefined;
+      const out = (await teamOp(env, teamId, "userForgeTokenGet", {}, { user_id: userId, forge: codeForge })) as
+        { token?: string } | undefined;
       return out?.token || undefined;
     },
   };

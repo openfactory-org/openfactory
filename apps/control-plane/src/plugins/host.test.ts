@@ -22,7 +22,10 @@ function backend(ints: Integration[]): PluginHostBackend & { secretCalls: string
   const secretCalls: string[][] = [];
   return {
     secretCalls,
-    listTeams: async () => [{ id: "team_1", name: "One" }, { id: "team_2", name: "Two" }],
+    listTeams: async () => [
+      { id: "team_1", name: "One" },
+      { id: "team_2", name: "Two" },
+    ],
     listIntegrations: async (teamId) => ints.filter((i) => teamId === "" || i.team_id === teamId),
     getSecret: async (teamId, factoryId, name) => {
       secretCalls.push([teamId, factoryId, name]);
@@ -108,7 +111,9 @@ describe("PluginHost", () => {
 
   it("expands {{NAME}} placeholders and fails on an unreadable one", async () => {
     const h = new PluginHost(backend([gitlab()]), { plugin });
-    expect(await h.expandSecrets("team:team_1", "a {{GL_HOOK}} b {{ GL_TOKEN }} c")).toBe("a value-of-GL_HOOK b value-of-GL_TOKEN c");
+    expect(await h.expandSecrets("team:team_1", "a {{GL_HOOK}} b {{ GL_TOKEN }} c")).toBe(
+      "a value-of-GL_HOOK b value-of-GL_TOKEN c",
+    );
     expect(await h.expandSecrets("team:team_1", "no placeholder")).toBe("no placeholder");
     await expect(h.expandSecrets("team:team_1", "{{OTHER}}")).rejects.toMatchObject({ code: "not_authorized" });
   });
@@ -123,9 +128,15 @@ describe("PluginHost", () => {
   });
 
   it("collects the providers of a plugin in lower case", () => {
-    expect([...pluginProviders({ name: "x", forgeProviders: ["GitLab"], responderProviders: ["slack"], integrationProviders: ["gitlab"] })].sort()).toEqual([
-      "gitlab",
-      "slack",
-    ]);
+    expect(
+      [
+        ...pluginProviders({
+          name: "x",
+          forgeProviders: ["GitLab"],
+          responderProviders: ["slack"],
+          integrationProviders: ["gitlab"],
+        }),
+      ].sort(),
+    ).toEqual(["gitlab", "slack"]);
   });
 });

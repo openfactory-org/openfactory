@@ -107,7 +107,13 @@ export function kit(secrets: Record<string, string>, extra: Partial<IntegrationD
   const store = new FakeStore();
   const published: Event[] = [];
   const ff = new FakeFetch();
-  const linker = new Linker({ store, key: "test-link-key", publicUrl: "https://of.example.com", currentUser: async () => null, now: () => NOW });
+  const linker = new Linker({
+    store,
+    key: "test-link-key",
+    publicUrl: "https://of.example.com",
+    currentUser: async () => null,
+    now: () => NOW,
+  });
   const deps: IntegrationDeps = {
     store,
     secrets: new FakeSecrets(secrets),
@@ -128,7 +134,15 @@ export function integration(over: Partial<Integration> & Pick<Integration, "id" 
 }
 
 export function user(over: Partial<User> = {}): User {
-  return { id: "usr_1", team_id: "team_1", email: "a@example.com", name: "A", role: "editor", created_at: "2026-01-01T00:00:00Z", ...over };
+  return {
+    id: "usr_1",
+    team_id: "team_1",
+    email: "a@example.com",
+    name: "A",
+    role: "editor",
+    created_at: "2026-01-01T00:00:00Z",
+    ...over,
+  };
 }
 
 export function post(url: string, body: string, headers: Record<string, string> = {}): Request {

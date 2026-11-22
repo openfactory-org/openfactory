@@ -61,7 +61,10 @@ function readData(raw: unknown): MessageData {
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 
 /** Turns the messages of a run into the normalized conversation. A user message starts a new step. */
-export function buildConversation(run: Pick<Run, "id">, msgs: readonly Pick<RunMessage, "id" | "role" | "content" | "data">[]): Conversation {
+export function buildConversation(
+  run: Pick<Run, "id">,
+  msgs: readonly Pick<RunMessage, "id" | "role" | "content" | "data">[],
+): Conversation {
   const steps: ConversationStep[] = [];
   let step: (ConversationStep & { messages: ConversationMessage[] }) | null = null;
   const newStep = (): ConversationStep & { messages: ConversationMessage[] } => {

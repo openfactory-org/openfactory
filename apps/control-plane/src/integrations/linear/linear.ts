@@ -65,7 +65,10 @@ export class LinearClient {
   }
 
   async query<T = unknown>(query: string, vars: Record<string, unknown>): Promise<T | undefined> {
-    const resp = await this.api.json<{ data?: T; errors?: { message: string }[] }>("POST", "", { query, variables: vars });
+    const resp = await this.api.json<{ data?: T; errors?: { message: string }[] }>("POST", "", {
+      query,
+      variables: vars,
+    });
     if (resp?.errors && resp.errors.length > 0) throw new GraphQLError(resp.errors.map((e) => e.message));
     return resp?.data;
   }
@@ -360,7 +363,7 @@ export class LinearHandler implements Responder, IssueTracker {
       throw new Error(`linear: decode payload: ${errMessage(e)}`, { cause: e });
     }
     const appUser = cfg(in_, "app_user_id");
-    let c: LinearClient | null = null;
+    let c: LinearClient | null;
     try {
       c = await this.client(in_);
     } catch {
@@ -510,7 +513,7 @@ export class LinearHandler implements Responder, IssueTracker {
           workspace,
         };
         let text = "";
-        let typ = "";
+        let typ: string;
         switch (p.action) {
           case "created":
             typ = "agent_session_created";

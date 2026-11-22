@@ -50,9 +50,13 @@ async function keyFromScalar(d: Uint8Array): Promise<IssuerKey> {
   const kid = toHex((await sha256(pub)).subarray(0, 8));
   const jwk = { kty: "EC", crv: "P-256", x, y, d: b64url(d), ext: true };
   const sign = await crypto.subtle.importKey("jwk", jwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
-  const verify = await crypto.subtle.importKey("jwk", { kty: "EC", crv: "P-256", x, y, ext: true }, { name: "ECDSA", namedCurve: "P-256" }, false, [
-    "verify",
-  ]);
+  const verify = await crypto.subtle.importKey(
+    "jwk",
+    { kty: "EC", crv: "P-256", x, y, ext: true },
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["verify"],
+  );
   return { kid, x, y, sign, verify };
 }
 
@@ -136,7 +140,12 @@ export class Issuer {
   }
 
   /** Signs a token for run r with audience aud. ttl 0 = 1 h, capped at 1 h. */
-  async token(r: TokenRun, aud: string, ttlMs = 0, o: TokenOptions = {}): Promise<{ token: string; expiresAt: number }> {
+  async token(
+    r: TokenRun,
+    aud: string,
+    ttlMs = 0,
+    o: TokenOptions = {},
+  ): Promise<{ token: string; expiresAt: number }> {
     if (aud.trim() === "") throw new Error("cloudid: audience is required");
     let ttl = ttlMs <= 0 ? DEFAULT_TTL_MS : ttlMs;
     if (ttl > MAX_TTL_MS) ttl = MAX_TTL_MS;
@@ -148,7 +157,15 @@ export class Issuer {
     }
     const now = Math.floor(this.now() / 1000);
     const exp = now + Math.floor(ttl / 1000);
-    const c: RunTokenClaims = { iss: this.issuer, sub: subjectOf(r), aud, iat: now, nbf: now - 30, exp, jti: newId("jti") };
+    const c: RunTokenClaims = {
+      iss: this.issuer,
+      sub: subjectOf(r),
+      aud,
+      iat: now,
+      nbf: now - 30,
+      exp,
+      jti: newId("jti"),
+    };
     const put = (k: keyof RunTokenClaims, v: string | undefined) => {
       if (v) (c as unknown as Record<string, unknown>)[k] = v;
     };
@@ -168,7 +185,9 @@ export class Issuer {
     const h = b64url(utf8(JSON.stringify({ alg: "ES256", kid: this.key.kid, typ: "JWT" })));
     const signing = `${h}.${b64url(utf8(JSON.stringify(claims)))}`;
     // WebCrypto ECDSA returns r || s (the JWS format).
-    const sig = new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, this.key.sign!, utf8(signing)));
+    const sig = new Uint8Array(
+      await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, this.key.sign!, utf8(signing)),
+    );
     return `${signing}.${b64url(sig)}`;
   }
 
@@ -180,7 +199,24 @@ export class Issuer {
       subject_types_supported: ["public"],
       id_token_signing_alg_values_supported: ["ES256"],
       scopes_supported: ["openid"],
-      claims_supported: ["iss", "sub", "aud", "iat", "nbf", "exp", "jti", "team_id", "factory_id", "agent", "agent_type", "run_id", "work_item_id", "run_as", "creator", "worker_host"],
+      claims_supported: [
+        "iss",
+        "sub",
+        "aud",
+        "iat",
+        "nbf",
+        "exp",
+        "jti",
+        "team_id",
+        "factory_id",
+        "agent",
+        "agent_type",
+        "run_id",
+        "work_item_id",
+        "run_as",
+        "creator",
+        "worker_host",
+      ],
     };
   }
 
@@ -203,7 +239,12 @@ export class Issuer {
     const data = utf8(`${parts[0]}.${parts[1]}`);
     let ok = false;
     for (const k of [this.key, ...this.previous]) {
-      ok ||= await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, k.verify, sig as Uint8Array<ArrayBuffer>, data);
+      ok ||= await crypto.subtle.verify(
+        { name: "ECDSA", hash: "SHA-256" },
+        k.verify,
+        sig as Uint8Array<ArrayBuffer>,
+        data,
+      );
     }
     if (!ok) throw new Error("cloudid: bad signature");
     const c = JSON.parse(new TextDecoder().decode(fromAnyB64(parts[1]!)!)) as RunTokenClaims;

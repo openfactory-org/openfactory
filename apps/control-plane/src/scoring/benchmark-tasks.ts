@@ -30,7 +30,10 @@ const SHA_RE = /^[0-9a-f]{40}$/;
 
 /** A slug from free text: lower case letters and digits separated by single dashes. */
 export function slugify(title: string): string {
-  let slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  let slug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
   if (slug.length > 50) slug = slug.slice(0, 50).replace(/^-+|-+$/g, "");
   return slug;
 }
@@ -57,7 +60,8 @@ export async function makeTaskFromRun(
   const root = definitionRoot(active.files);
   const suitePath = `${root}benchmarks/${suiteSlug}/suite.yaml`;
   const suiteYaml = active.files[suitePath];
-  if (suiteYaml === undefined) throw new OfError("resource_not_found", `benchmark suite ${JSON.stringify(req.suite)} not found`);
+  if (suiteYaml === undefined)
+    throw new OfError("resource_not_found", `benchmark suite ${JSON.stringify(req.suite)} not found`);
   const starts = await runs.loadStartCommits(run.id);
   const task: BenchmarkTask = {
     slug: "",
@@ -78,7 +82,10 @@ export async function makeTaskFromRun(
     }
     const forge = st.codeForge.toUpperCase();
     if (forge !== "GITHUB" && forge !== "GITLAB") {
-      throw new OfError("invalid_request", `benchmark tasks support GitHub and GitLab repositories only (${st.owner}/${st.repo} is on ${st.codeForge})`);
+      throw new OfError(
+        "invalid_request",
+        `benchmark tasks support GitHub and GitLab repositories only (${st.owner}/${st.repo} is on ${st.codeForge})`,
+      );
     }
     const ref = { codeForge: forge, owner: st.owner, repo: st.repo, ref: st.ref };
     startingRepoRefs.push(ref);
@@ -96,7 +103,8 @@ export async function makeTaskFromRun(
   }
   task.slug = slug;
   const taskPath = `${root}benchmarks/${suiteSlug}/tasks/${slug}.yaml`;
-  if (taskPath in active.files) throw new OfError("conflict", `task ${JSON.stringify(slug)} already exists in suite ${JSON.stringify(suiteSlug)}`);
+  if (taskPath in active.files)
+    throw new OfError("conflict", `task ${JSON.stringify(slug)} already exists in suite ${JSON.stringify(suiteSlug)}`);
   const doc: Record<string, unknown> = {
     title: task.title,
     prompt: task.prompt,

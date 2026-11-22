@@ -3,7 +3,13 @@
 // (TestParsePullRequestURL), the JSON-RPC handler and the envelope format.
 import { describe, expect, it } from "vitest";
 import { env } from "cloudflare:workers";
-import { MCP_CONNECTION_DIRECT, MCP_CONNECTION_PROXY, MCP_OAUTH_NOT_CONNECTED, isOfError, type RegisteredMCPServer } from "@openfactory/core";
+import {
+  MCP_CONNECTION_DIRECT,
+  MCP_CONNECTION_PROXY,
+  MCP_OAUTH_NOT_CONNECTED,
+  isOfError,
+  type RegisteredMCPServer,
+} from "@openfactory/core";
 import { checkRedirectURI, redirectAllowed } from "./auth/core";
 import { localEncrypter } from "./envelope";
 import { handleMessage, serveMcp, textResult, type McpServer } from "./jsonrpc";
@@ -15,18 +21,48 @@ import { matchesWorkItem, parsePullRequestURL, planReference } from "./server/re
 describe("mergeguard", () => {
   it("isMergeTool", () => {
     const merge = [
-      "merge_pull_request", "mergePullRequest", "forge.merge-pr", "merge_pr", "merge",
-      "merge_merge_request", "accept_merge_request", "acceptMergeRequest", "complete_pull_request",
-      "pull_request_merge", "pr_merge", "squash_merge", "enable_auto_merge", "enable_pull_request_automerge",
-      "set_auto_merge", "merge_branch", "mcp__forge__merge_pull_request", "MergePR", "merge_and_close",
-      "add_to_merge_queue", "enqueue_pull_request", "merge_into", "rebase_merge",
+      "merge_pull_request",
+      "mergePullRequest",
+      "forge.merge-pr",
+      "merge_pr",
+      "merge",
+      "merge_merge_request",
+      "accept_merge_request",
+      "acceptMergeRequest",
+      "complete_pull_request",
+      "pull_request_merge",
+      "pr_merge",
+      "squash_merge",
+      "enable_auto_merge",
+      "enable_pull_request_automerge",
+      "set_auto_merge",
+      "merge_branch",
+      "mcp__forge__merge_pull_request",
+      "MergePR",
+      "merge_and_close",
+      "add_to_merge_queue",
+      "enqueue_pull_request",
+      "merge_into",
+      "rebase_merge",
     ];
     for (const n of merge) expect(isMergeTool(n), n).toBe(true);
     const other = [
-      "get_merge_request", "list_merge_requests", "create_merge_request", "create_pull_request",
-      "get_pull_request", "merge_request_diff", "get_merge_status", "list_merges_in_queue_status",
-      "get_merge_base", "linear_get_issue", "comment_on_merge_request", "update_merge_request",
-      "emerge", "submerged_items", "", "merge_request",
+      "get_merge_request",
+      "list_merge_requests",
+      "create_merge_request",
+      "create_pull_request",
+      "get_pull_request",
+      "merge_request_diff",
+      "get_merge_status",
+      "list_merges_in_queue_status",
+      "get_merge_base",
+      "linear_get_issue",
+      "comment_on_merge_request",
+      "update_merge_request",
+      "emerge",
+      "submerged_items",
+      "",
+      "merge_request",
     ];
     for (const n of other) expect(isMergeTool(n), n).toBe(false);
   });
@@ -47,7 +83,12 @@ describe("mergeguard", () => {
     expect(body.result.isError).toBe(true);
     expect(body.result.content[0]!.text).toBe(REFUSAL_TEXT);
 
-    expect(await guardMerge(`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"create_pull_request"}}`, policy)).toBeNull();
+    expect(
+      await guardMerge(
+        `{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"create_pull_request"}}`,
+        policy,
+      ),
+    ).toBeNull();
     expect(await guardMerge(`{"jsonrpc":"2.0","id":9,"method":"tools/list"}`, policy)).toBeNull();
 
     const batch =
@@ -70,7 +111,14 @@ describe("mergeguard", () => {
   });
 });
 
-const srv = (m: Partial<RegisteredMCPServer>): RegisteredMCPServer => ({ id: "", team_id: "", name: "", created_at: "", updated_at: "", ...m });
+const srv = (m: Partial<RegisteredMCPServer>): RegisteredMCPServer => ({
+  id: "",
+  team_id: "",
+  name: "",
+  created_at: "",
+  updated_at: "",
+  ...m,
+});
 
 function expectInvalid(m: RegisteredMCPServer, label: string): void {
   try {
@@ -156,9 +204,12 @@ describe("registry validate", () => {
 
 describe("oauth helpers", () => {
   it("authParam and canonicalResource", () => {
-    expect(authParam([`Bearer resource_metadata="https://x.test/.well-known/oauth-protected-resource/mcp"`], "resource_metadata")).toBe(
-      "https://x.test/.well-known/oauth-protected-resource/mcp",
-    );
+    expect(
+      authParam(
+        [`Bearer resource_metadata="https://x.test/.well-known/oauth-protected-resource/mcp"`],
+        "resource_metadata",
+      ),
+    ).toBe("https://x.test/.well-known/oauth-protected-resource/mcp");
     expect(authParam([`Bearer realm="a", error="invalid_token"`], "error")).toBe("invalid_token");
     expect(canonicalResource("HTTPS://MCP.Example.test/mcp?x=1#f")).toBe("https://mcp.example.test/mcp");
     expect(canonicalResource("https://mcp.example.test")).toBe("https://mcp.example.test");
@@ -180,7 +231,11 @@ describe("oauth helpers", () => {
 
 describe("references (TestParsePullRequestURL, TestResolveExternalReferences)", () => {
   it("parses pull and merge request URLs", () => {
-    expect(parsePullRequestURL("https://github.com/acme/web/pull/42")).toMatchObject({ forge: "GITHUB", repo: "acme/web", number: 42 });
+    expect(parsePullRequestURL("https://github.com/acme/web/pull/42")).toMatchObject({
+      forge: "GITHUB",
+      repo: "acme/web",
+      number: 42,
+    });
     expect(parsePullRequestURL("https://gitlab.com/group/sub/proj/-/merge_requests/7/")).toMatchObject({
       forge: "GITLAB",
       repo: "group/sub/proj",
@@ -197,8 +252,18 @@ describe("references (TestParsePullRequestURL, TestResolveExternalReferences)", 
   });
 
   it("plans references", () => {
-    expect(planReference("acme/web#12", "")).toEqual({ kind: "search", keys: ["github:acme/web#12", "gitlab:acme/web#12"], prURL: "", branch: "" });
-    expect(planReference("ENG-42", "")).toEqual({ kind: "search", keys: ["linear:ENG-42", "jira:ENG-42"], prURL: "", branch: "" });
+    expect(planReference("acme/web#12", "")).toEqual({
+      kind: "search",
+      keys: ["github:acme/web#12", "gitlab:acme/web#12"],
+      prURL: "",
+      branch: "",
+    });
+    expect(planReference("ENG-42", "")).toEqual({
+      kind: "search",
+      keys: ["linear:ENG-42", "jira:ENG-42"],
+      prURL: "",
+      branch: "",
+    });
     expect(planReference("feature/x", "")).toEqual({ kind: "search", keys: [], prURL: "", branch: "feature/x" });
     expect(planReference("https://linear.app/acme/issue/ENG-1/title", "")).toMatchObject({ keys: ["linear:ENG-1"] });
     expect(planReference("https://acme.atlassian.net/browse/OPS-3", "")).toMatchObject({ keys: ["jira:OPS-3"] });
@@ -212,7 +277,13 @@ describe("references (TestParsePullRequestURL, TestResolveExternalReferences)", 
       runs: [],
     });
     expect(planReference("https://example.test/nothing", "")).toEqual({ kind: "notFound" });
-    const wi = { id: "w", source_key: "", pull_requests: [{ forge: "GITHUB", repo: "acme/web", number: 3, url: "https://github.com/acme/web/pull/3", branch: "b1" }] };
+    const wi = {
+      id: "w",
+      source_key: "",
+      pull_requests: [
+        { forge: "GITHUB", repo: "acme/web", number: 3, url: "https://github.com/acme/web/pull/3", branch: "b1" },
+      ],
+    };
     expect(matchesWorkItem(wi, [], "https://github.com/acme/web/pull/3/", "")).toBe(true);
     expect(matchesWorkItem(wi, ["github:acme/web#3"], "", "")).toBe(true);
     expect(matchesWorkItem(wi, [], "", "b1")).toBe(true);
@@ -225,7 +296,12 @@ describe("jsonrpc", () => {
     info: { name: "t", version: "1" },
     instructions: "hi",
     tools: [
-      { name: "echo", description: "Echo", inputSchema: { type: "object" }, handler: (a, c) => textResult(`${c.who}:${String(a.x)}`) },
+      {
+        name: "echo",
+        description: "Echo",
+        inputSchema: { type: "object" },
+        handler: (a, c) => textResult(`${c.who}:${String(a.x)}`),
+      },
       {
         name: "boom",
         description: "Fails",
@@ -237,24 +313,57 @@ describe("jsonrpc", () => {
     ],
   };
   it("initialize, list, call, errors, notifications, batches", async () => {
-    const init = await handleMessage(server, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } }, { who: "a" });
-    expect(init?.result).toMatchObject({ protocolVersion: "2025-06-18", serverInfo: { name: "t" }, instructions: "hi" });
-    const old = await handleMessage(server, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "1999-01-01" } }, { who: "a" });
+    const init = await handleMessage(
+      server,
+      { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } },
+      { who: "a" },
+    );
+    expect(init?.result).toMatchObject({
+      protocolVersion: "2025-06-18",
+      serverInfo: { name: "t" },
+      instructions: "hi",
+    });
+    const old = await handleMessage(
+      server,
+      { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "1999-01-01" } },
+      { who: "a" },
+    );
     expect((old?.result as { protocolVersion: string }).protocolVersion).toBe("2025-11-25");
-    expect(await handleMessage(server, { jsonrpc: "2.0", method: "notifications/initialized" }, { who: "a" })).toBeNull();
-    const call = await handleMessage(server, { jsonrpc: "2.0", id: "x", method: "tools/call", params: { name: "echo", arguments: { x: 5 } } }, { who: "a" });
+    expect(
+      await handleMessage(server, { jsonrpc: "2.0", method: "notifications/initialized" }, { who: "a" }),
+    ).toBeNull();
+    const call = await handleMessage(
+      server,
+      { jsonrpc: "2.0", id: "x", method: "tools/call", params: { name: "echo", arguments: { x: 5 } } },
+      { who: "a" },
+    );
     expect(call?.result).toEqual({ content: [{ type: "text", text: "a:5" }] });
-    const boom = await handleMessage(server, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "boom" } }, { who: "a" });
+    const boom = await handleMessage(
+      server,
+      { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "boom" } },
+      { who: "a" },
+    );
     expect(boom?.result).toEqual({ content: [{ type: "text", text: "bad" }], isError: true });
-    const unknown = await handleMessage(server, { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "nope" } }, { who: "a" });
+    const unknown = await handleMessage(
+      server,
+      { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "nope" } },
+      { who: "a" },
+    );
     expect(unknown?.error?.code).toBe(-32602);
     const missing = await handleMessage(server, { jsonrpc: "2.0", id: 4, method: "nope" }, { who: "a" });
     expect(missing?.error?.code).toBe(-32601);
 
-    const post = (body: string) => new Request("http://x/mcp", { method: "POST", body, headers: { "content-type": "application/json" } });
-    const r1 = await serveMcp(post(`[{"jsonrpc":"2.0","id":1,"method":"ping"},{"jsonrpc":"2.0","method":"notifications/initialized"}]`), server, { who: "a" });
+    const post = (body: string) =>
+      new Request("http://x/mcp", { method: "POST", body, headers: { "content-type": "application/json" } });
+    const r1 = await serveMcp(
+      post(`[{"jsonrpc":"2.0","id":1,"method":"ping"},{"jsonrpc":"2.0","method":"notifications/initialized"}]`),
+      server,
+      { who: "a" },
+    );
     expect(await r1.json()).toEqual([{ jsonrpc: "2.0", id: 1, result: {} }]);
-    expect((await serveMcp(post(`{"jsonrpc":"2.0","method":"notifications/initialized"}`), server, { who: "a" })).status).toBe(202);
+    expect(
+      (await serveMcp(post(`{"jsonrpc":"2.0","method":"notifications/initialized"}`), server, { who: "a" })).status,
+    ).toBe(202);
     expect((await serveMcp(post("{nope"), server, { who: "a" })).status).toBe(400);
     expect((await serveMcp(new Request("http://x/mcp"), server, { who: "a" })).status).toBe(405);
   });
@@ -263,9 +372,17 @@ describe("jsonrpc", () => {
 describe("envelope", () => {
   it("round-trips and binds the name", async () => {
     const enc = await localEncrypter(env);
-    const sealed = await enc.encrypt("team1", "", "mcp-oauth:mcp_1", "mcp_oauth_token", new TextEncoder().encode("secret-value") as Uint8Array<ArrayBuffer>);
+    const sealed = await enc.encrypt(
+      "team1",
+      "",
+      "mcp-oauth:mcp_1",
+      "mcp_oauth_token",
+      new TextEncoder().encode("secret-value") as Uint8Array<ArrayBuffer>,
+    );
     expect(sealed[0]).toBe(2);
-    expect(new TextDecoder().decode(await enc.decrypt("team1", "", "mcp-oauth:mcp_1", "mcp_oauth_token", sealed))).toBe("secret-value");
+    expect(new TextDecoder().decode(await enc.decrypt("team1", "", "mcp-oauth:mcp_1", "mcp_oauth_token", sealed))).toBe(
+      "secret-value",
+    );
     await expect(enc.decrypt("team2", "", "mcp-oauth:mcp_1", "mcp_oauth_token", sealed)).rejects.toThrow();
     await expect(enc.decrypt("team1", "", "mcp-oauth:mcp_2", "mcp_oauth_token", sealed)).rejects.toThrow();
   });

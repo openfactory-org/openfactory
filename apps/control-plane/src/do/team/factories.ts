@@ -135,7 +135,11 @@ export function findFactory(kit: TeamKit, ref: string): FactoryRecord | undefine
   if (!ref) return undefined;
   const r =
     first<{ data: string }>(kit.sql, "SELECT data FROM factories WHERE id = ?", ref) ??
-    first<{ data: string }>(kit.sql, "SELECT data FROM factories WHERE alias = ? COLLATE NOCASE ORDER BY created_ms LIMIT 1", ref) ??
+    first<{ data: string }>(
+      kit.sql,
+      "SELECT data FROM factories WHERE alias = ? COLLATE NOCASE ORDER BY created_ms LIMIT 1",
+      ref,
+    ) ??
     first<{ data: string }>(kit.sql, "SELECT data FROM factories WHERE name = ? ORDER BY created_ms LIMIT 1", ref);
   return r ? (JSON.parse(r.data) as FactoryRecord) : undefined;
 }
@@ -195,7 +199,11 @@ async function loadFiles(kit: TeamKit, r: VersionRow): Promise<Record<string, st
 }
 
 export async function getVersion(kit: TeamKit, id: string, withFiles = true): Promise<DefinitionVersion | undefined> {
-  const r = first<VersionRow & Record<string, SqlStorageValue>>(kit.sql, "SELECT data, files, files_r2 FROM definition_versions WHERE id = ?", id);
+  const r = first<VersionRow & Record<string, SqlStorageValue>>(
+    kit.sql,
+    "SELECT data, files, files_r2 FROM definition_versions WHERE id = ?",
+    id,
+  );
   if (!r) return undefined;
   const v = JSON.parse(r.data) as DefinitionVersion;
   v.files = withFiles ? await loadFiles(kit, r) : (undefined as unknown as Record<string, string>);
@@ -216,7 +224,10 @@ function effectiveState(v: DefinitionVersion, activeId: string): string {
 }
 
 /** Serializes files and puts large trees in R2 (call before the write transaction). */
-async function storeFiles(kit: TeamKit, files: Record<string, string>): Promise<{ inline: string | null; r2: string | null }> {
+async function storeFiles(
+  kit: TeamKit,
+  files: Record<string, string>,
+): Promise<{ inline: string | null; r2: string | null }> {
   const text = JSON.stringify(files);
   if (text.length <= INLINE_FILES_LIMIT) return { inline: text, r2: null };
   const key = `defs/${await sha256Hex(text)}`;
@@ -224,7 +235,12 @@ async function storeFiles(kit: TeamKit, files: Record<string, string>): Promise<
   return { inline: null, r2: key };
 }
 
-function insertVersion(kit: TeamKit, v: DefinitionVersion, stored: { inline: string | null; r2: string | null }, idemKey?: string): void {
+function insertVersion(
+  kit: TeamKit,
+  v: DefinitionVersion,
+  stored: { inline: string | null; r2: string | null },
+  idemKey?: string,
+): void {
   const { files: _files, ...meta } = v;
   kit.sql.exec(
     `INSERT INTO definition_versions (id, factory_id, state, valid, created_ms, files, files_r2, idem_key, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -239,11 +255,6 @@ function insertVersion(kit: TeamKit, v: DefinitionVersion, stored: { inline: str
     idemKey ?? null,
     JSON.stringify(meta),
   );
-}
-
-function updateVersionMeta(kit: TeamKit, v: DefinitionVersion): void {
-  const { files: _files, ...meta } = v;
-  kit.sql.exec("UPDATE definition_versions SET state = ?, valid = ?, data = ? WHERE id = ?", v.state ?? "", v.valid ? 1 : 0, JSON.stringify(meta), v.id);
 }
 
 // ---------- preflight ----------
@@ -261,7 +272,13 @@ export interface DefinitionCheck {
 }
 
 /** A preflight check of another module (workers, MCP servers, webhooks...). Sync, no I/O. */
-export type PreflightCheck = (kit: TeamKit, f: FactoryRecord, def: CompiledDefinition, files: Record<string, string>, chk: DefinitionCheck) => void;
+export type PreflightCheck = (
+  kit: TeamKit,
+  f: FactoryRecord,
+  def: CompiledDefinition,
+  files: Record<string, string>,
+  chk: DefinitionCheck,
+) => void;
 
 const preflights: { name: string; fn: PreflightCheck }[] = [];
 
@@ -295,12 +312,14 @@ function secretRefs(def: CompiledDefinition): DefRef[] {
     auth(agentFile(a.name), "harness", a.harness?.auth);
   }
   for (const au of def.automations ?? []) {
-    const o = au.overrides as { secrets?: string[]; harness?: { auth?: { source: string; secretName?: string } } } | undefined;
+    const o = au.overrides as
+      { secrets?: string[]; harness?: { auth?: { source: string; secretName?: string } } } | undefined;
     if (!o) continue;
     for (const s of o.secrets ?? []) add(automationFile(au.name), "secrets", s);
     auth(automationFile(au.name), "harness", o.harness?.auth);
   }
-  const sd = def.scorerDefaults as { secrets?: string[]; harness?: { auth?: { source: string; secretName?: string } } } | undefined;
+  const sd = def.scorerDefaults as
+    { secrets?: string[]; harness?: { auth?: { source: string; secretName?: string } } } | undefined;
   if (sd) {
     for (const s of sd.secrets ?? []) add("factory.yaml", "scorerDefaults.secrets", s);
     auth("factory.yaml", "scorerDefaults.harness", sd.harness?.auth);
@@ -310,11 +329,19 @@ function secretRefs(def: CompiledDefinition): DefRef[] {
   return refs;
 }
 
-function preflightSecrets(kit: TeamKit, f: FactoryRecord, def: CompiledDefinition, _files: Record<string, string>, chk: DefinitionCheck): void {
+function preflightSecrets(
+  kit: TeamKit,
+  f: FactoryRecord,
+  def: CompiledDefinition,
+  _files: Record<string, string>,
+  chk: DefinitionCheck,
+): void {
   const refs = secretRefs(def);
   if (refs.length === 0) return;
   const known = new Set(
-    all<{ name: string }>(kit.sql, "SELECT name FROM secrets WHERE factory_id = '' OR factory_id = ?", f.id).map((r) => r.name),
+    all<{ name: string }>(kit.sql, "SELECT name FROM secrets WHERE factory_id = '' OR factory_id = ?", f.id).map(
+      (r) => r.name,
+    ),
   );
   const seen = new Set<string>();
   for (const r of refs) {
@@ -328,7 +355,13 @@ function preflightSecrets(kit: TeamKit, f: FactoryRecord, def: CompiledDefinitio
   }
 }
 
-function preflightEnvironments(kit: TeamKit, _f: FactoryRecord, def: CompiledDefinition, files: Record<string, string>, chk: DefinitionCheck): void {
+function preflightEnvironments(
+  kit: TeamKit,
+  _f: FactoryRecord,
+  def: CompiledDefinition,
+  files: Record<string, string>,
+  chk: DefinitionCheck,
+): void {
   const refs: DefRef[] = [];
   const envField = "environmentId";
   const defaultsSet = keyLine("factory.yaml", files["factory.yaml"] ?? "", "agentDefaults." + envField) > 0;
@@ -343,7 +376,7 @@ function preflightEnvironments(kit: TeamKit, _f: FactoryRecord, def: CompiledDef
     refs.push({ file, field, name: a.environment_id });
   }
   for (const au of def.automations ?? []) {
-    const e = (au.overrides as { environmentId?: string | null; environment_id?: string | null } | undefined);
+    const e = au.overrides as { environmentId?: string | null; environment_id?: string | null } | undefined;
     const id = e?.environmentId ?? e?.environment_id;
     if (id) refs.push({ file: automationFile(au.name), field: envField, name: id });
   }
@@ -360,7 +393,11 @@ function preflightEnvironments(kit: TeamKit, _f: FactoryRecord, def: CompiledDef
     const key = r.file + "\0" + r.name;
     if (known.has(r.name) || seen.has(key)) continue;
     seen.add(key);
-    chk.errors.push({ file: r.file, field: r.field, message: `environment ${JSON.stringify(r.name)} does not exist in the team` });
+    chk.errors.push({
+      file: r.file,
+      field: r.field,
+      message: `environment ${JSON.stringify(r.name)} does not exist in the team`,
+    });
   }
 }
 
@@ -370,11 +407,27 @@ function checkAlias(kit: TeamKit, f: FactoryRecord, def: CompiledDefinition): Va
     .map((r) => JSON.parse(r.data) as FactoryRecord)
     .find((o) => o.id !== f.id);
   if (!other) return [];
-  return [{ file: "factory.yaml", field: "alias", message: `alias ${JSON.stringify(def.alias)} is already used by factory ${JSON.stringify(other.name)}` }];
+  return [
+    {
+      file: "factory.yaml",
+      field: "alias",
+      message: `alias ${JSON.stringify(def.alias)} is already used by factory ${JSON.stringify(other.name)}`,
+    },
+  ];
 }
 
 function sortIssues(v: ValidationError[]): void {
-  v.sort((a, b) => (a.file !== b.file ? (a.file < b.file ? -1 : 1) : (a.field ?? "") < (b.field ?? "") ? -1 : (a.field ?? "") > (b.field ?? "") ? 1 : 0));
+  v.sort((a, b) =>
+    a.file !== b.file
+      ? a.file < b.file
+        ? -1
+        : 1
+      : (a.field ?? "") < (b.field ?? "")
+        ? -1
+        : (a.field ?? "") > (b.field ?? "")
+          ? 1
+          : 0,
+  );
 }
 
 function addIssueLines(files: Record<string, string>, issues: ValidationError[]): void {
@@ -393,7 +446,8 @@ export function checkDefinition(kit: TeamKit, f: FactoryRecord, files: Record<st
   const chk: DefinitionCheck = { definition: null, errors: [], warnings: [], skipped: [] };
   const res = compile(files);
   let verrs = res.errors;
-  if (!res.definition && verrs.length === 0) verrs = [{ file: "factory.yaml", message: "definition could not be compiled" }];
+  if (!res.definition && verrs.length === 0)
+    verrs = [{ file: "factory.yaml", message: "definition could not be compiled" }];
   if (verrs.length > 0) {
     chk.errors.push(...verrs);
     return chk;
@@ -466,7 +520,8 @@ async function materialize(factoryId: string, def: CompiledDefinition): Promise<
 function runtimeOf(versionId: string, def: CompiledDefinition): FactoryRuntime {
   const rt: FactoryRuntime = { version_id: versionId, repositories: def.repositories ?? null };
   const set = <K extends keyof FactoryRuntime>(k: K, v: FactoryRuntime[K] | undefined | null) => {
-    if (v !== undefined && v !== null && !(Array.isArray(v) && v.length === 0) && v !== "" && v !== 0 && v !== false) rt[k] = v;
+    if (v !== undefined && v !== null && !(Array.isArray(v) && v.length === 0) && v !== "" && v !== 0 && v !== false)
+      rt[k] = v;
   };
   set("machines", def.machines && Object.keys(def.machines).length ? def.machines : undefined);
   set("skills", def.skills ?? undefined);
@@ -488,7 +543,11 @@ function runtimeOf(versionId: string, def: CompiledDefinition): FactoryRuntime {
 }
 
 function defaultAlias(name: string): string {
-  return name.trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function replaceResources(kit: TeamKit, factoryId: string, m: Materialized): void {
@@ -496,7 +555,14 @@ function replaceResources(kit: TeamKit, factoryId: string, m: Materialized): voi
   kit.sql.exec("DELETE FROM automations WHERE factory_id = ?", factoryId);
   kit.sql.exec("DELETE FROM scorers WHERE factory_id = ?", factoryId);
   m.agents.forEach((a, i) =>
-    kit.sql.exec("INSERT INTO agents (id, factory_id, name, ord, data) VALUES (?, ?, ?, ?, ?)", a.id, factoryId, a.name, i, JSON.stringify(a)),
+    kit.sql.exec(
+      "INSERT INTO agents (id, factory_id, name, ord, data) VALUES (?, ?, ?, ?, ?)",
+      a.id,
+      factoryId,
+      a.name,
+      i,
+      JSON.stringify(a),
+    ),
   );
   m.automations.forEach((a, i) =>
     kit.sql.exec(
@@ -509,10 +575,23 @@ function replaceResources(kit: TeamKit, factoryId: string, m: Materialized): voi
       JSON.stringify(a),
     ),
   );
-  m.scorers.forEach((s, i) => kit.sql.exec("INSERT INTO scorers (id, factory_id, ord, data) VALUES (?, ?, ?, ?)", s.id, factoryId, i, JSON.stringify(s)));
+  m.scorers.forEach((s, i) =>
+    kit.sql.exec(
+      "INSERT INTO scorers (id, factory_id, ord, data) VALUES (?, ?, ?, ?)",
+      s.id,
+      factoryId,
+      i,
+      JSON.stringify(s),
+    ),
+  );
 }
 
-function setFactoryIntegrations(kit: TeamKit, factoryId: string, providers: string[], settings: Record<string, Record<string, string> | undefined>): void {
+function setFactoryIntegrations(
+  kit: TeamKit,
+  factoryId: string,
+  providers: string[],
+  settings: Record<string, Record<string, string> | undefined>,
+): void {
   kit.sql.exec("DELETE FROM factory_integrations WHERE factory_id = ?", factoryId);
   providers.forEach((p, i) =>
     kit.sql.exec(
@@ -625,27 +704,45 @@ export async function applyDefinition(kit: TeamKit, factoryId: string, input: Ap
       kind: "dispatch.limits",
       lane: "dispatch",
       msgId: `limits:${factoryId}:${v.id}`,
-      payload: { factoryId, versionId: v.id, maxConcurrentRuns: def.maxConcurrentRuns ?? null, spendLimit: def.spendLimit ?? null },
+      payload: {
+        factoryId,
+        versionId: v.id,
+        maxConcurrentRuns: def.maxConcurrentRuns ?? null,
+        spendLimit: def.spendLimit ?? null,
+      },
     });
     runtimeCache.delete(factoryId);
-    kit.live.broadcast("definitions", { type: "event", id: "", event: "definition", data: factoryView(kit, nf) }, (a) => {
-      const fid = (a as { factoryId?: string } | null)?.factoryId ?? "";
-      return fid === "" || fid === factoryId;
-    });
+    kit.live.broadcast(
+      "definitions",
+      { type: "event", id: "", event: "definition", data: factoryView(kit, nf) },
+      (a) => {
+        const fid = (a as { factoryId?: string } | null)?.factoryId ?? "";
+        return fid === "" || fid === factoryId;
+      },
+    );
     return { version: v };
   });
 }
 
 /** TeamRpc.definitionApply: input {files, message?, author?, commitSha?, baseVersionId?}. Throws a validation error when invalid. */
-export async function definitionApply(kit: TeamKit, meta: CallMeta, factoryId: string, input: unknown): Promise<unknown> {
+export async function definitionApply(
+  kit: TeamKit,
+  meta: CallMeta,
+  factoryId: string,
+  input: unknown,
+): Promise<unknown> {
   const b = bodyObject(input);
   const files = b["files"] as Record<string, string> | undefined;
-  if (!files || typeof files !== "object" || Object.keys(files).length === 0) throw new OfError("invalid_request", "files is required");
+  if (!files || typeof files !== "object" || Object.keys(files).length === 0)
+    throw new OfError("invalid_request", "files is required");
   const base = str(b, "baseVersionId");
   const f = getFactoryById(kit, factoryId);
   if (!f) throw new OfError("resource_not_found", `factory ${factoryId} not found`);
   if (base && base !== (f.active_version_id ?? "")) {
-    throw new OfError("conflict", `the definition changed since version ${base} (active version is ${f.active_version_id ?? ""})`);
+    throw new OfError(
+      "conflict",
+      `the definition changed since version ${base} (active version is ${f.active_version_id ?? ""})`,
+    );
   }
   const r = await applyDefinition(kit, factoryId, {
     files,
@@ -653,7 +750,8 @@ export async function definitionApply(kit: TeamKit, meta: CallMeta, factoryId: s
     message: str(b, "message") || "Update definition",
     commitSha: str(b, "commitSha"),
   });
-  if (r.invalid) throw validationError("definition could not be applied; the previous version stays active", r.version.errors);
+  if (r.invalid)
+    throw validationError("definition could not be applied; the previous version stays active", r.version.errors);
   return { version: r.version };
 }
 
@@ -671,7 +769,9 @@ export async function configSnapshot(kit: TeamKit, factoryId: string): Promise<u
     runtime: rt ? (JSON.parse(rt.data) as FactoryRuntime) : { version_id: "", repositories: null },
     agents: listAgents(kit, f.id),
     automations: listAutomations(kit, f.id),
-    scorers: all<{ data: string }>(kit.sql, "SELECT data FROM scorers WHERE factory_id = ? ORDER BY ord", f.id).map((r) => JSON.parse(r.data) as Scorer),
+    scorers: all<{ data: string }>(kit.sql, "SELECT data FROM scorers WHERE factory_id = ? ORDER BY ord", f.id).map(
+      (r) => JSON.parse(r.data) as Scorer,
+    ),
     integrations: getFactoryIntegrations(kit, f.id),
   };
   runtimeCache.set(f.id, { versionId: vid, snapshot });
@@ -682,16 +782,30 @@ export async function configSnapshot(kit: TeamKit, factoryId: string): Promise<u
 export async function proposeDefinition(
   kit: TeamKit,
   _meta: CallMeta,
-  input: { factoryId: string; files: Record<string, string>; message: string; authorRunId: string; idempotencyKey: string },
+  input: {
+    factoryId: string;
+    files: Record<string, string>;
+    message: string;
+    authorRunId: string;
+    idempotencyKey: string;
+  },
 ): Promise<unknown> {
   const f = findFactory(kit, input.factoryId);
   if (!f) throw new OfError("resource_not_found", `factory ${input.factoryId} not found`);
-  const prev = first<{ id: string }>(kit.sql, "SELECT id FROM definition_versions WHERE idem_key = ?", input.idempotencyKey);
+  const prev = first<{ id: string }>(
+    kit.sql,
+    "SELECT id FROM definition_versions WHERE idem_key = ?",
+    input.idempotencyKey,
+  );
   if (prev) return { version: await getVersion(kit, prev.id, false) };
   const chk = checkDefinition(kit, f, input.files);
   const stored = await storeFiles(kit, input.files);
   return kit.tx(() => {
-    const again = first<{ id: string }>(kit.sql, "SELECT id FROM definition_versions WHERE idem_key = ?", input.idempotencyKey);
+    const again = first<{ id: string }>(
+      kit.sql,
+      "SELECT id FROM definition_versions WHERE idem_key = ?",
+      input.idempotencyKey,
+    );
     if (again) return { duplicate: again.id };
     const v: DefinitionVersion = {
       id: newId("defv"),
@@ -720,20 +834,27 @@ function agentOut(a: AgentConfig): AgentConfig {
 }
 
 export function listAgents(kit: TeamKit, factoryId: string): AgentConfig[] {
-  return all<{ data: string }>(kit.sql, "SELECT data FROM agents WHERE factory_id = ? ORDER BY ord", factoryId).map((r) => agentOut(JSON.parse(r.data) as AgentConfig));
+  return all<{ data: string }>(kit.sql, "SELECT data FROM agents WHERE factory_id = ? ORDER BY ord", factoryId).map(
+    (r) => agentOut(JSON.parse(r.data) as AgentConfig),
+  );
 }
 
 /** Machine specs of the active runtime, by name (WS6 listMachines). */
 export function activeMachines(kit: TeamKit, factoryId: string): Record<string, Record<string, unknown>> | undefined {
   const rt = first<{ data: string }>(kit.sql, "SELECT data FROM factory_runtime WHERE factory_id = ?", factoryId);
   if (!rt) return undefined;
-  return ((JSON.parse(rt.data) as FactoryRuntime).machines as Record<string, Record<string, unknown>> | undefined) ?? undefined;
+  return (
+    ((JSON.parse(rt.data) as FactoryRuntime).machines as Record<string, Record<string, unknown>> | undefined) ??
+    undefined
+  );
 }
 
 export function listAutomations(kit: TeamKit, factoryId: string): Automation[] {
-  return all<{ data: string }>(kit.sql, "SELECT data FROM automations WHERE factory_id = ? ORDER BY ord", factoryId).map(
-    (r) => JSON.parse(r.data) as Automation,
-  );
+  return all<{ data: string }>(
+    kit.sql,
+    "SELECT data FROM automations WHERE factory_id = ? ORDER BY ord",
+    factoryId,
+  ).map((r) => JSON.parse(r.data) as Automation);
 }
 
 // ---------- YAML editing (yaml Document API; keeps comments and key order) ----------
@@ -888,7 +1009,10 @@ function applyAgentSpec(d: MdDoc, u: JsonObject): void {
       break;
     }
     default:
-      throw new OfError("invalid_request", `unknown harness ${JSON.stringify(s("harness_type"))} (use claude or codex)`);
+      throw new OfError(
+        "invalid_request",
+        `unknown harness ${JSON.stringify(s("harness_type"))} (use claude or codex)`,
+      );
   }
   setOrDelete(f, ["machine"], s("machine"));
   setOrDelete(f, ["workerHost"], s("worker_host"));
@@ -915,14 +1039,19 @@ function applyAgentSpec(d: MdDoc, u: JsonObject): void {
   const t = s("idle_timeout_minutes").trim();
   if (t !== "") {
     const n = /^[+-]?\d+$/.test(t) ? Number(t) : NaN;
-    if (!Number.isInteger(n) || n < 0 || n > 60) throw new OfError("invalid_request", "idle_timeout_minutes must be 0 through 60");
+    if (!Number.isInteger(n) || n < 0 || n > 60)
+      throw new OfError("invalid_request", "idle_timeout_minutes must be 0 through 60");
     f.set("idleTimeoutMinutes", n);
   } else f.delete("idleTimeoutMinutes");
   const prompt = optString(u, "prompt");
   if (prompt !== undefined) d.body = prompt.replace(/\r\n/g, "\n");
 }
 
-async function agentSpec(kit: TeamKit, f: FactoryRecord, name: string): Promise<{ spec: AgentSpec; files: Record<string, string> }> {
+async function agentSpec(
+  kit: TeamKit,
+  f: FactoryRecord,
+  name: string,
+): Promise<{ spec: AgentSpec; files: Record<string, string> }> {
   const r = first<{ data: string }>(kit.sql, "SELECT data FROM agents WHERE factory_id = ? AND name = ?", f.id, name);
   if (!r) throw new OfError("resource_not_found", `agent ${name} not found`);
   const agent = JSON.parse(r.data) as AgentConfig;
@@ -967,7 +1096,12 @@ async function agentSpec(kit: TeamKit, f: FactoryRecord, name: string): Promise<
 
 const RESOURCE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/;
 
-async function automationFiles(kit: TeamKit, f: FactoryRecord, name: string, content0: string): Promise<{ files: Record<string, string>; path: string }> {
+async function automationFiles(
+  kit: TeamKit,
+  f: FactoryRecord,
+  name: string,
+  content0: string,
+): Promise<{ files: Record<string, string>; path: string }> {
   if (!RESOURCE_NAME_RE.test(name) || name === "new") {
     throw new OfError("invalid_request", `automation names use letters, numbers, '-' and '_' (and cannot be "new")`);
   }
@@ -986,7 +1120,14 @@ async function automationFiles(kit: TeamKit, f: FactoryRecord, name: string, con
 }
 
 /** applyFiles: apply edited files as a new version or answer the validation error. */
-async function applyFiles(kit: TeamKit, c: OpCall, f: FactoryRecord, files: Record<string, string>, message: string, detail = "updated definition is invalid"): Promise<DefinitionVersion> {
+async function applyFiles(
+  kit: TeamKit,
+  c: OpCall,
+  f: FactoryRecord,
+  files: Record<string, string>,
+  message: string,
+  detail = "updated definition is invalid",
+): Promise<DefinitionVersion> {
   const r = await applyDefinition(kit, f.id, { files, author: actorId(c.meta.principal), message });
   if (r.invalid) throw validationError(detail, r.version.errors);
   return r.version;
@@ -1043,17 +1184,28 @@ export function aliasFromName(name: string): string {
 
 function checkAliasFree(kit: TeamKit, alias: string, exceptId: string): void {
   const other = listFactories(kit).find((f) => f.id !== exceptId && f.alias.toLowerCase() === alias.toLowerCase());
-  if (other) throw new OfError("conflict", `alias ${JSON.stringify(alias)} is already used by factory ${JSON.stringify(other.name)}`);
+  if (other)
+    throw new OfError(
+      "conflict",
+      `alias ${JSON.stringify(alias)} is already used by factory ${JSON.stringify(other.name)}`,
+    );
 }
 
-function resolveCreateFiles(b: JsonObject, source: string, name: string, alias: string, description: string): Record<string, string> | null {
+function resolveCreateFiles(
+  b: JsonObject,
+  source: string,
+  name: string,
+  alias: string,
+  description: string,
+): Record<string, string> | null {
   const files = b["files"];
   if (files && typeof files === "object" && Object.keys(files).length > 0) return files as Record<string, string>;
   let useDefaults = source === "managed";
   const d = b["definition"];
   if (d !== undefined && d !== null) {
     if (typeof d === "string") {
-      if (d !== "defaults") throw new OfError("invalid_request", `definition must be "defaults" or an object with "files"`);
+      if (d !== "defaults")
+        throw new OfError("invalid_request", `definition must be "defaults" or an object with "files"`);
       useDefaults = true;
     } else {
       const fs = (d as { files?: unknown }).files;
@@ -1072,7 +1224,10 @@ function resolveCreateFiles(b: JsonObject, source: string, name: string, alias: 
       const a = String(a0).trim().toLowerCase();
       if (a === "foreman" || a === "main") continue;
       if (!(DEFAULT_AGENT_NAMES as readonly string[]).includes(a)) {
-        throw new OfError("invalid_request", `unknown default agent ${JSON.stringify(a)} (choose from ${DEFAULT_AGENT_NAMES.join(", ")})`);
+        throw new OfError(
+          "invalid_request",
+          `unknown default agent ${JSON.stringify(a)} (choose from ${DEFAULT_AGENT_NAMES.join(", ")})`,
+        );
       }
       if (!agents.includes(a)) agents.push(a);
     }
@@ -1080,15 +1235,23 @@ function resolveCreateFiles(b: JsonObject, source: string, name: string, alias: 
   const integrations = Array.isArray(b["integrations"]) ? (b["integrations"] as { type?: string }[]) : [];
   let trackers = 0;
   for (const it of integrations) {
-    let t = String(it?.type ?? "").trim().toLowerCase();
+    let t = String(it?.type ?? "")
+      .trim()
+      .toLowerCase();
     if (t === "teams" || t === "microsoft_teams") t = "microsoft-teams";
     if (!INTEGRATION_TYPES.some((x) => x.type === t)) {
-      throw new OfError("invalid_request", `unknown integration type ${JSON.stringify(it?.type ?? "")} (choose from ${INTEGRATION_TYPES.map((x) => x.type).join(", ")})`);
+      throw new OfError(
+        "invalid_request",
+        `unknown integration type ${JSON.stringify(it?.type ?? "")} (choose from ${INTEGRATION_TYPES.map((x) => x.type).join(", ")})`,
+      );
     }
     if (t === "linear" || t === "jira") trackers++;
   }
-  if (trackers > 1) throw new OfError("invalid_request", "linear and jira are mutually exclusive: declare at most one issue tracker");
-  const repos = Array.isArray(b["repositories"]) ? (b["repositories"] as { owner?: string; name?: string; codeForge?: string }[]) : [];
+  if (trackers > 1)
+    throw new OfError("invalid_request", "linear and jira are mutually exclusive: declare at most one issue tracker");
+  const repos = Array.isArray(b["repositories"])
+    ? (b["repositories"] as { owner?: string; name?: string; codeForge?: string }[])
+    : [];
   repos.forEach((r, i) => {
     if (!String(r?.owner ?? "").trim() || !String(r?.name ?? "").trim()) {
       throw new OfError("invalid_request", `repositories[${i}]: owner and name are required`);
@@ -1109,7 +1272,14 @@ function resolveCreateFiles(b: JsonObject, source: string, name: string, alias: 
 }
 
 function deleteFactoryRows(kit: TeamKit, id: string): void {
-  for (const t of ["agents", "automations", "scorers", "factory_integrations", "factory_runtime", "definition_versions"]) {
+  for (const t of [
+    "agents",
+    "automations",
+    "scorers",
+    "factory_integrations",
+    "factory_runtime",
+    "definition_versions",
+  ]) {
     kit.sql.exec(`DELETE FROM ${t} WHERE factory_id = ?`, id);
   }
   kit.sql.exec("DELETE FROM factories WHERE id = ?", id);
@@ -1125,21 +1295,27 @@ export const ops: Record<string, TeamOp> = {
     let fs = listFactories(kit);
     if (q) fs = fs.filter((f) => f.name.toLowerCase().includes(q) || f.alias.toLowerCase().includes(q));
     const p = paginate(fs, (f) => ({ ms: msOf(f.created_at), id: f.id }), page);
-    return listResponse(p.items.map((f) => factoryView(kit, f)), p.next);
+    return listResponse(
+      p.items.map((f) => factoryView(kit, f)),
+      p.next,
+    );
   },
 
   getFactory: (kit, c) => factoryView(kit, factoryFor(kit, c)),
 
   createFactory: async (kit, c) => {
     const p = c.principal();
-    if (roleRank(p.role) < roleRank("editor")) throw new OfError("not_authorized", "creating a factory requires the team-wide editor role");
+    if (roleRank(p.role) < roleRank("editor"))
+      throw new OfError("not_authorized", "creating a factory requires the team-wide editor role");
     const b = bodyObject(c.body);
     let name = str(b, "name").trim();
     let alias = str(b, "alias").trim();
     let description = str(b, "description");
     const source = str(b, "source") || "managed";
-    if (source !== "managed" && source !== "git") throw new OfError("invalid_request", `source must be "managed" or "git"`);
-    if (source === "git" && str(b, "git_repo").trim() === "") throw new OfError("invalid_request", "git_repo is required for a git-backed definition");
+    if (source !== "managed" && source !== "git")
+      throw new OfError("invalid_request", `source must be "managed" or "git"`);
+    if (source === "git" && str(b, "git_repo").trim() === "")
+      throw new OfError("invalid_request", "git_repo is required for a git-backed definition");
     const files = resolveCreateFiles(b, source, name, alias, description);
     if (files && Object.keys(files).length > 0) {
       const res = compile(files);
@@ -1154,7 +1330,8 @@ export const ops: Record<string, TeamOp> = {
     if (name === "") throw new OfError("invalid_request", "name is required");
     if ([...name].length > 100) throw new OfError("invalid_request", "name must be at most 100 characters");
     if (alias === "") alias = aliasFromName(name);
-    if (!validAlias(alias)) throw new OfError("invalid_request", "alias accepts up to 60 letters, numbers, spaces, '.', '_' and '-'");
+    if (!validAlias(alias))
+      throw new OfError("invalid_request", "alias accepts up to 60 letters, numbers, spaces, '.', '_' and '-'");
     const now = new Date().toISOString();
     const f: FactoryRecord = {
       id: newId("fac"),
@@ -1169,7 +1346,9 @@ export const ops: Record<string, TeamOp> = {
     if (source === "git") {
       f.git_repo = str(b, "git_repo").trim();
       f.git_branch = str(b, "git_branch").trim() || "main";
-      const gp = str(b, "git_path").trim().replace(/^\/+|\/+$/g, "");
+      const gp = str(b, "git_path")
+        .trim()
+        .replace(/^\/+|\/+$/g, "");
       if (gp) f.git_path = gp;
     }
     kit.tx(() => {
@@ -1209,7 +1388,8 @@ export const ops: Record<string, TeamOp> = {
     const alias = optString(b, "alias");
     if (alias !== undefined) {
       const a = alias.trim();
-      if (!validAlias(a)) throw new OfError("invalid_request", "alias accepts up to 60 letters, numbers, spaces, '.', '_' and '-'");
+      if (!validAlias(a))
+        throw new OfError("invalid_request", "alias accepts up to 60 letters, numbers, spaces, '.', '_' and '-'");
       checkAliasFree(kit, a, f.id);
       f.alias = a;
       yamlEdits["alias"] = a;
@@ -1224,9 +1404,14 @@ export const ops: Record<string, TeamOp> = {
     const cs0 = optString(b, "credential_strategy");
     if (cs0 !== undefined) {
       const cs = cs0.trim().toUpperCase();
-      if (cs !== "" && cs !== "EXECUTOR" && cs !== "CREATOR") throw new OfError("invalid_request", "credential_strategy must be EXECUTOR or CREATOR");
+      if (cs !== "" && cs !== "EXECUTOR" && cs !== "CREATOR")
+        throw new OfError("invalid_request", "credential_strategy must be EXECUTOR or CREATOR");
       yamlEdits["credentialStrategy"] = cs || null;
-      if (f.source !== "managed") throw new OfError("operation_not_supported", "credentialStrategy of a git-backed factory is set in its factory.yaml");
+      if (f.source !== "managed")
+        throw new OfError(
+          "operation_not_supported",
+          "credentialStrategy of a git-backed factory is set in its factory.yaml",
+        );
     }
     const source = optString(b, "source");
     const gitRepo = optString(b, "git_repo");
@@ -1235,7 +1420,7 @@ export const ops: Record<string, TeamOp> = {
     if (source !== undefined) {
       if (source === "managed") f.source = "managed";
       else if (source === "git") {
-        const repo = gitRepo !== undefined ? gitRepo.trim() : f.git_repo ?? "";
+        const repo = gitRepo !== undefined ? gitRepo.trim() : (f.git_repo ?? "");
         if (!repo) throw new OfError("invalid_request", "git_repo is required to switch the definition source to git");
         f.source = "git";
         f.git_branch ||= "main";
@@ -1243,10 +1428,12 @@ export const ops: Record<string, TeamOp> = {
     }
     if (gitPath !== undefined) {
       const gp = gitPath.trim().replace(/^\/+|\/+$/g, "");
-      if (gp.includes("..")) throw new OfError("invalid_request", "git_path must be a relative directory inside the repository");
+      if (gp.includes(".."))
+        throw new OfError("invalid_request", "git_path must be a relative directory inside the repository");
     }
     if (gitRepo !== undefined || gitBranch !== undefined || gitPath !== undefined) {
-      if (f.source !== "git") throw new OfError("operation_not_supported", "git settings apply only to git-backed factories");
+      if (f.source !== "git")
+        throw new OfError("operation_not_supported", "git settings apply only to git-backed factories");
       if (gitRepo !== undefined) {
         if (gitRepo.trim() === "") throw new OfError("invalid_request", "git_repo cannot be empty");
         f.git_repo = gitRepo.trim();
@@ -1276,7 +1463,10 @@ export const ops: Record<string, TeamOp> = {
     const f = factoryFor(kit, c);
     kit.tx(() => {
       deleteFactoryRows(kit, f.id);
-      const s = schedules as unknown as { syncSchedules?: (k: TeamKit, id: string, a: unknown[]) => void; syncWebhooks?: (k: TeamKit, id: string, w: unknown[]) => void };
+      const s = schedules as unknown as {
+        syncSchedules?: (k: TeamKit, id: string, a: unknown[]) => void;
+        syncWebhooks?: (k: TeamKit, id: string, w: unknown[]) => void;
+      };
       s.syncSchedules?.(kit, f.id, []);
       s.syncWebhooks?.(kit, f.id, []);
     });
@@ -1307,14 +1497,25 @@ export const ops: Record<string, TeamOp> = {
     }
     const b = bodyObject(c.body);
     const files = b["files"] as Record<string, string> | undefined;
-    if (!files || typeof files !== "object" || Object.keys(files).length === 0) throw new OfError("invalid_request", "files is required");
+    if (!files || typeof files !== "object" || Object.keys(files).length === 0)
+      throw new OfError("invalid_request", "files is required");
     const base = str(b, "base_version_id");
     if (base && base !== (f.active_version_id ?? "")) {
-      throw new OfError("conflict", `the definition changed since version ${base} (active version is ${f.active_version_id ?? ""})`);
+      throw new OfError(
+        "conflict",
+        `the definition changed since version ${base} (active version is ${f.active_version_id ?? ""})`,
+      );
     }
     const res = compile(files);
     if (res.errors.length > 0) throw validationError("definition is invalid", res.errors);
-    const v = await applyFiles(kit, c, f, files, str(b, "message") || "Update definition", "definition could not be applied; the previous version stays active");
+    const v = await applyFiles(
+      kit,
+      c,
+      f,
+      files,
+      str(b, "message") || "Update definition",
+      "definition could not be applied; the previous version stays active",
+    );
     return { version: v };
   },
 
@@ -1334,7 +1535,11 @@ export const ops: Record<string, TeamOp> = {
     const withFiles = /^(1|t|T|TRUE|true|True)$/.test(inc);
     const r = sqlPage<VersionRow & { id: string; created_ms: number } & Record<string, SqlStorageValue>>(
       kit.sql,
-      { select: "SELECT id, created_ms, data, files, files_r2 FROM definition_versions", where: ["factory_id = ?"], args: [f.id] },
+      {
+        select: "SELECT id, created_ms, data, files, files_r2 FROM definition_versions",
+        where: ["factory_id = ?"],
+        args: [f.id],
+      },
       page,
     );
     const items: DefinitionVersion[] = [];
@@ -1359,7 +1564,8 @@ export const ops: Record<string, TeamOp> = {
 
   restoreDefinitionVersion: async (kit, c) => {
     const f = factoryFor(kit, c);
-    if (f.source === "git") throw new OfError("operation_not_supported", `this factory's definition lives in ${f.git_repo}: revert it there`);
+    if (f.source === "git")
+      throw new OfError("operation_not_supported", `this factory's definition lives in ${f.git_repo}: revert it there`);
     const id = c.params["versionId"]!;
     const v = await getVersion(kit, id);
     if (!v || v.factory_id !== f.id) throw new OfError("resource_not_found", `definition version ${id} not found`);
@@ -1397,12 +1603,18 @@ export const ops: Record<string, TeamOp> = {
     const f = factoryFor(kit, c);
     const b = bodyObject(c.body);
     const req = optStringArray(b, "integrations") ?? [];
-    for (const t of req) if (!INTEGRATION_TYPES.some((x) => x.type === t)) throw new OfError("invalid_request", `unknown integration ${JSON.stringify(t)}`);
+    for (const t of req)
+      if (!INTEGRATION_TYPES.some((x) => x.type === t))
+        throw new OfError("invalid_request", `unknown integration ${JSON.stringify(t)}`);
     const providers = INTEGRATION_TYPES.map((x) => x.type).filter((t) => req.includes(t));
     if (providers.includes("linear") && providers.includes("jira")) {
       throw new OfError("invalid_request", "declare at most one issue tracker: linear and jira are mutually exclusive");
     }
-    if (f.source === "git") throw new OfError("operation_not_supported", "integrations of a git-backed factory are declared in its factory.yaml");
+    if (f.source === "git")
+      throw new OfError(
+        "operation_not_supported",
+        "integrations of a git-backed factory are declared in its factory.yaml",
+      );
     if (f.active_version_id) {
       const files = await activeFiles(kit, f);
       let fy: string;
@@ -1410,7 +1622,8 @@ export const ops: Record<string, TeamOp> = {
         const doc = yamlMapping(files["factory.yaml"] ?? "");
         const existing = new Map<string, unknown>();
         const seq0 = doc.get("integrations", true);
-        if (isSeq(seq0)) for (const item of seq0.items) if (isMap(item)) existing.set(nodeString(item.get("type", true)), item);
+        if (isSeq(seq0))
+          for (const item of seq0.items) if (isMap(item)) existing.set(nodeString(item.get("type", true)), item);
         const seq = new YAMLSeq();
         for (const p of providers) {
           if (existing.has(p)) seq.add(existing.get(p));
@@ -1467,11 +1680,15 @@ export const ops: Record<string, TeamOp> = {
     const f = factoryFor(kit, c);
     const name = c.params["name"]!;
     if (f.source === "git") {
-      throw new OfError("operation_not_supported", `this factory's definition lives in ${f.git_repo}: edit ${agentFile(name)} through a pull request`);
+      throw new OfError(
+        "operation_not_supported",
+        `this factory's definition lives in ${f.git_repo}: edit ${agentFile(name)} through a pull request`,
+      );
     }
     const u = bodyObject(c.body);
     const { spec, files } = await agentSpec(kit, f, name);
-    if (!spec.has_file) throw new OfError("operation_not_supported", `agent ${name} has no ${spec.path} in the active definition`);
+    if (!spec.has_file)
+      throw new OfError("operation_not_supported", `agent ${name} has no ${spec.path} in the active definition`);
     let doc: MdDoc;
     try {
       doc = parseMarkdownDoc(files[spec.path]!);
@@ -1497,7 +1714,11 @@ export const ops: Record<string, TeamOp> = {
 
   putAutomation: async (kit, c) => {
     const f = factoryFor(kit, c);
-    if (f.source === "git") throw new OfError("operation_not_supported", `automations of a git-backed factory change through a pull request in ${f.git_repo}`);
+    if (f.source === "git")
+      throw new OfError(
+        "operation_not_supported",
+        `automations of a git-backed factory change through a pull request in ${f.git_repo}`,
+      );
     const b = bodyObject(c.body);
     const name = c.params["name"]!;
     const { files, path } = await automationFiles(kit, f, name, str(b, "content"));
@@ -1508,7 +1729,11 @@ export const ops: Record<string, TeamOp> = {
 
   deleteAutomation: async (kit, c) => {
     const f = factoryFor(kit, c);
-    if (f.source === "git") throw new OfError("operation_not_supported", `automations of a git-backed factory change through a pull request in ${f.git_repo}`);
+    if (f.source === "git")
+      throw new OfError(
+        "operation_not_supported",
+        `automations of a git-backed factory change through a pull request in ${f.git_repo}`,
+      );
     const name = c.params["name"]!;
     const files = await activeFiles(kit, f);
     const prefix = `automations/${name}/`;
@@ -1531,13 +1756,15 @@ export const ops: Record<string, TeamOp> = {
       const { files } = await automationFiles(kit, f, c.params["name"]!, str(b, "content"));
       return validateFiles(kit, f, files);
     } catch (e) {
-      if (e instanceof OfError && Array.isArray(e.extra?.["errors"])) return { valid: false, errors: e.extra!["errors"] };
+      if (e instanceof OfError && Array.isArray(e.extra?.["errors"]))
+        return { valid: false, errors: e.extra!["errors"] };
       throw e;
     }
   },
 
   /** Internal: factories of the team (plugin host). */
-  "factories.list": (kit) => listFactories(kit).map((f) => ({ id: f.id, teamId: f.team_id, alias: f.alias, name: f.name })),
+  "factories.list": (kit) =>
+    listFactories(kit).map((f) => ({ id: f.id, teamId: f.team_id, alias: f.alias, name: f.name })),
 
   /** Internal: one factory and its repositories (plugin host). Body {factory_id}. */
   "factories.get": (kit, c) => {

@@ -78,7 +78,11 @@ export function webhookPartition(webhookId: string): string {
  * The dedupe identity of a delivery: the configured delivery ID header, the
  * scheme's delivery header, X-OF-Delivery-Id, else "sha256:<hex of body>".
  */
-export async function deliveryIdentity(wh: Pick<Webhook, "delivery_id_header" | "auth_mode" | "signature_scheme">, h: Headers, body: Uint8Array): Promise<string> {
+export async function deliveryIdentity(
+  wh: Pick<Webhook, "delivery_id_header" | "auth_mode" | "signature_scheme">,
+  h: Headers,
+  body: Uint8Array,
+): Promise<string> {
   const clip = (s: string | null) => (s ?? "").trim().slice(0, 200);
   if (wh.delivery_id_header) {
     const v = clip(h.get(wh.delivery_id_header));
@@ -133,7 +137,12 @@ export interface WebhookIngressDeps {
   /** The secret value; undefined when it does not exist; throws when unavailable. */
   getSecret(teamId: string, factoryId: string, name: string): Promise<string | undefined>;
   /** Hands the event to IngressDO; returns whether it was a duplicate. */
-  enqueue(teamId: string, partition: string, event: Event, dedupeKey: string): Promise<{ accepted: boolean; deduplicated: boolean }>;
+  enqueue(
+    teamId: string,
+    partition: string,
+    event: Event,
+    dedupeKey: string,
+  ): Promise<{ accepted: boolean; deduplicated: boolean }>;
   /** Writes a delivery log entry (IngressDO). Optional: without it entries are logged only. */
   record?(teamId: string, rec: WebhookDelivery): Promise<void>;
   /** Shared accepted-delivery limit (IngressDO). Without it, an isolate limiter applies. */
@@ -164,7 +173,12 @@ function retryAfter(retryMs: number, msg: string): Response {
 }
 
 /** Serves one custom webhook delivery. urlToken is set for the /webhooks/w/{uid}/{token} form. */
-export async function handleWebhookDelivery(req: Request, uid: string, urlToken: string | null, deps: WebhookIngressDeps): Promise<Response> {
+export async function handleWebhookDelivery(
+  req: Request,
+  uid: string,
+  urlToken: string | null,
+  deps: WebhookIngressDeps,
+): Promise<Response> {
   const viaURLToken = urlToken !== null;
   let found: { webhook: Webhook; teamId: string } | null;
   try {
@@ -185,7 +199,8 @@ export async function handleWebhookDelivery(req: Request, uid: string, urlToken:
   };
   const reject = async (reason: string) => {
     const r: WebhookDelivery = { ...rec, status: STATUS_REJECTED, reason };
-    if (deps.record) await deps.record(teamId, r).catch((e) => console.warn("recording rejected delivery failed", wh.id, e));
+    if (deps.record)
+      await deps.record(teamId, r).catch((e) => console.warn("recording rejected delivery failed", wh.id, e));
     else console.info("webhook delivery rejected", wh.id, reason);
   };
   const ex = authFailures.exhausted(wh.id, now);
@@ -253,13 +268,21 @@ export async function handleWebhookDelivery(req: Request, uid: string, urlToken:
   }
   const status = res.deduplicated ? STATUS_DEDUPLICATED : STATUS_ACCEPTED;
   if (deps.record) {
-    const r: WebhookDelivery = { ...rec, delivery_id: identity, status, ...(res.deduplicated ? { reason: "duplicate" } : { body: payload }) };
+    const r: WebhookDelivery = {
+      ...rec,
+      delivery_id: identity,
+      status,
+      ...(res.deduplicated ? { reason: "duplicate" } : { body: payload }),
+    };
     await deps.record(teamId, r).catch((e) => console.warn("recording delivery failed", wh.id, e));
   }
-  return new Response(JSON.stringify({ delivery_id: identity, status: res.deduplicated ? "duplicate" : "accepted" }) + "\n", {
-    status: 202,
-    headers: { "content-type": "application/json" },
-  });
+  return new Response(
+    JSON.stringify({ delivery_id: identity, status: res.deduplicated ? "duplicate" : "accepted" }) + "\n",
+    {
+      status: 202,
+      headers: { "content-type": "application/json" },
+    },
+  );
 }
 
 async function authenticate(

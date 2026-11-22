@@ -5,7 +5,9 @@ import { OfError, type Integration } from "@openfactory/core";
 export const REASON_NO_INTEGRATION = "no_integration";
 
 export function noIntegration(msg: string): OfError {
-  return new OfError("invalid_request", `${msg}: no code-forge integration configured`, { reason: REASON_NO_INTEGRATION });
+  return new OfError("invalid_request", `${msg}: no code-forge integration configured`, {
+    reason: REASON_NO_INTEGRATION,
+  });
 }
 
 export function isNoIntegration(e: unknown): boolean {
@@ -57,7 +59,12 @@ export function repoOwner(provider: string, repo: string): string {
  * owner: the records whose config.org is owner (case ignored), the factory
  * record first, else the team record. Never "the first record".
  */
-export function selectIntegration(ints: readonly Integration[], provider: string, factoryId: string, owner: string): Integration {
+export function selectIntegration(
+  ints: readonly Integration[],
+  provider: string,
+  factoryId: string,
+  owner: string,
+): Integration {
   const tier = (fac: string): Integration[] =>
     ints.filter((in_) => (in_.factory_id ?? "") === fac && (owner === "" || eqFold(cfg(in_, "org"), owner)));
   const tiers = factoryId !== "" ? [tier(factoryId), tier("")] : [tier("")];
@@ -73,7 +80,9 @@ export function selectIntegration(ints: readonly Integration[], provider: string
     throw noIntegration(`${provider}: ${t.length} records (${ids}) serve the owner "${owner}": keep one`);
   }
   if (owner === "") throw noIntegration(`no ${provider} integration record serves this repository`);
-  throw noIntegration(`no ${provider} integration record for the owner "${owner}": add a record with config.org "${owner}"`);
+  throw noIntegration(
+    `no ${provider} integration record for the owner "${owner}": add a record with config.org "${owner}"`,
+  );
 }
 
 /** Records of one provider across the given records, by team. */
@@ -138,7 +147,9 @@ export async function intakeVerified(
   if (ok.length === 1) return ok[0]!;
   if (ok.length > 1) {
     const ids = ok.map((x) => `${x.id} (team ${x.team_id})`).join(", ");
-    throw new DeliveryAmbiguousError(`${provider}: the records ${ids} verify the delivery: give each team its own webhook secret`);
+    throw new DeliveryAmbiguousError(
+      `${provider}: the records ${ids} verify the delivery: give each team its own webhook secret`,
+    );
   }
   if (cands.length === 0 && skipped.length === 0) {
     throw new DeliveryUnverifiedError(`no ${provider} integration record for the owner "${owners.join(", ")}"`, true);

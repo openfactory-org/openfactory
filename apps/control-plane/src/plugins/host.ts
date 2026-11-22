@@ -31,7 +31,11 @@ export interface PluginHostBackend {
   getFactoryRepos(factoryId: string): Promise<RepoRef[]>;
 }
 
-export type LogFn = (level: "debug" | "info" | "warn" | "error", message: string, fields: Record<string, unknown>) => void;
+export type LogFn = (
+  level: "debug" | "info" | "warn" | "error",
+  message: string,
+  fields: Record<string, unknown>,
+) => void;
 
 export interface PluginHostScope {
   /** The plugin the host serves. Its providers limit what it may read. */
@@ -70,7 +74,11 @@ export class PluginHost extends RpcTarget implements HostApi {
     this.#log = scope.log ?? defaultLog;
   }
 
-  async log(level: "debug" | "info" | "warn" | "error", message: string, attrs?: Record<string, string>): Promise<void> {
+  async log(
+    level: "debug" | "info" | "warn" | "error",
+    message: string,
+    attrs?: Record<string, string>,
+  ): Promise<void> {
     const lv = (["debug", "info", "warn", "error"] as const).includes(level) ? level : "info";
     // The attributes cannot replace the fixed fields.
     this.#log(lv, message, { ...(attrs ?? {}), plugin: this.#scope.plugin.name });

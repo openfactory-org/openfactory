@@ -15,14 +15,7 @@
 //
 // The typed RPC methods of TeamRpc delegate to named exports of the modules.
 import { OfError, notImplemented, toOfError } from "@openfactory/core";
-import type {
-  ApiKeyLookup,
-  CallMeta,
-  OutboxKind,
-  Principal,
-  Role,
-  TeamRpc,
-} from "../../contracts/do-messages";
+import type { ApiKeyLookup, CallMeta, OutboxKind, Principal, Role, TeamRpc } from "../../contracts/do-messages";
 import type { Env } from "../../contracts/env";
 import { ROUTES } from "../../http/routes";
 import type { RouteRole } from "../../http/handler";
@@ -116,7 +109,15 @@ export function isOpResponse(v: unknown): v is OpResponse {
 
 /** Error result of api(): OfError fields, so that detail and extra survive RPC. */
 export interface OpError {
-  $error: { code: string; detail: string; reason?: string; provider?: string; authUrl?: string; setupUrl?: string; extra?: Record<string, unknown> };
+  $error: {
+    code: string;
+    detail: string;
+    reason?: string;
+    provider?: string;
+    authUrl?: string;
+    setupUrl?: string;
+    extra?: Record<string, unknown>;
+  };
 }
 
 export function isOpError(v: unknown): v is OpError {
@@ -125,7 +126,17 @@ export function isOpError(v: unknown): v is OpError {
 
 export const QUERY_PREFIX = "?";
 
-const MODULES: Record<string, TeamModule> = { auth, secrets, factories, settings, workers, integrations, schedules, mcp, scoring };
+const MODULES: Record<string, TeamModule> = {
+  auth,
+  secrets,
+  factories,
+  settings,
+  workers,
+  integrations,
+  schedules,
+  mcp,
+  scoring,
+};
 
 function allMigrations(): Migration[] {
   const list = Object.entries(MODULES).flatMap(([name, m]) =>
@@ -305,7 +316,13 @@ export class TeamDO extends BaseDO implements TeamRpc, RetentionRpc {
 
   proposeDefinition(
     meta: CallMeta,
-    input: { factoryId: string; files: Record<string, string>; message: string; authorRunId: string; idempotencyKey: string },
+    input: {
+      factoryId: string;
+      files: Record<string, string>;
+      message: string;
+      authorRunId: string;
+      idempotencyKey: string;
+    },
   ): Promise<unknown> {
     return this.rpc(() => factories.proposeDefinition(this.kit, meta, input));
   }

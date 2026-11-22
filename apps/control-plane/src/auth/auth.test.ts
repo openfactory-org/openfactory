@@ -45,14 +45,23 @@ describe("API keys", () => {
     expect(parseKey(g.key)).toEqual({ prefix: g.prefix, serviceAccount: false });
     expect(g.hash).toMatch(/^[0-9a-f]{64}$/);
     expect(parseKey((await generateKey("ofa_")).key)?.serviceAccount).toBe(true);
-    for (const bad of ["of_short_x", "of_ABCDEFGH_" + "a".repeat(40), "of_abcdefgh_" + "a".repeat(39), "ofx_abcdefgh_" + "a".repeat(40), "of_abcdefgh" + "a".repeat(41)]) {
+    for (const bad of [
+      "of_short_x",
+      "of_ABCDEFGH_" + "a".repeat(40),
+      "of_abcdefgh_" + "a".repeat(39),
+      "ofx_abcdefgh_" + "a".repeat(40),
+      "of_abcdefgh" + "a".repeat(41),
+    ]) {
       expect(parseKey(bad), bad).toBeNull();
     }
   });
 });
 
 describe("roles (internal/api roles_test, auth RoleAuthorizer)", () => {
-  const p = (role: "user" | "editor" | "admin", factoryRoles: Record<string, "user" | "editor" | "admin"> = {}): Principal => ({
+  const p = (
+    role: "user" | "editor" | "admin",
+    factoryRoles: Record<string, "user" | "editor" | "admin"> = {},
+  ): Principal => ({
     kind: "user",
     id: "usr_1",
     teamId: "default",
@@ -67,7 +76,9 @@ describe("roles (internal/api roles_test, auth RoleAuthorizer)", () => {
     expect(canOn(u, "fac_1", "admin")).toBe(true);
     expect(canOn(p("admin", { fac_1: "user" }), "fac_1", "editor")).toBe(false);
     expect(() => requireRole(u, "", "editor")).toThrow("this operation requires the editor role; your role is user");
-    expect(() => requireRole(u, "fac_2", "editor")).toThrow("this operation requires the editor role; your role for this factory is user");
+    expect(() => requireRole(u, "fac_2", "editor")).toThrow(
+      "this operation requires the editor role; your role for this factory is user",
+    );
     expect(() => requireRole(undefined, "", "user")).toThrow(/missing credentials/);
     expect(requireRole(u, "", "public")).toBe(u);
   });
@@ -76,7 +87,9 @@ describe("roles (internal/api roles_test, auth RoleAuthorizer)", () => {
     expect(actionForRole("POST", "user")).toBe("operate");
     expect(actionForRole("POST", "editor")).toBe("write");
     expect(actionForRole("GET", "admin")).toBe("admin");
-    expect(() => roleAuthorizerAllow(p("user"), "write:factory.update")).toThrow("write:factory.update requires the editor role; your role is user");
+    expect(() => roleAuthorizerAllow(p("user"), "write:factory.update")).toThrow(
+      "write:factory.update requires the editor role; your role is user",
+    );
     expect(() => roleAuthorizerAllow(p("admin"), "read", { teamId: "other" })).toThrow(/another team/);
     roleAuthorizerAllow(p("editor"), "write", { factoryId: "fac_1" });
   });
@@ -114,18 +127,26 @@ describe("OIDC (internal/auth oidc tests)", () => {
   });
   it("enforces allowed domains and verified email", () => {
     const c = cfg({ allowedDomains: ["example.com"] });
-    expect(identityFromClaims(c, "s1", { email: "a@example.com", email_verified: "true", groups: ["dev"] })).toMatchObject({
+    expect(
+      identityFromClaims(c, "s1", { email: "a@example.com", email_verified: "true", groups: ["dev"] }),
+    ).toMatchObject({
       subject: "s1",
       emailVerified: true,
       role: "editor",
       roleManaged: true,
     });
-    expect(() => identityFromClaims(c, "s1", { email: "a@other.com", email_verified: true })).toThrow(/domain_not_allowed/);
+    expect(() => identityFromClaims(c, "s1", { email: "a@other.com", email_verified: true })).toThrow(
+      /domain_not_allowed/,
+    );
     expect(() => identityFromClaims(c, "s1", { email: "a@example.com" })).toThrow(/email_not_verified/);
     expect(identityFromClaims(cfg({ requireVerifiedEmail: false }), "s", { email: "x@y.z" }).emailVerified).toBe(true);
   });
   it("reads the configuration and keeps return paths local", () => {
-    const env = { OF_OIDC_ISSUER_URL: "https://idp.example.test", OF_OIDC_CLIENT_ID: "cid", OF_PUBLIC_URL: "https://f.example.test/" } as never;
+    const env = {
+      OF_OIDC_ISSUER_URL: "https://idp.example.test",
+      OF_OIDC_CLIENT_ID: "cid",
+      OF_PUBLIC_URL: "https://f.example.test/",
+    } as never;
     const c = oidcConfigFromEnv(env)!;
     expect(c.redirectUrl).toBe("https://f.example.test/auth/oidc/callback");
     expect(c.scopes).toEqual(["openid", "profile", "email"]);
@@ -150,7 +171,9 @@ describe("runner tokens (internal/runnertoken)", () => {
   it("refuses expired, early, tampered, unknown-key and malformed tokens", async () => {
     await expect(verifySessionToken(keys, GO_TOKEN, 1795003600_000)).rejects.toMatchObject({ kind: "expired" });
     await expect(verifySessionToken(keys, GO_TOKEN, 1794999000_000)).rejects.toMatchObject({ kind: "not_yet_valid" });
-    await expect(verifySessionToken(keys, GO_TOKEN.slice(0, -2) + "xx", 1795000100_000)).rejects.toMatchObject({ kind: "bad_signature" });
+    await expect(verifySessionToken(keys, GO_TOKEN.slice(0, -2) + "xx", 1795000100_000)).rejects.toMatchObject({
+      kind: "bad_signature",
+    });
     const other = staticKeys("aaaa", { aaaa: key });
     await expect(verifySessionToken(other, GO_TOKEN, 1795000100_000)).rejects.toMatchObject({ kind: "unknown_key" });
     for (const bad of ["x", "ofs_", "ofs_a.b.c", "ofs_" + "a".repeat(5000)]) {

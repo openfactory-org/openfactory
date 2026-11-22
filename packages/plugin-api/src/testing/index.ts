@@ -38,7 +38,11 @@ export class FakeHostApi implements HostApi {
 
   constructor(private readonly o: FakeHostOptions = {}) {}
 
-  async log(level: "debug" | "info" | "warn" | "error", message: string, attrs?: Record<string, string>): Promise<void> {
+  async log(
+    level: "debug" | "info" | "warn" | "error",
+    message: string,
+    attrs?: Record<string, string>,
+  ): Promise<void> {
     this.logs.push({ level, message, ...(attrs ? { attrs } : {}) });
   }
 

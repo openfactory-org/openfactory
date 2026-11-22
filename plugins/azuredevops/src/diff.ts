@@ -39,8 +39,7 @@ export function diffOps(a: string[], b: string[]): DiffOp[] {
     const t = new Int32Array((n + 1) * w);
     for (let i = n - 1; i >= 0; i--) {
       for (let j = m - 1; j >= 0; j--) {
-        t[i * w + j] =
-          ma[i] === mb[j] ? t[(i + 1) * w + j + 1]! + 1 : Math.max(t[(i + 1) * w + j]!, t[i * w + j + 1]!);
+        t[i * w + j] = ma[i] === mb[j] ? t[(i + 1) * w + j + 1]! + 1 : Math.max(t[(i + 1) * w + j]!, t[i * w + j + 1]!);
       }
     }
     let i = 0;
@@ -83,7 +82,7 @@ export function unifiedDiff(oldText: string, newText: string): string {
   let out = "";
   let oldLine = 1;
   let newLine = 1;
-  for (let i = 0; i < ops.length; ) {
+  for (let i = 0; i < ops.length;) {
     if (!show[i]) {
       if (ops[i]!.kind !== "+") oldLine++;
       if (ops[i]!.kind !== "-") newLine++;

@@ -5,12 +5,12 @@
 // with the failsafe schema so that every scalar keeps its source text; tags
 // are then resolved with the yaml.v3 rules (yaml-resolve.ts).
 
-import { isAlias, isMap, isPair, isScalar, isSeq, LineCounter, parseAllDocuments, type Document } from 'yaml';
-import { goFloat, goQuote, goTrimSpace } from './gofmt.ts';
-import { decodeBool, decodeFloat, decodeInt, resolvePlain, shortTag } from './yaml-resolve.ts';
-import type { ValidationError } from './types.ts';
+import { isAlias, isMap, isPair, isScalar, isSeq, LineCounter, parseAllDocuments, type Document } from "yaml";
+import { goFloat, goQuote, goTrimSpace } from "./gofmt.ts";
+import { decodeBool, decodeFloat, decodeInt, resolvePlain, shortTag } from "./yaml-resolve.ts";
+import type { ValidationError } from "./types.ts";
 
-export type NodeKind = 'map' | 'seq' | 'scalar' | 'alias';
+export type NodeKind = "map" | "seq" | "scalar" | "alias";
 
 export interface YNode {
   kind: NodeKind;
@@ -27,11 +27,11 @@ export interface YNode {
 }
 
 function scalarNode(value: string, tag: string, line: number, styled = false, explicitTag = false): YNode {
-  return { kind: 'scalar', tag, value, line, content: [], alias: null, styled, explicitTag };
+  return { kind: "scalar", tag, value, line, content: [], alias: null, styled, explicitTag };
 }
 
 export function emptyMapping(line: number): YNode {
-  return { kind: 'map', tag: '!!map', value: '', line, content: [], alias: null, styled: false, explicitTag: false };
+  return { kind: "map", tag: "!!map", value: "", line, content: [], alias: null, styled: false, explicitTag: false };
 }
 
 export interface ParseResult {
@@ -47,9 +47,9 @@ export function parseYAML(src: string): ParseResult {
   const lc = new LineCounter();
   let docs: Document.Parsed[] | unknown;
   try {
-    docs = parseAllDocuments(src, { lineCounter: lc, schema: 'failsafe', uniqueKeys: false, prettyErrors: false });
+    docs = parseAllDocuments(src, { lineCounter: lc, schema: "failsafe", uniqueKeys: false, prettyErrors: false });
   } catch (err) {
-    return { root: null, error: { line: 0, message: 'yaml: ' + String(err) } };
+    return { root: null, error: { line: 0, message: "yaml: " + String(err) } };
   }
   if (!Array.isArray(docs) || docs.length === 0) return { root: null, error: null };
   const doc = docs[0] as Document.Parsed;
@@ -64,29 +64,29 @@ export function parseYAML(src: string): ParseResult {
   let aliasError: string | null = null;
 
   const convert = (n: AnyNode, fallbackLine: number): YNode => {
-    if (n === null || n === undefined) return scalarNode('', '!!null', fallbackLine);
+    if (n === null || n === undefined) return scalarNode("", "!!null", fallbackLine);
     const cached = cache.get(n);
     if (cached) return cached;
     if (isScalar(n)) {
       const line = lineOf(n, fallbackLine);
-      const value = n.value === null || n.value === undefined ? '' : String(n.value);
-      const styled = n.type !== undefined && n.type !== 'PLAIN';
-      const explicit = typeof n.tag === 'string' && n.tag !== '' && n.tag !== '!';
+      const value = n.value === null || n.value === undefined ? "" : String(n.value);
+      const styled = n.type !== undefined && n.type !== "PLAIN";
+      const explicit = typeof n.tag === "string" && n.tag !== "" && n.tag !== "!";
       let tag: string;
       if (explicit) tag = shortTag(n.tag as string);
-      else if (styled) tag = '!!str';
-      else if (value === '<<') tag = '!!merge';
+      else if (styled) tag = "!!str";
+      else if (value === "<<") tag = "!!merge";
       else tag = resolvePlain(value).tag;
       const y = scalarNode(value, tag, line, styled, explicit);
       cache.set(n, y);
       return y;
     }
     if (isMap(n)) {
-      const explicit = typeof n.tag === 'string' && n.tag !== '' && n.tag !== '!';
+      const explicit = typeof n.tag === "string" && n.tag !== "" && n.tag !== "!";
       const y: YNode = {
-        kind: 'map',
-        tag: explicit ? shortTag(n.tag as string) : '!!map',
-        value: '',
+        kind: "map",
+        tag: explicit ? shortTag(n.tag as string) : "!!map",
+        value: "",
         line: lineOf(n, fallbackLine),
         content: [],
         alias: null,
@@ -102,11 +102,11 @@ export function parseYAML(src: string): ParseResult {
       return y;
     }
     if (isSeq(n)) {
-      const explicit = typeof n.tag === 'string' && n.tag !== '' && n.tag !== '!';
+      const explicit = typeof n.tag === "string" && n.tag !== "" && n.tag !== "!";
       const y: YNode = {
-        kind: 'seq',
-        tag: explicit ? shortTag(n.tag as string) : '!!seq',
-        value: '',
+        kind: "seq",
+        tag: explicit ? shortTag(n.tag as string) : "!!seq",
+        value: "",
         line: lineOf(n, fallbackLine),
         content: [],
         alias: null,
@@ -129,8 +129,8 @@ export function parseYAML(src: string): ParseResult {
     if (isAlias(n)) {
       const target = n.resolve(doc);
       const y: YNode = {
-        kind: 'alias',
-        tag: '',
+        kind: "alias",
+        tag: "",
         value: n.source,
         line: lineOf(n, fallbackLine),
         content: [],
@@ -141,7 +141,7 @@ export function parseYAML(src: string): ParseResult {
       cache.set(n, y);
       if (target === undefined) {
         aliasError ??= `yaml: unknown anchor '${n.source}' referenced`;
-        y.alias = scalarNode('', '!!null', y.line);
+        y.alias = scalarNode("", "!!null", y.line);
       } else {
         y.alias = convert(target, y.line);
       }
@@ -153,7 +153,7 @@ export function parseYAML(src: string): ParseResult {
       m.content.push(k, convert(n.value, k.line));
       return m;
     }
-    return scalarNode('', '!!null', fallbackLine);
+    return scalarNode("", "!!null", fallbackLine);
   };
 
   const root = convert(doc.contents, 1);
@@ -162,9 +162,9 @@ export function parseYAML(src: string): ParseResult {
 }
 
 function firstLine(s: string): string {
-  const i = s.indexOf('\n');
+  const i = s.indexOf("\n");
   const line = i >= 0 ? s.slice(0, i) : s;
-  return line.replace(/ at line \d+, column \d+:?$/, '');
+  return line.replace(/ at line \d+, column \d+:?$/, "");
 }
 
 // ---- diagnostics ----
@@ -198,7 +198,7 @@ export class Diag {
 export function encodeError(e: RawError): ValidationError {
   const out: ValidationError = { file: e.file, message: e.message };
   if (e.line !== 0) out.line = e.line;
-  if (e.field !== '') out.field = e.field;
+  if (e.field !== "") out.field = e.field;
   return out;
 }
 
@@ -206,28 +206,29 @@ export function encodeError(e: RawError): ValidationError {
 
 /** put sets o[k] as an own property, also for keys such as "__proto__". */
 export function put<V>(o: Record<string, V>, k: string, v: V): void {
-  if (k === '__proto__') Object.defineProperty(o, k, { value: v, enumerable: true, writable: true, configurable: true });
+  if (k === "__proto__")
+    Object.defineProperty(o, k, { value: v, enumerable: true, writable: true, configurable: true });
   else o[k] = v;
 }
 
 export function resolve(n: YNode | null | undefined): YNode | null {
   let cur = n ?? null;
-  while (cur !== null && cur.kind === 'alias') cur = cur.alias;
+  while (cur !== null && cur.kind === "alias") cur = cur.alias;
   return cur;
 }
 
 export function isSeqNode(n: YNode | null | undefined): boolean {
   const r = resolve(n);
-  return r !== null && r.kind === 'seq';
+  return r !== null && r.kind === "seq";
 }
 
 export function isNull(n: YNode | null | undefined): boolean {
   const r = resolve(n);
-  return r === null || (r.kind === 'scalar' && r.tag === '!!null');
+  return r === null || (r.kind === "scalar" && r.tag === "!!null");
 }
 
 export function joinPath(base: string, key: string): string {
-  return base === '' ? key : base + '.' + key;
+  return base === "" ? key : base + "." + key;
 }
 
 export function indexPath(base: string, i: number): string {
@@ -235,7 +236,7 @@ export function indexPath(base: string, i: number): string {
 }
 
 function indicatedString(n: YNode): boolean {
-  return n.kind === 'scalar' && (n.tag === '!!str' || (!n.explicitTag && n.styled));
+  return n.kind === "scalar" && (n.tag === "!!str" || (!n.explicitTag && n.styled));
 }
 
 export function nodeBool(n: YNode): boolean | null {
@@ -279,9 +280,9 @@ export class Doc {
       let msg = r.error.message;
       if (r.error.line > 0) {
         line = r.error.line + this.offset;
-        msg = 'invalid YAML: ' + msg;
+        msg = "invalid YAML: " + msg;
       }
-      this.d.add(this.file, line, '', msg);
+      this.d.add(this.file, line, "", msg);
       return null;
     }
     if (r.root === null) return emptyMapping(1);
@@ -290,7 +291,7 @@ export class Doc {
 
   mapping(n: YNode | null | undefined, path: string): Mapping | null {
     const r = resolve(n);
-    if (r === null || r.kind !== 'map') {
+    if (r === null || r.kind !== "map") {
       this.errf(r, path, `${describe(path)} must be an object`);
       return null;
     }
@@ -298,11 +299,11 @@ export class Doc {
     for (let i = 0; i + 1 < r.content.length; i += 2) {
       const k = resolve(r.content[i])!;
       const v = r.content[i + 1]!;
-      if (k.kind === 'scalar' && k.tag === '!!merge') {
-        this.errf(k, path, 'YAML merge keys (<<) are not supported');
+      if (k.kind === "scalar" && k.tag === "!!merge") {
+        this.errf(k, path, "YAML merge keys (<<) are not supported");
         continue;
       }
-      if (k.kind !== 'scalar') {
+      if (k.kind !== "scalar") {
         this.errf(k, path, `${describe(path)} keys must be strings`);
         continue;
       }
@@ -319,26 +320,26 @@ export class Doc {
 
   str(n: YNode | null | undefined, path: string): [string, boolean] {
     const r = resolve(n);
-    if (r === null || r.kind !== 'scalar' || r.tag !== '!!str') {
+    if (r === null || r.kind !== "scalar" || r.tag !== "!!str") {
       this.errf(r, path, `${path} must be a string${quoteHint(r)}`);
-      return ['', false];
+      return ["", false];
     }
     return [r.value, true];
   }
 
   nonEmptyStr(n: YNode | null | undefined, path: string): [string, boolean] {
     const [s, ok] = this.str(n, path);
-    if (!ok) return ['', false];
-    if (goTrimSpace(s) === '') {
+    if (!ok) return ["", false];
+    if (goTrimSpace(s) === "") {
       this.errf(n, path, `${path} must not be empty`);
-      return ['', false];
+      return ["", false];
     }
     return [s, true];
   }
 
   boolean(n: YNode | null | undefined, path: string): [boolean, boolean] {
     const r = resolve(n);
-    if (r === null || r.kind !== 'scalar' || r.tag !== '!!bool') {
+    if (r === null || r.kind !== "scalar" || r.tag !== "!!bool") {
       this.errf(r, path, `${path} must be true or false`);
       return [false, false];
     }
@@ -352,7 +353,7 @@ export class Doc {
 
   integer(n: YNode | null | undefined, path: string): [number, boolean] {
     const r = resolve(n);
-    if (r === null || r.kind !== 'scalar' || r.tag !== '!!int') {
+    if (r === null || r.kind !== "scalar" || r.tag !== "!!int") {
       this.errf(r, path, `${path} must be an integer`);
       return [0, false];
     }
@@ -366,7 +367,7 @@ export class Doc {
 
   number(n: YNode | null | undefined, path: string): [number, boolean] {
     const r = resolve(n);
-    if (r === null || r.kind !== 'scalar' || (r.tag !== '!!int' && r.tag !== '!!float')) {
+    if (r === null || r.kind !== "scalar" || (r.tag !== "!!int" && r.tag !== "!!float")) {
       this.errf(r, path, `${path} must be a number`);
       return [0, false];
     }
@@ -390,16 +391,16 @@ export class Doc {
 
   enum(n: YNode | null | undefined, path: string, ...allowed: string[]): [string, boolean] {
     const [s, ok] = this.str(n, path);
-    if (!ok) return ['', false];
+    if (!ok) return ["", false];
     if (allowed.includes(s)) return [s, true];
-    this.errf(n, path, `${path} must be one of ${allowed.join(', ')} (got ${goQuote(s)})`);
-    return ['', false];
+    this.errf(n, path, `${path} must be one of ${allowed.join(", ")} (got ${goQuote(s)})`);
+    return ["", false];
   }
 
   /** seq returns the items of a list, or null (with an error) when n is not a list. */
   seq(n: YNode | null | undefined, path: string): YNode[] | null {
     const r = resolve(n);
-    if (r === null || r.kind !== 'seq') {
+    if (r === null || r.kind !== "seq") {
       this.errf(r, path, `${path} must be a list`);
       return null;
     }
@@ -457,14 +458,14 @@ export class Doc {
 }
 
 export function describe(path: string): string {
-  return path === '' ? 'document' : path;
+  return path === "" ? "document" : path;
 }
 
 export function quoteHint(n: YNode | null): string {
-  if (n !== null && n.kind === 'scalar' && (n.tag === '!!int' || n.tag === '!!float' || n.tag === '!!bool')) {
+  if (n !== null && n.kind === "scalar" && (n.tag === "!!int" || n.tag === "!!float" || n.tag === "!!bool")) {
     return ` (quote ${n.value} to keep it a string)`;
   }
-  return '';
+  return "";
 }
 
 /** Mapping is a YAML mapping being decoded; finish reports unconsumed keys. */
@@ -530,27 +531,27 @@ export function toValue(n: YNode | null | undefined): unknown {
   const r = resolve(n);
   if (r === null) return null;
   switch (r.kind) {
-    case 'map': {
+    case "map": {
       const m: Record<string, unknown> = {};
       for (let i = 0; i + 1 < r.content.length; i += 2) {
-        put(m, resolve(r.content[i])?.value ?? '', toValue(r.content[i + 1]));
+        put(m, resolve(r.content[i])?.value ?? "", toValue(r.content[i + 1]));
       }
       return m;
     }
-    case 'seq':
+    case "seq":
       return r.content.map((c) => toValue(c));
-    case 'scalar':
+    case "scalar":
       switch (r.tag) {
-        case '!!null':
+        case "!!null":
           return null;
-        case '!!bool':
+        case "!!bool":
           return nodeBool(r) ?? false;
-        case '!!int': {
+        case "!!int": {
           const i = nodeInt(r);
           if (i !== null) return i;
           return nodeFloat(r) ?? 0;
         }
-        case '!!float':
+        case "!!float":
           return nodeFloat(r) ?? 0;
         default:
           return r.value;
@@ -562,10 +563,10 @@ export function toValue(n: YNode | null | undefined): unknown {
 /** sprint formats a scalar node's decoded value like Go's fmt.Sprint of toValue. */
 export function sprintNode(n: YNode | null | undefined): string {
   const r = resolve(n);
-  if (r === null) return '<nil>';
+  if (r === null) return "<nil>";
   const v = toValue(r);
-  if (v === null) return '<nil>';
-  if (r.kind === 'scalar' && r.tag === '!!float' && typeof v === 'number') return goFloat(v);
+  if (v === null) return "<nil>";
+  if (r.kind === "scalar" && r.tag === "!!float" && typeof v === "number") return goFloat(v);
   return String(v);
 }
 
@@ -579,16 +580,28 @@ export interface Frontmatter {
 
 /** splitFrontmatter splits a Markdown document into YAML frontmatter and body. */
 export function splitFrontmatter(content: string): Frontmatter {
-  let s = content.startsWith('﻿') ? content.slice(1) : content;
-  s = s.replaceAll('\r\n', '\n');
-  const nl = s.indexOf('\n');
+  let s = content.startsWith("﻿") ? content.slice(1) : content;
+  s = s.replaceAll("\r\n", "\n");
+  const nl = s.indexOf("\n");
   const first = nl >= 0 ? s.slice(0, nl) : s;
-  if (first.replace(/[ \t]+$/, '') !== '---') return { fm: '', body: s, hasFM: false, offset: 0, error: null };
-  const lines = s.split('\n');
+  if (first.replace(/[ \t]+$/, "") !== "---") return { fm: "", body: s, hasFM: false, offset: 0, error: null };
+  const lines = s.split("\n");
   for (let i = 1; i < lines.length; i++) {
-    if (lines[i]!.replace(/[ \t]+$/, '') === '---') {
-      return { fm: lines.slice(1, i).join('\n'), body: lines.slice(i + 1).join('\n'), hasFM: true, offset: 1, error: null };
+    if (lines[i]!.replace(/[ \t]+$/, "") === "---") {
+      return {
+        fm: lines.slice(1, i).join("\n"),
+        body: lines.slice(i + 1).join("\n"),
+        hasFM: true,
+        offset: 1,
+        error: null,
+      };
     }
   }
-  return { fm: '', body: '', hasFM: true, offset: 1, error: 'frontmatter starting on line 1 is not closed by a "---" line' };
+  return {
+    fm: "",
+    body: "",
+    hasFM: true,
+    offset: 1,
+    error: 'frontmatter starting on line 1 is not closed by a "---" line',
+  };
 }

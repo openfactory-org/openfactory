@@ -97,7 +97,8 @@ function parsePattern(p: Pattern): Node | null {
 }
 
 function buildNode(obj: { [k: string]: JVal }, path: string[], depth: number, leaves: { n: number }): Node {
-  if (depth > MAX_PATTERN_DEPTH) throw new InvalidPatternError(path, `pattern nests deeper than ${MAX_PATTERN_DEPTH} levels`);
+  if (depth > MAX_PATTERN_DEPTH)
+    throw new InvalidPatternError(path, `pattern nests deeper than ${MAX_PATTERN_DEPTH} levels`);
   const keys = Object.keys(obj).sort();
   const n: Node = { fields: [] };
   for (const k of keys) {
@@ -111,15 +112,20 @@ function buildNode(obj: { [k: string]: JVal }, path: string[], depth: number, le
       if (ks.length > 0 && ks.every((x) => OPERATOR_KEYS.has(x))) {
         f.leaf = buildLeaf(v, p);
       } else {
-        if (ks.some((x) => OPERATOR_KEYS.has(x))) throw new InvalidPatternError(p, "object mixes operators (in, not_in, exists) with field names");
+        if (ks.some((x) => OPERATOR_KEYS.has(x)))
+          throw new InvalidPatternError(p, "object mixes operators (in, not_in, exists) with field names");
         f.nested = buildNode(v, p, depth + 1, leaves);
         if (ks.length === 0) leaves.n++;
       }
     } else {
-      throw new InvalidPatternError(p, `expected an array of allowed values, an operator object or a nested object, got ${kindOf(v)}`);
+      throw new InvalidPatternError(
+        p,
+        `expected an array of allowed values, an operator object or a nested object, got ${kindOf(v)}`,
+      );
     }
     if (f.leaf) leaves.n++;
-    if (leaves.n > MAX_PATTERN_LEAVES) throw new InvalidPatternError(p, `pattern holds more than ${MAX_PATTERN_LEAVES} leaf fields`);
+    if (leaves.n > MAX_PATTERN_LEAVES)
+      throw new InvalidPatternError(p, `pattern holds more than ${MAX_PATTERN_LEAVES} leaf fields`);
     n.fields.push(f);
   }
   return n;
@@ -133,15 +139,20 @@ function buildLeaf(ops: { [k: string]: JVal }, path: string[]): Leaf {
     if (typeof ops["exists"] !== "boolean") throw new InvalidPatternError(path, "exists must be true or false");
     lm.exists = ops["exists"];
   }
-  for (const a of lm.in) for (const b of lm.notIn) if (scalarEqual(a, b)) throw new InvalidPatternError(path, `value ${scalarText(a)} appears in both in and not_in`);
-  if (lm.exists === false && lm.in.length > 0) throw new InvalidPatternError(path, "exists: false cannot be combined with a non-empty in");
+  for (const a of lm.in)
+    for (const b of lm.notIn)
+      if (scalarEqual(a, b))
+        throw new InvalidPatternError(path, `value ${scalarText(a)} appears in both in and not_in`);
+  if (lm.exists === false && lm.in.length > 0)
+    throw new InvalidPatternError(path, "exists: false cannot be combined with a non-empty in");
   return lm;
 }
 
 function valueSet(v: JVal, path: string[], op: string): JVal[] {
   if (v === null) return [];
   if (!Array.isArray(v)) throw new InvalidPatternError(path, `${op} must be an array of values`);
-  if (v.length > MAX_PATTERN_VALUES) throw new InvalidPatternError(path, `${op} lists more than ${MAX_PATTERN_VALUES} values`);
+  if (v.length > MAX_PATTERN_VALUES)
+    throw new InvalidPatternError(path, `${op} lists more than ${MAX_PATTERN_VALUES} values`);
   const out: JVal[] = [];
   for (const e of v) {
     if (!(e === null || typeof e === "string" || typeof e === "boolean" || isNum(e))) {
@@ -215,7 +226,7 @@ export function matchPayload(pattern: Pattern, body: string | Uint8Array | unkno
     try {
       doc = decodeJSON(text);
     } catch (e) {
-      throw new Error(`payload is not valid JSON: ${(e as Error).message}`);
+      throw new Error(`payload is not valid JSON: ${(e as Error).message}`, { cause: e });
     }
   } else {
     if (body === undefined) throw new Error("payload is not valid JSON: empty");

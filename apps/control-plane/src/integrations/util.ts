@@ -104,7 +104,10 @@ export async function integrationSecret(
 ): Promise<string> {
   const name = configKey ? (integration.config?.[configKey] ?? "") : (integration.secret_ref ?? "");
   if (name === "") {
-    throw new OfError("resource_not_found", `integration ${integration.id} (${integration.provider}): no secret configured`);
+    throw new OfError(
+      "resource_not_found",
+      `integration ${integration.id} (${integration.provider}): no secret configured`,
+    );
   }
   if (!secrets) throw new Error(`integration ${integration.id}: no secret store configured`);
   try {

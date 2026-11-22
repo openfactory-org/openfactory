@@ -5,7 +5,8 @@ import type { OutboundMessage } from "./types";
 const FENCED_CODE = /(```|~~~)[\s\S]*?(```|~~~|$)/g;
 const INLINE_CODE = /`[^`\n]*`/g;
 const QUOTE_LINE = /^\s*>.*$/gm;
-const MENTION = /(^|[^A-Za-z0-9_.\-/@`])@([A-Za-z0-9](?:[A-Za-z0-9_.\-]*[A-Za-z0-9_])?(?:\/[A-Za-z0-9_.\-]+)?(?:\[bot\])?)/g;
+const MENTION =
+  /(^|[^A-Za-z0-9_./@`-])@([A-Za-z0-9](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?(?:\/[A-Za-z0-9_.-]+)?(?:\[bot\])?)/g;
 
 /** Replaces fenced code, inline code and quoted lines with a space. */
 export function stripCode(text: string): string {

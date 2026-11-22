@@ -55,7 +55,12 @@ export async function scheduleEvent(s: SlotInput): Promise<Event> {
 }
 
 /** The event of a manual start of an automation (POST /automations/{id}/run). */
-export function manualEvent(a: Pick<Automation, "id" | "name" | "factory_id">, teamId: string, actor: Actor, nowMs: number): Event {
+export function manualEvent(
+  a: Pick<Automation, "id" | "name" | "factory_id">,
+  teamId: string,
+  actor: Actor,
+  nowMs: number,
+): Event {
   const id = newId("evt");
   return {
     id,
