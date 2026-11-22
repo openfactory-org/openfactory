@@ -1,0 +1,15 @@
+{
+  "name": "@openfactory/core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Domain types, IDs with partition token, errors and failure codes, run states, network policy, redaction.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -b"
+  }
+}

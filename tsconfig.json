@@ -1,0 +1,21 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/definition" },
+    { "path": "packages/api-client" },
+    { "path": "packages/runner-proto" },
+    { "path": "packages/worker-proto" },
+    { "path": "packages/sandbox" },
+    { "path": "packages/plugin-api" },
+    { "path": "apps/control-plane" },
+    { "path": "apps/cli" },
+    { "path": "providers/cloudflare-sandbox" },
+    { "path": "providers/daytona" },
+    { "path": "providers/boatdev" },
+    { "path": "plugins/gitlab" },
+    { "path": "plugins/azuredevops" },
+    { "path": "tests/contract" },
+    { "path": "tests/e2e" }
+  ]
+}

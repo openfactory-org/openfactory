@@ -1,0 +1,15 @@
+{
+  "name": "@openfactory/definition",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Parse, validate, compile, resolve and diff factory definitions; schema and docs generators.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -b"
+  }
+}

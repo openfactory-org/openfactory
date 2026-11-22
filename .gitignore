@@ -35,3 +35,11 @@ deploy/helm/openfactory/Chart.lock
 .vscode/
 *.swp
 *~
+
+# TypeScript workspace
+node_modules/
+**/dist/
+!internal/webui/dist/
+.wrangler/
+.dev.vars
+*.tsbuildinfo

@@ -1,0 +1,143 @@
+// Frozen contract (C0). The control-plane Worker. Source: appendix 01 §4, with the
+// plan overrides: RouterDO added, no McpSessionDO, DO classes declared with
+// "exports" (mutually exclusive with "migrations"; a one-way switch).
+// After a change: `npm run cf-types -w @openfactory/control-plane`, update
+// src/contracts/env.ts, and document new vars, secrets and bindings in docs/.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "openfactory",
+  "main": "src/index.ts",
+  // Never later than the deploy date. >= 2026-08-04 turns nodejs_compat on by default;
+  // >= 2026-02-24 makes deleteAll() also delete the alarm; >= 2025-11-17 enables ctx.exports.
+  "compatibility_date": "2026-11-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "upload_source_maps": true,
+  // Set per install: a custom domain in "routes" (it is also OF_PUBLIC_URL), or workers_dev.
+  "workers_dev": true,
+
+  // Paid plan. The Worker holds long-polls and SSE (wall time, not CPU).
+  "limits": { "cpu_ms": 60000, "subrequests": 50000 },
+
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+
+  // ---- Dashboard (Static Assets) ----
+  "assets": {
+    "directory": "../../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    // Every server path. With an explicit list, navigation auto-detection is off,
+    // so browser-navigated server paths (/auth/*, /oauth/*) must be listed.
+    "run_worker_first": [
+      "/api/*",
+      "/runner/*",
+      "/worker/*",
+      "/mcp",
+      "/mcp/*",
+      "/oauth/*",
+      "/.well-known/*",
+      "/auth/*",
+      "/webhooks/*",
+      "/integrations/*",
+      "/plugins/*",
+      "/healthz",
+      "/readyz",
+      "/metrics",
+    ],
+  },
+
+  // ---- Durable Objects ----
+  "durable_objects": {
+    "bindings": [
+      { "name": "TEAM", "class_name": "TeamDO" },
+      { "name": "WORK", "class_name": "WorkDO" },
+      { "name": "DISPATCH", "class_name": "DispatchDO" },
+      { "name": "ROUTER", "class_name": "RouterDO" },
+      { "name": "INDEX", "class_name": "IndexDO" },
+      { "name": "INGRESS", "class_name": "IngressDO" },
+      { "name": "WORKER_HUB", "class_name": "WorkerHubDO" },
+      { "name": "BENCHMARK", "class_name": "BenchmarkDO" },
+    ],
+    // Explicit, because a deploy that omits it falls back to the default.
+    // 300 s lets a turn finish; long-poll sockets reconnect after a forced reset.
+    "code_update_strategy": { "mode": "deferred", "max_delay": 300 },
+  },
+
+  // New-style class declarations. Deleting a class later is a "state": "deleted" entry.
+  "exports": {
+    "TeamDO": { "type": "durable-object", "storage": "sqlite" },
+    "WorkDO": { "type": "durable-object", "storage": "sqlite" },
+    "DispatchDO": { "type": "durable-object", "storage": "sqlite" },
+    "RouterDO": { "type": "durable-object", "storage": "sqlite" },
+    "IndexDO": { "type": "durable-object", "storage": "sqlite" },
+    "IngressDO": { "type": "durable-object", "storage": "sqlite" },
+    "WorkerHubDO": { "type": "durable-object", "storage": "sqlite" },
+    "BenchmarkDO": { "type": "durable-object", "storage": "sqlite" },
+  },
+
+  // ---- R2: snapshots, artifacts, attachments, transcripts, compacted messages, runner binaries ----
+  "r2_buckets": [
+    {
+      "binding": "DATA",
+      "bucket_name": "openfactory-data",
+      "preview_bucket_name": "openfactory-data-dev",
+    },
+  ],
+
+  // ---- Queues: unordered fan-out only (judge results, scoring samples, retention, compaction) ----
+  "queues": {
+    "producers": [{ "queue": "openfactory-jobs", "binding": "JOBS" }],
+    "consumers": [
+      {
+        "queue": "openfactory-jobs",
+        "max_batch_size": 25,
+        "max_batch_timeout": 5,
+        "max_retries": 10,
+        "dead_letter_queue": "openfactory-jobs-dlq",
+        "max_concurrency": 10,
+      },
+    ],
+  },
+
+  // ---- Cron: safety net that re-arms TeamDO and DispatchDO alarms. Not the timer. ----
+  "triggers": { "crons": ["* * * * *"] },
+
+  // ---- Service bindings (typed RPC). Daytona and boat.dev run in-process. ----
+  "services": [
+    {
+      "binding": "PROVIDER_CLOUDFLARE_SANDBOX",
+      "service": "openfactory-provider-cloudflare-sandbox",
+      "entrypoint": "SandboxProvider",
+    },
+    { "binding": "PLUGIN_GITLAB", "service": "openfactory-plugin-gitlab", "entrypoint": "Plugin" },
+    { "binding": "PLUGIN_AZUREDEVOPS", "service": "openfactory-plugin-azuredevops", "entrypoint": "Plugin" },
+  ],
+
+  // ---- Plain configuration (names reuse the Go server's OF_* variables where they exist) ----
+  "vars": {
+    "OF_PUBLIC_URL": "https://factory.example.com",
+    "OF_R2_ACCOUNT_ID": "",
+    "OF_R2_BUCKET": "openfactory-data",
+    "OF_OBJECT_STORE_PRESIGN_TTL": "15m",
+    "OF_QUEUE_TIMEOUT": "30m",
+    "OF_MAX_SESSION_DURATION": "4h",
+    "OF_SESSION_STOP_GRACE": "30s",
+    "OF_SANDBOX_START_TIMEOUT": "10m",
+    "OF_SANDBOX_PROVIDER": "cloudflare-sandbox",
+    "OF_ALLOW_UNENFORCED_NETWORK_POLICY": "false",
+    "OF_DEV_PROCESS_WORKERS": "false",
+    "OF_RUNNER_VERSION": "0.0.0-dev",
+    "OF_OIDC_ISSUER_URL": "",
+    "OF_OIDC_CLIENT_ID": "",
+    "OF_LOG_LEVEL": "info",
+  },
+
+  // Secrets are set with `wrangler secret put` or `wrangler deploy --secrets-file`.
+  // Optional: OF_SECRET_KEY_PREVIOUS, OF_SIGNING_KEY_PREVIOUS (rotation),
+  // OF_OIDC_CLIENT_SECRET, OF_CLOUD_ID_KEY.
+  "secrets": {
+    "required": ["OF_SECRET_KEY", "OF_SIGNING_KEY", "OF_R2_ACCESS_KEY_ID", "OF_R2_SECRET_ACCESS_KEY"],
+  },
+
+  // ---- Local development ----
+  "dev": { "port": 8787 },
+}

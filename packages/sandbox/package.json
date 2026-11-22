@@ -1,0 +1,15 @@
+{
+  "name": "@openfactory/sandbox",
+  "version": "0.0.0",
+  "private": true,
+  "description": "SandboxProvider contract, capability gate, failure mapping, conformance suite.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -b"
+  }
+}

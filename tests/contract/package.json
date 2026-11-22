@@ -1,0 +1,15 @@
+{
+  "name": "@openfactory/contract-tests",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Black-box contract suite: REST, fake runner, fake worker, SSE.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -b"
+  }
+}

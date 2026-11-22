@@ -1,0 +1,15 @@
+{
+  "name": "@openfactory/e2e-tests",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Opt-in live end-to-end scenarios.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -b"
+  }
+}

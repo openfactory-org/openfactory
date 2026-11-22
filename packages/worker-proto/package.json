@@ -1,0 +1,15 @@
+{
+  "name": "@openfactory/worker-proto",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Worker protocol v2 types generated from schemas/worker/v2.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -b"
+  }
+}

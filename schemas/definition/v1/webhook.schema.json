@@ -1,0 +1,75 @@
+{
+  "$id": "https://openfactory-org.github.io/schemas/v1/webhook.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "else": {
+        "not": {
+          "required": [
+            "signatureScheme"
+          ]
+        }
+      },
+      "if": {
+        "properties": {
+          "authMode": {
+            "const": "signature"
+          }
+        },
+        "required": [
+          "authMode"
+        ]
+      },
+      "then": {
+        "required": [
+          "signatureScheme"
+        ]
+      }
+    }
+  ],
+  "description": "webhooks/<name>.yaml: an authenticated ingress URL for JSON POST requests.",
+  "properties": {
+    "authMode": {
+      "default": "token",
+      "description": "How the sender authenticates: token (the secret in an Authorization: Bearer header), url_token (the secret as the last segment of the URL path) or signature (a provider signature). It cannot change after the first apply.",
+      "enum": [
+        "token",
+        "url_token",
+        "signature"
+      ],
+      "type": "string"
+    },
+    "deliveryIdHeader": {
+      "description": "Request header that holds the delivery ID. Open Factory uses the ID to find repeated deliveries. It must not be a credential header, for example Authorization, Cookie or a signature header. Stored in canonical form.",
+      "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,64}$",
+      "type": "string"
+    },
+    "enabled": {
+      "default": true,
+      "description": "If false, the webhook never starts an automation.",
+      "type": "boolean"
+    },
+    "secretName": {
+      "$ref": "common.schema.json#/$defs/secretName",
+      "description": "Secret that authenticates the requests."
+    },
+    "signatureScheme": {
+      "description": "Signature format of the provider. Required when authMode is signature, and allowed only then. It cannot change after the first apply.",
+      "enum": [
+        "github",
+        "pagerduty",
+        "sentry",
+        "standard_webhooks",
+        "stripe",
+        "vercel"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "secretName"
+  ],
+  "title": "Webhook",
+  "type": "object"
+}

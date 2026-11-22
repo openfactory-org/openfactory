@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist/types",
+    "rootDir": "../..",
+    "tsBuildInfoFile": "dist/types/.tsbuildinfo",
+    "types": ["@cloudflare/workers-types"]
+  },
+  "include": ["src", "test", "../../schemas/testdata/*.json"],
+  "references": []
+}

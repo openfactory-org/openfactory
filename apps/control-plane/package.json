@@ -1,0 +1,18 @@
+{
+  "name": "@openfactory/control-plane",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Open Factory control plane: Worker, Durable Objects, wrangler.jsonc.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -b",
+    "cf-types": "wrangler types --include-runtime=false --env-interface WranglerEnv worker-configuration.d.ts",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "dev": "wrangler dev"
+  }
+}

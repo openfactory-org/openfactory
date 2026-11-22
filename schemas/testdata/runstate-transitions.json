@@ -1,0 +1,5324 @@
+{
+  "cases": [
+    {
+      "state": "queued",
+      "input": {
+        "event": "assigned"
+      },
+      "want": {
+        "state": "pending",
+        "changed": true
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "assigned"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "assigned"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "assigned"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "assigned"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "assigned"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "assigned"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "assigned"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "assigned"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "assigned"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "config_fault"
+      },
+      "want": {
+        "state": "failed",
+        "changed": true,
+        "failure_code": "invalid_configuration"
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "config_fault"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "config_fault"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "config_fault"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "config_fault"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "config_fault"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "config_fault"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "config_fault"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "config_fault"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "config_fault"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "state": "failed",
+        "changed": true,
+        "failure_code": "harness_auth_failed"
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "state": "failed",
+        "changed": true,
+        "failure_code": "invalid_configuration"
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "bogus"
+      },
+      "want": {
+        "state": "failed",
+        "changed": true,
+        "failure_code": "invalid_configuration"
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "config_fault",
+        "failure_code": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "queue_timeout"
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "infrastructure_timeout"
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "queue_timeout"
+      },
+      "want": {
+        "state": "pending",
+        "changed": false
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "queue_timeout"
+      },
+      "want": {
+        "state": "claimed",
+        "changed": false
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "queue_timeout"
+      },
+      "want": {
+        "state": "running",
+        "changed": false
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "queue_timeout"
+      },
+      "want": {
+        "state": "blocked",
+        "changed": false
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "queue_timeout"
+      },
+      "want": {
+        "state": "succeeded",
+        "changed": false
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "queue_timeout"
+      },
+      "want": {
+        "state": "failed",
+        "changed": false
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "queue_timeout"
+      },
+      "want": {
+        "state": "error",
+        "changed": false
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "queue_timeout"
+      },
+      "want": {
+        "state": "cancelled",
+        "changed": false
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "queue_timeout"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "session_started"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "session_started"
+      },
+      "want": {
+        "state": "claimed",
+        "changed": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "session_started"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "session_started"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "session_started"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "session_started"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "session_started"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "session_started"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "session_started"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "session_started"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "setup_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "setup_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "setup_failed"
+      },
+      "want": {
+        "state": "failed",
+        "changed": true,
+        "failure_code": "environment_setup_failed"
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "setup_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "setup_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "setup_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "setup_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "setup_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "setup_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "setup_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "state": "failed",
+        "changed": true,
+        "failure_code": "harness_auth_failed"
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "invalid_configuration"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "invalid_configuration"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "invalid_configuration"
+      },
+      "want": {
+        "state": "failed",
+        "changed": true,
+        "failure_code": "invalid_configuration"
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "invalid_configuration"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "invalid_configuration"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "invalid_configuration"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "invalid_configuration"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "invalid_configuration"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "invalid_configuration"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "invalid_configuration"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "agent_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "agent_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "agent_failed"
+      },
+      "want": {
+        "state": "failed",
+        "changed": true,
+        "failure_code": "environment_setup_failed"
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "agent_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "agent_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "agent_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "agent_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "agent_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "agent_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "setup_failed",
+        "failure_code": "agent_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "turn_started"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "turn_started"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "turn_started"
+      },
+      "want": {
+        "state": "running",
+        "changed": true
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "turn_started"
+      },
+      "want": {
+        "state": "running",
+        "changed": false
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "turn_started"
+      },
+      "want": {
+        "state": "running",
+        "changed": true
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "turn_started"
+      },
+      "want": {
+        "state": "running",
+        "changed": true
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "turn_started"
+      },
+      "want": {
+        "state": "running",
+        "changed": true
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "turn_started"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "turn_started"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "turn_started"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "turn_ended"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "turn_ended"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "turn_ended"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "turn_ended"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "turn_ended"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "turn_ended"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "turn_ended"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "turn_ended"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "turn_ended"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "turn_ended"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "done"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "done"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "done"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "done"
+      },
+      "want": {
+        "state": "succeeded",
+        "changed": true
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "done"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "done"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "done"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "done"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "done"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "done"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "done",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "done",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "done",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "done",
+        "has_open_request": true
+      },
+      "want": {
+        "state": "blocked",
+        "changed": true,
+        "blocked_reason": "human_request"
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "done",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "done",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "done",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "done",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "done",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "done",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "interrupted"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "interrupted"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "interrupted"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "interrupted"
+      },
+      "want": {
+        "state": "succeeded",
+        "changed": true
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "interrupted"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "interrupted"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "interrupted"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "interrupted"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "interrupted"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "interrupted"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "interrupted",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "interrupted",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "interrupted",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "interrupted",
+        "has_open_request": true
+      },
+      "want": {
+        "state": "blocked",
+        "changed": true,
+        "blocked_reason": "human_request"
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "interrupted",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "interrupted",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "interrupted",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "interrupted",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "interrupted",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "interrupted",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "needs_input"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "needs_input"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "needs_input"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "needs_input"
+      },
+      "want": {
+        "state": "blocked",
+        "changed": true,
+        "blocked_reason": "harness_needs_input"
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "needs_input"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "needs_input"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "needs_input"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "needs_input"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "needs_input"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "needs_input"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "needs_input",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "needs_input",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "needs_input",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "needs_input",
+        "has_open_request": true
+      },
+      "want": {
+        "state": "blocked",
+        "changed": true,
+        "blocked_reason": "harness_needs_input"
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "needs_input",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "needs_input",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "needs_input",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "needs_input",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "needs_input",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "needs_input",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error"
+      },
+      "want": {
+        "state": "failed",
+        "changed": true,
+        "failure_code": "agent_failed"
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "has_open_request": true
+      },
+      "want": {
+        "state": "failed",
+        "changed": true,
+        "failure_code": "agent_failed"
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "bogus",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "bogus",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "bogus",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "bogus",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "bogus",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "bogus",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "bogus",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "bogus",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "bogus",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "bogus",
+        "has_open_request": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "state": "failed",
+        "changed": true,
+        "failure_code": "harness_auth_failed"
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "failure_code": "harness_auth_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "state": "failed",
+        "changed": true,
+        "failure_code": "agent_failed"
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "turn_ended",
+        "outcome": "error",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "session_lost"
+      },
+      "want": {
+        "state": "queued",
+        "changed": false
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "session_lost"
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "internal_error"
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "session_lost"
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "internal_error"
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "session_lost"
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "internal_error"
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "session_lost"
+      },
+      "want": {
+        "state": "blocked",
+        "changed": false
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "session_lost"
+      },
+      "want": {
+        "state": "succeeded",
+        "changed": false
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "session_lost"
+      },
+      "want": {
+        "state": "failed",
+        "changed": false
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "session_lost"
+      },
+      "want": {
+        "state": "error",
+        "changed": false
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "session_lost"
+      },
+      "want": {
+        "state": "cancelled",
+        "changed": false
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "session_lost"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "state": "queued",
+        "changed": false
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "state": "queued",
+        "changed": true,
+        "failure_code": "sandbox_lost",
+        "retry": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "state": "queued",
+        "changed": true,
+        "failure_code": "sandbox_lost",
+        "retry": true
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "state": "queued",
+        "changed": true,
+        "failure_code": "sandbox_lost",
+        "retry": true
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "state": "blocked",
+        "changed": false
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "state": "succeeded",
+        "changed": false
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "state": "failed",
+        "changed": false
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "state": "error",
+        "changed": false
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "state": "cancelled",
+        "changed": false
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "queued",
+        "changed": false
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "queued",
+        "changed": true,
+        "failure_code": "sandbox_lost",
+        "retry": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "queued",
+        "changed": true,
+        "failure_code": "sandbox_lost",
+        "retry": true
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "queued",
+        "changed": true,
+        "failure_code": "sandbox_lost",
+        "retry": true
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "blocked",
+        "changed": false
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "succeeded",
+        "changed": false
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "failed",
+        "changed": false
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "error",
+        "changed": false
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "cancelled",
+        "changed": false
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost",
+        "prior_retries": 1
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "queued",
+        "changed": false
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "sandbox_lost"
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "sandbox_lost"
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "sandbox_lost"
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "blocked",
+        "changed": false
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "succeeded",
+        "changed": false
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "failed",
+        "changed": false
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "error",
+        "changed": false
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "cancelled",
+        "changed": false
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "sandbox_lost",
+        "prior_retries": 2
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost"
+      },
+      "want": {
+        "state": "queued",
+        "changed": false
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost"
+      },
+      "want": {
+        "state": "queued",
+        "changed": true,
+        "failure_code": "runner_lost",
+        "retry": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost"
+      },
+      "want": {
+        "state": "queued",
+        "changed": true,
+        "failure_code": "runner_lost",
+        "retry": true
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost"
+      },
+      "want": {
+        "state": "queued",
+        "changed": true,
+        "failure_code": "runner_lost",
+        "retry": true
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost"
+      },
+      "want": {
+        "state": "blocked",
+        "changed": false
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost"
+      },
+      "want": {
+        "state": "succeeded",
+        "changed": false
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost"
+      },
+      "want": {
+        "state": "failed",
+        "changed": false
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost"
+      },
+      "want": {
+        "state": "error",
+        "changed": false
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost"
+      },
+      "want": {
+        "state": "cancelled",
+        "changed": false
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "queued",
+        "changed": false
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "queued",
+        "changed": true,
+        "failure_code": "runner_lost",
+        "retry": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "queued",
+        "changed": true,
+        "failure_code": "runner_lost",
+        "retry": true
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "queued",
+        "changed": true,
+        "failure_code": "runner_lost",
+        "retry": true
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "blocked",
+        "changed": false
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "succeeded",
+        "changed": false
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "failed",
+        "changed": false
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "error",
+        "changed": false
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "cancelled",
+        "changed": false
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost",
+        "prior_retries": 1
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "queued",
+        "changed": false
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "runner_lost"
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "runner_lost"
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "runner_lost"
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "blocked",
+        "changed": false
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "succeeded",
+        "changed": false
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "failed",
+        "changed": false
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "error",
+        "changed": false
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "cancelled",
+        "changed": false
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "runner_lost",
+        "prior_retries": 2
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory"
+      },
+      "want": {
+        "state": "queued",
+        "changed": false
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory"
+      },
+      "want": {
+        "state": "failed",
+        "changed": true,
+        "failure_code": "out_of_memory"
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory"
+      },
+      "want": {
+        "state": "failed",
+        "changed": true,
+        "failure_code": "out_of_memory"
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory"
+      },
+      "want": {
+        "state": "failed",
+        "changed": true,
+        "failure_code": "out_of_memory"
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory"
+      },
+      "want": {
+        "state": "blocked",
+        "changed": false
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory"
+      },
+      "want": {
+        "state": "succeeded",
+        "changed": false
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory"
+      },
+      "want": {
+        "state": "failed",
+        "changed": false
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory"
+      },
+      "want": {
+        "state": "error",
+        "changed": false
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory"
+      },
+      "want": {
+        "state": "cancelled",
+        "changed": false
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "queued",
+        "changed": false
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "failed",
+        "changed": true,
+        "failure_code": "out_of_memory"
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "failed",
+        "changed": true,
+        "failure_code": "out_of_memory"
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "failed",
+        "changed": true,
+        "failure_code": "out_of_memory"
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "blocked",
+        "changed": false
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "succeeded",
+        "changed": false
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "failed",
+        "changed": false
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "error",
+        "changed": false
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "cancelled",
+        "changed": false
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory",
+        "prior_retries": 1
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "queued",
+        "changed": false
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "failed",
+        "changed": true,
+        "failure_code": "out_of_memory"
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "failed",
+        "changed": true,
+        "failure_code": "out_of_memory"
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "failed",
+        "changed": true,
+        "failure_code": "out_of_memory"
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "blocked",
+        "changed": false
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "succeeded",
+        "changed": false
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "failed",
+        "changed": false
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "error",
+        "changed": false
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "cancelled",
+        "changed": false
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "out_of_memory",
+        "prior_retries": 2
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed"
+      },
+      "want": {
+        "state": "queued",
+        "changed": false
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed"
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "agent_process_failed"
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed"
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "agent_process_failed"
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed"
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "agent_process_failed"
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed"
+      },
+      "want": {
+        "state": "blocked",
+        "changed": false
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed"
+      },
+      "want": {
+        "state": "succeeded",
+        "changed": false
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed"
+      },
+      "want": {
+        "state": "failed",
+        "changed": false
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed"
+      },
+      "want": {
+        "state": "error",
+        "changed": false
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed"
+      },
+      "want": {
+        "state": "cancelled",
+        "changed": false
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "queued",
+        "changed": false
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "agent_process_failed"
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "agent_process_failed"
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "agent_process_failed"
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "blocked",
+        "changed": false
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "succeeded",
+        "changed": false
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "failed",
+        "changed": false
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "error",
+        "changed": false
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "cancelled",
+        "changed": false
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed",
+        "prior_retries": 1
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "queued",
+        "changed": false
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "agent_process_failed"
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "agent_process_failed"
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "agent_process_failed"
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "blocked",
+        "changed": false
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "succeeded",
+        "changed": false
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "failed",
+        "changed": false
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "error",
+        "changed": false
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "cancelled",
+        "changed": false
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "agent_process_failed",
+        "prior_retries": 2
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus"
+      },
+      "want": {
+        "state": "queued",
+        "changed": false
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus"
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "internal_error"
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus"
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "internal_error"
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus"
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "internal_error"
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus"
+      },
+      "want": {
+        "state": "blocked",
+        "changed": false
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus"
+      },
+      "want": {
+        "state": "succeeded",
+        "changed": false
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus"
+      },
+      "want": {
+        "state": "failed",
+        "changed": false
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus"
+      },
+      "want": {
+        "state": "error",
+        "changed": false
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus"
+      },
+      "want": {
+        "state": "cancelled",
+        "changed": false
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "queued",
+        "changed": false
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "internal_error"
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "internal_error"
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "internal_error"
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "blocked",
+        "changed": false
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "succeeded",
+        "changed": false
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "failed",
+        "changed": false
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "error",
+        "changed": false
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus",
+        "prior_retries": 1
+      },
+      "want": {
+        "state": "cancelled",
+        "changed": false
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus",
+        "prior_retries": 1
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "queued",
+        "changed": false
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "internal_error"
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "internal_error"
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "internal_error"
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "blocked",
+        "changed": false
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "succeeded",
+        "changed": false
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "failed",
+        "changed": false
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "error",
+        "changed": false
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus",
+        "prior_retries": 2
+      },
+      "want": {
+        "state": "cancelled",
+        "changed": false
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "session_lost",
+        "failure_code": "bogus",
+        "prior_retries": 2
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "session_deadline"
+      },
+      "want": {
+        "state": "queued",
+        "changed": false
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "session_deadline"
+      },
+      "want": {
+        "state": "pending",
+        "changed": false
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "session_deadline"
+      },
+      "want": {
+        "state": "claimed",
+        "changed": false
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "session_deadline"
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "infrastructure_timeout"
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "session_deadline"
+      },
+      "want": {
+        "state": "blocked",
+        "changed": false
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "session_deadline"
+      },
+      "want": {
+        "state": "succeeded",
+        "changed": false
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "session_deadline"
+      },
+      "want": {
+        "state": "failed",
+        "changed": false
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "session_deadline"
+      },
+      "want": {
+        "state": "error",
+        "changed": false
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "session_deadline"
+      },
+      "want": {
+        "state": "cancelled",
+        "changed": false
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "session_deadline"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "message"
+      },
+      "want": {
+        "state": "queued",
+        "changed": false
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "message"
+      },
+      "want": {
+        "state": "pending",
+        "changed": false
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "message"
+      },
+      "want": {
+        "state": "claimed",
+        "changed": false
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "message"
+      },
+      "want": {
+        "state": "running",
+        "changed": false
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "message"
+      },
+      "want": {
+        "state": "queued",
+        "changed": true
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "message"
+      },
+      "want": {
+        "state": "queued",
+        "changed": true
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "message"
+      },
+      "want": {
+        "state": "queued",
+        "changed": true
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "message"
+      },
+      "want": {
+        "state": "queued",
+        "changed": true
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "message"
+      },
+      "want": {
+        "state": "queued",
+        "changed": true
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "message"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "message",
+        "sandbox_running": true
+      },
+      "want": {
+        "state": "queued",
+        "changed": false
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "message",
+        "sandbox_running": true
+      },
+      "want": {
+        "state": "pending",
+        "changed": false
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "message",
+        "sandbox_running": true
+      },
+      "want": {
+        "state": "claimed",
+        "changed": false
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "message",
+        "sandbox_running": true
+      },
+      "want": {
+        "state": "running",
+        "changed": false
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "message",
+        "sandbox_running": true
+      },
+      "want": {
+        "state": "blocked",
+        "changed": false
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "message",
+        "sandbox_running": true
+      },
+      "want": {
+        "state": "succeeded",
+        "changed": false
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "message",
+        "sandbox_running": true
+      },
+      "want": {
+        "state": "failed",
+        "changed": false
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "message",
+        "sandbox_running": true
+      },
+      "want": {
+        "state": "error",
+        "changed": false
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "message",
+        "sandbox_running": true
+      },
+      "want": {
+        "state": "cancelled",
+        "changed": false
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "message",
+        "sandbox_running": true
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "cancel"
+      },
+      "want": {
+        "state": "cancelled",
+        "changed": true
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "cancel"
+      },
+      "want": {
+        "state": "cancelled",
+        "changed": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "cancel"
+      },
+      "want": {
+        "state": "cancelled",
+        "changed": true
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "cancel"
+      },
+      "want": {
+        "state": "cancelled",
+        "changed": true
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "cancel"
+      },
+      "want": {
+        "state": "cancelled",
+        "changed": true
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "cancel"
+      },
+      "want": {
+        "state": "succeeded",
+        "changed": false
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "cancel"
+      },
+      "want": {
+        "state": "failed",
+        "changed": false
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "cancel"
+      },
+      "want": {
+        "state": "error",
+        "changed": false
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "cancel"
+      },
+      "want": {
+        "state": "cancelled",
+        "changed": false
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "cancel"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "spend_limit"
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "spend_limit_exceeded"
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "spend_limit"
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "spend_limit_exceeded"
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "spend_limit"
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "spend_limit_exceeded"
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "spend_limit"
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "spend_limit_exceeded"
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "spend_limit"
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "spend_limit_exceeded"
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "spend_limit"
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "spend_limit_exceeded"
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "spend_limit"
+      },
+      "want": {
+        "state": "error",
+        "changed": true,
+        "failure_code": "spend_limit_exceeded"
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "spend_limit"
+      },
+      "want": {
+        "state": "error",
+        "changed": false
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "spend_limit"
+      },
+      "want": {
+        "state": "cancelled",
+        "changed": false
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "spend_limit"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "queued",
+      "input": {
+        "event": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "pending",
+      "input": {
+        "event": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "claimed",
+      "input": {
+        "event": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "running",
+      "input": {
+        "event": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "blocked",
+      "input": {
+        "event": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "succeeded",
+      "input": {
+        "event": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "failed",
+      "input": {
+        "event": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "error",
+      "input": {
+        "event": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "cancelled",
+      "input": {
+        "event": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    },
+    {
+      "state": "idle",
+      "input": {
+        "event": "bogus"
+      },
+      "want": {
+        "changed": false,
+        "invalid": true
+      }
+    }
+  ],
+  "description": "Generated from internal/runstate.Next at go-final. Each case: state + input -\u003e want. invalid=true means ErrInvalidTransition.",
+  "finished": {
+    "blocked": false,
+    "cancelled": true,
+    "claimed": false,
+    "error": true,
+    "failed": true,
+    "idle": false,
+    "pending": false,
+    "queued": false,
+    "running": false,
+    "succeeded": true
+  },
+  "known": {
+    "blocked": true,
+    "cancelled": true,
+    "claimed": true,
+    "error": true,
+    "failed": true,
+    "idle": false,
+    "pending": true,
+    "queued": true,
+    "running": true,
+    "succeeded": true
+  }
+}

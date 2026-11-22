@@ -1,9 +1,9 @@
 {
-  "name": "openfactory-dashboard",
+  "name": "@openfactory/web",
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "Open Factory dashboard (React). Built into internal/webui/dist and embedded in the openfactory binary.",
+  "description": "Open Factory dashboard (React).",
   "scripts": {
     "dev": "vite",
     "gen:api": "openapi-typescript ../internal/api/openapi.json -o src/api/schema.d.ts",

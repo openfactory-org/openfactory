@@ -1,0 +1,170 @@
+{
+  "description": "Generated from internal/core/failure.go at go-final. failure_codes: AllFailureCodes in table order. sandbox_reasons: FailureForSandboxReason (failure null means no failure code). runner_codes: RunnerFailureCode.",
+  "failure_codes": [
+    {
+      "code": "invalid_configuration",
+      "class": "user",
+      "retry": false
+    },
+    {
+      "code": "environment_setup_failed",
+      "class": "user",
+      "retry": false
+    },
+    {
+      "code": "harness_auth_failed",
+      "class": "user",
+      "retry": false
+    },
+    {
+      "code": "external_authentication_required",
+      "class": "user",
+      "retry": false
+    },
+    {
+      "code": "integration_disabled",
+      "class": "user",
+      "retry": false
+    },
+    {
+      "code": "agent_failed",
+      "class": "user",
+      "retry": false
+    },
+    {
+      "code": "out_of_memory",
+      "class": "user",
+      "retry": false
+    },
+    {
+      "code": "resource_unavailable",
+      "class": "platform",
+      "retry": true
+    },
+    {
+      "code": "sandbox_create_failed",
+      "class": "platform",
+      "retry": true
+    },
+    {
+      "code": "network_policy_timeout",
+      "class": "platform",
+      "retry": true
+    },
+    {
+      "code": "sandbox_lost",
+      "class": "platform",
+      "retry": true
+    },
+    {
+      "code": "runner_lost",
+      "class": "platform",
+      "retry": true
+    },
+    {
+      "code": "agent_process_failed",
+      "class": "platform",
+      "retry": false
+    },
+    {
+      "code": "infrastructure_timeout",
+      "class": "platform",
+      "retry": false
+    },
+    {
+      "code": "internal_error",
+      "class": "platform",
+      "retry": false
+    },
+    {
+      "code": "spend_limit_exceeded",
+      "class": "platform",
+      "retry": false
+    }
+  ],
+  "max_retry_sessions": 3,
+  "runner_codes": [
+    {
+      "reported": "environment_setup_failed",
+      "failure": "environment_setup_failed"
+    },
+    {
+      "reported": "harness_auth_failed",
+      "failure": "harness_auth_failed"
+    },
+    {
+      "reported": "agent_failed",
+      "failure": "agent_failed"
+    },
+    {
+      "reported": "invalid_configuration",
+      "failure": "agent_failed"
+    },
+    {
+      "reported": "sandbox_lost",
+      "failure": "agent_failed"
+    },
+    {
+      "reported": "",
+      "failure": "agent_failed"
+    },
+    {
+      "reported": "bogus",
+      "failure": "agent_failed"
+    }
+  ],
+  "sandbox_reasons": [
+    {
+      "reason": "completed",
+      "failure": "agent_process_failed"
+    },
+    {
+      "reason": "process_failed",
+      "failure": "agent_process_failed"
+    },
+    {
+      "reason": "image_pull",
+      "failure": "sandbox_create_failed"
+    },
+    {
+      "reason": "unschedulable",
+      "failure": "sandbox_create_failed"
+    },
+    {
+      "reason": "network_policy_timeout",
+      "failure": "network_policy_timeout"
+    },
+    {
+      "reason": "invalid_spec",
+      "failure": "invalid_configuration"
+    },
+    {
+      "reason": "container_oom",
+      "failure": "out_of_memory"
+    },
+    {
+      "reason": "evicted",
+      "failure": "sandbox_lost"
+    },
+    {
+      "reason": "node_lost",
+      "failure": "sandbox_lost"
+    },
+    {
+      "reason": "deadline_exceeded",
+      "failure": "infrastructure_timeout"
+    },
+    {
+      "reason": "cancelled",
+      "failure": null
+    },
+    {
+      "reason": "unknown",
+      "failure": "runner_lost"
+    },
+    {
+      "reason": "something_else",
+      "failure": "runner_lost"
+    }
+  ]
+}
