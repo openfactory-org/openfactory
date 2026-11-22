@@ -1,16 +1,791 @@
-// WorkDO: C0 stub. Owner: WS5. Replace the body; keep the class name and export
-// (wrangler.jsonc "exports" declares it). Migrations go in ./migrations/NNNN_<name>.sql.
-import { DurableObject } from "cloudflare:workers";
-import { notImplemented, problemResponse } from "@openfactory/core";
+// WorkDO (key team:<t>|work:<token>): one work item (or a run tree without
+// one), its runs, sessions, runner protocol, inbox items, dispatch ledger and
+// tool idempotency rows. Every request or alarm step is one transactionSync.
+import { conflict, invalid, isOfError, notFound, OfError, type FailureCode } from "@openfactory/core";
+import { failureForSandboxReason, gateNetworkPolicy, parseProviderError, type TaskStatus } from "@openfactory/sandbox";
+import type { EndRequest, StartRequest } from "@openfactory/runner-proto";
+import type { Ack, CallMeta, CoreEvent, OutboxEnvelope, OutboxPayloads } from "../../contracts/do-messages";
 import type { Env } from "../../contracts/env";
+import { BaseDO, type Migration } from "../../lib/base";
+import { LiveHub, isUpgrade } from "../../lib/live/index";
+import type { OutboxRow } from "../../lib/outbox/outbox";
+import type { TimerRow } from "../../lib/timers/timers";
+import { decideDeadline, decideSilent, DEFAULT_LOST_AFTER_MS } from "../../engine/liveness";
+import { parseDuration } from "../../engine/sessions";
+import { isTerminal, STAGES, type Run, type RunSession, type Stage } from "../../engine/types";
+import { taskIdOf } from "../../engine/timeline";
+import { defaultProviderId, providerFor, targetOf } from "../dispatch/providers";
+import {
+  createRun as engineCreateRun,
+  resolveInboxItem,
+  workItemEvent,
+  cancel,
+  cancelOne,
+  setStage,
+  dispatchRoot,
+  endSession,
+  loseCode,
+  loseSession,
+  requestSlot,
+  runAgents,
+  sendMessage,
+  stopSession,
+  transition,
+  enqueueProvider,
+  type ChildPlan,
+  type DispatchPlan,
+  type EngineConfig,
+  type Fx,
+} from "./engine";
+import { buildTask, commitGrant, mintBootstrap, onGrant, startFailed, startSucceeded, taskPolicy, type Grant, type GrantPrep } from "./grant";
+import { m0001 } from "./migrations/0001_init";
+import { Repo } from "./repo";
+import {
+  appendEvents,
+  authSession,
+  endSessionByRunner,
+  enqueueCommand,
+  failStart,
+  pollCommands,
+  rerr,
+  sessionStart,
+  type RunnerError,
+} from "./runner";
+import { runTool, type ToolCall, type ToolResult } from "./tools";
 
-export class WorkDO extends DurableObject<Env> {
-  /** Liveness probe for tests and the readiness check. */
+/** Delivers notices (notify service). The integrations workstream sets it; the default logs and acks. */
+export type NoticeDeliverer = (env: Env, envelope: OutboxEnvelope) => Promise<void>;
+let noticeDeliverer: NoticeDeliverer = async (_env, e) => {
+  console.info("work: notice without a deliverer", e.kind, e.msgId);
+};
+export function setNoticeDeliverer(fn: NoticeDeliverer): void {
+  noticeDeliverer = fn;
+}
+
+export function engineConfig(env: Env): EngineConfig {
+  const pub = (env.OF_PUBLIC_URL ?? "").replace(/\/+$/, "");
+  return {
+    publicUrl: pub,
+    controlUrl: pub,
+    r2AccountId: env.OF_R2_ACCOUNT_ID ?? "",
+    queueTimeoutMs: parseDuration(env.OF_QUEUE_TIMEOUT, 30 * 60_000),
+    maxSessionMs: parseDuration(env.OF_MAX_SESSION_DURATION, 8 * 3_600_000),
+    stopGraceMs: parseDuration(env.OF_SESSION_STOP_GRACE, 2 * 60_000),
+    startTimeoutMs: parseDuration(env.OF_SANDBOX_START_TIMEOUT, 30 * 60_000),
+    lostAfterMs: DEFAULT_LOST_AFTER_MS,
+    maxDepth: Number((env as unknown as Record<string, string>).OF_MAX_ORCHESTRATION_DEPTH ?? "") || 1,
+    runnerVersion: env.OF_RUNNER_VERSION ?? "",
+    allowUnenforced: env.OF_ALLOW_UNENFORCED_NETWORK_POLICY ?? "",
+  };
+}
+
+export interface CreateRunInput {
+  /** Root dispatch (work item + root run, or a follow-up to the root run). */
+  dispatch?: DispatchPlan;
+  /** A run without a work item (POST /runs of a single agent, judge runs). */
+  run?: { factoryId: string; config: Run["config"]; prompt: string; name?: string; triggeredBy?: string; metadata?: Record<string, string>; actor?: string; runId?: string };
+}
+
+export class WorkDO extends BaseDO {
+  private readonly live = new LiveHub(this.ctx);
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    this.onMessage("dispatch.grant", (p) => this.withFx((fx) => onGrant(fx, p)));
+    this.onMessage("work.queueExpired", (p) =>
+      this.withFx((fx) => {
+        const r = fx.repo.getRun(p.runId);
+        const latest = fx.repo.latestSession(p.runId);
+        if (!r || r.state !== "queued" || (latest && latest.session >= p.session)) return;
+        transition(fx, p.runId, { event: "queue_timeout" });
+      }),
+    );
+    this.onMessage("work.spendHold", (p) =>
+      this.withFx((fx) => {
+        const r = fx.repo.getRun(p.runId);
+        if (r?.state === "queued" && r.queued_reason !== "spend_limit") {
+          fx.repo.putRun(Object.assign(r, { queued_reason: "spend_limit" }));
+        }
+      }),
+    );
+    this.onMessage("work.spendRelease", (p) =>
+      this.withFx((fx) => {
+        const r = fx.repo.getRun(p.runId);
+        if (r?.queued_reason) {
+          delete r.queued_reason;
+          fx.repo.putRun(r);
+        }
+      }),
+    );
+    this.onMessage("work.spendStop", (p) => this.withFx((fx) => this.spendStop(fx, p.rootRunId)));
+    this.onTimerAsync<Grant>("grant", (t) => this.prepareAndCommitGrant(t.payload));
+    this.onTimer<{ runId: string }>("requeue", (t) =>
+      this.fxSync((fx) => {
+        const r = fx.repo.getRun(t.payload.runId);
+        if (r?.state === "queued") requestSlot(fx, r);
+      }),
+    );
+    this.onTimer<{ runId: string; session: number }>("start_timeout", (t) =>
+      this.fxSync((fx) => {
+        const s = fx.repo.getSession(t.payload.runId, t.payload.session);
+        if (s?.state === "assigned") loseCode(fx, s, "deadline_exceeded", "sandbox_create_failed", true, { cancel: true });
+      }),
+    );
+    this.onTimer<{ runId: string; session: number }>("deadline", (t) => this.fxSync((fx) => this.onDeadline(fx, t)));
+    this.onTimerAsync<{ runId: string; session: number }>("liveness", (t) => this.onLiveness(t));
+  }
+
+  protected migrations(): readonly Migration[] {
+    return [m0001];
+  }
+
   async ping(): Promise<string> {
     return "WorkDO";
   }
 
-  override async fetch(_request: Request): Promise<Response> {
-    return problemResponse(notImplemented("WorkDO"));
+  // ---------- fx plumbing ----------
+
+  private token(): string {
+    const name = this.doName();
+    const i = name.lastIndexOf("|work:");
+    return i >= 0 ? name.slice(i + 6) : name;
+  }
+
+  private makeFx(wakes: { cmd: Set<string>; run: Set<string> }): Fx {
+    return {
+      repo: new Repo(this.sql, () => Date.now()),
+      now: () => Date.now(),
+      teamId: this.teamId(),
+      token: this.token(),
+      doName: this.doName(),
+      cfg: engineConfig(this.env),
+      target: (h) => targetOf(this.env, h),
+      enqueue: (input) => this.enqueue(input),
+      setTimer: (n, k, d, p) => this.setTimer(n, k, d, p),
+      clearTimer: (n) => void this.clearTimer(n),
+      wakeCommands: (runId, s) => wakes.cmd.add(`cmd:${runId}:${s}`),
+      wakeRun: (runId) => wakes.run.add(`run:${runId}`),
+    };
+  }
+
+  /** Runs fn in the current transaction (message handlers, sync timers), then flushes wakes. */
+  private withFx<T>(fn: (fx: Fx) => T): T {
+    const wakes = { cmd: new Set<string>(), run: new Set<string>() };
+    const out = fn(this.makeFx(wakes));
+    queueMicrotask(() => this.afterCommit(wakes));
+    return out;
+  }
+
+  private fxSync<T>(fn: (fx: Fx) => T): T {
+    return this.withFx(fn);
+  }
+
+  /** One transaction with an Fx, then live pushes and an outbox kick. */
+  private txFx<T>(fn: (fx: Fx) => T): T {
+    const wakes = { cmd: new Set<string>(), run: new Set<string>() };
+    const out = this.tx(() => fn(this.makeFx(wakes)));
+    this.afterCommit(wakes);
+    return out;
+  }
+
+  private afterCommit(wakes: { cmd: Set<string>; run: Set<string> }): void {
+    for (const tag of wakes.cmd) this.live.broadcast(tag, { type: "wake", channel: tag });
+    for (const tag of wakes.run) this.live.broadcast(tag, { type: "wake", channel: tag });
+    try {
+      this.ctx.waitUntil(this.drainNow().then(() => undefined));
+    } catch {
+      /* no execution context (tests) */
+    }
+  }
+
+  // ---------- live subscriptions ----------
+
+  override async fetch(request: Request): Promise<Response> {
+    await this.ready;
+    const url = new URL(request.url);
+    if (isUpgrade(request) && url.pathname === "/subscribe/commands") {
+      const run = url.searchParams.get("run") ?? "";
+      const session = Number(url.searchParams.get("session") ?? "0");
+      const after = Number(url.searchParams.get("after") ?? "0");
+      const tag = `cmd:${run}:${session}`;
+      return this.live.accept([tag], { after }, (ws) => {
+        const repo = new Repo(this.sql, () => Date.now());
+        const s = repo.getSession(run, session);
+        if (!s || s.state === "ended" || repo.listCommands(run, session, after).length > 0) {
+          ws.send(JSON.stringify({ type: "wake", channel: tag }));
+        }
+      });
+    }
+    if (isUpgrade(request) && url.pathname === "/subscribe/run") {
+      const run = url.searchParams.get("run") ?? "";
+      return this.live.accept([`run:${run}`], {});
+    }
+    return new Response("not found", { status: 404 });
+  }
+
+  override async webSocketMessage(): Promise<void> {}
+  override async webSocketClose(ws: WebSocket, code: number): Promise<void> {
+    try {
+      ws.close(code === 1005 ? 1000 : code, "bye");
+    } catch {
+      /* closed */
+    }
+  }
+
+  // ---------- runs (Worker -> WorkDO) ----------
+
+  async runsCreate(meta: CallMeta, input: CreateRunInput): Promise<{ run: Run; workItemId?: string; followUp?: boolean }> {
+    return this.rpc(() =>
+      this.txFx((fx) => {
+        if (input.dispatch) {
+          const out = dispatchRoot(fx, input.dispatch);
+          return { run: out.run, workItemId: out.workItem.id, followUp: out.followUp };
+        }
+        const r = input.run;
+        if (!r) throw invalid("dispatch or run is required");
+        if (r.runId && fx.repo.getRun(r.runId)) return { run: fx.repo.mustRun(r.runId) };
+        return { run: createRunOnly(fx, r, meta) };
+      }),
+    );
+  }
+
+  async runsMessage(_meta: CallMeta, runId: string, input: { message: string; actor: string; attachments?: string[]; messageId?: string }) {
+    return this.rpc(() =>
+      this.txFx((fx) => sendMessage(fx, runId, input.message, input.actor, input.attachments ?? [], input.messageId)),
+    );
+  }
+
+  async runsCancel(meta: CallMeta, runId: string, cascade: boolean): Promise<{ cancelled: string[]; run: Run }> {
+    return this.rpc(() =>
+      this.txFx((fx) => {
+        const actor = meta.principal?.userId ?? meta.principal?.id ?? "api";
+        const done = cancel(fx, runId, actor, cascade);
+        return { cancelled: [...done], run: fx.repo.mustRun(runId) };
+      }),
+    );
+  }
+
+  /** Dispatcher.Interrupt. Throws operation_not_supported with reason no_active_turn / unsupported_harness. */
+  async runsInterrupt(_meta: CallMeta, runId: string): Promise<{ ok: true }> {
+    return this.rpc(() =>
+      this.txFx((fx) => {
+        fx.repo.mustRun(runId);
+        const s = fx.repo.latestSession(runId);
+        if (!s || s.state !== "active" || !s.active_turn_id) {
+          throw new OfError("conflict", "the run has no active turn", { reason: "no_active_turn" });
+        }
+        if (!(s.capabilities ?? []).includes("interrupt")) {
+          throw new OfError("operation_not_supported", "the harness of the run cannot interrupt a turn", {
+            reason: "unsupported_harness",
+          });
+        }
+        enqueueCommand(fx, s, "turn.interrupt", { turn_id: s.active_turn_id });
+        return { ok: true as const };
+      }),
+    );
+  }
+
+  /** run_agents: children in one transaction. Plans are resolved by the caller (TeamDO config). */
+  async runAgents(parentRunId: string, plans: ChildPlan[], summary = ""): Promise<Run[]> {
+    return this.rpc(() => this.txFx((fx) => runAgents(fx, parentRunId, plans, summary)));
+  }
+
+  /** Orchestration tool call with its idempotency row in the same transaction (C8). */
+  async toolCall(call: ToolCall): Promise<ToolResult> {
+    return this.rpc(() => this.txFx((fx) => runTool(fx, call)));
+  }
+
+  /** Active turn of the latest session (the orchestration turn source). */
+  async activeTurn(runId: string): Promise<string> {
+    return this.rpc(() => new Repo(this.sql, Date.now).latestSession(runId)?.active_turn_id ?? "");
+  }
+
+  // ---------- reads ----------
+
+  async getRun(runId: string): Promise<Run> {
+    return this.rpc(() => new Repo(this.sql, Date.now).mustRun(runId));
+  }
+
+  async api(meta: CallMeta, op: string, params: Record<string, string>, body: unknown): Promise<unknown> {
+    return this.rpc(() => {
+      const repo = new Repo(this.sql, Date.now);
+      const runId = params.runId ?? params.id ?? "";
+      switch (op) {
+        case "getRun":
+          return repo.mustRun(runId);
+        case "listRunMessages":
+          repo.mustRun(runId);
+          return { messages: repo.listMessages(runId, Number(params.after ?? 0), Number(params.limit ?? 0)) };
+        case "listRunInputs":
+          repo.mustRun(runId);
+          return { inputs: repo.listInputs(runId) };
+        case "getRunTimeline":
+          repo.mustRun(runId);
+          return { events: repo.listTimeline(runId) };
+        case "listRunSessions":
+          repo.mustRun(runId);
+          return { sessions: repo.listSessions(runId).map(publicSession) };
+        case "getRunDiagnostics": {
+          repo.mustRun(runId);
+          const out: unknown[] = [];
+          for (const s of repo.listSessions(runId)) out.push(...repo.listEvents(runId, s.session).filter((e) => e.type === "diagnostic"));
+          return { diagnostics: out };
+        }
+        case "listRunChildren":
+          return { runs: repo.listRuns({ parentRunId: runId }) };
+        case "getWorkItem": {
+          const wi = repo.getWorkItem(params.id);
+          if (!wi) throw notFound(`work item ${params.id}`);
+          return wi;
+        }
+        case "getWorkItemTimeline": {
+          const wi = repo.getWorkItem(params.id);
+          if (!wi) throw notFound(`work item ${params.id}`);
+          return { events: repo.listWorkItemEvents(wi.id) };
+        }
+        case "listWorkItemRuns": {
+          const wi = repo.getWorkItem(params.id);
+          if (!wi) throw notFound(`work item ${params.id}`);
+          return { runs: repo.listRuns({ workItemId: wi.id }) };
+        }
+        case "getInbox": {
+          const it = repo.getInbox(params.id ?? "");
+          if (!it) throw notFound(`inbox item ${params.id}`);
+          return it;
+        }
+        case "resolveInbox":
+          return this.txFx((fx) => resolveInbox(fx, params.id ?? "", body, meta));
+        case "workItemMessage":
+          return this.txFx((fx) => {
+            const wi = fx.repo.getWorkItem(params.id);
+            if (!wi) throw notFound(`work item ${params.id}`);
+            if (!wi.root_run_id) throw conflict("the work item has no root run");
+            const b = (body ?? {}) as { message?: string };
+            return sendMessage(fx, wi.root_run_id, b.message ?? "", actorOfMeta(meta));
+          });
+        case "workItemCancel":
+          return this.txFx((fx) => {
+            const wi = fx.repo.getWorkItem(params.id);
+            if (!wi) throw notFound(`work item ${params.id}`);
+            const actor = actorOfMeta(meta);
+            const done = new Set<string>();
+            for (const r of fx.repo.listRuns({ workItemId: wi.id })) {
+              if (!r.parent_run_id) for (const id of cancel(fx, r.id, actor, true)) done.add(id);
+            }
+            const cur = fx.repo.getWorkItem(wi.id)!;
+            if (cur.stage !== "cancelled" && cur.stage !== "complete") setStage(fx, wi.id, "cancelled", actor, "cancelled");
+            return { work_item: fx.repo.getWorkItem(wi.id), cancelled: [...done] };
+          });
+        case "workItemComplete":
+          return this.txFx((fx) => {
+            const wi = fx.repo.getWorkItem(params.id);
+            if (!wi) throw notFound(`work item ${params.id}`);
+            const out = setStage(fx, wi.id, "complete", actorOfMeta(meta), "completed");
+            for (const r of fx.repo.listRuns({ workItemId: wi.id })) if (r.parent_run_id) cancelOne(fx, r.id, actorOfMeta(meta));
+            return out;
+          });
+        case "workItemStage":
+          return this.txFx((fx) => {
+            const b = (body ?? {}) as { stage?: string; reason?: string };
+            if (!b.stage || !STAGES.includes(b.stage as Stage)) throw invalid(`invalid stage ${JSON.stringify(b.stage ?? "")}`);
+            return setStage(fx, params.id ?? "", b.stage as Stage, actorOfMeta(meta), b.reason ?? "");
+          });
+        default:
+          throw new OfError("feature_not_available", `WorkDO does not serve ${op}`);
+      }
+    });
+  }
+
+  // ---------- runner protocol ----------
+
+  async runnerStart(input: {
+    bootstrapHash: string;
+    instanceHash: string;
+    req: StartRequest;
+  }): Promise<{ run: Run; session: RunSession } | RunnerError> {
+    return this.rpc(() =>
+      this.txFx((fx) => {
+        if (fx.cfg.runnerVersion && input.req.runner_version !== fx.cfg.runnerVersion && !isDevVersion(input.req.runner_version)) {
+          return rerr(
+            426,
+            "runner_version_mismatch",
+            `runner version ${JSON.stringify(input.req.runner_version)} is not the served version ${JSON.stringify(fx.cfg.runnerVersion)}`,
+          );
+        }
+        const res = sessionStart(fx, input);
+        if ("error" in res) return res;
+        return { run: res.run, session: res.session };
+      }),
+    );
+  }
+
+  /** The start configuration of a session failed with a configuration fault. */
+  async runnerFailStart(runId: string, session: number, message: string): Promise<RunnerError> {
+    return this.rpc(() => this.txFx((fx) => failStart(fx, runId, session, message)));
+  }
+
+  /** authSession for the routes that only need a live session (secrets, token, git credential). */
+  async runnerAuth(runId: string, session: number): Promise<{ run: Run; session: RunSession } | RunnerError> {
+    return this.rpc(() =>
+      this.txFx((fx) => {
+        const s = authSession(fx, runId, session);
+        if ("error" in s) return s;
+        return { run: fx.repo.mustRun(runId), session: s };
+      }),
+    );
+  }
+
+  async runnerEvents(runId: string, session: number, batch: unknown): Promise<{ ack: number } | RunnerError> {
+    return this.rpc(() =>
+      this.txFx((fx) => appendEvents(fx, runId, session, (batch ?? { events: [] }) as Parameters<typeof appendEvents>[3])),
+    );
+  }
+
+  async runnerCommands(runId: string, session: number, after: number): Promise<unknown> {
+    return this.rpc(() => this.txFx((fx) => pollCommands(fx, runId, session, after)));
+  }
+
+  async runnerEnd(runId: string, session: number, input: unknown): Promise<unknown> {
+    return this.rpc(() => this.txFx((fx) => endSessionByRunner(fx, runId, session, input as EndRequest)));
+  }
+
+  async runnerConversation(runId: string, session: number, after = 0): Promise<unknown> {
+    return this.rpc(() =>
+      this.txFx((fx) => {
+        const s = authSession(fx, runId, session);
+        if ("error" in s) return s;
+        return { messages: fx.repo.listMessages(runId, after, 200) };
+      }),
+    );
+  }
+
+  /** DispatchDO reconcile only. */
+  async leaseCheck(runId: string, session: number): Promise<"open" | "ended"> {
+    return this.rpc(() => {
+      const repo = new Repo(this.sql, Date.now);
+      const s = repo.getSession(runId, session);
+      if (s) return s.state === "ended" ? "ended" : "open";
+      const g = this.sql
+        .exec<{ state: string }>("SELECT state FROM grants WHERE run_id = ? AND session = ?", runId, session)
+        .toArray()[0];
+      return g?.state === "pending" ? "open" : "ended";
+    });
+  }
+
+  // ---------- intake (IngressDO -> WorkDO) ----------
+
+  async applyAction(input: {
+    actionKey: string;
+    target: string;
+    kind: "continue" | "createRoot" | "sideRun" | "deliverToRoot" | "mention";
+    event: CoreEvent;
+    bundleRef?: string;
+    dispatchRequest?: unknown;
+  }): Promise<Ack> {
+    return this.rpc(() =>
+      this.txFx((fx) => {
+        if (fx.repo.hasDispatch(input.actionKey, input.target) !== undefined) return { ok: true } as const;
+        const plan = input.dispatchRequest as DispatchPlan | undefined;
+        if ((input.kind === "createRoot" || input.kind === "deliverToRoot" || input.kind === "mention") && plan) {
+          dispatchRoot(fx, { ...plan, ledger: { actionKey: input.actionKey, target: input.target } });
+          return { ok: true } as const;
+        }
+        const wi = fx.repo.getWorkItem();
+        if (input.kind === "continue" && wi?.root_run_id) {
+          const r = fx.repo.getRun(wi.root_run_id);
+          if (r && r.state !== "cancelled") {
+            const text = input.event.text || `${input.event.provider} ${input.event.type}`;
+            const rec = sendMessage(fx, r.id, text, input.event.actor?.handle || "system");
+            fx.repo.recordDispatch(input.actionKey, input.target, rec.message_id);
+          }
+        }
+        fx.repo.recordDispatch(input.actionKey, input.target, "");
+        return { ok: true } as const;
+      }),
+    );
+  }
+
+  async allowBotAction(actionKey: string): Promise<boolean> {
+    return this.rpc(() =>
+      this.tx(() => {
+        this.sql.exec("INSERT OR IGNORE INTO bot_actions (action_key, at_ms) VALUES (?, ?)", actionKey, Date.now());
+        const n = Number(this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM bot_actions").one().n);
+        return n <= 20;
+      }),
+    );
+  }
+
+  async reopen(input: { actionKey: string; event: CoreEvent }): Promise<Ack> {
+    return this.rpc(() =>
+      this.txFx((fx) => {
+        const wi = fx.repo.getWorkItem();
+        if (!wi || wi.stage !== "complete") return { ok: true } as const;
+        if (fx.repo.hasDispatch(input.actionKey, "reopen") !== undefined) return { ok: true } as const;
+        wi.stage = "triage";
+        delete wi.completed_at;
+        wi.updated_at = new Date().toISOString();
+        fx.repo.putWorkItem(wi);
+        fx.repo.recordDispatch(input.actionKey, "reopen", wi.id);
+        return { ok: true } as const;
+      }),
+    );
+  }
+
+  // ---------- grants ----------
+
+  private async prepareAndCommitGrant(g: Grant): Promise<void> {
+    let prep: GrantPrep;
+    try {
+      prep = await this.prepareGrant(g);
+    } catch (e) {
+      prep = { kind: "retry_later", grant: g, message: e instanceof Error ? e.message : String(e) };
+    }
+    this.txFx((fx) => commitGrant(fx, prep));
+  }
+
+  private async prepareGrant(g: Grant): Promise<GrantPrep> {
+    const repo = new Repo(this.sql, Date.now);
+    const run = repo.getRun(g.runId);
+    if (!run || run.state !== "queued") return { kind: "release", grant: g, reason: "not queued" };
+    const provider = providerFor(this.env, this.teamId(), g.providerId || defaultProviderId(this.env), g.workerId);
+    const caps = await provider.capabilities();
+    const fx = this.makeFx({ cmd: new Set(), run: new Set() });
+    const policy = taskPolicy(fx, run);
+    const gate = gateNetworkPolicy(caps, policy, { allowUnenforced: fx.cfg.allowUnenforced });
+    if (!gate.ok) return { kind: "config_fault", grant: g, code: gate.code, message: gate.message };
+    if (gate.warning) console.warn("work: gate:", gate.warning, run.id);
+    const { token, hash } = await mintBootstrap(this.teamId(), run.id);
+    const arch = caps.arch[0] ?? "amd64";
+    const task = buildTask(fx, run, g.session, token, g, {
+      arch,
+      egress: gate.egress,
+      loopbackDaemonPorts: caps.loopbackDaemonPorts,
+      runnerSha256: await runnerSha256(this.env, arch),
+    });
+    const pre = await provider.preflight(task);
+    if (!pre.ok) {
+      const info = failureClass(pre.code);
+      if (info === "user") return { kind: "config_fault", grant: g, code: pre.code, message: pre.message };
+      return { kind: "retry_later", grant: g, message: pre.message };
+    }
+    if (pre.resources) task.resources = pre.resources;
+    return { kind: "start", grant: g, task, bootstrapHash: hash };
+  }
+
+  // ---------- outbox destinations ----------
+
+  protected override async deliverCustom(envelope: OutboxEnvelope, row: OutboxRow): Promise<Ack | void> {
+    if (row.dest.startsWith("notice:") || row.dest === "svc:notify") {
+      await noticeDeliverer(this.env, envelope);
+      return { ok: true };
+    }
+    if (row.dest.startsWith("provider:")) return this.deliverProvider(envelope);
+    throw new Error(`no delivery for destination ${row.dest}`);
+  }
+
+  private async deliverProvider(envelope: OutboxEnvelope): Promise<Ack> {
+    const team = this.teamId();
+    switch (envelope.kind) {
+      case "provider.start": {
+        const p = envelope.payload as OutboxPayloads["provider.start"];
+        const provider = providerFor(this.env, team, p.providerId, p.workerId);
+        try {
+          await provider.start(p.task);
+          this.txFx((fx) => startSucceeded(fx, p.task.runId, p.task.session, p.workerId ? `worker:${p.workerId}` : p.providerId, p.workerId));
+        } catch (e) {
+          this.txFx((fx) => startFailed(fx, p.task.runId, p.task.session, e));
+        }
+        return { ok: true };
+      }
+      case "provider.ack" as never: {
+        const p = envelope.payload as unknown as OutboxPayloads["provider.destroy"];
+        const prov = providerOf(this.env, team, p.providerId, p.workerId) as { ack?: (id: string) => Promise<void> };
+        if (typeof prov.ack === "function") await ignoreNotFound(prov.ack(p.taskId));
+        return { ok: true };
+      }
+      case "provider.cancel": {
+        const p = envelope.payload as OutboxPayloads["provider.cancel"];
+        await ignoreNotFound(providerOf(this.env, team, p.providerId, p.workerId).cancel(p.taskId, p.graceSeconds));
+        return { ok: true };
+      }
+      case "provider.destroy": {
+        const p = envelope.payload as OutboxPayloads["provider.destroy"];
+        await ignoreNotFound(providerOf(this.env, team, p.providerId, p.workerId).destroy(p.taskId));
+        return { ok: true };
+      }
+    }
+    throw new Error(`unexpected provider kind ${envelope.kind}`);
+  }
+
+  // ---------- timers ----------
+
+  private onDeadline(fx: Fx, t: TimerRow<{ runId: string; session: number }>): void {
+    const s = fx.repo.getSession(t.payload.runId, t.payload.session);
+    if (!s) return;
+    const d = decideDeadline(s, fx.repo.stopSentMs(s.run_id, s.session), fx.now(), {
+      maxSessionMs: fx.cfg.maxSessionMs,
+      stopGraceMs: fx.cfg.stopGraceMs,
+      lostAfterMs: fx.cfg.lostAfterMs,
+    });
+    switch (d.kind) {
+      case "wait":
+        fx.setTimer(t.name, "deadline", d.atMs, t.payload);
+        return;
+      case "stop":
+        enqueueCommand(fx, s, "session.stop", { reason: "deadline", snapshot: true });
+        fx.repo.setStopSent(s.run_id, s.session, fx.now());
+        if (d.applyDeadlineEvent) transition(fx, s.run_id, { event: "session_deadline" });
+        fx.setTimer(t.name, "deadline", fx.now() + fx.cfg.stopGraceMs + fx.cfg.lostAfterMs + 1, t.payload);
+        return;
+      case "lose":
+        loseSession(fx, s, "deadline_exceeded", d.applyEvent, { cancel: true });
+        return;
+    }
+  }
+
+  private async onLiveness(t: TimerRow<{ runId: string; session: number }>): Promise<void> {
+    const repo = new Repo(this.sql, Date.now);
+    const s = repo.getSession(t.payload.runId, t.payload.session);
+    if (!s || s.state === "ended") return;
+    const cfg = engineConfig(this.env);
+    let d = decideSilent(s, Date.now(), { lostAfterMs: cfg.lostAfterMs });
+    if (d.kind === "ask_status") {
+      let status: TaskStatus | "not_found" | "unavailable";
+      try {
+        status = await providerOf(this.env, this.teamId(), s.backend ?? "", s.worker_id).status(s.task_id);
+      } catch (e) {
+        status = parseProviderError(e)?.kind === "not_found" ? "not_found" : "unavailable";
+      }
+      const cur = repo.getSession(s.run_id, s.session);
+      if (!cur || cur.state === "ended") return;
+      d = decideSilent(cur, Date.now(), { lostAfterMs: cfg.lostAfterMs }, status);
+    }
+    const action = d;
+    this.txFx((fx) => {
+      const cur = fx.repo.getSession(s.run_id, s.session);
+      if (!cur || cur.state === "ended") return;
+      if (action.kind === "wait" || action.kind === "ask_status") {
+        const at = action.kind === "wait" ? action.recheckAtMs : Date.now() + cfg.lostAfterMs;
+        fx.setTimer(t.name, "liveness", Math.max(at, Date.now() + 1000), t.payload);
+        return;
+      }
+      if (action.useReasonMap) loseCode(fx, cur, action.reason, failureForSandboxReason(action.reason) ?? "", true, { cancel: action.cancel });
+      else loseCode(fx, cur, action.reason, action.code, true, { cancel: action.cancel });
+    });
+  }
+
+  /** work.spendStop: spend_limit on every run of the tree, and stop live sessions (N7). */
+  private spendStop(fx: Fx, rootRunId: string): void {
+    const queue = [rootRunId];
+    const seen = new Set<string>();
+    while (queue.length) {
+      const id = queue.shift()!;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const r = fx.repo.getRun(id);
+      if (!r) continue;
+      const { changed } = transition(fx, id, { event: "spend_limit" }, (run) => {
+        if (run.state === "error" && run.failure_code === "spend_limit_exceeded") {
+          run.error = "spend_limit_exceeded: the spend limit of the factory or team is reached";
+        }
+      });
+      if (changed) stopSession(fx, id);
+      for (const c of fx.repo.listRuns({ parentRunId: id })) queue.push(c.id);
+    }
+  }
+
+  // ---------- tests and tools ----------
+
+  /** Runs due timers and delivers due outbox rows now (the alarm body). */
+  async pump(): Promise<void> {
+    await this.alarm();
   }
 }
+
+// ---------- helpers ----------
+
+function createRunOnly(fx: Fx, r: NonNullable<CreateRunInput["run"]>, meta: CallMeta): Run {
+  const actor = r.actor ?? meta.principal?.userId ?? "api";
+  return engineCreateRun(
+    fx,
+    {
+      ...(r.runId ? { id: r.runId } : {}),
+      factoryId: r.factoryId,
+      config: r.config,
+      prompt: r.prompt,
+      ...(r.name ? { name: r.name } : {}),
+      ...(r.metadata ? { metadata: r.metadata } : {}),
+      triggeredBy: r.triggeredBy ?? "api",
+    },
+    actor,
+  );
+}
+
+/** ResolveInbox (T12): resolution, timeline and the answer message to the run in one transaction. */
+function resolveInbox(fx: Fx, id: string, body: unknown, meta: CallMeta): unknown {
+  const it = fx.repo.getInbox(id);
+  if (!it) throw notFound(`inbox item ${id}`);
+  const b = (body ?? {}) as { resolution?: string; message?: string; via?: string };
+  const resolution = (b.resolution ?? "").trim();
+  if (!resolution) throw invalid("resolution is required");
+  const actor = meta.principal?.userId ?? meta.principal?.id ?? "api";
+  resolveInboxItem(fx, it, resolution, actor, b.via);
+  workItemEvent(fx, it.work_item_id, it.kind === "approval" ? "approval_decided" : "answer", it.run_id ?? "", actor, {
+    inbox_id: it.id,
+    resolution,
+  });
+  if (it.run_id && (it.kind === "question" || it.kind === "approval")) {
+    const text = b.message ? `${resolution}\n\n${b.message}` : resolution;
+    const rec = sendMessage(fx, it.run_id, `Answer to "${it.title}": ${text}`, actor);
+    it.answer_message_id = rec.message_id;
+    fx.repo.putInbox(it);
+  }
+  return it;
+}
+
+function actorOfMeta(meta: CallMeta): string {
+  return meta.principal?.userId ?? meta.principal?.id ?? "api";
+}
+
+function publicSession(s: RunSession): Omit<RunSession, "bootstrap_hash" | "instance_hash"> {
+  const { bootstrap_hash: _b, instance_hash: _i, ...rest } = s;
+  return rest;
+}
+
+function isDevVersion(v: string): boolean {
+  const major = v.replace(/^v/, "").split(".")[0] ?? "";
+  return major === "" || !/^\d+$/.test(major);
+}
+
+function failureClass(code: FailureCode | string): "user" | "platform" {
+  const user = ["invalid_configuration", "environment_setup_failed", "harness_auth_failed", "external_authentication_required", "integration_disabled", "agent_failed", "out_of_memory"];
+  return user.includes(code) ? "user" : "platform";
+}
+
+function providerOf(env: Env, team: string, backend: string, workerId?: string) {
+  if (workerId) return providerFor(env, team, "", workerId);
+  return providerFor(env, team, backend.startsWith("worker:") ? "" : backend, backend.startsWith("worker:") ? backend.slice(7) : undefined);
+}
+
+/** The checksum of the published runner binary, or undefined when it is not in R2. */
+async function runnerSha256(env: Env, arch: string): Promise<string | undefined> {
+  const v = env.OF_RUNNER_VERSION;
+  if (!v) return undefined;
+  try {
+    const obj = await env.DATA.get(`runner/${v}/openfactory-runtime-linux-${arch}.sha256`);
+    const text = obj ? (await obj.text()).trim() : "";
+    return text.split(/\s+/)[0] || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function ignoreNotFound(p: Promise<void>): Promise<void> {
+  try {
+    await p;
+  } catch (e) {
+    if (parseProviderError(e)?.kind === "not_found") return;
+    throw e;
+  }
+}
+

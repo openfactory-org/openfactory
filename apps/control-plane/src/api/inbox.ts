@@ -1,21 +1,55 @@
-// REST handlers: inbox. C0 stubs that answer 501. Owner: WS5.
-// Keep the exported names: src/http/routes.ts maps each openapi operation to one of them.
-import { notImplementedHandler, type Handler } from "../http/handler";
+// REST handlers: inbox. Owner: WS5. Items of runs live in their WorkDO
+// (partition token "w"); team-level items in IndexDO ("i"). Lists and read
+// state come from IndexDO.
+import { doName, OfError, partitionOf, tokenKind } from "@openfactory/core";
+import { notImplementedHandler, type Handler, type RouteContext } from "../http/handler";
+import type { Env } from "../contracts/env";
+import { json, metaOf, teamOf, workFor } from "./runs";
 
-/** GET /api/v1/inbox: Your inbox across the team's factories (owner DO: IndexDO (read model)). */
-export const listTeamInbox: Handler = notImplementedHandler;
+function ownerIsWork(id: string): boolean {
+  try {
+    return tokenKind(partitionOf(id)) === "w";
+  } catch {
+    return false;
+  }
+}
 
-/** GET /api/v1/factories/{uid}/inbox: Factory inbox (owner DO: IndexDO (read model)). */
-export const listInbox: Handler = notImplementedHandler;
+function index(env: Env, ctx: RouteContext) {
+  return env.INDEX.getByName(doName.index(teamOf(ctx)));
+}
 
-/** GET /api/v1/inbox/{id}: Get an inbox item (owner DO: WorkDO (owner)). */
-export const getInboxItem: Handler = notImplementedHandler;
+/** GET /api/v1/inbox: the caller's inbox across the team's factories. */
+export const listTeamInbox: Handler = async (_req, env, ctx) => {
+  const q = { ...Object.fromEntries(ctx.url.searchParams), user_id: ctx.principal?.userId ?? ctx.principal?.id ?? "" };
+  return json(200, await index(env, ctx).list(metaOf(ctx), "inbox", q));
+};
 
-/** POST /api/v1/inbox/{id}/resolve: Resolve an inbox item (owner DO: WorkDO (owner)). */
-export const resolveInboxItem: Handler = notImplementedHandler;
+/** GET /api/v1/factories/{uid}/inbox */
+export const listInbox: Handler = async (_req, env, ctx) => {
+  const q = { ...Object.fromEntries(ctx.url.searchParams), factory_id: ctx.params.uid ?? "", scope: "team" };
+  return json(200, await index(env, ctx).list(metaOf(ctx), "inbox", q));
+};
 
-/** POST /api/v1/inbox/{id}/read: Mark an inbox item as read (owner DO: IndexDO (per-user read state)). */
-export const readInboxItem: Handler = notImplementedHandler;
+/** GET /api/v1/inbox/{id} */
+export const getInboxItem: Handler = async (_req, env, ctx) => {
+  const id = ctx.params.id ?? "";
+  if (ownerIsWork(id)) return json(200, await workFor(env, ctx, id).api(metaOf(ctx), "getInbox", { id }, null));
+  return json(200, await index(env, ctx).getInboxItem(metaOf(ctx), id));
+};
 
-/** POST /api/v1/inbox/{id}/unresolve: Undo a resolve (owner DO: WorkDO (owner)). */
+/** POST /api/v1/inbox/{id}/resolve */
+export const resolveInboxItem: Handler = async (req, env, ctx) => {
+  const id = ctx.params.id ?? "";
+  if (!ownerIsWork(id)) throw new OfError("feature_not_available", "team-level inbox items are resolved by their owner");
+  const t = await req.text();
+  return json(200, await workFor(env, ctx, id).api(metaOf(ctx), "resolveInbox", { id }, t.trim() ? JSON.parse(t) : {}));
+};
+
+/** POST /api/v1/inbox/{id}/read */
+export const readInboxItem: Handler = async (_req, env, ctx) => {
+  await index(env, ctx).markInboxRead(metaOf(ctx), ctx.params.id ?? "");
+  return json(200, { read: true });
+};
+
+/** POST /api/v1/inbox/{id}/unresolve: not in this wave. */
 export const unresolveInboxItem: Handler = notImplementedHandler;
