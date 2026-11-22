@@ -1,0 +1,7 @@
+# Open Factory guest kernel options for aarch64 (arm64), on top of
+# config-common. VMGenID uses the device tree (6.10+).
+CONFIG_ARM_AMBA=y
+CONFIG_RTC_CLASS=y
+CONFIG_RTC_DRV_PL031=y
+CONFIG_SERIAL_OF_PLATFORM=y
+CONFIG_OF=y

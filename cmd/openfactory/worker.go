@@ -24,8 +24,13 @@ func newWorkerCmd(g *globals) *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "worker",
-		Short: "Run a dev process worker that runs agent sessions for a control plane",
-		Long: `Connect to an Open Factory control plane and run each assigned session as a
+		Short: "Run a microVM worker host (enroll, run, status, drain, doctor), or a dev process worker (--process)",
+		Long: `A microVM worker host runs each session in a Firecracker microVM. Set it up
+with the subcommands: worker doctor, worker enroll, then worker run (the
+openfactory-worker service); worker status and worker drain operate it.
+
+Without a subcommand, the dev process worker (--process) connects to an Open
+Factory control plane and runs each assigned session as a
 runner process on this host. Agents select the worker with workerHost: <id>.
 The worker connects outbound, authenticates with a team API key and reconnects
 automatically. The runner of each session talks to the control plane directly.
@@ -92,6 +97,7 @@ Example:
 	f.StringVar(&metricsAddr, "metrics-addr", os.Getenv("OF_METRICS_ADDR"), "serve worker Prometheus metrics on this address, e.g. :9090 (env OF_METRICS_ADDR; default off)")
 	f.StringVar(&keyFile, "key-file", os.Getenv("OF_WORKER_KEY_FILE"), "Ed25519 private key file of an enrolled worker, for the challenge of the control plane (env OF_WORKER_KEY_FILE)")
 	cmd.AddCommand(newWorkerListCmd(g))
+	cmd.AddCommand(newWorkerHostCmds(g)...)
 	return cmd
 }
 
