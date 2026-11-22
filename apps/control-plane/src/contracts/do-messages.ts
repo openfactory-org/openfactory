@@ -334,6 +334,8 @@ export interface WorkRpc extends OutboxReceiver {
   runsMessage(meta: CallMeta, runId: string, input: unknown): Promise<unknown>;
   runsCancel(meta: CallMeta, runId: string, cascade: boolean): Promise<unknown>;
   runsInterrupt(meta: CallMeta, runId: string): Promise<unknown>;
+  /** A provider or WorkerHubDO pushes a task state; an exited task ends its session as lost. */
+  sandboxState(runId: string, session: number, status: TaskStatus): Promise<{ ok: true }>;
   runnerStart(input: {
     runId: string;
     session: number;
