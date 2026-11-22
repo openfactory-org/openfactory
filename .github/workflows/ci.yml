@@ -64,6 +64,9 @@ jobs:
       - name: Build the runtime
         run: make build
       - run: npm ci
+      # wrangler dev serves web/dist as Static Assets; it must exist.
+      - name: Build the dashboard
+        run: npm run build -w @openfactory/web
       # wrangler dev, the local provider, a fake runner and one real Go runner run.
       - name: Contract suite
         run: npm run contract
@@ -195,9 +198,12 @@ jobs:
           tags: openfactory-sandbox:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      # The base image was only loaded into the local Docker daemon. The
+      # buildx container builder cannot see it, so use the Docker builder.
       - name: Cloudflare sandbox image
         uses: docker/build-push-action@v6
         with:
+          builder: default
           context: deploy/sandbox
           file: deploy/sandbox/Dockerfile.cloudflare
           build-args: SANDBOX_IMAGE=openfactory-sandbox:ci

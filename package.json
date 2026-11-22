@@ -9,11 +9,11 @@
     "node": ">=24"
   },
   "workspaces": [
+    "web",
     "apps/*",
     "packages/*",
     "providers/*",
     "plugins/*",
-    "web",
     "tests/*"
   ],
   "scripts": {
