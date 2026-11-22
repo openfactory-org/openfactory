@@ -13,7 +13,10 @@ import { fromAnyB64, randomToken, sha256Hex } from "../../lib/bytes";
 import { isoOf, listResponse } from "../../lib/page";
 import type { Migration } from "../../lib/sql/migrate";
 import { all, first, run } from "../../lib/sql/query";
+import { registeredProviders } from "../dispatch/providers";
+import { registerPreflight, type DefinitionCheck } from "./factories";
 import { created, noContent, type OpCall, type TeamKit, type TeamOp } from "./index";
+import type { CompiledDefinition } from "@openfactory/definition";
 
 // ---------- schema ----------
 
@@ -718,4 +721,51 @@ function listRecordsView(kit: TeamKit): WorkerView[] {
   return all<WorkerRow>(kit.sql, "SELECT * FROM workers ORDER BY created_ms, id").map((r) => view(kit, r));
 }
 
-export function setup(_kit: TeamKit): void {}
+// ---------- definition preflight: worker hosts ----------
+
+/** Hosts that are not workers: the default provider. */
+const BUILTIN_HOSTS = new Set(["", "server", "managed"]);
+/** Sandbox providers of the control plane (a workerHost may name one). */
+const PROVIDER_HOSTS = new Set(["cloudflare-sandbox", "daytona", "boatdev", "microvm"]);
+
+/**
+ * Port of preflightWorkerHosts (internal/engine/preflight.go): a workerHost of
+ * an agent or an automation override must be a built-in host, a sandbox
+ * provider, a registered worker of the team (ID or name) or a pool whose
+ * label a worker has. Sync, no I/O.
+ */
+export function preflightWorkerHosts(kit: TeamKit, def: CompiledDefinition, chk: DefinitionCheck, providers: readonly string[] = []): void {
+  const refs: { file: string; host: string }[] = [];
+  const add = (file: string, host: string | undefined) => {
+    if (host === undefined || BUILTIN_HOSTS.has(host) || PROVIDER_HOSTS.has(host) || providers.includes(host)) return;
+    refs.push({ file, host });
+  };
+  for (const a of def.agents ?? []) add(`agents/${a.name}/agent.md`, a.worker_host);
+  for (const au of def.automations ?? []) add(`automations/${au.name}/automation.md`, au.overrides?.worker_host);
+  if (refs.length === 0) return;
+  const known = new Set<string>();
+  const labels = new Set<string>();
+  for (const r of all<WorkerRow>(kit.sql, "SELECT * FROM workers WHERE revoked_ms IS NULL")) {
+    known.add(r.id);
+    known.add(r.name);
+    for (const k of Object.keys(parseJson<Record<string, string>>(r.labels, {}))) labels.add(k);
+  }
+  const seen = new Set<string>();
+  for (const r of refs) {
+    const key = `${r.file}\0${r.host}`;
+    if (seen.has(key)) continue;
+    if (r.host.startsWith("pool:") ? labels.has(r.host.slice(5)) : known.has(r.host)) continue;
+    seen.add(key);
+    chk.errors.push({
+      file: r.file,
+      field: "workerHost",
+      message: r.host.startsWith("pool:")
+        ? `worker pool ${JSON.stringify(r.host)} has no registered worker with the label ${JSON.stringify(r.host.slice(5))}`
+        : `worker host ${JSON.stringify(r.host)} is not a registered worker of the team or a sandbox provider of this server`,
+    });
+  }
+}
+
+export function setup(_kit: TeamKit): void {
+  registerPreflight("worker hosts", (kit, _f, def, _files, chk) => preflightWorkerHosts(kit, def, chk, registeredProviders()));
+}

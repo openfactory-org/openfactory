@@ -13,7 +13,9 @@ import type { CallMeta, Principal, TeamRpc } from "../../contracts/do-messages";
 import { drainWorker, resumeWorker, revokeWorker } from "../../api/workers";
 import { ROUTES } from "../../http/routes";
 import type { RouteContext } from "../../http/handler";
-import { setFactoryAccess, setGitCredentialMinter } from "../team/workers";
+import { preflightWorkerHosts, setFactoryAccess, setGitCredentialMinter } from "../team/workers";
+import type { TeamKit } from "../team/index";
+import type { CompiledDefinition } from "@openfactory/definition";
 import { localProvider } from "./providers";
 
 const TEAM = "default";
@@ -526,5 +528,30 @@ describe("providers and machines", () => {
       { factory_id: "fac_b", factory_name: "beta", name: "tiny", vcpus: 1 },
     ]);
     expect(r.page_info).toEqual({ has_next_page: false });
+  });
+
+  it("preflight refuses an unknown workerHost and accepts workers, pools and providers", async () => {
+    const { id } = await enroll({ name: "pre-host" });
+    const def = {
+      agents: [
+        { name: "a", worker_host: "pre-host" },
+        { name: "b", worker_host: id },
+        { name: "c", worker_host: "pool:linux" },
+        { name: "d", worker_host: "daytona" },
+        { name: "e", worker_host: "server" },
+        { name: "f", worker_host: "nowhere" },
+        { name: "g", worker_host: "pool:gpu-none" },
+      ],
+      automations: [{ name: "x", overrides: { worker_host: "nowhere" } }],
+    } as unknown as CompiledDefinition;
+    const chk = { definition: null, errors: [] as { file: string; field: string; message: string }[], warnings: [], skipped: [] };
+    await runInDurableObject(env.TEAM.getByName(doName.team(TEAM)), async (_i, state) => {
+      preflightWorkerHosts({ sql: state.storage.sql } as unknown as TeamKit, def, chk as never);
+    });
+    expect(chk.errors.map((e) => `${e.file}|${e.field}`)).toEqual([
+      "agents/f/agent.md|workerHost",
+      "agents/g/agent.md|workerHost",
+      "automations/x/automation.md|workerHost",
+    ]);
   });
 });
