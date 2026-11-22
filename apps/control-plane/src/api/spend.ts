@@ -1,6 +1,11 @@
-// REST handlers: spend. C0 stubs that answer 501. Owner: WS13.
-// Keep the exported names: src/http/routes.ts maps each openapi operation to one of them.
-import { notImplementedHandler, type Handler } from "../http/handler";
+// REST handlers: spend. Owner: WS13 (reads from DispatchDO, limits from TeamDO).
+import { doName } from "@openfactory/core";
+import { json, teamOf, type Handler } from "../http/handler";
+import { factoryAccess } from "./measure";
 
-/** GET /api/v1/factories/{uid}/spend: Model spend of the factory and its team, with the spend limits (owner DO: DispatchDO (counters) + TeamDO (limits)). */
-export const getFactorySpend: Handler = notImplementedHandler;
+/** GET /api/v1/factories/{uid}/spend: Model spend of the factory and its team, with the limits. */
+export const getFactorySpend: Handler = async (_req, env, ctx) => {
+  const f = await factoryAccess(env, ctx);
+  const out = await env.DISPATCH.getByName(doName.dispatch(teamOf(ctx))).spend(f.factory_id);
+  return json(out);
+};
