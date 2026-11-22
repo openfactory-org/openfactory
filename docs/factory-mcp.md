@@ -106,7 +106,7 @@ Point a client that supports remote streamable HTTP servers at the URL, with the
 }
 ```
 
-- Server URL: `--server` or `OF_SERVER` (default `http://localhost:8080`). Key: `--api-key` or `OF_API_KEY`. Without a key, the command stops with an error.
+- Server URL: `--server` or `OF_SERVER` (default `http://localhost:8787`). Key: `--api-key` or `OF_API_KEY`. Without a key, the command stops with an error.
 - `--path` sets the endpoint path (default `/mcp`), for example `/api/v1/mcp/factory`.
 
 With Claude Code: `claude mcp add openfactory -e OF_SERVER=https://factories.example.com -e OF_API_KEY=$OF_API_KEY -- openfactory mcp`.

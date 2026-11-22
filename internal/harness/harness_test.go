@@ -6,36 +6,36 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openfactory-org/openfactory/internal/core"
 	"github.com/openfactory-org/openfactory/internal/harness"
 	"github.com/openfactory-org/openfactory/internal/harness/harnesstest"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 )
 
-type fakeHarness struct{ t core.HarnessType }
+type fakeHarness struct{ t rtcore.HarnessType }
 
-func (f fakeHarness) Type() core.HarnessType { return f.t }
-func (f fakeHarness) Run(context.Context, core.Sandbox, core.HarnessRequest) (<-chan core.HarnessEvent, error) {
+func (f fakeHarness) Type() rtcore.HarnessType { return f.t }
+func (f fakeHarness) Run(context.Context, rtcore.Sandbox, rtcore.HarnessRequest) (<-chan rtcore.HarnessEvent, error) {
 	return nil, nil
 }
 
 func TestRegistry(t *testing.T) {
-	r := harness.NewRegistry(fakeHarness{core.HarnessClaude}, fakeHarness{core.HarnessCodex})
-	for _, in := range []core.HarnessType{"claude", "claude-code", "Claude-Code"} {
+	r := harness.NewRegistry(fakeHarness{rtcore.HarnessClaude}, fakeHarness{rtcore.HarnessCodex})
+	for _, in := range []rtcore.HarnessType{"claude", "claude-code", "Claude-Code"} {
 		h, err := r.Get(in)
-		if err != nil || h.Type() != core.HarnessClaude {
+		if err != nil || h.Type() != rtcore.HarnessClaude {
 			t.Fatalf("Get(%q) = %v, %v", in, h, err)
 		}
 	}
-	if h, err := r.Get(""); err != nil || h.Type() != core.HarnessClaude {
+	if h, err := r.Get(""); err != nil || h.Type() != rtcore.HarnessClaude {
 		t.Fatalf("empty should select claude: %v", err)
 	}
-	if _, err := r.Get("open"); !errors.Is(err, core.ErrNotFound) {
+	if _, err := r.Get("open"); !errors.Is(err, rtcore.ErrNotFound) {
 		t.Fatalf("err = %v", err)
 	}
-	if got := r.Types(); len(got) != 2 || got[0] != core.HarnessClaude {
+	if got := r.Types(); len(got) != 2 || got[0] != rtcore.HarnessClaude {
 		t.Fatalf("types = %v", got)
 	}
-	if harness.NormalizeType("claude-code") != core.HarnessClaude || !harness.IsKnownType("codex") || harness.IsKnownType("gemini") || harness.IsKnownType("open") {
+	if harness.NormalizeType("claude-code") != rtcore.HarnessClaude || !harness.IsKnownType("codex") || harness.IsKnownType("gemini") || harness.IsKnownType("open") {
 		t.Fatal("normalize")
 	}
 }
@@ -53,15 +53,7 @@ func TestClaudeAuthEnv(t *testing.T) {
 		{"typed oauth token", map[string]string{"type": "anthropic_oauth_token", "value": " tok "}, map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "tok"}, false},
 		{"oauth token env", map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "tok"}, map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "tok"}, false},
 		{"empty oauth token", map[string]string{"type": "anthropic_oauth_token", "value": ""}, nil, true},
-		{"bedrock api key", map[string]string{"type": "anthropic_bedrock_api_key", "value": `{"apiKey":"b","region":"us-west-2"}`},
-			map[string]string{"AWS_BEARER_TOKEN_BEDROCK": "b", "AWS_REGION": "us-west-2", "CLAUDE_CODE_USE_BEDROCK": "1"}, false},
-		{"bedrock api key raw", map[string]string{"type": "anthropic_bedrock_api_key", "value": "b", "region": "eu-west-1"},
-			map[string]string{"AWS_BEARER_TOKEN_BEDROCK": "b", "AWS_REGION": "eu-west-1", "CLAUDE_CODE_USE_BEDROCK": "1"}, false},
-		{"bedrock access key", map[string]string{"type": "anthropic_bedrock_access_key", "value": `{"accessKeyId":"A","secretAccessKey":"S","region":"us-east-1"}`},
-			map[string]string{"AWS_ACCESS_KEY_ID": "A", "AWS_SECRET_ACCESS_KEY": "S", "AWS_REGION": "us-east-1", "CLAUDE_CODE_USE_BEDROCK": "1"}, false},
-		{"bedrock env", map[string]string{"AWS_ACCESS_KEY_ID": "A", "AWS_SECRET_ACCESS_KEY": "S", "AWS_SESSION_TOKEN": "T", "AWS_REGION": "r"},
-			map[string]string{"AWS_ACCESS_KEY_ID": "A", "AWS_SECRET_ACCESS_KEY": "S", "AWS_SESSION_TOKEN": "T", "AWS_REGION": "r", "CLAUDE_CODE_USE_BEDROCK": "1"}, false},
-		{"bedrock missing region", map[string]string{"AWS_BEARER_TOKEN_BEDROCK": "b"}, nil, true},
+		{"unknown type rejected", map[string]string{"type": "generic", "value": "b"}, nil, true},
 		{"openai rejected", map[string]string{"type": "openai_api_key", "value": "sk"}, nil, true},
 	}
 	for _, tt := range tests {
@@ -95,37 +87,8 @@ func TestCodexAuthEnv(t *testing.T) {
 	}
 }
 
-func TestModelsAndReasoning(t *testing.T) {
-	if harness.DefaultModel("claude-code") != "claude-opus-5-5" || harness.DefaultModel(core.HarnessCodex) == "" || harness.DefaultModel("open") != "" {
-		t.Fatal("defaults")
-	}
-	if err := harness.ValidateReasoningLevel(core.HarnessCodex, "xhigh"); err != nil {
-		t.Fatal(err)
-	}
-	if err := harness.ValidateReasoningLevel(core.HarnessClaude, "minimal"); err == nil {
-		t.Fatal("claude has no minimal")
-	}
-	if err := harness.ValidateReasoningLevel("open", "high"); err == nil {
-		t.Fatal("an unknown harness rejects reasoningLevel")
-	}
-}
-
-func TestHarnessForModel(t *testing.T) {
-	for model, want := range map[string]core.HarnessType{
-		"claude-opus-5-5": core.HarnessClaude, "Claude-Sonnet-4-6": core.HarnessClaude, "sonnet": core.HarnessClaude,
-		"anthropic.claude-haiku-4-5": core.HarnessClaude,
-		"gpt-5":                      core.HarnessCodex, "gpt-5.3-codex": core.HarnessCodex, "o3": core.HarnessCodex, "o4-mini": core.HarnessCodex,
-		"codex-mini-latest": core.HarnessCodex,
-		"auto":              "", "gemini-2.5-pro": "", "": "", "custom:llama": "", "opus-like": "",
-	} {
-		if got := harness.HarnessForModel(model); got != want {
-			t.Errorf("HarnessForModel(%q) = %q, want %q", model, got, want)
-		}
-	}
-}
-
 func TestSkillsIndexAndDedupe(t *testing.T) {
-	skills := []core.Skill{
+	skills := []rtcore.Skill{
 		{Name: "review", Description: "factory", Scope: "factory", Content: "F"},
 		{Name: "Review", Description: "agent", Scope: "implement", Content: "A"},
 		{Name: "triage", Description: "t", Scope: "factory"},
@@ -155,7 +118,7 @@ func TestTOMLHelpers(t *testing.T) {
 	if harness.TOMLKey("ok-key_1") != "ok-key_1" || harness.TOMLKey("a.b") != `"a.b"` {
 		t.Fatal("keys")
 	}
-	cfg, warn := harness.ClaudeMCPConfig(map[string]core.MCPServer{"s": {URL: "https://x/sse"}, "m": {ManagedID: "id"}})
+	cfg, warn := harness.ClaudeMCPConfig(map[string]rtcore.MCPServer{"s": {URL: "https://x/sse"}, "m": {ManagedID: "id"}})
 	if !strings.Contains(string(cfg), `"type": "sse"`) || len(warn) != 1 {
 		t.Fatalf("cfg=%s warn=%v", cfg, warn)
 	}
@@ -170,16 +133,16 @@ func TestTruncate(t *testing.T) {
 }
 
 func TestCredentialHint(t *testing.T) {
-	run := func(a *core.HarnessAuth) *core.Run {
-		return &core.Run{Config: core.AgentConfig{Harness: core.HarnessConfig{Type: core.HarnessClaude, Auth: a}}}
+	run := func(a *rtcore.HarnessAuth) rtcore.HarnessConfig {
+		return rtcore.HarnessConfig{Type: rtcore.HarnessClaude, Auth: a}
 	}
-	if h := harness.CredentialHint(core.HarnessRequest{Run: run(nil)}); !strings.Contains(h, "harness.auth") {
+	if h := harness.CredentialHint(rtcore.HarnessRequest{Harness: run(nil)}); !strings.Contains(h, "harness.auth") {
 		t.Errorf("no hint without a credential: %q", h)
 	}
-	if h := harness.CredentialHint(core.HarnessRequest{Run: run(nil), Auth: map[string]string{"ANTHROPIC_API_KEY": "k"}}); h != "" {
+	if h := harness.CredentialHint(rtcore.HarnessRequest{Harness: run(nil), Auth: map[string]string{"ANTHROPIC_API_KEY": "k"}}); h != "" {
 		t.Errorf("hint with auth: %q", h)
 	}
-	if h := harness.CredentialHint(core.HarnessRequest{Run: run(&core.HarnessAuth{Source: "workerEnvironment"})}); h != "" {
+	if h := harness.CredentialHint(rtcore.HarnessRequest{Harness: run(&rtcore.HarnessAuth{Source: "workerEnvironment"})}); h != "" {
 		t.Errorf("hint with worker environment auth: %q", h)
 	}
 }

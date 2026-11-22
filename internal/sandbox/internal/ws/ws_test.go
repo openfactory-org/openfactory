@@ -34,14 +34,14 @@ func echoServer(t *testing.T, protos []string) *httptest.Server {
 }
 
 func TestEchoAndSubprotocol(t *testing.T) {
-	srv := echoServer(t, []string{"v5.channel.k8s.io", "v4.channel.k8s.io"})
+	srv := echoServer(t, []string{"v5.example.test", "v4.example.test"})
 	defer srv.Close()
-	c, _, err := Dial(context.Background(), nil, "ws"+strings.TrimPrefix(srv.URL, "http"), nil, []string{"v9", "v4.channel.k8s.io"})
+	c, _, err := Dial(context.Background(), nil, "ws"+strings.TrimPrefix(srv.URL, "http"), nil, []string{"v9", "v4.example.test"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	if c.Subprotocol != "v4.channel.k8s.io" {
+	if c.Subprotocol != "v4.example.test" {
 		t.Fatalf("subprotocol %q", c.Subprotocol)
 	}
 	for _, size := range []int{0, 1, 125, 126, 65535, 65536, 1 << 20} {

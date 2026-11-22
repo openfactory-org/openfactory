@@ -4,24 +4,26 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/openfactory-org/openfactory/internal/config"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 	"github.com/openfactory-org/openfactory/internal/sandbox/direct"
-	"github.com/openfactory-org/openfactory/internal/server"
+	"github.com/openfactory-org/openfactory/internal/sandbox/tasklocal"
 	"github.com/openfactory-org/openfactory/internal/worker"
 )
 
 // workerV2Flags holds the flags of the worker command that version 2 uses.
 type workerV2Flags struct {
-	backend, id, name, metricsAddr string
-	oneShot                        bool
-	capacity                       int
-	labels                         map[string]string
+	backend, id, name, metricsAddr, keyFile string
+	oneShot                                 bool
+	capacity                                int
+	labels                                  map[string]string
 }
 
 // workerTaskEnv returns the variables that the worker adds to each task.
@@ -37,19 +39,44 @@ func workerTaskEnv(lookup func(string) string) (map[string]string, error) {
 	return env, nil
 }
 
-// workerBackendConfig loads the configuration of the sandbox backend of a worker
-// from the environment. The worker needs no master key, so it runs in dev mode.
-func workerBackendConfig(backend string) (*config.Config, error) {
-	lookup := func(k string) (string, bool) {
-		switch k {
-		case "OF_DEV":
-			return "true", true
-		case "OF_SANDBOX_BACKEND":
-			return backend, true
+// localBackendOptions reads the options of the process backend from the
+// environment: OF_SANDBOX_ROOT, OF_DATA_DIR, OF_RUNNER_COMMAND and
+// OF_RUNNER_EXEC_COMMAND.
+func localBackendOptions(lookup func(string) string, executable func() (string, error)) (tasklocal.Options, error) {
+	command := strings.Fields(lookup("OF_RUNNER_COMMAND"))
+	if len(command) == 0 {
+		exe, err := executable()
+		if err != nil {
+			return tasklocal.Options{}, fmt.Errorf("find the runner command: %w", err)
 		}
-		return os.LookupEnv(k)
+		command = []string{exe, "runner"}
 	}
-	return config.LoadFrom(nil, lookup)
+	root := strings.TrimSpace(lookup("OF_SANDBOX_ROOT"))
+	if root == "" {
+		data := strings.TrimSpace(lookup("OF_DATA_DIR"))
+		if data == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return tasklocal.Options{}, fmt.Errorf("set OF_SANDBOX_ROOT: %w", err)
+			}
+			data = filepath.Join(home, ".openfactory")
+		}
+		root = filepath.Join(data, "sandboxes")
+	}
+	extra := map[string]string{}
+	if c := lookup("OF_RUNNER_EXEC_COMMAND"); c != "" {
+		extra["OF_RUNNER_EXEC_COMMAND"] = c
+	}
+	return tasklocal.Options{Root: filepath.Join(root, "tasks"), Command: command, ExtraEnv: extra}, nil
+}
+
+// buildWorkerBackend builds the process backend of the dev worker.
+func buildWorkerBackend(lookup func(string) string) (rtcore.TaskBackend, error) {
+	opts, err := localBackendOptions(lookup, os.Executable)
+	if err != nil {
+		return nil, err
+	}
+	return tasklocal.New(opts)
 }
 
 // runWorkerV2 runs the worker with protocol version 2.
@@ -58,15 +85,9 @@ func runWorkerV2(ctx context.Context, g *globals, f workerV2Flags) error {
 	if err != nil {
 		return err
 	}
-	cfg, err := workerBackendConfig(f.backend)
-	if err != nil {
-		return err
-	}
-	log := cfg.Logger()
-	if f.backend == config.BackendLocal && !envBool("OF_DEV") {
-		log.Warn("the local sandbox backend runs agents directly on this host without isolation; it is for development and tests only. Use --backend kubernetes in production")
-	}
-	b, image, err := server.BuildTaskBackend(cfg, log)
+	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	log.Warn("the process worker runs agents directly on this host without isolation; it is for development and tests only")
+	b, err := buildWorkerBackend(os.Getenv)
 	if err != nil {
 		return err
 	}
@@ -84,19 +105,19 @@ func runWorkerV2(ctx context.Context, g *globals, f workerV2Flags) error {
 		log.Info("worker metrics listening", "addr", f.metricsAddr)
 	}
 	err = direct.RunWorkerV2(ctx, direct.WorkerV2Options{
-		ServerURL:    strings.TrimRight(g.server, "/"),
-		APIKey:       g.apiKey,
-		WorkerID:     f.id,
-		Name:         f.name,
-		Labels:       f.labels,
-		Capacity:     f.capacity,
-		Backend:      b,
-		Version:      version,
-		OneShot:      f.oneShot,
-		TaskEnv:      taskEnv,
-		DefaultImage: image,
-		Metrics:      m,
-		Logger:       log.With("component", "worker", "worker_id", f.id),
+		ServerURL: strings.TrimRight(g.server, "/"),
+		APIKey:    g.apiKey,
+		WorkerID:  f.id,
+		Name:      f.name,
+		Labels:    f.labels,
+		Capacity:  f.capacity,
+		Backend:   b,
+		Version:   version,
+		OneShot:   f.oneShot,
+		TaskEnv:   taskEnv,
+		KeyFile:   f.keyFile,
+		Metrics:   m,
+		Logger:    log.With("component", "worker", "worker_id", f.id),
 	})
 	if errors.Is(err, context.Canceled) && ctx.Err() != nil {
 		return nil // the operator stopped the worker

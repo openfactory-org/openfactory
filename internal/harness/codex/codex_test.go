@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openfactory-org/openfactory/internal/core"
 	"github.com/openfactory-org/openfactory/internal/harness"
 	"github.com/openfactory-org/openfactory/internal/harness/harnesstest"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 )
 
 const fixture = `{"type":"thread.started","thread_id":"0199a213-81c0-7800-8aa1-bbab2a035a53"}
@@ -27,9 +27,9 @@ const fixture = `{"type":"thread.started","thread_id":"0199a213-81c0-7800-8aa1-b
 {"type":"turn.completed","usage":{"input_tokens":1000000,"cached_input_tokens":0,"output_tokens":100000}}
 `
 
-func collect(t *testing.T, ch <-chan core.HarnessEvent) []core.HarnessEvent {
+func collect(t *testing.T, ch <-chan rtcore.HarnessEvent) []rtcore.HarnessEvent {
 	t.Helper()
-	var evs []core.HarnessEvent
+	var evs []rtcore.HarnessEvent
 	timeout := time.After(5 * time.Second)
 	for {
 		select {
@@ -44,7 +44,7 @@ func collect(t *testing.T, ch <-chan core.HarnessEvent) []core.HarnessEvent {
 	}
 }
 
-func kinds(evs []core.HarnessEvent) []string {
+func kinds(evs []rtcore.HarnessEvent) []string {
 	var k []string
 	for _, e := range evs {
 		k = append(k, e.Kind)
@@ -55,20 +55,20 @@ func kinds(evs []core.HarnessEvent) []string {
 func TestRunParsesJSONL(t *testing.T) {
 	sb := harnesstest.New("/work")
 	var proc *harnesstest.Process
-	sb.StartFunc = func(context.Context, core.ExecRequest) (core.Process, error) {
+	sb.StartFunc = func(context.Context, rtcore.ExecRequest) (rtcore.Process, error) {
 		proc = harnesstest.NewProcess(fixture, "", 0)
 		return proc, nil
 	}
-	req := core.HarnessRequest{
-		Run:          &core.Run{Config: core.AgentConfig{Harness: core.HarnessConfig{Type: core.HarnessCodex, Model: "gpt-5", ReasoningLevel: "high"}}},
+	req := rtcore.HarnessRequest{
+		Harness:      rtcore.HarnessConfig{Type: rtcore.HarnessCodex, Model: "gpt-5", ReasoningLevel: "high"},
 		Prompt:       "do it",
 		SystemPrompt: "You implement.",
 		Auth:         map[string]string{"type": "openai_api_key", "value": "sk-open"},
-		MCPServers: map[string]core.MCPServer{
+		MCPServers: map[string]rtcore.MCPServer{
 			"factory":  {URL: "https://of.example/mcp/run/r1", Headers: map[string]string{"Authorization": "Bearer tok"}},
 			"my tools": {Command: "uvx", Args: []string{"tools-mcp", "--flag=\"x\""}, Env: map[string]string{"TOKEN": "s3"}},
 		},
-		Skills: []core.Skill{{Name: "triage", Content: "# T"}},
+		Skills: []rtcore.Skill{{Name: "triage", Content: "# T"}},
 	}
 	ch, err := New(Options{}).Run(context.Background(), sb, req)
 	if err != nil {
@@ -135,9 +135,9 @@ func TestRunParsesJSONL(t *testing.T) {
 }
 
 func TestResumeArgs(t *testing.T) {
-	args := New(Options{}).BuildArgs(core.HarnessRequest{
-		Resume: true,
-		Run:    &core.Run{SessionID: "thread-1", Config: core.AgentConfig{Harness: core.HarnessConfig{Model: "default", ReasoningLevel: "max"}}},
+	args := New(Options{}).BuildArgs(rtcore.HarnessRequest{
+		Resume:    true,
+		SessionID: "thread-1", Harness: rtcore.HarnessConfig{Model: "default", ReasoningLevel: "max"},
 	}, "/work")
 	want := []string{"codex", "exec", "resume", "--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "-c", `model_reasoning_effort="xhigh"`, "thread-1", "-"}
 	if !slices.Equal(args, want) {
@@ -147,13 +147,13 @@ func TestResumeArgs(t *testing.T) {
 
 func TestTurnFailed(t *testing.T) {
 	sb := harnesstest.New("/w")
-	sb.StartFunc = func(context.Context, core.ExecRequest) (core.Process, error) {
+	sb.StartFunc = func(context.Context, rtcore.ExecRequest) (rtcore.Process, error) {
 		return harnesstest.NewProcess(`{"type":"thread.started","thread_id":"t1"}
 {"type":"error","message":"stream disconnected; retrying 1/5"}
 {"type":"turn.failed","error":{"message":"401 Unauthorized"}}
 `, "", 1), nil
 	}
-	ch, err := New(Options{}).Run(context.Background(), sb, core.HarnessRequest{Run: &core.Run{}, Prompt: "x"})
+	ch, err := New(Options{}).Run(context.Background(), sb, rtcore.HarnessRequest{Prompt: "x"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,10 +166,10 @@ func TestTurnFailed(t *testing.T) {
 
 func TestExitWithoutTurn(t *testing.T) {
 	sb := harnesstest.New("/w")
-	sb.StartFunc = func(context.Context, core.ExecRequest) (core.Process, error) {
+	sb.StartFunc = func(context.Context, rtcore.ExecRequest) (rtcore.Process, error) {
 		return harnesstest.NewProcess(`{"type":"error","message":"model not found"}`+"\n", "boom", 1), nil
 	}
-	ch, _ := New(Options{}).Run(context.Background(), sb, core.HarnessRequest{Run: &core.Run{}, Prompt: "x"})
+	ch, _ := New(Options{}).Run(context.Background(), sb, rtcore.HarnessRequest{Prompt: "x"})
 	evs := collect(t, ch)
 	last := evs[len(evs)-1]
 	if last.Kind != harness.EventError || !strings.Contains(last.Content, "model not found") || !strings.Contains(last.Content, "boom") {
@@ -178,7 +178,7 @@ func TestExitWithoutTurn(t *testing.T) {
 }
 
 func TestAuthRejectsAnthropic(t *testing.T) {
-	_, err := New(Options{}).Run(context.Background(), harnesstest.New("/w"), core.HarnessRequest{Run: &core.Run{}, Auth: map[string]string{"ANTHROPIC_API_KEY": "x"}})
+	_, err := New(Options{}).Run(context.Background(), harnesstest.New("/w"), rtcore.HarnessRequest{Auth: map[string]string{"ANTHROPIC_API_KEY": "x"}})
 	if err == nil {
 		t.Fatal("expected error")
 	}

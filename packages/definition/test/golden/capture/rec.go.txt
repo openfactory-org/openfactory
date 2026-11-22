@@ -1,0 +1,118 @@
+package definition
+
+// Golden recorder. capture.sh adds this file to internal/definition through
+// `go test -overlay` and renames Compile, Diff and ValidateSchema of the Go
+// reference to compileOrig, diffOrig and validateSchemaOrig. Every call of the
+// Go tests goes through these wrappers and is written to the golden corpus.
+
+import (
+	"encoding/json"
+	"errors"
+	"sync"
+
+	"github.com/santhosh-tekuri/jsonschema/v6"
+
+	"github.com/openfactory-org/openfactory/internal/core"
+)
+
+type goldenRecord struct {
+	Kind string `json:"kind"`
+	// compile
+	Files    map[string]string      `json:"files,omitempty"`
+	Compiled json.RawMessage        `json:"compiled,omitempty"`
+	Errors   []core.ValidationError `json:"errors,omitempty"`
+	// diff
+	Old     json.RawMessage `json:"old,omitempty"`
+	New     json.RawMessage `json:"new,omitempty"`
+	Changes []Change        `json:"changes,omitempty"`
+	Summary string          `json:"summary,omitempty"`
+	// schema
+	Path    string         `json:"path,omitempty"`
+	Content string         `json:"content,omitempty"`
+	Valid   *bool          `json:"valid,omitempty"`
+	Leaves  []schemaLeaf   `json:"leaves,omitempty"`
+	Message string         `json:"message,omitempty"`
+}
+
+type schemaLeaf struct {
+	Instance string `json:"instance"`
+	Keyword  string `json:"keyword"`
+}
+
+var (
+	goldenMu      sync.Mutex
+	goldenRecords []goldenRecord
+)
+
+func goldenAdd(r goldenRecord) {
+	goldenMu.Lock()
+	goldenRecords = append(goldenRecords, r)
+	goldenMu.Unlock()
+}
+
+func goldenJSON(def *core.CompiledDefinition) json.RawMessage {
+	if def == nil {
+		return json.RawMessage("null")
+	}
+	b, err := json.Marshal(def)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
+// Compile records each compile.
+func Compile(files map[string]string) (*core.CompiledDefinition, []core.ValidationError) {
+	def, errs := compileOrig(files)
+	cp := make(map[string]string, len(files))
+	for k, v := range files {
+		cp[k] = v
+	}
+	goldenAdd(goldenRecord{Kind: "compile", Files: cp, Compiled: goldenJSON(def), Errors: errs})
+	return def, errs
+}
+
+// Diff records each diff.
+func Diff(old, new *core.CompiledDefinition) DiffResult {
+	r := diffOrig(old, new)
+	goldenAdd(goldenRecord{Kind: "diff", Old: goldenJSON(old), New: goldenJSON(new), Changes: r.Changes, Summary: r.Summary()})
+	return r
+}
+
+// ValidateSchema records each schema validation.
+func ValidateSchema(p, content string) error {
+	err := validateSchemaOrig(p, content)
+	valid := err == nil
+	rec := goldenRecord{Kind: "schema", Path: p, Content: content, Valid: &valid}
+	var ve *jsonschema.ValidationError
+	if errors.As(err, &ve) {
+		var walk func(e *jsonschema.ValidationError)
+		walk = func(e *jsonschema.ValidationError) {
+			if len(e.Causes) == 0 {
+				loc := ""
+				for _, s := range e.InstanceLocation {
+					loc += "/" + s
+				}
+				kw := ""
+				if e.ErrorKind != nil {
+					for i, s := range e.ErrorKind.KeywordPath() {
+						if i > 0 {
+							kw += "/"
+						}
+						kw += s
+					}
+				}
+				rec.Leaves = append(rec.Leaves, schemaLeaf{Instance: loc, Keyword: kw})
+				return
+			}
+			for _, c := range e.Causes {
+				walk(c)
+			}
+		}
+		walk(ve)
+	} else if err != nil {
+		rec.Message = err.Error()
+	}
+	goldenAdd(rec)
+	return err
+}

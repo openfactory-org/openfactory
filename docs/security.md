@@ -6,10 +6,11 @@ This page describes the security model of a self-hosted deployment: authenticati
 
 | Component | Trust level | Notes |
 |---|---|---|
-| Control plane (`openfactory serve`) | Trusted | Holds the database and the secret key. |
-| Database | Trusted | Stores secrets only as ciphertext, and API keys only as SHA-256 hashes. |
-| Remote worker | Trusted by the team | Authenticates with a team API key. Runs sandboxes for that team. |
-| Plugin | Trusted | Runs as a child process of the server, with a minimal environment: `PATH`, `HOME`, `TMPDIR`, `LANG`, `TZ`, the variables in `OF_PLUGIN_ENV_ALLOW`, and its own entry of `OF_PLUGIN_ENV`. It does not get `OF_SECRET_KEY` or the database URL. A sandbox backend plugin controls the sandboxes that it starts, so install only plugins that you trust. |
+| Control plane (a Cloudflare Worker) | Trusted | Holds the Durable Object state and the secret key (a Worker secret). |
+| Durable Objects and R2 | Trusted | Store secrets only as ciphertext, and API keys only as SHA-256 hashes. |
+| MicroVM worker | Trusted by the team | Authenticates with an Ed25519 key. The host owner can read the secrets of every run on the host. |
+| Hosted sandbox provider | Trusted with the sandbox | Cloudflare, Daytona or boat.dev run the sandbox and can see what runs in it. |
+| Plugin | Trusted | A separate Worker that the control plane calls over a service binding. It holds no team secrets: the control plane gives it the integration settings and tokens for each call. A sandbox provider plugin controls the sandbox, so it gets the bootstrap token of each session that it starts. |
 | Sandbox | Untrusted | Runs agent commands, which can follow instructions from issues, pull requests and chat messages. |
 | Harness CLIs (`claude`, `codex`) | Untrusted | Run inside the sandbox. |
 
@@ -46,7 +47,7 @@ API keys also work on `/mcp`. Use them for clients without a person, such as CI.
 
 ### Bootstrap the first admin
 
-A new server has no teams and no users. One unauthenticated request to `POST /api/v1/bootstrap` (or `openfactory bootstrap`) creates the first team, its admin and an API key. See [Get the first key](api.md#get-the-first-key). After that, the endpoint fails with `409` and the code `conflict`. Run the bootstrap immediately after the first start, before you expose the server.
+A new control plane has no teams and no users. One unauthenticated request to `POST /api/v1/bootstrap` (or `openfactory bootstrap`) creates the first team, its admin and an API key. See [Get the first key](api.md#get-the-first-key). After that, the endpoint fails with `409` and the code `conflict`. Run the bootstrap immediately after the first start, before you expose the server.
 
 ### Dashboard sign-in
 
@@ -63,9 +64,9 @@ OIDC login is part of the free core. The login page shows a single sign-on butto
 
 ### Development mode
 
-`OF_DEV=true` creates an admin and prints its API key once, generates a secret key in the data directory, and selects the `local` sandbox backend, which runs agents on the host without isolation. See [Development mode](self-hosting/configuration.md#development-mode).
+With `OF_DEV_PROCESS_WORKERS=true` and `OF_SANDBOX_PROVIDER=local`, development process workers run agents on their host without isolation. See [Workers](self-hosting/workers.md).
 
-> **Warning:** Never set `OF_DEV=true` on a server that other people or networks can reach.
+> **Warning:** Never set `OF_DEV_PROCESS_WORKERS=true` on a control plane that other people or networks can reach.
 
 ### Session tokens of runners
 
@@ -100,7 +101,9 @@ The built-in tracker and chat tools (`builtin/linear`, `builtin/jira`, `builtin/
 
 ### Worker authentication
 
-Remote workers connect to `/api/v1/workers/connect` with a team API key whose owner has the team-wide `admin` role. The worker registers under the team of the key. Its API key is not passed to sandboxes. See [Workers](self-hosting/workers.md#worker-api-key).
+A microVM worker enrolls once with a single-use token, then proves its identity at each connection: the control plane sends a challenge and the worker signs it with its Ed25519 private key. The key is a secret on the host, but it is not a bearer secret: a challenge with a fresh nonce prevents replay. Revoking a worker closes its connection and refuses its git credentials. See [Self-hosted workers](self-hosted-machines.md#trust-model).
+
+A development process worker connects to `/api/v1/workers/connect` with a team API key whose owner has the team-wide `admin` role. Its API key is not passed to sandboxes. See [Workers](self-hosting/workers.md#worker-api-key).
 
 ## Roles and permissions
 
@@ -209,7 +212,7 @@ Without these branch rules, the platform cannot stop a merge that an agent makes
 A spend limit stops model spend before a loop of runs or a long run uses many tokens.
 
 - A factory sets `spendLimit.daily` and `spendLimit.monthly` in `factory.yaml`, in US dollars. See [Definition reference](definition-reference.md#factoryyaml).
-- `OF_TEAM_SPEND_LIMIT_DAILY` and `OF_TEAM_SPEND_LIMIT_MONTHLY` set a limit for each team. See [Configuration](self-hosting/configuration.md#spend-limits).
+- An admin sets a daily and a monthly limit for each team in the team settings. See [Configuration](self-hosting/configuration.md#team-settings).
 - Days and months are UTC calendar periods. The spend of a period is the sum of `usage.cost_usd` of the runs created in it. A run that continues into the next period keeps its cost in the period of its creation.
 - At 80 percent of a limit, each team admin gets an inbox item of kind `spend_limit`, once per period.
 - When a limit is reached:
@@ -225,11 +228,11 @@ The secret store uses AES-256-GCM envelope encryption.
 
 - Each secret value is encrypted with a new random 256-bit data key, and the data key is encrypted with the master key `OF_SECRET_KEY`.
 - Both layers use the secret's team, factory scope, name and type as additional authenticated data, so a ciphertext moved to another record fails to decrypt.
-- The database sees only ciphertext. Secret values are never logged, and the API never returns them.
+- The Durable Objects see only ciphertext. Secret values are never logged, and the API never returns them.
 
 ## Secrets in runs
 
-- Secrets reach the sandbox as environment variables and files. The runner fetches them from the control plane after the sandbox starts, so they are not in command arguments, Pod specs or Kubernetes audit logs. The Pod spec holds only the run ID, the session number, the control URL and a bootstrap token for the session.
+- Secrets reach the sandbox as environment variables and files. The runner fetches them from the control plane after the sandbox starts, so they are not in command arguments or in the sandbox specification. The specification that the provider gets holds only the run ID, the session number, the control URL and a bootstrap token for the session.
 - Repository clone URLs with credentials go through the environment, not through `git clone` arguments.
 - Setup errors are scrubbed: known secret values and credentials in clone URLs become `***`.
 - Names that start with `OF_` are reserved for platform variables.
@@ -238,7 +241,7 @@ See [Secrets](secrets.md) for secret types and templates.
 
 ### Redaction
 
-Open Factory replaces the secret values of a run with `***` in its output (code: `internal/redact`). The redactor knows the run's secrets, the harness credentials, the header and variable values of MCP servers, the session token and the forge tokens. For each value it matches:
+Open Factory replaces the secret values of a run with `***` in its output (code: `packages/core/src/redact.ts` and the runtime). The redactor knows the run's secrets, the harness credentials, the header and variable values of MCP servers, the session token and the forge tokens. For each value it matches:
 
 - the raw value and the JSON-escaped value;
 - the standard and URL-safe base64 forms, with and without padding;
@@ -257,17 +260,30 @@ The control plane makes no model calls and holds no model key. Each harness CLI 
 - Use a model key for each factory or team, not a shared personal key.
 - Set spend and usage limits at the provider.
 - Rotate the key when a run might have exposed it.
-- With `auth.source: workerEnvironment`, the credential comes from the self-hosted worker. The sandbox can read it too.
+- With `auth.source: workerEnvironment`, the credential comes from the development process worker. The sandbox can read it too.
 - Without `harness.auth`, a run uses the one factory or team secret of a model credential type. Every agent of the team without `harness.auth` can then read it. Use a factory secret or `harness.auth` to keep a key to one factory.
 
 ## Sandbox isolation
 
-| Backend | Isolation |
+| Target | Isolation |
 |---|---|
-| `local` | Development and tests only. A separate workspace directory, but processes share the host kernel, file system and network. Sandboxes get only `HOME`, `TMPDIR` and `PATH` from the host, plus run variables. |
-| `kubernetes` | A separate Pod per run. Use Pod Security admission, a restricted sandbox service account and NetworkPolicy. |
+| `cloudflare-sandbox` | A container for each session, in your Cloudflare account. Egress is checked by the provider Worker (`native`). |
+| `daytona` | A Daytona sandbox for each session, outside your account. Egress is a native domain allow list, or the in-sandbox lock. |
+| `boatdev` | A boat.dev virtual machine for each session. Egress is the in-sandbox lock. |
+| microVM worker | A Firecracker microVM for each session, with a jailer, cgroup limits, a private network and host firewall rules. The host owner can read the run. |
+| development process worker | None. Processes share the host kernel, file system and network. For development and tests only. |
 
-For agents that process untrusted input (public issues, external pull requests, chat from many users), use `kubernetes` and a restricted `networkPolicy`. The backend then creates a NetworkPolicy and a proxy sidecar for each sandbox, and the cluster network plugin must enforce NetworkPolicy. Set `OF_K8S_NETWORK_POLICY_ENFORCEMENT=require` to fail restricted runs on a cluster that does not enforce policies, and keep the egress lock on (the default; it needs `NET_ADMIN` for one init container). See [Network policy](self-hosting/network-policy.md#kubernetes).
+Egress control on hosted providers is best effort. Open Factory uses what each provider offers. A provider that cannot enforce a policy declares `egress: none`, and the dispatcher refuses restricted policies on it unless `OF_ALLOW_UNENFORCED_NETWORK_POLICY=true`. See [Network policy](self-hosting/network-policy.md#enforcement).
+
+### In-sandbox lock
+
+On providers without native egress control, the runner starts as root and creates the users `ofproxy` and `agent` (uid 1001). It starts the egress proxy as `ofproxy`, adds firewall rules that reject every connection of `agent` except loopback, runs probes to check the lock, and fails the run closed if a probe connects. The harness runs as `agent`. The agent may use loopback (for example for a test server), except for the daemon ports of the provider. The sandbox image has no `sudo` and no setuid programs, so the agent cannot change the rules.
+
+### MicroVM trust model
+
+A microVM isolates the agent from the host and from other VMs. The host drops VM-to-VM and VM-to-host traffic, private ranges, metadata addresses and IPv6. The VM gets the session bootstrap token through a metadata service that the guest init clears before the runner starts. The host persists only a redacted task, never the token. Because the host owner controls the hypervisor, the host owner can read the secrets of the sessions that run there. See [Self-hosted workers](self-hosted-machines.md#trust-model).
+
+For agents that process untrusted input (public issues, external pull requests, chat from many users), use a restricted `networkPolicy` on a provider that enforces it (`native` or `in-sandbox`).
 
 ## Data boundaries
 
@@ -275,9 +291,9 @@ All data stays in your infrastructure, except data that you send to external ser
 
 | Data | Where it goes |
 |---|---|
-| Definitions, work items, runs, run messages (the transcript), inbox items, secrets | Your database. |
-| Artifacts, raw harness transcripts, prompt attachments | Your [object storage](self-hosting/object-storage.md) (S3, GCS, Azure Blob or local disk). Clients read them through short-lived presigned URLs. |
-| Repository checkouts, build output | The sandbox (a Pod in your cluster, or the host with the `local` backend). It is removed when the run ends. |
+| Definitions, work items, runs, run messages (the transcript), inbox items, secrets | Durable Objects in your Cloudflare account. |
+| Artifacts, raw harness transcripts, prompt attachments | Your R2 bucket (see [Object storage](self-hosting/object-storage.md)). Clients read them through short-lived presigned URLs. |
+| Repository checkouts, build output | The sandbox (at the provider, or on your worker host). It is removed when the run ends. |
 | LLM prompts and responses | The model provider of the harness, called from the sandbox. A scorer's judge is also a run. The control plane does not call a model provider. |
 | Replies and status updates | The forge, chat or tracker integrations that you configure. |
 
@@ -287,20 +303,20 @@ Code can appear in transcripts and LLM prompts.
 
 - Forge and chat integrations verify the provider's signature or token. See [Integrations](integrations/README.md).
 - Custom webhooks support token, URL token and signature authentication. See [Webhooks](webhooks.md).
-- The server listens on plain HTTP at `OF_LISTEN`. Put TLS in front of it.
+- Cloudflare terminates TLS for the control plane. Use a custom domain or the `workers.dev` address over HTTPS.
 
 ## Hardening checklist
 
-1. Set a stable `OF_SECRET_KEY` from a secret manager.
-2. Serve the control plane only over HTTPS.
+1. Set a stable `OF_SECRET_KEY` as a Worker secret, and keep a copy in a secret manager.
+2. Serve the control plane only over HTTPS (Cloudflare does this).
 3. Bootstrap the first admin at once. Give other users the lowest role that they need.
-4. Use a dedicated user and key for each remote worker. Revoke unused keys.
-5. Use the `kubernetes` backend outside development, never `local`.
-6. Use restricted network policies, and enforce them at the network level. On Kubernetes, only a NetworkPolicy object or your CNI enforces them.
+4. Enroll workers with single-use tokens, and revoke workers that you no longer use.
+5. Never set `OF_DEV_PROCESS_WORKERS=true` outside development.
+6. Use restricted network policies on providers that enforce them, and leave `OF_ALLOW_UNENFORCED_NETWORK_POLICY` off.
 7. Scope secrets to the factories that need them.
-8. Restrict access to the server's Kubernetes API credentials. The Helm chart grants access only to Jobs, Pods, Pod logs, events and NetworkPolicies in the sandbox namespace.
+8. Give the Daytona and boat.dev credentials only to the control plane, and use a dedicated organization for each.
 9. Use OIDC single sign-on, so that access follows your identity provider.
-10. Install only plugins that you trust. A plugin does not get the server's environment, but a sandbox backend plugin gets the bootstrap token of each session that it starts.
+10. Install only plugins that you trust. A plugin Worker holds no team secrets, but a sandbox provider plugin gets the bootstrap token of each session that it starts.
 11. Give sign-in access only to people who may approve agent requests, or set `approvers`. Every role can resolve inbox items.
 12. Configure the sign-in of each provider on its integration record (`oauth_client_id`), so that each account link has a proof from the provider. See [Account linking](integrations/README.md#account-linking).
 13. Give each integration token access only to the repositories and projects that the factories need. With a GitHub App, the server limits each installation token to the run's repositories. For a static token, create a record for each factory with its own limited token. See [Credential isolation between factories](integrations/README.md#credential-isolation-between-factories).

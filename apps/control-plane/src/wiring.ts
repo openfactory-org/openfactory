@@ -1,0 +1,604 @@
+// The composition root of the control plane. bootstrapControlPlane() at the
+// end of this file registers, in one place, every built-in part that other
+// modules reach through a registry:
+//
+// - server routes: /runner/v1, /mcp/run/, /webhooks/w/*, /integrations/github/webhook,
+//   /integrations/{slack/events,slack/interactions,teams/messages,linear/webhook,jira/webhook},
+//   the account linker pages /integrations/link*, /integrations/links/*, and /plugins/
+// - the bearer authenticators of worker access tokens (ofw_) and Factory MCP tokens (ofm_)
+// - the IngressDO intake handler and the event context builders
+// - the notice deliverer of WorkDO and the responders of Slack, Teams, Linear and Jira
+// - the integration clients of the built-in MCP servers
+// - the sandbox providers local, daytona and boatdev (credentials: Worker secrets)
+// - the active-run check of schedules with concurrency "skip", manual automation runs
+// - the name resolver of the definition preflight and the git source check
+// - the git definition sync (push webhook, pull request check, periodic sync)
+// - the git credential minter of the worker git cache
+//
+// The modules themselves have no registration side effects. A registry that
+// is still empty when it is used fails with an error.
+import {
+  DEFAULT_TEAM,
+  FINISHED_RUN_STATES,
+  INBOX_VIA_CHAT,
+  OfError,
+  doName,
+  partitionOf,
+  sameIntegrationProvider,
+  startedByAutomation,
+  type Event,
+  type Integration,
+  type User,
+} from "@openfactory/core";
+import { createBoatdevProvider } from "@openfactory/boatdev";
+import { createDaytonaProvider } from "@openfactory/daytona";
+import { manualRunDispatcher } from "./api/runs";
+import { workerTokenAuthenticator } from "./api/workers";
+import { registerBearerAuthenticator } from "./auth/authenticate";
+import { setManualRunDispatcher } from "./api/schedules";
+import { routeWebhookIngress } from "./api/webhooks";
+import { authenticate } from "./auth/authenticate";
+import { registerCronHook, registerServerRoute, type CronHook, type ServerRouteHandler } from "./builder";
+import type { CallMeta, Principal } from "./contracts/do-messages";
+import type { Env } from "./contracts/env";
+import { registerProvider } from "./do/dispatch/providers";
+import { setIntakeHandler } from "./do/ingress/index";
+import { WORKER_TOKEN_PREFIX } from "./do/workerhub/token";
+import { localProvider } from "./do/workerhub/providers";
+import { setNoticeDeliverer } from "./do/work/index";
+import {
+  activeFiles,
+  applyDefinition,
+  checkDefinition,
+  configSnapshot,
+  getFactoryById,
+  getVersion,
+  listFactories,
+  setDefSyncRunner,
+  setGitSourceChecker,
+  type DefSyncRunner,
+  type GitSourceChecker,
+} from "./do/team/factories";
+import type { TeamKit } from "./do/team/kit";
+import { getSetting, setSetting } from "./do/team/settings";
+import { listIntegrations } from "./do/team/integrations";
+import { setNameResolver, type FilterNameResolver } from "./do/team/preflight";
+import { setScheduleActiveRunCheck, type ActiveRunCheck } from "./do/team/schedules";
+import { normalizeRepo, setGitCredentialMinter, type GitCredentialMinter } from "./do/team/workers";
+import {
+  checkGitSource,
+  checkPullRequest,
+  onPush,
+  sync,
+  type CheckResult,
+  type DefSyncDeps,
+  type GitFactory,
+} from "./forges/defsync";
+import type { DefinitionPR } from "./forges/github/webhook";
+import { compile, diff, diffCounts, diffEmpty, diffSummary } from "@openfactory/definition";
+import { resolverFor } from "./forges/env";
+import type { ForgeResolver } from "./forges/forge";
+import { reviewBuilders } from "./eventctx/index";
+import { platformIntakeHandler, setEventContextBuilders, type BuildersFor } from "./do/ingress/intake";
+import { b64url, sha256 } from "./lib/bytes";
+import { adfText, markdownToAdf } from "./integrations/jira/adf";
+import { newApiClient as jiraApiClient } from "./integrations/jira/jira";
+import { LinearClient } from "./integrations/linear/linear";
+import { LINK_CALLBACK_PATH, LINK_PATH, LINK_START_PATH, LINKS_PATH, Linker } from "./integrations/link";
+import { teamProver } from "./integrations/prover";
+import { createIntegrationHandlers, INBOUND_PATHS, type IntegrationHandlers } from "./integrations/registry";
+import { selectTeam } from "./integrations/select";
+import { SlackClient } from "./integrations/slack/client";
+import type { InboxItemRef, WorkSide } from "./integrations/types";
+import { integrationSecret } from "./integrations/util";
+import { integrationDeps, rpcSecrets, rpcStore } from "./integrations/worker";
+import { ACCESS_TOKEN_PREFIX } from "./mcp/auth/core";
+import { setMcpBackendResolver, verifyFactoryMcpToken } from "./mcp/index";
+import type { IntegrationBackend, IntegrationRecord } from "./mcp/registry/builtin";
+import { deliverNotice, registerResponders } from "./notify/index";
+import { handleRunMcp, RUN_MCP_PREFIX } from "./orchestration/index";
+import { PLUGIN_ROUTE_PREFIX, pluginWebhookRoute } from "./plugins/routes";
+import { handleRunnerApi, RUNNER_PREFIX } from "./runner-api/index";
+import { isOpError } from "./lib/rpc";
+
+const META: CallMeta = { requestId: "integrations" };
+
+// ---------- integrations ----------
+
+/** Partition of a chat or tracker event: one per source thread or issue, so events of one thread stay in order. */
+export async function integrationPartition(ev: Event): Promise<string> {
+  const s = ev.source;
+  const key = [
+    ev.provider,
+    s.workspace ?? "",
+    s.repo ?? "",
+    s.channel ?? "",
+    s.thread_id ?? "",
+    s.external_id ?? "",
+    s.number ?? "",
+  ].join("\u0000");
+  return `${ev.provider}:${b64url(await sha256(key)).slice(0, 22)}`;
+}
+
+/** The IngressDO enqueue of normalized events. */
+export async function publishEvents(env: Env, events: Event[]): Promise<void> {
+  for (const ev of events) {
+    const teamId = ev.team_id || DEFAULT_TEAM;
+    const partition = await integrationPartition(ev);
+    await env.INGRESS.getByName(doName.ingress(teamId, partition)).enqueueEvent(
+      partition,
+      ev as never,
+      ev.delivery_id || ev.id,
+    );
+  }
+}
+
+function workStub(env: Env, teamId: string, id: string) {
+  return env.WORK.getByName(doName.work(teamId, partitionOf(id)));
+}
+
+/** What the integrations need from WorkDO and IndexDO. */
+export function workSide(env: Env, teamId = DEFAULT_TEAM): WorkSide {
+  return {
+    async factoryOf(workItemId) {
+      const wi = (await workStub(env, teamId, workItemId).api(META, "getWorkItem", { id: workItemId }, null)) as {
+        factory_id?: string;
+      };
+      return wi.factory_id ?? "";
+    },
+    async openInboxItem(workItemId): Promise<InboxItemRef | null> {
+      // Newest unresolved item of the work item, approvals and questions first (integrations.OpenInboxItem).
+      const out = (await env.INDEX.getByName(doName.index(teamId)).list(META, "inbox", {
+        work_item_id: workItemId,
+        resolved: "false",
+        scope: "team",
+        limit: "200",
+      })) as { items?: { id: string; kind?: string; created_at?: string }[] };
+      let best: { id: string; kind?: string; created_at?: string } | undefined;
+      const pref = (k?: string) => k === "approval" || k === "question";
+      for (const it of out.items ?? []) {
+        if (
+          !best ||
+          (pref(it.kind) && !pref(best.kind)) ||
+          (pref(it.kind) === pref(best.kind) && (it.created_at ?? "") > (best.created_at ?? ""))
+        )
+          best = it;
+      }
+      return best ? { id: best.id } : null;
+    },
+    async onAction(inboxId, option, actor) {
+      const principal: Principal = { kind: "user", id: actor, userId: actor, teamId, role: "user", factoryRoles: {} };
+      await workStub(env, teamId, inboxId).api(
+        { requestId: "chat-action", principal },
+        "resolveInbox",
+        { id: inboxId },
+        { resolution: option, via: INBOX_VIA_CHAT },
+      );
+    },
+  };
+}
+
+/** The account linker (signed link pages, provider sign-in, unlink). */
+export function linkerFor(env: Env, teamId = DEFAULT_TEAM): Linker {
+  const store = rpcStore(env, teamId);
+  const secrets = rpcSecrets(env, teamId);
+  return new Linker({
+    store,
+    key: env.OF_SIGNING_KEY,
+    publicUrl: env.OF_PUBLIC_URL,
+    currentUser: async (req): Promise<User | null> => {
+      const p = await authenticate(req, env);
+      if (!p || p.kind !== "user" || !p.userId) return null;
+      return store.getUser(p.userId);
+    },
+    loginUrl: (next) => "/login?return_to=" + encodeURIComponent(next),
+    prover: (t, provider) => teamProver(store, secrets, t, provider),
+    audit: (rec) => {
+      const line = { audit: true, ...rec };
+      if (rec.outcome === "failure") console.warn("audit: " + rec.action, line);
+      else console.log("audit: " + rec.action, line);
+    },
+  });
+}
+
+let cached: { env: Env; handlers: IntegrationHandlers; linker: Linker } | undefined;
+
+/** The integration handlers of the default team, built once per env. */
+export function integrationsFor(env: Env): { handlers: IntegrationHandlers; linker: Linker } {
+  if (cached && cached.env === env) return cached;
+  const linker = linkerFor(env);
+  const handlers = createIntegrationHandlers(
+    integrationDeps(env, { publish: (evs) => publishEvents(env, evs), linker, work: workSide(env) }),
+  );
+  cached = { env, handlers, linker };
+  return cached;
+}
+
+const INBOUND = new Set<string>(INBOUND_PATHS);
+
+function isLinkerPath(path: string): boolean {
+  return (
+    path.startsWith(LINK_PATH) ||
+    path.startsWith(LINK_START_PATH) ||
+    path === LINK_CALLBACK_PATH ||
+    path.startsWith(LINKS_PATH)
+  );
+}
+
+const webhookIngressRoute: ServerRouteHandler = (request, env, ctx) => routeWebhookIngress(request, env, ctx);
+
+/** The inbound chat and tracker events, and the account linker pages. Other /integrations/ paths pass. */
+const integrationsRoute: ServerRouteHandler = async (request, env, ctx, url) => {
+  const path = url.pathname;
+  if (INBOUND.has(path)) {
+    const out = await integrationsFor(env).handlers.handleRequest(request);
+    if (!out) return new Response("Method Not Allowed\n", { status: 405, headers: { allow: "POST" } });
+    if (out.background) {
+      const bg = out.background;
+      ctx.waitUntil(bg().catch((e: unknown) => console.error("integrations: background step failed", path, e)));
+    }
+    return out.response;
+  }
+  if (isLinkerPath(path)) return integrationsFor(env).linker.handle(request);
+  return null;
+};
+
+/** Event context builders of intake: chat threads (slack, teams) and forge review threads. */
+const eventContextBuilders: BuildersFor = (env) => [
+  ...reviewBuilders(resolverFor(env)),
+  ...Object.entries(integrationsFor(env).handlers.contextBuilders).map(([provider, b]) => ({
+    provider: () => provider,
+    eventContext: (ev: Event) => b.eventContext(ev),
+  })),
+];
+
+// ---------- built-in MCP integration servers ----------
+
+function asIntegration(rec: IntegrationRecord): Integration {
+  return rec as unknown as Integration;
+}
+
+/** The integration clients of /mcp/integrations/{provider}/{runId}. */
+export function integrationBackend(env: Env): IntegrationBackend {
+  return {
+    async factoryIntegration(_env, run, provider, workspace) {
+      const store = rpcStore(env, run.teamId || DEFAULT_TEAM);
+      const attached = await store.getFactoryIntegrations(run.factoryId).catch((e: unknown) => {
+        if (e instanceof OfError && e.code === "resource_not_found") return {};
+        throw e;
+      });
+      if (!Object.keys(attached).some((k) => sameIntegrationProvider(k, provider))) {
+        throw new Error(
+          `the factory does not attach the ${provider} integration (add it to factory.yaml integrations)`,
+        );
+      }
+      return (await selectTeam(
+        store,
+        run.teamId || DEFAULT_TEAM,
+        provider,
+        run.factoryId,
+        workspace,
+      )) as unknown as IntegrationRecord;
+    },
+    credential: (_env, run, rec) =>
+      integrationSecret(rpcSecrets(env, run.teamId || DEFAULT_TEAM), asIntegration(rec), ""),
+    linearQuery: (rec, token, query, variables) =>
+      new LinearClient("", token, rec.config["token_type"] ?? "").query(query, variables),
+    linearCreateComment: (rec, token, issueId, body) =>
+      new LinearClient("", token, rec.config["token_type"] ?? "").createComment(issueId, body),
+    jiraRequest: (rec, token, method, path, body) =>
+      jiraApiClient(asIntegration(rec), token).json(method, path, body as never),
+    jiraText: (adf) => adfText(adf),
+    markdownToADF: (md) => markdownToAdf(md),
+    slackCall: (_rec, token, method, params) => new SlackClient("", token).call(method, new URLSearchParams(params)),
+    slackPost: (_rec, token, msg) => new SlackClient("", token).postMessage(msg),
+    teamsPost: (rec, channelId, rootId, text) =>
+      integrationsFor(env).handlers.teams.handler.postMessage(asIntegration(rec), channelId, rootId, text),
+  };
+}
+
+const backends = new WeakMap<Env, IntegrationBackend>();
+
+function integrationBackendFor(env: Env): IntegrationBackend {
+  let b = backends.get(env);
+  if (!b) {
+    b = integrationBackend(env);
+    backends.set(env, b);
+  }
+  return b;
+}
+
+/**
+ * Builds the integration clients of env ahead of the first MCP request. The
+ * MCP surface resolves its backends per request, so this sets no shared state.
+ */
+export function bindMcpBackends(env: Env): void {
+  integrationBackendFor(env);
+}
+
+// ---------- sandbox providers ----------
+//
+// daytona and boatdev run in-process. Their credentials are Worker secrets
+// (OF_DAYTONA_API_KEY, OF_BOATDEV_API_KEY), with OF_DAYTONA_TIER and
+// OF_DAYTONA_TARGET as vars. The install ID that labels the sandboxes is the
+// host of OF_PUBLIC_URL. local is the provider of the development process
+// workers (src/do/workerhub/providers.ts); cloudflare-sandbox is the service
+// binding (src/do/dispatch/providers.ts).
+
+function installId(env: Env): string {
+  try {
+    return new URL(env.OF_PUBLIC_URL).host || "openfactory";
+  } catch {
+    return "openfactory";
+  }
+}
+
+function daytonaProvider(env: Env) {
+  const apiKey = env.OF_DAYTONA_API_KEY ?? "";
+  if (apiKey === "")
+    throw new OfError(
+      "invalid_request",
+      "sandbox provider daytona is not configured: set the OF_DAYTONA_API_KEY secret",
+    );
+  return createDaytonaProvider({
+    apiKey,
+    installId: installId(env),
+    tier: Number(env.OF_DAYTONA_TIER || "3"),
+    ...(env.OF_DAYTONA_TARGET ? { target: env.OF_DAYTONA_TARGET } : {}),
+    allowUnenforcedNetworkPolicy: env.OF_ALLOW_UNENFORCED_NETWORK_POLICY,
+  });
+}
+
+function boatdevProvider(env: Env) {
+  const apiKey = env.OF_BOATDEV_API_KEY ?? "";
+  if (apiKey === "")
+    throw new OfError(
+      "invalid_request",
+      "sandbox provider boatdev is not configured: set the OF_BOATDEV_API_KEY secret",
+    );
+  return createBoatdevProvider({ apiKey, installId: installId(env) });
+}
+
+// ---------- schedules: concurrency "skip" ----------
+
+const FINISHED = new Set<string>(FINISHED_RUN_STATES);
+
+const scheduleActiveRunCheck: ActiveRunCheck = async (kit, factoryId, automationId) => {
+  const idx = kit.env.INDEX.getByName(doName.index(kit.teamId()));
+  let cursor = "";
+  for (let page = 0; page < 50; page++) {
+    const out = (await idx.list(META, "runs", {
+      factory_id: factoryId,
+      limit: "200",
+      ...(cursor ? { cursor } : {}),
+    })) as {
+      items?: { id: string; state?: string; triggered_by?: string }[];
+      page_info?: { next_cursor?: string };
+    };
+    for (const r of out.items ?? []) {
+      if (!FINISHED.has((r.state ?? "").toLowerCase()) && startedByAutomation(r.triggered_by ?? "", automationId))
+        return r.id;
+    }
+    cursor = out.page_info?.next_cursor ?? "";
+    if (!cursor) break;
+  }
+  return "";
+};
+
+// ---------- definition preflight: names in automation filters ----------
+
+/** SetNameResolver (server.go): the name resolvers of the integrations, by trigger provider. */
+function nameResolverOf(kit: TeamKit): FilterNameResolver {
+  return {
+    resolveNames: (teamId, provider, kind, names, scope) => {
+      const r = integrationsFor(kit.env).handlers.nameResolvers[provider];
+      if (!r) return Promise.reject(new Error(`this server cannot list ${provider} objects`));
+      return r.resolveNames(teamId, provider, kind, names, scope);
+    },
+  };
+}
+
+// ---------- git definition source: the branch check of the factory routes ----------
+
+/** CheckGitSource (server.go): defsync.CheckBranch with the TeamDO preflight. */
+const gitSourceChecker: GitSourceChecker = (kit, f, outcome) =>
+  checkGitSource(
+    {
+      resolver: resolverFor(kit.env),
+      check: async (_g, files) => {
+        const chk = await checkDefinition(kit, f, files);
+        return { valid: chk.errors.length === 0, errors: chk.errors, warnings: chk.warnings, skipped: chk.skipped };
+      },
+    },
+    f,
+    outcome,
+    listIntegrations(kit),
+  );
+
+// ---------- git definition sync (internal/server/defsync.go) ----------
+
+/** The defsync dependencies of one TeamDO: forges, the KV of the last commit, apply and check. */
+export function defSyncDeps(kit: TeamKit, resolver: ForgeResolver = resolverFor(kit.env)): DefSyncDeps {
+  const factoryOf = (g: GitFactory) => getFactoryById(kit, g.id);
+  return {
+    resolver,
+    publicURL: kit.env.OF_PUBLIC_URL ?? "",
+    lastSha: {
+      get: async (g) => getSetting<string>(kit, `defsync:${g.id}:last_sha`) ?? "",
+      set: async (g, sha) => kit.tx(() => setSetting(kit, `defsync:${g.id}:last_sha`, sha)),
+    },
+    activeCommitSha: async (g) => {
+      const f = factoryOf(g);
+      if (!f?.active_version_id) return "";
+      return (await getVersion(kit, f.active_version_id, false))?.commit_sha ?? "";
+    },
+    apply: async (g, files, message, sha) => {
+      const r = await applyDefinition(kit, g.id, { files, author: "git", message, ...(sha ? { commitSha: sha } : {}) });
+      return r.invalid ? { invalid: true, errors: r.version.errors ?? [] } : { versionId: r.version.id };
+    },
+    check: async (g, files) => {
+      const f = factoryOf(g);
+      if (!f) throw new OfError("resource_not_found", `factory ${g.id} not found`);
+      const chk = await checkDefinition(kit, f, files);
+      const valid = chk.errors.length === 0;
+      const out: CheckResult = { valid, errors: chk.errors, warnings: chk.warnings, skipped: chk.skipped };
+      if (valid) {
+        // The resource diff against the active version.
+        const old = f.active_version_id ? compile(await activeFiles(kit, f)).definition : null;
+        const d = diff(old, chk.definition);
+        out.diff = { empty: diffEmpty(d), ...diffCounts(d), summary: diffSummary(d) };
+      }
+      return out;
+    },
+  };
+}
+
+const gitFactoriesOf = (kit: TeamKit): GitFactory[] =>
+  listFactories(kit).filter((f) => f.source === "git" && !!f.git_repo) as GitFactory[];
+
+/** The defsync runner of the TeamDO ops, with the forges of resolverOf. */
+export function defSyncRunner(resolverOf: (kit: TeamKit) => ForgeResolver): DefSyncRunner {
+  const deps = (kit: TeamKit) => defSyncDeps(kit, resolverOf(kit));
+  return {
+    push: (kit, repo, branch) => onPush(deps(kit), gitFactoriesOf(kit), repo, branch),
+    async pullRequest(kit, pr0) {
+      const pr = pr0 as unknown as DefinitionPR;
+      const f = getFactoryById(kit, pr.factoryId);
+      if (!f) return;
+      try {
+        await checkPullRequest(deps(kit), f as GitFactory, pr);
+      } catch (e) {
+        console.warn("definition pull request check", pr.factoryId, pr.repo, pr.number, (e as Error).message);
+      }
+    },
+    async syncAll(kit) {
+      for (const f of gitFactoriesOf(kit)) {
+        try {
+          await sync(deps(kit), f);
+        } catch (e) {
+          console.warn("sync git definition", f.id, f.git_repo, (e as Error).message);
+        }
+      }
+    },
+  };
+}
+
+const DEFSYNC_EVERY_MINUTES = 5;
+
+/** The periodic sync (every 5 minutes); it also covers forges that deliver no webhooks. */
+const defSyncCron: CronHook = async (env, ctx) => {
+  if (new Date().getUTCMinutes() % DEFSYNC_EVERY_MINUTES !== 0) return;
+  const team = env.TEAM.getByName(doName.team(DEFAULT_TEAM));
+  const run = async () => {
+    const out: unknown = await team.api({ requestId: "defsync-cron" }, "defsyncAll", {}, null);
+    if (isOpError(out)) console.warn("defsync: periodic sync", out.$error.detail);
+  };
+  ctx.waitUntil(run().catch((e: unknown) => console.warn("defsync: periodic sync", e)));
+};
+
+// ---------- worker git cache: read-only credential of one repository ----------
+
+/** Life reported for a minted git credential (engine runnerGitCredentialTTL). */
+const GIT_CREDENTIAL_TTL_MS = 50 * 60_000;
+
+function withoutCredentials(u: string): string {
+  try {
+    const x = new URL(u);
+    x.username = "";
+    x.password = "";
+    return x.toString();
+  } catch {
+    return u;
+  }
+}
+
+/**
+ * Finds the repository among the definition repositories of the worker's
+ * factories (all factories when the worker has no list) and returns the
+ * credential of the forge clone URL. The integration of that factory decides
+ * the credential, the same as for a run.
+ */
+const gitCredentialMinter: GitCredentialMinter = async (kit, input) => {
+  const factoryIds = input.factories.length > 0 ? input.factories : listFactories(kit).map((f) => f.id);
+  const resolver = resolverFor(kit.env);
+  for (const factoryId of factoryIds) {
+    let snap: { runtime?: { repositories?: { codeForge?: string; owner?: string; name?: string }[] | null } };
+    try {
+      snap = (await configSnapshot(kit, factoryId)) as typeof snap;
+    } catch {
+      continue;
+    }
+    for (const r of snap.runtime?.repositories ?? []) {
+      if (!r.owner || !r.name) continue;
+      const codeForge = (r.codeForge ?? "github").toUpperCase();
+      const forge = await resolver
+        .forge({ teamId: kit.teamId(), factoryId, codeForge, repo: `${r.owner}/${r.name}` })
+        .catch(() => null);
+      if (!forge) continue;
+      const url = await forge.cloneURL(r.owner, r.name).catch(() => "");
+      if (url === "" || normalizeRepo(withoutCredentials(url)) !== input.repo) continue;
+      const u = new URL(url);
+      const password = decodeURIComponent(u.password);
+      if (password === "") throw new OfError("not_authorized", `the forge gave no credential for ${input.repo}`);
+      return {
+        username: decodeURIComponent(u.username),
+        password,
+        expiresAt: new Date(Date.now() + GIT_CREDENTIAL_TTL_MS).toISOString(),
+      };
+    }
+  }
+  throw new OfError("not_authorized", `${input.repo} is not a repository of the worker's factories`);
+};
+
+// ---------- the composition root ----------
+
+let bootstrapped = false;
+
+/**
+ * Registers every built-in route, hook, provider and port of the control
+ * plane. src/index.ts calls it when the Worker module loads. Every isolate
+ * (the Worker and each Durable Object) loads that module before it serves,
+ * so all registries are filled before the first request, alarm or RPC. A
+ * second call does nothing. A custom build adds its own routes and hooks with
+ * the extension points of src/builder.ts.
+ */
+export function bootstrapControlPlane(): void {
+  if (bootstrapped) return;
+  bootstrapped = true;
+
+  // Server routes outside /api/v1.
+  registerServerRoute(RUNNER_PREFIX + "/", (req, env, ctx) => handleRunnerApi(req, env, ctx));
+  registerServerRoute(RUN_MCP_PREFIX, (req, env) => handleRunMcp(req, env));
+  registerServerRoute("/webhooks/w/", webhookIngressRoute);
+  registerServerRoute("/integrations/github/webhook", webhookIngressRoute);
+  registerServerRoute("/integrations/", integrationsRoute);
+  registerServerRoute(PLUGIN_ROUTE_PREFIX, pluginWebhookRoute);
+
+  // Bearer tokens besides API keys: worker access tokens and Factory MCP tokens.
+  registerBearerAuthenticator(WORKER_TOKEN_PREFIX, workerTokenAuthenticator);
+  registerBearerAuthenticator(ACCESS_TOKEN_PREFIX, verifyFactoryMcpToken);
+
+  // Events in, notices out.
+  setIntakeHandler(platformIntakeHandler);
+  setEventContextBuilders(eventContextBuilders);
+  setNoticeDeliverer((env, envelope) => deliverNotice(env, envelope));
+  registerResponders((env) => Object.values(integrationsFor(env).handlers.responders));
+
+  // Each MCP request resolves the integration clients of its own env.
+  setMcpBackendResolver((env) => ({ integrations: integrationBackendFor(env) }));
+
+  // In-process sandbox providers.
+  registerProvider("local", localProvider);
+  registerProvider("daytona", daytonaProvider);
+  registerProvider("boatdev", boatdevProvider);
+
+  // TeamDO ports.
+  setScheduleActiveRunCheck(scheduleActiveRunCheck);
+  setManualRunDispatcher(manualRunDispatcher);
+  setNameResolver(nameResolverOf);
+  setGitSourceChecker(gitSourceChecker);
+  setDefSyncRunner(defSyncRunner((kit) => resolverFor(kit.env)));
+  setGitCredentialMinter(gitCredentialMinter);
+
+  registerCronHook(defSyncCron);
+}

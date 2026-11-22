@@ -31,7 +31,7 @@ linters:
     gosec:
       excludes:
         - G104 # covered by errcheck
-        - G204 # subprocesses with variable args are the sandbox backends' job
+        - G204 # the runner, the harness adapters and the microVM worker start subprocesses with variable args
         - G301 # workspace, checkout and data directories use the usual 0755; the umask narrows it
         - G302 # same for files that a checkout keeps, such as the exclude file of a repository (0644)
         - G304 # file paths come from configuration
@@ -41,7 +41,6 @@ linters:
       ignore-rules:
         - cancelled # the run state "cancelled" is API
         - cancelling # same word family as the API value "cancelled"
-        - noteable # field name of the forge webhook payload (noteable_type)
     revive:
       rules:
         - name: exported
@@ -60,6 +59,7 @@ linters:
         linters: [gosec, errcheck, noctx, bodyclose]
     paths:
       - dist/
+      - node_modules/
 
 formatters:
   enable:

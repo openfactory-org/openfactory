@@ -153,9 +153,14 @@ func (r *runner) loadPart(ctx context.Context, part string, files []runnerproto.
 	if !found {
 		return none, "", false
 	}
-	dir := filepath.Join(r.cfg.StateDir, "restore", part)
+	dir := filepath.Join(r.scratchDir("restore"), part)
 	if err := r.fetchPart(ctx, dir, files); err != nil {
 		r.diagnostic("snapshot_restore_failed", "download snapshot: "+scrub(err))
+		return none, "", false
+	}
+	// git reads the bundles as the agent when the lock is on.
+	if err := r.giveToAgent(dir); err != nil {
+		r.diagnostic("snapshot_restore_failed", "download snapshot: "+err.Error())
 		return none, "", false
 	}
 	m, err := snapshot.ReadManifest(dir)
@@ -249,7 +254,7 @@ func (r *runner) restoreRepo(ctx context.Context, e snapshot.RepoEntry, dir stri
 		return false
 	}
 	st.base = e.UpstreamSHA
-	if err := snapshot.RestoreRepo(ctx, st.dir, e, dir); err != nil {
+	if err := snapshot.RestoreRepo(r.withGitHook(ctx), st.dir, e, dir); err != nil {
 		r.diagnostic("snapshot_restore_failed", "repository "+e.Path+": "+err.Error())
 		return false
 	}
@@ -298,11 +303,15 @@ func (r *runner) captureSnapshot() {
 
 // saveWorkspace writes the part below StateDir and uploads it.
 func (r *runner) saveWorkspace(ctx context.Context) ([]string, int64, error) {
-	dir := filepath.Join(r.cfg.StateDir, "snapshot", snapshot.PartWorkspace)
+	dir := filepath.Join(r.scratchDir("snapshot"), snapshot.PartWorkspace)
 	if err := os.RemoveAll(dir); err != nil {
 		return nil, 0, err
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, 0, err
+	}
+	// git writes the bundles as the agent when the lock is on.
+	if err := r.giveToAgent(dir); err != nil {
 		return nil, 0, err
 	}
 	m := snapshot.Manifest{
@@ -314,7 +323,7 @@ func (r *runner) saveWorkspace(ctx context.Context) ([]string, int64, error) {
 		Complete:  true,
 	}
 	for i, st := range r.repos {
-		e, skipped, err := snapshot.CaptureRepo(ctx, snapshot.CaptureOptions{
+		e, skipped, err := snapshot.CaptureRepo(r.withGitHook(ctx), snapshot.CaptureOptions{
 			RepoDir: st.dir, Path: st.path, BaseSHA: st.base, OutDir: dir, Index: i,
 		})
 		if err != nil {

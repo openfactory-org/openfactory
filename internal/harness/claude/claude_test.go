@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openfactory-org/openfactory/internal/core"
 	"github.com/openfactory-org/openfactory/internal/harness"
 	"github.com/openfactory-org/openfactory/internal/harness/harnesstest"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 )
 
 const fixture = `{"type":"system","subtype":"init","session_id":"sess-123","model":"claude-sonnet-4-6","tools":["Bash","Read"],"mcp_servers":[{"name":"factory","status":"connected"},{"name":"broken","status":"failed"}]}
@@ -23,9 +23,9 @@ not json at all
 {"type":"result","subtype":"success","is_error":false,"result":"Done: two files.","session_id":"sess-123","total_cost_usd":0.0123,"duration_ms":4567,"num_turns":2,"usage":{"input_tokens":100,"cache_creation_input_tokens":10,"cache_read_input_tokens":1000,"output_tokens":50}}
 `
 
-func collect(t *testing.T, ch <-chan core.HarnessEvent) []core.HarnessEvent {
+func collect(t *testing.T, ch <-chan rtcore.HarnessEvent) []rtcore.HarnessEvent {
 	t.Helper()
-	var evs []core.HarnessEvent
+	var evs []rtcore.HarnessEvent
 	timeout := time.After(5 * time.Second)
 	for {
 		select {
@@ -40,7 +40,7 @@ func collect(t *testing.T, ch <-chan core.HarnessEvent) []core.HarnessEvent {
 	}
 }
 
-func kinds(evs []core.HarnessEvent) []string {
+func kinds(evs []rtcore.HarnessEvent) []string {
 	var k []string
 	for _, e := range evs {
 		k = append(k, e.Kind)
@@ -51,26 +51,26 @@ func kinds(evs []core.HarnessEvent) []string {
 func TestRunParsesStreamJSON(t *testing.T) {
 	sb := harnesstest.New("/work")
 	var proc *harnesstest.Process
-	sb.StartFunc = func(_ context.Context, req core.ExecRequest) (core.Process, error) {
+	sb.StartFunc = func(_ context.Context, req rtcore.ExecRequest) (rtcore.Process, error) {
 		proc = harnesstest.NewProcess(fixture, "", 0)
 		return proc, nil
 	}
 	h := New(Options{MaxTurns: 7})
-	req := core.HarnessRequest{
-		Run: &core.Run{ID: "run_1", SessionID: "sess-prev", Config: core.AgentConfig{Harness: core.HarnessConfig{
-			Type: core.HarnessClaude, Model: "claude-sonnet-4-6", ReasoningLevel: "xhigh",
-		}}},
+	req := rtcore.HarnessRequest{
+		RunID: "run_1", SessionID: "sess-prev", Harness: rtcore.HarnessConfig{
+			Type: rtcore.HarnessClaude, Model: "claude-sonnet-4-6", ReasoningLevel: "xhigh",
+		},
 		Prompt:       "list files",
 		SystemPrompt: "You are the implement agent.",
 		Resume:       true,
 		Env:          map[string]string{"OF_METADATA_TICKET": "ENG-1"},
 		Auth:         map[string]string{"ANTHROPIC_API_KEY": "sk-ant"},
-		MCPServers: map[string]core.MCPServer{
+		MCPServers: map[string]rtcore.MCPServer{
 			"factory": {URL: "https://of.example/mcp/run/run_1", Headers: map[string]string{"Authorization": "Bearer t"}},
 			"dbt":     {Command: "uvx", Args: []string{"dbt-mcp"}, Env: map[string]string{"X": "1"}},
 			"managed": {ManagedID: "abc"},
 		},
-		Skills: []core.Skill{{Name: "Security Review", Description: "checks", Content: "# SR", Files: map[string]string{"ref/check.md": "x", "../../evil": "y"}, Scope: "factory"}},
+		Skills: []rtcore.Skill{{Name: "Security Review", Description: "checks", Content: "# SR", Files: map[string]string{"ref/check.md": "x", "../../evil": "y"}, Scope: "factory"}},
 	}
 	ch, err := h.Run(context.Background(), sb, req)
 	if err != nil {
@@ -170,12 +170,12 @@ func keys(m map[string][]byte) []string {
 
 func TestRunErrorResult(t *testing.T) {
 	sb := harnesstest.New("/w")
-	sb.StartFunc = func(context.Context, core.ExecRequest) (core.Process, error) {
+	sb.StartFunc = func(context.Context, rtcore.ExecRequest) (rtcore.Process, error) {
 		return harnesstest.NewProcess(`{"type":"system","subtype":"init","session_id":"s1"}
 {"type":"result","subtype":"error_max_turns","is_error":true,"session_id":"s1","num_turns":3,"total_cost_usd":0.5}
 `, "", 1), nil
 	}
-	ch, err := New(Options{}).Run(context.Background(), sb, core.HarnessRequest{Run: &core.Run{}, Prompt: "x"})
+	ch, err := New(Options{}).Run(context.Background(), sb, rtcore.HarnessRequest{Prompt: "x"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,10 +188,10 @@ func TestRunErrorResult(t *testing.T) {
 
 func TestRunProcessCrash(t *testing.T) {
 	sb := harnesstest.New("/w")
-	sb.StartFunc = func(context.Context, core.ExecRequest) (core.Process, error) {
+	sb.StartFunc = func(context.Context, rtcore.ExecRequest) (rtcore.Process, error) {
 		return harnesstest.NewProcess("", "Error: Invalid API key\n", 1), nil
 	}
-	ch, _ := New(Options{}).Run(context.Background(), sb, core.HarnessRequest{Run: &core.Run{}, Prompt: "x"})
+	ch, _ := New(Options{}).Run(context.Background(), sb, rtcore.HarnessRequest{Prompt: "x"})
 	evs := collect(t, ch)
 	if len(evs) != 1 || evs[0].Kind != harness.EventError || !strings.Contains(evs[0].Content, "Invalid API key") {
 		t.Fatalf("evs = %+v", evs)
@@ -207,19 +207,19 @@ func TestRunUsage(t *testing.T) {
 		stream    string // inline stream or testdata file
 		code      int
 		wantKinds []string
-		want      *core.Usage // usage event, nil for none
+		want      *rtcore.Usage // usage event, nil for none
 	}{
 		{
 			name:      "normal turn",
 			stream:    fixture,
 			wantKinds: []string{"session", "log", "message", "tool_call", "tool_result", "log", "message", "usage", "done"},
-			want:      &core.Usage{InputTokens: 1110, OutputTokens: 50, CostUSD: 0.0123, DurationMS: 4567},
+			want:      &rtcore.Usage{InputTokens: 1110, OutputTokens: 50, CostUSD: 0.0123, DurationMS: 4567},
 		},
 		{
 			name:      "result after partial messages",
 			stream:    "testdata/turn_result_after_messages.jsonl",
 			wantKinds: []string{"session", "message", "tool_call", "tool_result", "message", "usage", "done"},
-			want:      &core.Usage{InputTokens: 425, OutputTokens: 43, CostUSD: 0.02, DurationMS: 3210},
+			want:      &rtcore.Usage{InputTokens: 425, OutputTokens: 43, CostUSD: 0.02, DurationMS: 3210},
 		},
 		{
 			name:      "interrupted turn",
@@ -227,7 +227,7 @@ func TestRunUsage(t *testing.T) {
 			code:      143,
 			wantKinds: []string{"session", "message", "tool_call", "message", "usage", "error"},
 			// msg_a counts once with its newest usage; the sub-agent message counts too.
-			want: &core.Usage{InputTokens: 210 + 10, OutputTokens: 40 + 2, Coverage: core.UsagePartial},
+			want: &rtcore.Usage{InputTokens: 210 + 10, OutputTokens: 40 + 2, Coverage: rtcore.UsagePartial},
 		},
 		{
 			name:      "ended without tokens",
@@ -247,10 +247,10 @@ func TestRunUsage(t *testing.T) {
 				stream = string(b)
 			}
 			sb := harnesstest.New("/w")
-			sb.StartFunc = func(context.Context, core.ExecRequest) (core.Process, error) {
+			sb.StartFunc = func(context.Context, rtcore.ExecRequest) (rtcore.Process, error) {
 				return harnesstest.NewProcess(stream, "", tc.code), nil
 			}
-			ch, err := New(Options{}).Run(context.Background(), sb, core.HarnessRequest{Run: &core.Run{}, Prompt: "x"})
+			ch, err := New(Options{}).Run(context.Background(), sb, rtcore.HarnessRequest{Prompt: "x"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -258,7 +258,7 @@ func TestRunUsage(t *testing.T) {
 			if !slices.Equal(kinds(evs), tc.wantKinds) {
 				t.Fatalf("kinds = %v, want %v", kinds(evs), tc.wantKinds)
 			}
-			var got *core.Usage
+			var got *rtcore.Usage
 			for _, ev := range evs {
 				if ev.Kind == harness.EventUsage {
 					got = ev.Usage
@@ -275,8 +275,8 @@ func TestRunUsage(t *testing.T) {
 }
 
 func TestAuthMismatch(t *testing.T) {
-	_, err := New(Options{}).Run(context.Background(), harnesstest.New("/w"), core.HarnessRequest{
-		Run: &core.Run{}, Auth: map[string]string{"type": "openai_api_key", "value": "sk"},
+	_, err := New(Options{}).Run(context.Background(), harnesstest.New("/w"), rtcore.HarnessRequest{
+		Auth: map[string]string{"type": "openai_api_key", "value": "sk"},
 	})
 	if err == nil {
 		t.Fatal("expected auth error")
@@ -285,7 +285,7 @@ func TestAuthMismatch(t *testing.T) {
 
 func TestBuildArgsVariants(t *testing.T) {
 	h := New(Options{DangerouslySkipPermissions: true, ThinkingTokensEnv: true})
-	args, env := h.BuildArgs(core.HarnessRequest{Run: &core.Run{Config: core.AgentConfig{Harness: core.HarnessConfig{Model: "default", ReasoningLevel: "high"}}}}, "/w/sp.md", "")
+	args, env := h.BuildArgs(rtcore.HarnessRequest{Harness: rtcore.HarnessConfig{Model: "default", ReasoningLevel: "high"}}, "/w/sp.md", "")
 	joined := strings.Join(args, " ")
 	if strings.Contains(joined, "--model") || strings.Contains(joined, "--resume") || strings.Contains(joined, "--effort") {
 		t.Fatalf("unexpected args %v", args)

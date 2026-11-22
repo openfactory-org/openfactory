@@ -10,8 +10,8 @@
 
 - [ ] Tests added or updated for the change.
 - [ ] `make ci` passes locally.
-- [ ] Docs in `docs/` updated, if behavior, flags, environment variables, API, Helm values or definition fields changed.
-- [ ] Generated files regenerated, not edited by hand (`make schemas`, `make docs-gen`, `make web-build`). See [CONTRIBUTING.md](../CONTRIBUTING.md#generated-files).
+- [ ] Docs in `docs/` updated, if behavior, flags, environment variables, API or definition fields changed.
+- [ ] Generated files regenerated, not edited by hand (`npm run gen`). See [CONTRIBUTING.md](../CONTRIBUTING.md#generated-files).
 - [ ] No breaking change to a public contract, or the change was agreed in an issue first.
 
 ## What remains

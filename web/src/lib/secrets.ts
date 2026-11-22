@@ -37,9 +37,9 @@ export function useUsableSecrets(fid: string): { data: UsableSecret[] | undefine
   return { data: mergeSecrets(team.data ?? [], factory.data ?? []), isLoading: team.isLoading || factory.isLoading };
 }
 
-/** Model credential secret types per harness (internal/harness CredentialSecretTypes). */
+/** Model credential secret types per harness (the same table as the control plane run planner). */
 export const HARNESS_CREDENTIAL_TYPES: Record<string, string[]> = {
-  claude: ["anthropic_api_key", "anthropic_oauth_token", "anthropic_bedrock_api_key", "anthropic_bedrock_access_key"],
+  claude: ["anthropic_api_key", "anthropic_oauth_token"],
   codex: ["openai_api_key"],
 };
 
@@ -47,7 +47,7 @@ export const HARNESS_CREDENTIAL_TYPES: Record<string, string[]> = {
 export type DefaultCredential = { kind: "one"; name: string; scope: "team" | "factory" } | { kind: "ambiguous"; scope: "team" | "factory"; names: string[] } | { kind: "none" };
 
 /**
- * Applies the server rule (internal/engine findDefaultCredential) to usable
+ * Applies the server rule (findDefaultCredential of the control plane) to usable
  * secrets from mergeSecrets, which already drops team secrets that a factory
  * secret shadows: the one fitting factory secret, else the one fitting team
  * secret. More than one fit at a scope gives no credential.

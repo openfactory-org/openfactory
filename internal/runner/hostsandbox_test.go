@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 )
 
 func skipWindows(t *testing.T) {
@@ -42,7 +42,7 @@ func TestHostSandboxExec(t *testing.T) {
 	s := newHostSandbox("", dir, []string{"PATH=" + os.Getenv("PATH"), "BASE=one", "BOTH=base"})
 	ctx := context.Background()
 
-	res, err := s.Exec(ctx, core.ExecRequest{
+	res, err := s.Exec(ctx, rtcore.ExecRequest{
 		Cmd:   []string{"sh", "-c", `cat; echo "$BASE $BOTH $EXTRA"; pwd; echo err >&2; exit 3`},
 		Dir:   "sub",
 		Env:   map[string]string{"BOTH": "req", "EXTRA": "two"},
@@ -67,7 +67,7 @@ func TestHostSandboxExec(t *testing.T) {
 	}
 
 	// An empty dir is the workspace.
-	res, err = s.Exec(ctx, core.ExecRequest{Cmd: []string{"pwd"}})
+	res, err = s.Exec(ctx, rtcore.ExecRequest{Cmd: []string{"pwd"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,10 +75,10 @@ func TestHostSandboxExec(t *testing.T) {
 		t.Fatalf("default dir %q", res.Stdout)
 	}
 
-	if _, err := s.Exec(ctx, core.ExecRequest{Cmd: []string{"/no/such/binary"}}); err == nil {
+	if _, err := s.Exec(ctx, rtcore.ExecRequest{Cmd: []string{"/no/such/binary"}}); err == nil {
 		t.Fatal("start failure is not an error")
 	}
-	if _, err := s.Exec(ctx, core.ExecRequest{}); err == nil {
+	if _, err := s.Exec(ctx, rtcore.ExecRequest{}); err == nil {
 		t.Fatal("empty command is not an error")
 	}
 }
@@ -87,7 +87,7 @@ func TestHostSandboxExecTimeoutAndCap(t *testing.T) {
 	skipWindows(t)
 	s := newHostSandbox("", t.TempDir(), []string{"PATH=" + os.Getenv("PATH")})
 	t0 := time.Now()
-	res, err := s.Exec(context.Background(), core.ExecRequest{Cmd: []string{"sleep", "30"}, Timeout: 100 * time.Millisecond})
+	res, err := s.Exec(context.Background(), rtcore.ExecRequest{Cmd: []string{"sleep", "30"}, Timeout: 100 * time.Millisecond})
 	if err == nil || res == nil || res.ExitCode != -1 {
 		t.Fatalf("timeout: res %+v err %v", res, err)
 	}
@@ -96,7 +96,7 @@ func TestHostSandboxExecTimeoutAndCap(t *testing.T) {
 	}
 
 	// 5 MiB of output: keep the end.
-	res, err = s.Exec(context.Background(), core.ExecRequest{Cmd: []string{"sh", "-c", "head -c 5242880 /dev/zero | tr '\\0' a; printf END"}})
+	res, err = s.Exec(context.Background(), rtcore.ExecRequest{Cmd: []string{"sh", "-c", "head -c 5242880 /dev/zero | tr '\\0' a; printf END"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestHostSandboxStartAndKill(t *testing.T) {
 	s := newHostSandbox("", t.TempDir(), []string{"PATH=" + os.Getenv("PATH")})
 	ctx := context.Background()
 
-	p, err := s.Start(ctx, core.ExecRequest{Cmd: []string{"sh", "-c", "read x; echo got:$x; echo oops >&2; exit 4"}})
+	p, err := s.Start(ctx, rtcore.ExecRequest{Cmd: []string{"sh", "-c", "read x; echo got:$x; echo oops >&2; exit 4"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestHostSandboxStartAndKill(t *testing.T) {
 	}
 
 	// Kill ends the whole group: the child "sleep" holds the pipe open.
-	p, err = s.Start(ctx, core.ExecRequest{Cmd: []string{"sh", "-c", "sleep 30 & echo started; wait"}})
+	p, err = s.Start(ctx, rtcore.ExecRequest{Cmd: []string{"sh", "-c", "sleep 30 & echo started; wait"}})
 	if err != nil {
 		t.Fatal(err)
 	}

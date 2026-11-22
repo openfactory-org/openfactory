@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openfactory-org/openfactory/internal/core"
-	"github.com/openfactory-org/openfactory/internal/runnerapi"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
+	"github.com/openfactory-org/openfactory/internal/runner/runnertest"
 	"github.com/openfactory-org/openfactory/internal/runnerproto"
 )
 
@@ -130,10 +130,10 @@ func TestSetupFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := e.wantEnded("setup_failed")
-	if s.FailureCode != core.FailureEnvironmentSetupFailed {
+	if s.FailureCode != string(rtcore.FailureEnvironmentSetupFailed) {
 		t.Fatalf("failure code %q", s.FailureCode)
 	}
-	ev, ok := e.find(runnerproto.EventSetupStep, func(ev core.RunnerEvent) bool {
+	ev, ok := e.find(runnerproto.EventSetupStep, func(ev runnertest.Event) bool {
 		return decode[runnerproto.SetupStepData](t, ev).Status == "failed"
 	})
 	if !ok {
@@ -153,9 +153,7 @@ type endHooks struct {
 	req *runnerproto.EndRequest
 }
 
-func (h *endHooks) SessionStarted(context.Context, *core.RunSession)                   {}
-func (h *endHooks) EventsStored(context.Context, *core.RunSession, []core.RunnerEvent) {}
-func (h *endHooks) SessionEnded(_ context.Context, _ *core.RunSession, r runnerproto.EndRequest) {
+func (h *endHooks) ended(_ int, r runnerproto.EndRequest) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.req = &r
@@ -170,7 +168,7 @@ func TestSetupFailureMessage(t *testing.T) {
 			{Command: "echo ok"},
 			{Command: "yes noise | head -c 20000; echo token=s3cret; echo build failed >&2; exit 3"},
 		}},
-	}, fakeSecrets{runnerproto.SecretsResponse{Redact: []string{"s3cret"}}}, func(c *runnerapi.Config) { c.Hooks = hooks })
+	}, &runnerproto.SecretsResponse{Redact: []string{"s3cret"}}, func(c *runnertest.Server) { c.OnEnd = hooks.ended })
 	done := e.start(context.Background(), e.config(execHarness("cat")))
 	if err := waitResult(t, done, 10*time.Second); err != nil {
 		t.Fatal(err)
@@ -200,7 +198,7 @@ func TestUnknownHarness(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := e.wantEnded("setup_failed")
-	if s.FailureCode != core.FailureEnvironmentSetupFailed {
+	if s.FailureCode != string(rtcore.FailureEnvironmentSetupFailed) {
 		t.Fatalf("failure code %q", s.FailureCode)
 	}
 }
@@ -230,7 +228,7 @@ func TestTurnError(t *testing.T) {
 	e.startTurn("t1", "go")
 	waitFor(t, "turn.ended", func() bool { return e.hasEvent(runnerproto.EventTurnEnded) })
 	d, _ := e.turnEnded()
-	if d.Outcome != runnerproto.OutcomeError || d.FailureCode != string(core.FailureAgentFailed) || !strings.Contains(d.Message, "bad") {
+	if d.Outcome != runnerproto.OutcomeError || d.FailureCode != string(rtcore.FailureAgentFailed) || !strings.Contains(d.Message, "bad") {
 		t.Fatalf("turn.ended %+v", d)
 	}
 	e.command(runnerproto.CommandSessionStop, runnerproto.SessionStopData{})
@@ -286,7 +284,7 @@ func TestGracefulStop(t *testing.T) {
 }
 
 func TestRedaction(t *testing.T) {
-	e := newEnv(t, runnerproto.StartResponse{}, fakeSecrets{runnerproto.SecretsResponse{Redact: []string{"s3cret"}}})
+	e := newEnv(t, runnerproto.StartResponse{}, &runnerproto.SecretsResponse{Redact: []string{"s3cret"}})
 	done := e.start(context.Background(), e.config(execHarness("echo token=s3cret")))
 	waitFor(t, "ready", e.ready)
 	e.startTurn("t1", "go")
@@ -307,8 +305,8 @@ func TestRedaction(t *testing.T) {
 
 func TestSecretEnvReachesHarness(t *testing.T) {
 	e := newEnv(t, runnerproto.StartResponse{Env: map[string]string{"FROM_START": "a"}},
-		fakeSecrets{runnerproto.SecretsResponse{Env: map[string]string{"FROM_SECRETS": "b"}}})
-	t.Setenv(core.TaskEnvBootstrapToken, "ofb_should_not_leak")
+		&runnerproto.SecretsResponse{Env: map[string]string{"FROM_SECRETS": "b"}})
+	t.Setenv(rtcore.TaskEnvBootstrapToken, "ofb_should_not_leak")
 	done := e.start(context.Background(), e.config(execHarness(`echo "$FROM_START$FROM_SECRETS/${OF_BOOTSTRAP_TOKEN:-none}"`)))
 	waitFor(t, "ready", e.ready)
 	e.startTurn("t1", "go")
@@ -348,15 +346,12 @@ func TestHarnessGetsDefaultGitIdentity(t *testing.T) {
 
 func TestCancelledRunReturnsQuickly(t *testing.T) {
 	e := newEnv(t, runnerproto.StartResponse{}, nil)
-	e.run.State = core.RunCancelled
-	if err := e.mem.UpdateRun(context.Background(), e.run); err != nil {
-		t.Fatal(err)
-	}
+	e.cp.SetRunCancelled(true)
 	done := e.start(context.Background(), e.config(execHarness("cat")))
 	if err := waitResult(t, done, 5*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if e.session().State != core.SessionAssigned {
+	if e.session().State != runnertest.SessionAssigned {
 		t.Fatalf("session state %q", e.session().State)
 	}
 }
@@ -364,11 +359,7 @@ func TestCancelledRunReturnsQuickly(t *testing.T) {
 func TestBadBootstrapTokenIsAnError(t *testing.T) {
 	e := newEnv(t, runnerproto.StartResponse{}, nil)
 	cfg := e.config(execHarness("cat"))
-	tok, _, err := runnerAPIBootstrap()
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.BootstrapToken = tok
+	cfg.BootstrapToken = "ofb_unknown"
 	if err := waitResult(t, e.start(context.Background(), cfg), 5*time.Second); err == nil {
 		t.Fatal("want an error")
 	}
@@ -414,7 +405,7 @@ func TestClone(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(e.work, "repo", "b.txt")); err == nil {
 		t.Fatal("b.txt exists: the ref v1 was not checked out")
 	}
-	if _, ok := e.find(runnerproto.EventSetupStep, func(ev core.RunnerEvent) bool {
+	if _, ok := e.find(runnerproto.EventSetupStep, func(ev runnertest.Event) bool {
 		d := decode[runnerproto.SetupStepData](t, ev)
 		return d.Step == "clone:repo" && d.Status == "ok"
 	}); !ok {

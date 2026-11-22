@@ -152,6 +152,10 @@ func (r *runner) restoreHarnessState(ctx context.Context, files []runnerproto.Do
 		r.diagnostic("snapshot_restore_failed", "harness_state: "+err.Error())
 		return false
 	}
+	if err := r.giveToAgent(r.cfg.HomeDir); err != nil {
+		r.diagnostic("snapshot_restore_failed", "harness_state: "+err.Error())
+		return false
+	}
 	r.harnessStateRestored = true
 	return true
 }

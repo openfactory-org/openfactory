@@ -59,14 +59,14 @@ The engine creates the work item at stage `intake` and a `queued` run. The run c
 
 The control plane claims the run and assigns a sandbox. It does not run the agent loop: the runner (`openfactory runner`) does that inside the sandbox and talks to the control plane over HTTP.
 
-1. The control plane selects the worker host: the server's sandbox backend, or the remote worker named by `workerHost`. The backend starts the sandbox (a Kubernetes Job, a local process, a remote worker sandbox or a plugin sandbox).
+1. The control plane selects the target from `workerHost`: the default sandbox provider, a named provider, a worker or a worker pool. The provider starts the sandbox (a Cloudflare Sandbox, a Daytona sandbox, a boat.dev sandbox, a microVM on a worker, or a plugin sandbox).
 2. The runner checks out the factory repositories, and runs the machine and environment setup commands.
 3. The control plane expands `{{SECRET}}` templates and sets the agent secrets and the `OF_METADATA_*` variables.
 4. The skills and the MCP configuration are written for the harness: agent skills, factory skills and the [built-in skills](skills.md#built-in-skills) for the agent type and connected integrations. The harness also loads the skills and rule files that it finds in the repositories.
 5. The event that started the run is written to `.openfactory/events/<message_id>/` (see [What the agent gets from the event](automations.md#what-the-agent-gets-from-the-event)).
 6. The runner starts the harness with the composed prompt and streams its events to the control plane, which stores them as run messages (the transcript). Artifacts and raw harness transcripts go to [object storage](self-hosting/object-storage.md).
 
-A server replica holds no agent turn, so a replica restart does not interrupt a turn. The runner sends events with a cursor and reconnects to any replica.
+The control plane holds no agent turn, so a deploy does not interrupt a turn. The runner sends events with a cursor and reconnects.
 
 The composed prompt is a short platform preamble (role, tools, agents, work item and the rule about untrusted input) followed by the agent instructions. Workflow policy, for example spec approval, lives in the agent instructions. See [Workflow policy](agents.md#workflow-policy).
 
@@ -84,7 +84,7 @@ After each turn, the runner uploads new and changed files to object storage with
 
 The foreman uses the `factory` MCP server to start agents, message other runs, ask people, set the stage, link pull requests and issues, and complete the work item. See [The orchestration server](agents.md#the-orchestration-server).
 
-The default foreman instructions follow triage, spec, approval, implementation, review, handoff. Stages are not agents: the foreman can skip a stage for a small fix, or go back when review finds a problem. `spawnableBy` on an agent controls which agents can start it (default: only the foreman). `OF_MAX_ORCHESTRATION_DEPTH` (default `1`) limits the depth of the run tree, so by default only a root run starts agents.
+The default foreman instructions follow triage, spec, approval, implementation, review, handoff. Stages are not agents: the foreman can skip a stage for a small fix, or go back when review finds a problem. `spawnableBy` on an agent controls which agents can start it (default: only the foreman). The team setting for the orchestration depth (default `1`) limits the depth of the run tree, so by default only a root run starts agents.
 
 ## 5. Child runs report back
 

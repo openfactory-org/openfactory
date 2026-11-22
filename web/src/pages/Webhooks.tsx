@@ -50,7 +50,7 @@ export function CopyField({ id, label, value }: { id: string; label: string; val
 
 const HEX_SHA256 = `SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | sed 's/^.* //')`;
 
-/** What a sender adds to a delivery, per signature scheme (internal/webhooks/signature.go). */
+/** What a sender adds to a delivery, per signature scheme (the webhook signature checks of the control plane). */
 const SIGNATURES: Record<string, { header: string; how: string; sign: string[] }> = {
   github: {
     header: "X-Hub-Signature-256: sha256=<signature>",

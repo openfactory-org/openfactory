@@ -1,13 +1,13 @@
 # yaml-language-server: $schema=https://openfactory-org.github.io/schemas/v1/factory.schema.json
 schemaVersion: v1
 name: sdlc
-description: Turns labeled issues into reviewed pull requests for the web and iOS apps.
+description: Turns labeled issues into reviewed pull requests for a web app and its API.
 alias: sdlc
 repositories:
   - owner: acme
     name: web-app
   - owner: acme
-    name: ios-app
+    name: api-service
 secrets:
   - NPM_TOKEN
 networkPolicy:

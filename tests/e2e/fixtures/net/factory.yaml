@@ -1,0 +1,12 @@
+# Factory of the restricted network check. A task reaches the control plane
+# (always allowed), the host __ALLOWED_HOST__ and nothing else.
+schemaVersion: v1
+name: of-local-net
+alias: of-local-net
+description: Restricted network policy check.
+repositories: []
+networkPolicy:
+  allowedHosts:
+    - __ALLOWED_HOST__
+agentDefaults:
+  model: claude-sonnet-5-5

@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 	"github.com/openfactory-org/openfactory/internal/runnerproto"
 )
 
@@ -20,18 +20,18 @@ const (
 	skillsDir         = ".openfactory/skills"
 )
 
-// CoreHarness runs a harness of internal/harness (claude, codex or open) inside the runner.
+// CoreHarness runs a harness of internal/harness (claude or codex) inside the runner.
 // The sandbox of the harness is the local machine, in the workspace.
 // One value serves one session: it keeps the harness session ID and the
 // usage totals between turns. It runs one turn at a time.
 type CoreHarness struct {
-	H    core.Harness
+	H    rtcore.Harness
 	Caps []runnerproto.Capability // capabilities to report; nil means {interrupt}
 
 	mu        sync.Mutex
-	sessionID string     // newest harness session ID seen in this process
-	usage     core.Usage // totals of all turns
-	declared  []string   // artifact paths that the harness reported since the last take
+	sessionID string       // newest harness session ID seen in this process
+	usage     rtcore.Usage // totals of all turns
+	declared  []string     // artifact paths that the harness reported since the last take
 
 	now func() time.Time // clock for the turn wall time; nil means time.Now
 }
@@ -54,15 +54,13 @@ func (c *CoreHarness) Capabilities() []runnerproto.Capability {
 // Turn runs one turn of the wrapped harness and maps its events.
 func (c *CoreHarness) Turn(ctx context.Context, req TurnRequest, emit Emitter) TurnResult {
 	resume := c.resumeID(req)
-	hreq := core.HarnessRequest{
-		Run: &core.Run{
-			ID:        req.RunID,
-			SessionID: resume,
-			Config: core.AgentConfig{Harness: core.HarnessConfig{
-				Type:           core.HarnessType(req.Harness.Type),
-				Model:          req.Harness.Model,
-				ReasoningLevel: req.Harness.ReasoningLevel,
-			}},
+	hreq := rtcore.HarnessRequest{
+		RunID:     req.RunID,
+		SessionID: resume,
+		Harness: rtcore.HarnessConfig{
+			Type:           rtcore.HarnessType(req.Harness.Type),
+			Model:          req.Harness.Model,
+			ReasoningLevel: req.Harness.ReasoningLevel,
 		},
 		Prompt:       RenderInput(req.Input),
 		SystemPrompt: req.Harness.SystemPrompt,
@@ -74,6 +72,7 @@ func (c *CoreHarness) Turn(ctx context.Context, req TurnRequest, emit Emitter) T
 		Auth:         req.Auth,
 	}
 	sb := newHostSandbox(req.SandboxID, req.WorkDir, req.Env)
+	sb.agent = req.Agent
 	ch, err := c.H.Run(ctx, sb, hreq)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -132,7 +131,7 @@ type coreTurn struct {
 	durationMS int64     // turn duration that the harness reported; 0 means none
 }
 
-func (t *coreTurn) handle(ev core.HarnessEvent) {
+func (t *coreTurn) handle(ev rtcore.HarnessEvent) {
 	if ev.SessionID != "" {
 		t.session(ev.SessionID)
 	}
@@ -167,9 +166,9 @@ func (t *coreTurn) handle(ev core.HarnessEvent) {
 		if msg == "" {
 			msg = "harness reported an error"
 		}
-		code := string(core.FailureAgentFailed)
+		code := string(rtcore.FailureAgentFailed)
 		if authMessage(msg) {
-			code = string(core.FailureHarnessAuthFailed)
+			code = string(rtcore.FailureHarnessAuthFailed)
 		}
 		t.result = &TurnResult{Outcome: runnerproto.OutcomeError, FailureCode: code, Message: msg}
 	default:
@@ -193,7 +192,7 @@ func (t *coreTurn) session(id string) {
 	}
 }
 
-func (t *coreTurn) message(ev core.HarnessEvent) {
+func (t *coreTurn) message(ev rtcore.HarnessEvent) {
 	if ev.Content == "" {
 		return
 	}
@@ -212,7 +211,7 @@ func (t *coreTurn) message(ev core.HarnessEvent) {
 	t.emit(runnerproto.EventMessage, runnerproto.MessageData{Role: role, Content: content, Truncated: cut})
 }
 
-func (t *coreTurn) toolCall(ev core.HarnessEvent) {
+func (t *coreTurn) toolCall(ev rtcore.HarnessEvent) {
 	d := runnerproto.ToolCallData{
 		CallID:   dataString(ev.Data, "call_id", "id"),
 		Name:     dataString(ev.Data, "name"),
@@ -233,7 +232,7 @@ func (t *coreTurn) toolCall(ev core.HarnessEvent) {
 	t.emit(runnerproto.EventToolCall, d)
 }
 
-func (t *coreTurn) toolResult(ev core.HarnessEvent) {
+func (t *coreTurn) toolResult(ev rtcore.HarnessEvent) {
 	content, cut := cutContent(ev.Content)
 	isErr, _ := ev.Data["is_error"].(bool)
 	t.emit(runnerproto.EventToolResult, runnerproto.ToolResultData{
@@ -246,7 +245,7 @@ func (t *coreTurn) toolResult(ev core.HarnessEvent) {
 
 // addDoneUsage adds the usage of a final event. The harnesses send the same
 // numbers in a usage event first, so it counts only without one.
-func (t *coreTurn) addDoneUsage(u *core.Usage) {
+func (t *coreTurn) addDoneUsage(u *rtcore.Usage) {
 	if u != nil && !t.usageSeen {
 		t.usageSeen = true
 		t.addUsage(u)
@@ -257,7 +256,7 @@ func (t *coreTurn) addDoneUsage(u *core.Usage) {
 // session are partial from the first partial turn on. The duration of the
 // turn counts at its end (endDuration); until then the totals include the
 // duration that the harness reported for the turn.
-func (t *coreTurn) addUsage(u *core.Usage) {
+func (t *coreTurn) addUsage(u *rtcore.Usage) {
 	if u.DurationMS > 0 {
 		t.durationMS = u.DurationMS
 	}
@@ -265,8 +264,8 @@ func (t *coreTurn) addUsage(u *core.Usage) {
 	t.c.usage.InputTokens += u.InputTokens
 	t.c.usage.OutputTokens += u.OutputTokens
 	t.c.usage.CostUSD += u.CostUSD
-	if u.Coverage == core.UsagePartial {
-		t.c.usage.Coverage = core.UsagePartial
+	if u.Coverage == rtcore.UsagePartial {
+		t.c.usage.Coverage = rtcore.UsagePartial
 	}
 	total := t.c.usage
 	t.c.mu.Unlock()
@@ -294,7 +293,7 @@ func (t *coreTurn) endDuration() {
 	}
 }
 
-func (t *coreTurn) sendUsage(total core.Usage) {
+func (t *coreTurn) sendUsage(total rtcore.Usage) {
 	t.emit(runnerproto.EventUsage, runnerproto.UsageData{
 		InputTokens:  total.InputTokens,
 		OutputTokens: total.OutputTokens,
@@ -328,13 +327,13 @@ func envMap(env []string) map[string]string {
 
 // coreMCPServers converts the servers of the start response and adds the
 // headers and the environment of the secrets response. It copies the maps.
-func coreMCPServers(servers map[string]runnerproto.MCPServer, headers, env map[string]map[string]string) map[string]core.MCPServer {
+func coreMCPServers(servers map[string]runnerproto.MCPServer, headers, env map[string]map[string]string) map[string]rtcore.MCPServer {
 	if len(servers) == 0 {
 		return nil
 	}
-	out := make(map[string]core.MCPServer, len(servers))
+	out := make(map[string]rtcore.MCPServer, len(servers))
 	for name, s := range servers {
-		cs := core.MCPServer{URL: s.URL, Command: s.Command, Args: s.Args, Env: mergeEnv(s.Env, env[name])}
+		cs := rtcore.MCPServer{URL: s.URL, Command: s.Command, Args: s.Args, Env: mergeEnv(s.Env, env[name])}
 		if h := headers[name]; len(h) > 0 {
 			cs.Headers = make(map[string]string, len(h))
 			for k, v := range h {
@@ -362,13 +361,13 @@ func mergeEnv(base, extra map[string]string) map[string]string {
 }
 
 // coreSkills converts the skills. The runner wrote them below .openfactory/skills.
-func coreSkills(skills []runnerproto.Skill) []core.Skill {
+func coreSkills(skills []runnerproto.Skill) []rtcore.Skill {
 	if len(skills) == 0 {
 		return nil
 	}
-	out := make([]core.Skill, 0, len(skills))
+	out := make([]rtcore.Skill, 0, len(skills))
 	for _, s := range skills {
-		cs := core.Skill{Name: s.Name, Content: s.Files[skillFile], Path: skillsDir + "/" + s.Name}
+		cs := rtcore.Skill{Name: s.Name, Content: s.Files[skillFile], Path: skillsDir + "/" + s.Name}
 		for name, content := range s.Files {
 			if name == skillFile {
 				continue
@@ -404,9 +403,9 @@ func authMessage(msg string) bool {
 // The harnesses report a bad credential as "<name> auth: ...".
 func startFailureCode(msg string) string {
 	if authMessage(msg) || strings.Contains(msg, " auth: ") {
-		return string(core.FailureHarnessAuthFailed)
+		return string(rtcore.FailureHarnessAuthFailed)
 	}
-	return string(core.FailureAgentFailed)
+	return string(rtcore.FailureAgentFailed)
 }
 
 // cutBytes cuts s to at most n bytes.
@@ -420,23 +419,8 @@ func cutBytes(s string, n int) string {
 // StateFiles returns the session files of the harness, relative to home. It
 // returns no credential files.
 func (c *CoreHarness) StateFiles(home, workDir string) ([]string, error) {
-	var roots []string
-	switch c.H.Type() {
-	case core.HarnessClaude:
-		dirs := []string{workDir}
-		if real, err := filepath.EvalSymlinks(workDir); err == nil && real != workDir {
-			dirs = append(dirs, real)
-		}
-		for _, d := range dirs {
-			roots = append(roots, ".claude/projects/"+encodeClaudeDir(d))
-		}
-	case core.HarnessCodex:
-		roots = []string{".codex/sessions"}
-	default:
-		return nil, nil
-	}
 	var out []string
-	for _, root := range roots {
+	for _, root := range c.stateRoots(workDir) {
 		err := filepath.WalkDir(filepath.Join(home, filepath.FromSlash(root)), func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
 				if errors.Is(err, fs.ErrNotExist) {
@@ -461,6 +445,28 @@ func (c *CoreHarness) StateFiles(home, workDir string) ([]string, error) {
 	return out, nil
 }
 
+// stateRoots returns the session directories of the harness, relative to the
+// home directory and with forward slashes. The claude harness keys them by
+// the work directory, also by its target when it is a symbolic link. Other
+// harnesses have none.
+func (c *CoreHarness) stateRoots(workDir string) []string {
+	switch c.H.Type() {
+	case rtcore.HarnessClaude:
+		dirs := []string{workDir}
+		if real, err := filepath.EvalSymlinks(workDir); err == nil && real != workDir {
+			dirs = append(dirs, real)
+		}
+		roots := make([]string, 0, len(dirs))
+		for _, d := range dirs {
+			roots = append(roots, ".claude/projects/"+encodeClaudeDir(d))
+		}
+		return roots
+	case rtcore.HarnessCodex:
+		return []string{".codex/sessions"}
+	}
+	return nil
+}
+
 // encodeClaudeDir replaces each character that is not an ASCII letter or
 // digit with '-'.
 func encodeClaudeDir(dir string) string {
@@ -480,7 +486,7 @@ func isCredentialFile(name string) bool {
 }
 
 // declareArtifacts keeps the paths of an artifact event of the harness.
-func (c *CoreHarness) declareArtifacts(ev core.HarnessEvent) {
+func (c *CoreHarness) declareArtifacts(ev rtcore.HarnessEvent) {
 	var paths []string
 	if p, ok := ev.Data["path"].(string); ok && p != "" {
 		paths = append(paths, p)
@@ -522,25 +528,10 @@ func (c *CoreHarness) TranscriptPath(home, workDir string) string {
 	c.mu.Lock()
 	id := c.sessionID
 	c.mu.Unlock()
-	var roots []string
-	switch c.H.Type() {
-	case core.HarnessClaude:
-		dirs := []string{workDir}
-		if real, err := filepath.EvalSymlinks(workDir); err == nil && real != workDir {
-			dirs = append(dirs, real)
-		}
-		for _, d := range dirs {
-			roots = append(roots, filepath.Join(home, ".claude", "projects", encodeClaudeDir(d)))
-		}
-	case core.HarnessCodex:
-		roots = []string{filepath.Join(home, ".codex", "sessions")}
-	default:
-		return ""
-	}
 	var best string
 	var bestTime time.Time
-	for _, root := range roots {
-		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+	for _, root := range c.stateRoots(workDir) {
+		_ = filepath.WalkDir(filepath.Join(home, filepath.FromSlash(root)), func(p string, d fs.DirEntry, err error) error {
 			if err != nil || !d.Type().IsRegular() || !strings.HasSuffix(d.Name(), ".jsonl") {
 				return nil //nolint:nilerr // best-effort search: an unreadable entry or a missing root is skipped
 			}

@@ -1,0 +1,28 @@
+[Unit]
+Description=Open Factory microVM worker
+Documentation=https://github.com/openfactory-org/openfactory/blob/main/docs/self-hosted-machines.md
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/var/lib/openfactory/worker/identity/worker.json
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/openfactory-runtime worker run --config /etc/openfactory/worker.yaml
+Restart=always
+RestartSec=5
+# The VMs live in the delegated cgroup subtree of this unit. A restart or an
+# upgrade of the agent must not stop them, so only the main process is
+# stopped; the next start adopts the running VMs.
+Delegate=yes
+KillMode=process
+TimeoutStopSec=30
+LimitNOFILE=1048576
+TasksMax=infinity
+OOMScoreAdjust=-500
+ProtectHome=yes
+PrivateTmp=yes
+StateDirectory=openfactory
+ConfigurationDirectory=openfactory
+
+[Install]
+WantedBy=multi-user.target

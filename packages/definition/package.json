@@ -1,0 +1,24 @@
+{
+  "name": "@openfactory/definition",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Parse, validate, compile, resolve and diff factory definitions; schema and docs generators.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./node": "./src/node.ts",
+    "./validate": "./src/validate-schema.ts"
+  },
+  "dependencies": {
+    "@openfactory/core": "*"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -b",
+    "gen:schemas": "node scripts/run.mjs scripts/gen-schemas.ts && node scripts/gen-default-agents.ts",
+    "docs-gen": "node scripts/run.mjs scripts/docs-gen.ts",
+    "gen:check": "node scripts/run.mjs scripts/gen-schemas.ts --check && node scripts/gen-default-agents.ts --check && node scripts/run.mjs scripts/docs-gen.ts --check",
+    "golden:capture": "bash test/golden/capture/capture.sh"
+  }
+}

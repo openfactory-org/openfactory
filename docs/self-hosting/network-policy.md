@@ -60,12 +60,12 @@ In a restricted policy, Open Factory always adds the hosts that the run needs. `
 
 | Required host | Source |
 |---|---|
-| Control plane | The host of `OF_INTERNAL_URL`, else `OF_PUBLIC_URL`, for the runner and the orchestration MCP server. |
+| Control plane | The host of `OF_PUBLIC_URL`, for the runner and the orchestration MCP server. |
+| Run data storage | The R2 S3 host `<account>.r2.cloudflarestorage.com`, built from `OF_R2_ACCOUNT_ID`. Without it, a restricted run cannot upload its workspace snapshots. |
 | Repository forges | The host of each repository clone URL of the run, for example a GitHub Enterprise Server or self-managed GitLab host. For github.com repositories, also `github.com`, `api.github.com` and `codeload.github.com`. For GitLab.com, `gitlab.com`. For Azure DevOps, `dev.azure.com`. |
 | MCP servers | The host of each `url` MCP server, including servers from `managedId`. Proxied and built-in servers resolve to the control plane, which reaches their upstream hosts. |
-| Image registry | The registry host of the sandbox image (environment image, then machine image, then `OF_SANDBOX_IMAGE`, then the built-in default). Docker Hub images add `registry-1.docker.io`. |
-| Inference | The harness CLI calls the model provider from the sandbox. `claude`: `api.anthropic.com`. `codex`: `api.openai.com`. An `ANTHROPIC_BASE_URL` or `OPENAI_BASE_URL` in the harness credential replaces the default host. Claude Code on Bedrock uses `bedrock-runtime.<AWS_REGION>.amazonaws.com` (default region `us-east-1`), or the host of `ANTHROPIC_BEDROCK_BASE_URL`. |
-| Cloud identity | With `cloudProviders`: `sts.amazonaws.com` for AWS; `sts.googleapis.com` and `iamcredentials.googleapis.com` for Google Cloud. |
+| Inference | The harness CLI calls the model provider from the sandbox. `claude`: `api.anthropic.com`. `codex`: `api.openai.com`. An `ANTHROPIC_BASE_URL` or `OPENAI_BASE_URL` in the harness credential replaces the default host. |
+| Cloud identity | With `cloudProviders`: `sts.googleapis.com` and `iamcredentials.googleapis.com` for Google Cloud. |
 
 Other hosts are not added. Add them yourself, for example package registries with `builtin/package-registries`, or the authentication hosts of `builtin/claude-code` and `builtin/codex`.
 
@@ -115,17 +115,25 @@ curl -sS "${OF_PUBLIC_URL}/api/v1/networking/policies" \
 
 ## Enforcement
 
-| Backend | Enforcement |
-|---|---|
-| `local` (development only) | None. |
-| `kubernetes` | A NetworkPolicy and an egress proxy sidecar for each restricted sandbox. See [Kubernetes](#kubernetes). |
-| remote worker | The same as the worker's backend. |
+Each sandbox provider enforces a restricted policy in its own way. A provider states what it can do as its `egress` capability: `native`, `in-sandbox` or `none`. See [Sandbox providers](../sandbox-providers.md) for the value of each provider.
 
-If the `kubernetes` backend cannot enforce a restricted policy, the run ends with `invalid_configuration`, and the error names the settings to use. `OF_ALLOW_UNENFORCED_NETWORK_POLICY=true` starts the run with a warning instead. Set it only if another control enforces egress for sandbox Pods.
+| `egress` | Enforcement | Providers |
+|---|---|---|
+| `native` | The platform blocks all hosts that the policy does not allow, outside the sandbox. | `cloudflare-sandbox` (the provider Worker intercepts all outbound HTTP and HTTPS), `daytona` (domain allow list, when the policy fits), microVM workers (host firewall and a proxy for each VM) |
+| `in-sandbox` | The runner locks the network inside the sandbox before it starts the agent. See [In-sandbox lock](#in-sandbox-lock). | `boatdev`, and `daytona` when its allow list cannot hold the policy |
+| `none` | Nothing. The provider cannot limit egress. | Development process workers, and a provider that has no mechanism |
+
+Egress control on hosted providers is best effort: Open Factory uses what each provider offers.
+
+### The capability gate
+
+When a run has a restricted policy and its target declares `egress: none`, the dispatcher refuses the run with the failure code `invalid_configuration`. The error names the target. Set the control-plane variable `OF_ALLOW_UNENFORCED_NETWORK_POLICY=true` to start such runs with a warning instead. Set it only if another control limits egress for that target.
+
+A policy that has IP literals is refused on `cloudflare-sandbox`, because its intercept matches host names. Use host names, or choose another provider.
 
 ### Egress proxy
 
-A NetworkPolicy cannot match host names, so the `kubernetes` backend enforces `allowedHosts` and `deniedHosts` with `openfactory netguard`, an HTTP forward proxy for plain HTTP and `CONNECT` tunnels. It runs as a sidecar in each restricted sandbox Pod (see [Proxy sidecar for each sandbox](#proxy-sidecar-for-each-sandbox)).
+A network rule cannot match host names for HTTPS, so the runtime enforces `allowedHosts` and `deniedHosts` with `openfactory-runtime netguard`, an HTTP forward proxy for plain HTTP and `CONNECT` tunnels. The runner starts it as the user `ofproxy`. On a microVM worker, the host starts one for each VM.
 
 The proxy applies these rules in order:
 
@@ -133,173 +141,51 @@ The proxy applies these rules in order:
 2. A denied host is blocked, even when it is also allowed.
 3. Only allowed hosts are reachable.
 
+The proxy checks the address of each connection when it dials. It refuses private, link-local, CGNAT, cloud metadata and other reserved addresses, so an allowed host name that resolves to such an address is blocked.
+
 A blocked request gets HTTP status `403` with the body `Open Factory network policy blocked access to <host>`.
 
-> **Important:** The proxy controls only programs that honour the proxy variables. A program that opens raw sockets bypasses it on ports 80 and 443. The NetworkPolicy blocks all other ports. The [egress lock](#egress-lock) closes ports 80 and 443. It is on by default when it can work.
-
-### Kubernetes
-
-Each restricted sandbox gets a NetworkPolicy named after its Job. It selects the Pod by the label `openfactory.dev/sandbox` and allows egress only to:
-
-| Destination | Rule |
-|---|---|
-| DNS | Port 53 over UDP and TCP, to Pods in any namespace. |
-| Control plane | The Pods that match `OF_K8S_CONTROL_PLANE_SELECTOR` in `OF_K8S_CONTROL_PLANE_NAMESPACE`. Without a selector: the IP address of the control URL, only if its host is an IP address. |
-| Ports 80 and 443 | TCP ports 80 and 443 to any address, for the proxy sidecar. Only if the Pod has the sidecar. |
-
-When the control URL host is a DNS name (for example the server Service), the NetworkPolicy needs the selector. Otherwise it has no control plane rule. The selector rule allows all ports of the selected Pods, so it also matches after a Service forwards port 80 to the container port. The Helm chart sets the selector to the server Pods of the release by default. See [Kubernetes: Network policy](kubernetes.md#network-policy) for the default and the override (`sandbox.k8s.controlPlane`).
-
-The Job owns the NetworkPolicy, so it goes away with the Job (the backend also deletes it). An unrestricted sandbox gets none.
-
-- **Without the sidecar image (`OF_K8S_EGRESS_PROXY_SIDECAR_IMAGE`), a restricted sandbox can reach DNS and the control plane only.** This blocks forges, registries and inference. The Helm chart sets the image to the runner image by default.
-- The cluster network plugin (CNI) must enforce NetworkPolicy. Otherwise the objects exist but have no effect. See [Check that the cluster enforces NetworkPolicy](#check-that-the-cluster-enforces-networkpolicy).
-- The Role needs `create`, `get`, `patch` and `delete` for `networkpolicies`. The Helm chart adds them.
-
-If the backend cannot create the NetworkPolicy, the run ends with `invalid_configuration`, unless `OF_ALLOW_UNENFORCED_NETWORK_POLICY=true`.
-
-#### Check that the cluster enforces NetworkPolicy
-
-If the network plugin does not enforce NetworkPolicy, the cluster accepts the object and a restricted run has no limit. At startup, the backend tests this in the background, in the sandbox namespace, with no extra permission:
-
-1. It starts a target Pod that listens on a TCP port.
-2. It creates a NetworkPolicy that denies all egress for Pods with the role `denied`.
-3. It starts two client Pods. The `control` client has no policy and must connect. The `denied` client has the deny policy. It waits 3 seconds, then tries to connect.
-4. It deletes all Pods and the policy.
-
-| Result | Meaning |
-|---|---|
-| `enforced` | The `denied` client could not connect. The server logs this at info level. |
-| `not_enforced` | The `denied` client connected. The server logs an error. |
-| no answer | The test could not finish, for example the image does not pull or the `control` client could not connect. The server logs a warning and tries again when a restricted run needs the answer, at most every 5 minutes. |
-
-The probe Pods run `openfactory netprobe` from `OF_K8S_EGRESS_PROXY_SIDECAR_IMAGE`, else `OF_RUNNER_IMAGE` (no image: no check). They run as user 65532 without capabilities, with a read-only root file system, and copy the node selector, tolerations, affinity, runtime class, priority class and `imagePullSecrets` of the pod template. A leftover probe Pod ends by itself after 5 minutes.
-
-| Setting | Values | Effect |
-|---|---|---|
-| `OF_K8S_NETWORK_POLICY_CHECK` | `probe` (default), `off` | `off` does not run the probe. |
-| `OF_K8S_NETWORK_POLICY_ENFORCEMENT` | `warn` (default), `require` | `warn`: a restricted run always starts. After `not_enforced`, the server logs a warning for each restricted run. `require`: a restricted run starts only after `enforced`, else it ends with `invalid_configuration`. `require` needs `OF_K8S_NETWORK_POLICY_CHECK=probe`. |
-
-`OF_ALLOW_UNENFORCED_NETWORK_POLICY=true` overrides `require` and logs a warning. With `require`, the first restricted run waits for a running probe: a few seconds, or up to 3 minutes for an image pull.
-
-Typical causes of `not_enforced`: a plugin without policy support or installed in a mode without it, or a managed cluster with its network policy add-on off.
-
-#### The sandbox does not start before the policy is active
-
-A network plugin applies a NetworkPolicy shortly after a Pod starts (on k3s, a connection at 5 ms passed, one at 250 ms was blocked). A process that connects in that gap is not limited.
-
-To close the gap, a restricted sandbox Pod gets the init container `egress-wait`. It runs before every container with sandbox code: the runner and tool image copies, your pod template's init containers and the sandbox container. It runs `openfactory netprobe wait-blocked`, which dials the kubelet of the node (`status.hostIP`, port 10250). The kubelet always listens and a sandbox NetworkPolicy never allows it, so the dial works until the policy is active. After two failed dials in a row, the init container ends. The plugin limits the whole Pod, so the policy is then active for the sandbox container too.
-
-| Rule | Detail |
-|---|---|
-| Guarantee | The runner, and so every agent process, starts only after a direct dial to the target fails. |
-| Time | At most 30 seconds (`OF_K8S_EGRESS_WAIT_TIMEOUT`). Usually a few hundred milliseconds. |
-| Timeout | Exit code 75. The sandbox container does not start. The sandbox ends with `network_policy_timeout`, and the run goes to `error` with that failure code. The platform retries it, at most 3 sessions in sequence. |
-| No wait | For an unrestricted sandbox, after a probe result `not_enforced`, or with `OF_ALLOW_UNENFORCED_NETWORK_POLICY=true`. Without a probe answer, the wait runs: the sandbox fails instead of running without a limit. |
-| Image | `OF_RUNNER_IMAGE`, else the proxy sidecar image, else the sandbox image. |
-
-A refused connection counts as blocked, because a plugin can reject instead of drop. The target is not port 80 or 443, because the egress lock refuses these ports from the start. The lock does not replace the wait: the wait covers all ports.
-
-Limits of the wait:
-
-- If a node firewall refuses port 10250 from Pods, the wait ends at once and gives no guarantee. Test with `openfactory netprobe dial --addr <node IP>:10250` in a Pod without a policy: it must connect.
-- A plugin that always allows Pod-to-node traffic never blocks the target. Every restricted sandbox then ends with `network_policy_timeout` after 30 seconds. The Amazon VPC CNI on EKS is such a plugin: on EKS, set `OF_K8S_EGRESS_WAIT_ADDR` (Helm `sandbox.k8s.networkPolicy.waitAddr`), for example to the ClusterIP and port of a Service in another namespace.
-
-| Setting | Default | Effect |
-|---|---|---|
-| `OF_K8S_EGRESS_WAIT_TIMEOUT` | `30s` | Time of the wait, for example `60s`. At least `1s`. `off` turns the wait off. |
-| `OF_K8S_EGRESS_WAIT_ADDR` | the kubelet of the node, port `10250` | `host:port` that the wait dials. The server refuses other formats. |
-
-A custom target must be reachable without a policy and blocked by the sandbox NetworkPolicy: not DNS, not the control plane, not port 80 or 443. Test it with `openfactory netprobe dial --addr <host:port>` in a Pod without a policy.
-
-> **Warning:** With `OF_K8S_EGRESS_WAIT_TIMEOUT=off`, a process that connects before the plugin applies the policy is not limited. Turn the wait off only if the plugin applies the policy before the Pod starts, or another control limits egress. `OF_ALLOW_UNENFORCED_NETWORK_POLICY=true` also turns the wait off; use it only for a cluster that does not enforce policies.
-
-#### Proxy sidecar for each sandbox
-
-Set `OF_K8S_EGRESS_PROXY_SIDECAR_IMAGE` to an image with the `openfactory` binary. The Helm chart uses the runner image by default. Each restricted sandbox Pod then gets the sidecar `egress-proxy`, which runs `openfactory netguard` with the host lists of the sandbox.
-
-The sidecar is a native sidecar (an init container with `restartPolicy: Always`, Kubernetes 1.29 or later). The sandbox container starts after the proxy listens, and the Job completes when the sandbox container ends.
-
-A restricted sandbox container gets these variables:
+The sandbox gets these variables when the policy is restricted:
 
 | Variable | Value |
 |---|---|
-| `HTTPS_PROXY`, `HTTP_PROXY`, `https_proxy`, `http_proxy` | `http://127.0.0.1:3128`, the sidecar. |
-| `NO_PROXY`, `no_proxy` | The host of the control URL, `localhost` and `127.0.0.1`. |
+| `HTTPS_PROXY`, `HTTP_PROXY`, `https_proxy`, `http_proxy` | The address of the proxy. |
+| `NO_PROXY`, `no_proxy` | `localhost` and `127.0.0.1`. |
 | `OF_NETGUARD_REPORT` | The URL of the report of blocked hosts. See [Blocked hosts in the diagnostics of the run](#blocked-hosts-in-the-diagnostics-of-the-run). |
 
-An unrestricted sandbox gets no sidecar and none of these variables.
+An unrestricted sandbox gets none of these variables.
 
-A NetworkPolicy cannot select one container, so ports 80 and 443 are also open for the sandbox container. A program that ignores the proxy variables can connect directly on them. The [egress lock](#egress-lock) closes this gap.
+> **Important:** The proxy controls only programs that honour the proxy variables. On `in-sandbox` and microVM targets, a lock closes every other path. On `native` targets, the platform closes it.
 
-#### Blocked hosts in the diagnostics of the run
+### In-sandbox lock
 
-The sidecar serves a report of blocked hosts at `http://127.0.0.1:3129/blocked`, reachable only inside the Pod (`OF_NETGUARD_REPORT`). The runner reads it every 5 seconds and when the session ends, so the sandbox image needs no `curl`. For each blocked host, the runner sends one diagnostic `network/egress_blocked` with `data.blocked_host` and `data.count`. A diagnostic is a warning, not a result, and does not appear in the transcript. Read it with `GET /api/v1/runs/{runId}/diagnostics`.
+The in-sandbox lock is for providers that cannot filter egress themselves. The runner starts as root and does this before it starts the agent:
 
-#### Egress lock
+1. It creates the users `ofproxy` and `agent` (uid 1001).
+2. It starts the proxy as `ofproxy`.
+3. It adds `iptables` and `ip6tables` OUTPUT rules. `ofproxy` may go out. `agent` may use loopback, except the daemon ports of the provider. Every other TCP or UDP connection from `agent` is rejected.
+4. It probes a direct connection, a connection by IP address and the daemon ports as `agent`. If a probe connects, the run fails and does not start the agent.
+5. It starts the harness as `agent`. The runner never runs git as root in the workspace.
 
-The lock closes ports 80 and 443 for every process of the sandbox except the proxy. Without it, a program in a restricted sandbox that ignores the proxy variables can connect to any address on these ports.
+The agent can use loopback, for example to run a test server. The sandbox image has no `sudo`, so the agent cannot change the rules. The agent can reach only the proxy and its own loopback.
 
-| `OF_K8S_EGRESS_LOCK` | Effect |
+A provider whose sandbox cannot run `iptables` as root declares `egress: none`.
+
+### MicroVM workers
+
+A microVM worker adds host firewall rules (`nftables`) for each VM. With any policy, the host drops VM-to-VM traffic, VM-to-host traffic (except the proxy port), private ranges, cloud metadata addresses and all IPv6. With a restricted policy, the VM has no route and no DNS: it reaches the internet only through the proxy. With no policy, the VM gets NAT and a DNS relay. See [Self-hosted workers](../self-hosted-machines.md#network).
+
+### Blocked hosts in the diagnostics of the run
+
+The proxy serves a report of blocked hosts. The runner reads it every 5 seconds and when the session ends (`OF_NETGUARD_REPORT`). For each blocked host, the runner sends one diagnostic `network/egress_blocked` with `data.blocked_host` and `data.count`. A diagnostic is a warning, not a result, and does not appear in the transcript. Read it with `GET /api/v1/runs/{runId}/diagnostics`.
+
+### A restricted run does not start
+
+| Symptom | Cause |
 |---|---|
-| Not set | `iptables` when `OF_K8S_EGRESS_PROXY_SIDECAR_IMAGE` is set and `OF_K8S_RUN_AS_USER` is numeric (the chart sets both by default). Otherwise `none`. |
-| `iptables` | The lock is on. The server does not start without the sidecar image or with `OF_K8S_RUN_AS_USER=image`. |
-| `none` | The lock is off. Set it when the sandbox namespace cannot allow `NET_ADMIN`, and accept the gap. |
-
-With the lock on, a restricted sandbox Pod gets the init container `egress-lock`, which runs first. It adds a firewall rule to the Pod network (and an `ip6tables` rule for IPv6): a TCP connection to port 80 or 443 is refused unless its process runs as the proxy user, 65532. If the sandbox user or a template `runAsUser` is 65532, the proxy uses the next free user, for example 65533. A program that ignores the proxy variables gets `connection refused`. The rule goes away with the Pod and does not change the node or other Pods.
-
-The lock needs a numeric sandbox user. A restricted run with `platform.linux.user: image` fails while the lock is on. The sandbox container always gets `runAsNonRoot: true` and no capabilities, so it cannot switch to the proxy user.
-
-| Requirement | Reason |
-|---|---|
-| `OF_K8S_EGRESS_PROXY_SIDECAR_IMAGE` | The lock works with the sidecar. The setting is not valid without it. |
-| `sh`, `grep`, `iptables` and `ip6tables` in the sidecar image | The lock container uses that image. The `openfactory` image of this project has them. In your own image, add the package `iptables`. |
-| The capabilities `NET_ADMIN` and `NET_RAW` for the init container | The container runs as root with only these two capabilities and no privilege escalation. The Pod Security levels `baseline` and `restricted` refuse `NET_ADMIN`. Set the level `privileged` on the sandbox namespace, or add an exception for the container `egress-lock`. |
-| A non-root sandbox container | A root process could switch to the proxy user. Use a numeric `OF_K8S_RUN_AS_USER` (default 1000), not 65532. |
-| Linux nodes with `iptables` and its `owner` match | This is the normal case. |
-
-If the control URL uses port 80 or 443 (for example `https://openfactory.example.com`), the sandbox reaches the control plane through the proxy: the backend always allows its host in the proxy and removes it from `NO_PROXY`. A program that ignores the proxy variables then cannot reach the control plane. On another port, for example `http://openfactory.ns.svc:8080`, the sandbox connects directly.
-
-Seeing the rule from inside a Pod needs `NET_ADMIN`. Read `kubectl logs <pod> -c egress-lock` instead: a failed init container shows the `iptables` error.
-
-#### A restricted run does not start
-
-| Message | Cause |
-|---|---|
-| `create network policy for restricted task` | The Role cannot create NetworkPolicy objects. Add `networkpolicies` to the Role. |
-| `the cluster does not enforce NetworkPolicy` | `require`, and the probe found `not_enforced`. Install a plugin that enforces policies. See [Check that the cluster enforces NetworkPolicy](#check-that-the-cluster-enforces-networkpolicy). |
-| `it is not known that the cluster enforces NetworkPolicy` | `require`, and the probe had no answer. The error names the reason, for example an image that does not pull. |
-| The run ends with `network_policy_timeout` | `egress-wait` could still reach the kubelet after 30 seconds: the plugin applied the policy too late, or not at all. Read `kubectl logs <pod> -c egress-wait`. See [The sandbox does not start before the policy is active](#the-sandbox-does-not-start-before-the-policy-is-active). |
-| `egress-lock` init container fails | The lock is on (the default), and the namespace refuses `NET_ADMIN`, or the image has no `iptables`. Read `kubectl logs <pod> -c egress-lock`. Allow `NET_ADMIN` for the container `egress-lock`, or set `OF_K8S_EGRESS_LOCK=none`. |
-
-#### Extra rules
-
-Kubernetes combines all policies that select a Pod, so your own NetworkPolicy in the sandbox namespace can only allow more.
-
-This example allows DNS and HTTPS for all Pods that Open Factory manages. **It also opens port 443 for restricted runs**, so use it only when no run has a restricted policy:
-
-```yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: factory-sandbox-egress
-  namespace: openfactory-sandboxes
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/managed-by: openfactory
-  policyTypes: ["Egress"]
-  egress:
-    - ports:
-        - protocol: UDP
-          port: 53
-        - protocol: TCP
-          port: 53
-    - ports:
-        - protocol: TCP
-          port: 443
-```
-
-Make sure that sandbox Pods can still reach `OF_INTERNAL_URL` (or `OF_PUBLIC_URL`), your forges and your registries.
+| `invalid_configuration` naming the target | The target has `egress: none`. Choose another provider, or set `OF_ALLOW_UNENFORCED_NETWORK_POLICY=true`. |
+| `invalid_configuration`, "IP literals" | The policy lists an IP address and the target is `cloudflare-sandbox`. List host names. |
+| The run fails before the agent starts, with a lock probe error | The in-sandbox lock did not close a path. Check that the sandbox image is the current one and that the provider allows `iptables` for root. |
 
 ## Related pages
 

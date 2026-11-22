@@ -8,11 +8,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 )
 
 // MCPTransport classifies a server entry.
-func MCPTransport(s core.MCPServer) string {
+func MCPTransport(s rtcore.MCPServer) string {
 	switch {
 	case s.Command != "":
 		return "stdio"
@@ -37,7 +37,7 @@ func IsSSEURL(raw string) bool {
 }
 
 // SortedServerNames returns map keys sorted.
-func SortedServerNames(servers map[string]core.MCPServer) []string {
+func SortedServerNames(servers map[string]rtcore.MCPServer) []string {
 	names := make([]string, 0, len(servers))
 	for n := range servers {
 		names = append(names, n)
@@ -53,7 +53,7 @@ func SortedServerNames(servers map[string]core.MCPServer) []string {
 //
 // Entries that only carry a managedId (not resolved to a transport by the planner)
 // are skipped and reported in warnings.
-func ClaudeMCPConfig(servers map[string]core.MCPServer) ([]byte, []string) {
+func ClaudeMCPConfig(servers map[string]rtcore.MCPServer) ([]byte, []string) {
 	var warnings []string
 	out := map[string]any{}
 	for _, name := range SortedServerNames(servers) {
@@ -87,7 +87,7 @@ func nonNil(a []string) []string {
 }
 
 // CodexMCPConfigTOML renders the [mcp_servers.*] tables of a Codex config.toml.
-func CodexMCPConfigTOML(servers map[string]core.MCPServer) (string, []string) {
+func CodexMCPConfigTOML(servers map[string]rtcore.MCPServer) (string, []string) {
 	var warnings []string
 	var b strings.Builder
 	for _, name := range SortedServerNames(servers) {

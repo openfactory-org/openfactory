@@ -1,0 +1,111 @@
+{
+  "$id": "https://openfactory-org.github.io/schemas/v1/machine.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "machines/<name>.yaml: compute for agent runs.",
+  "properties": {
+    "description": {
+      "description": "Short description of the machine.",
+      "type": "string"
+    },
+    "failureSessionRetentionMinutes": {
+      "description": "Minutes that the sandbox of a failed run is kept. Without a value, the sandbox is released at once.",
+      "maximum": 60,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "instanceShape": {
+      "additionalProperties": false,
+      "description": "CPU and memory of the sandbox. Both values must be powers of two.",
+      "properties": {
+        "memoryGb": {
+          "description": "Memory in GB.",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "vcpus": {
+          "description": "Number of virtual CPUs.",
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "vcpus",
+        "memoryGb"
+      ],
+      "type": "object"
+    },
+    "platform": {
+      "additionalProperties": false,
+      "description": "Operating system, architecture and image of the sandbox.",
+      "properties": {
+        "arch": {
+          "default": "x86_64",
+          "description": "CPU architecture.",
+          "enum": [
+            "x86_64",
+            "aarch64"
+          ],
+          "type": "string"
+        },
+        "linux": {
+          "additionalProperties": false,
+          "description": "Linux settings.",
+          "properties": {
+            "image": {
+              "description": "Container image of the sandbox. No spaces or tabs.",
+              "minLength": 1,
+              "type": "string"
+            },
+            "registryCredentialSecretName": {
+              "$ref": "common.schema.json#/$defs/secretName",
+              "description": "Secret with the credential to pull a private image."
+            },
+            "user": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "const": "image"
+                }
+              ],
+              "default": 1000,
+              "description": "User of the sandbox. A number sets the user and group IDs. image keeps the user of the image. Root (0) is not allowed."
+            }
+          },
+          "required": [
+            "image"
+          ],
+          "type": "object"
+        },
+        "os": {
+          "default": "linux",
+          "description": "Operating system of the sandbox. Machines run Linux only.",
+          "enum": [
+            "linux"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "linux"
+      ],
+      "type": "object"
+    },
+    "setupCommands": {
+      "description": "Commands that run in order after the repositories are checked out.",
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "platform"
+  ],
+  "title": "Machine",
+  "type": "object"
+}

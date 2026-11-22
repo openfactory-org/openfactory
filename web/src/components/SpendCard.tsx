@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrap } from "../api/client";
-import type { operations } from "../api/schema";
+import type { operations } from "@openfactory/api-client";
 import { money, percent } from "../lib/format";
 import { Card, Metric } from "./ui";
 

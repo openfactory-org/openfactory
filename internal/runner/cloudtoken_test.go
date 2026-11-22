@@ -44,13 +44,13 @@ func TestCloudTokenHelper(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := runner.CloudToken(context.Background(), state, "sts.amazonaws.com", 900, &buf); err != nil {
+	if err := runner.CloudToken(context.Background(), state, "//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/p/providers/of", 900, &buf); err != nil {
 		t.Fatal(err)
 	}
 	if buf.String() != "jwt-abc" {
 		t.Fatalf("output %q, want only the token", buf.String())
 	}
-	if got.Audience != "sts.amazonaws.com" || got.TTLSeconds != 900 || auth != "Bearer ofs_test" {
+	if got.Audience != "//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/p/providers/of" || got.TTLSeconds != 900 || auth != "Bearer ofs_test" {
 		t.Fatalf("request %+v auth %q", got, auth)
 	}
 

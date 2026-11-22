@@ -25,7 +25,7 @@ func (r *runner) withConversation(ctx context.Context, input []runnerproto.Input
 	if r.conversationDone {
 		return input
 	}
-	if r.start.Session <= 1 || r.harnessStateRestored || r.start.Harness.Type == "open" {
+	if r.start.Session <= 1 || r.harnessStateRestored {
 		return input
 	}
 	r.conversationDone = true

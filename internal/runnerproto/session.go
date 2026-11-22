@@ -70,20 +70,45 @@ type StartResponse struct {
 	// Cloud is the cloud identity of the session. Nil means
 	// that the factory configures no cloud provider.
 	Cloud *CloudIdentity `json:"cloud,omitempty"`
+	// RunnerVersion is the runner version that the control plane expects.
+	// When it is set and differs from the version of the runner, the runner
+	// stops. Empty means that the control plane does not check.
+	RunnerVersion string `json:"runner_version,omitempty"`
+	// NetworkPolicy is the network policy of the session. The in-sandbox
+	// lock enforces it. Nil means that the control plane sends no policy: a
+	// runner that must lock the network then fails closed.
+	NetworkPolicy *NetworkPolicy `json:"network_policy,omitempty"`
+	// EgressLock is EgressLockRequired or EgressLockOff. A runner that must
+	// lock the network fails closed when it is EgressLockOff.
+	EgressLock string `json:"egress_lock,omitempty"`
+}
+
+// Values of StartResponse.EgressLock.
+const (
+	// EgressLockRequired means that the runner locks the network when the
+	// provider asks for it (OF_EGRESS_LOCK).
+	EgressLockRequired = "required"
+	// EgressLockOff means that the control plane does not want the lock.
+	EgressLockOff = "off"
+)
+
+// NetworkPolicy is the network policy of a session.
+type NetworkPolicy struct {
+	// Restricted is true when only the allowed hosts are reachable.
+	Restricted bool `json:"restricted"`
+	// AllowedHosts are the hosts that a restricted policy allows.
+	AllowedHosts []string `json:"allowed_hosts"`
+	// DeniedHosts are hosts that are never reachable, also when allowed.
+	DeniedHosts []string `json:"denied_hosts"`
+	// AlwaysAllow are platform hosts that are always reachable: the control
+	// plane and the run data store. A leading "." matches subdomains.
+	AlwaysAllow []string `json:"always_allow,omitempty"`
 }
 
 // CloudIdentity tells the runner which cloud credential files to write. The
 // files hold no token: the SDKs get each token from the runner.
 type CloudIdentity struct {
-	AWS *CloudAWS `json:"aws,omitempty"`
 	GCP *CloudGCP `json:"gcp,omitempty"`
-}
-
-// CloudAWS is the AWS part of a CloudIdentity.
-type CloudAWS struct {
-	RoleARN     string `json:"role_arn"`
-	Audience    string `json:"audience"`
-	SessionName string `json:"session_name"`
 }
 
 // CloudGCP is the GCP part of a CloudIdentity.

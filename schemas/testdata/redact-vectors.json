@@ -1,0 +1,225 @@
+{
+  "description": "Generated from internal/redact at go-final. terms: Terms(values, min_len) in order (stable sort by UTF-8 byte length, longest first; min_len compares byte length; JSON escaping follows Go json.Marshal, which escapes \u003c, \u003e and \u0026 as \\u003c, \\u003e, \\u0026). string: NewWithMin(min_len, secrets...).String(input). json: New(secrets...).JSON(input).",
+  "json": [
+    {
+      "name": "escaped value",
+      "secrets": [
+        "quote\"and\\back-slash-1"
+      ],
+      "input": "{\"k\":\"quote\\\"and\\\\back-slash-1\"}",
+      "output": "{\"k\":\"***\"}"
+    },
+    {
+      "name": "invalid after redaction",
+      "secrets": [
+        "\"abcdefgh"
+      ],
+      "input": "{\"a\":\"x\"}\"abcdefgh",
+      "output": "{\"redacted\":true}"
+    },
+    {
+      "name": "no secrets",
+      "secrets": [],
+      "input": "{\"a\":\"b\"}",
+      "output": "{\"a\":\"b\"}"
+    },
+    {
+      "name": "nested",
+      "secrets": [
+        "super-secret-1"
+      ],
+      "input": "{\"cmd\":\"echo super-secret-1\",\"n\":3,\"nested\":{\"list\":[\"a super-secret-1 b\",2]}}",
+      "output": "{\"cmd\":\"echo ***\",\"n\":3,\"nested\":{\"list\":[\"a *** b\",2]}}"
+    }
+  ],
+  "mark": "***",
+  "min_len": 8,
+  "string": [
+    {
+      "name": "raw",
+      "secrets": [
+        "s3cr3t/value+with\u0026chars=1"
+      ],
+      "min_len": 8,
+      "input": "a s3cr3t/value+with\u0026chars=1 b",
+      "output": "a *** b"
+    },
+    {
+      "name": "three forms",
+      "secrets": [
+        "token-abc123XYZ"
+      ],
+      "min_len": 8,
+      "input": "raw token-abc123XYZ b64 dG9rZW4tYWJjMTIzWFla url token-abc123XYZ",
+      "output": "raw *** b64 *** url ***"
+    },
+    {
+      "name": "short ignored",
+      "secrets": [
+        "short",
+        "1234567",
+        "12345678"
+      ],
+      "min_len": 8,
+      "input": "short 1234567 12345678",
+      "output": "short 1234567 ***"
+    },
+    {
+      "name": "low min",
+      "secrets": [
+        "s3cret"
+      ],
+      "min_len": 1,
+      "input": "s3cret czNjcmV0",
+      "output": "*** czNjcmV0"
+    },
+    {
+      "name": "longest first",
+      "secrets": [
+        "password-123",
+        "password-123-and-more"
+      ],
+      "min_len": 8,
+      "input": "x password-123-and-more y",
+      "output": "x *** y"
+    },
+    {
+      "name": "unrelated",
+      "secrets": [
+        "s3cr3t/value+with\u0026chars=1"
+      ],
+      "min_len": 8,
+      "input": "a s3cr3t\\/value b",
+      "output": "a s3cr3t\\/value b"
+    },
+    {
+      "name": "url encoded",
+      "secrets": [
+        "a secret with spaces"
+      ],
+      "min_len": 8,
+      "input": "q=a+secret+with+spaces p=a%20secret%20with%20spaces",
+      "output": "q=*** p=***"
+    },
+    {
+      "name": "base64 url",
+      "secrets": [
+        "s3cr3t/value+with\u0026chars=1"
+      ],
+      "min_len": 8,
+      "input": "czNjcjN0L3ZhbHVlK3dpdGgmY2hhcnM9MQ== and czNjcjN0L3ZhbHVlK3dpdGgmY2hhcnM9MQ",
+      "output": "*** and ***"
+    }
+  ],
+  "terms": [
+    {
+      "name": "special chars",
+      "values": [
+        "s3cr3t/value+with\u0026chars=1"
+      ],
+      "min_len": 8,
+      "terms": [
+        "czNjcjN0L3ZhbHVlK3dpdGgmY2hhcnM9MQ==",
+        "czNjcjN0L3ZhbHVlK3dpdGgmY2hhcnM9MQ",
+        "s3cr3t%2Fvalue%2Bwith%26chars%3D1",
+        "s3cr3t/value+with\\u0026chars=1",
+        "s3cr3t%2Fvalue+with\u0026chars=1",
+        "s3cr3t/value+with\u0026chars=1"
+      ]
+    },
+    {
+      "name": "plain",
+      "values": [
+        "token-abc123XYZ"
+      ],
+      "min_len": 8,
+      "terms": [
+        "dG9rZW4tYWJjMTIzWFla",
+        "token-abc123XYZ"
+      ]
+    },
+    {
+      "name": "short ignored",
+      "values": [
+        "short",
+        "1234567",
+        "12345678"
+      ],
+      "min_len": 8,
+      "terms": [
+        "MTIzNDU2Nzg=",
+        "MTIzNDU2Nzg",
+        "12345678"
+      ]
+    },
+    {
+      "name": "low min no encodings",
+      "values": [
+        "s3cret"
+      ],
+      "min_len": 1,
+      "terms": [
+        "s3cret"
+      ]
+    },
+    {
+      "name": "nested longest first",
+      "values": [
+        "password-123",
+        "password-123-and-more"
+      ],
+      "min_len": 8,
+      "terms": [
+        "cGFzc3dvcmQtMTIzLWFuZC1tb3Jl",
+        "password-123-and-more",
+        "cGFzc3dvcmQtMTIz",
+        "password-123"
+      ]
+    },
+    {
+      "name": "json escapes",
+      "values": [
+        "quote\"and\\back-slash-1"
+      ],
+      "min_len": 8,
+      "terms": [
+        "cXVvdGUiYW5kXGJhY2stc2xhc2gtMQ==",
+        "cXVvdGUiYW5kXGJhY2stc2xhc2gtMQ",
+        "quote%22and%5Cback-slash-1",
+        "quote\\\"and\\\\back-slash-1",
+        "quote\"and\\back-slash-1"
+      ]
+    },
+    {
+      "name": "unicode",
+      "values": [
+        "pässwörd-ü\u003c\u003e\u0026"
+      ],
+      "min_len": 8,
+      "terms": [
+        "p%C3%A4ssw%C3%B6rd-%C3%BC%3C%3E%26",
+        "p%C3%A4ssw%C3%B6rd-%C3%BC%3C%3E\u0026",
+        "pässwörd-ü\\u003c\\u003e\\u0026",
+        "cMOkc3N3w7ZyZC3DvDw+Jg==",
+        "cMOkc3N3w7ZyZC3DvDw-Jg==",
+        "cMOkc3N3w7ZyZC3DvDw+Jg",
+        "cMOkc3N3w7ZyZC3DvDw-Jg",
+        "pässwörd-ü\u003c\u003e\u0026"
+      ]
+    },
+    {
+      "name": "spaces",
+      "values": [
+        "a secret with spaces"
+      ],
+      "min_len": 8,
+      "terms": [
+        "YSBzZWNyZXQgd2l0aCBzcGFjZXM=",
+        "YSBzZWNyZXQgd2l0aCBzcGFjZXM",
+        "a%20secret%20with%20spaces",
+        "a secret with spaces",
+        "a+secret+with+spaces"
+      ]
+    }
+  ]
+}

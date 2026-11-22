@@ -1,10 +1,10 @@
 package main
 
 import (
+	"errors"
+	"path/filepath"
+	"reflect"
 	"testing"
-
-	"github.com/openfactory-org/openfactory/internal/config"
-	"github.com/openfactory-org/openfactory/internal/server"
 )
 
 func TestWorkerTaskEnv(t *testing.T) {
@@ -28,16 +28,35 @@ func TestWorkerTaskEnv(t *testing.T) {
 	}
 }
 
-func TestWorkerBackendConfig(t *testing.T) {
-	t.Setenv("OF_SANDBOX_ROOT", t.TempDir())
-	cfg, err := workerBackendConfig(config.BackendLocal)
+func TestLocalBackendOptions(t *testing.T) {
+	root := t.TempDir()
+	env := map[string]string{"OF_SANDBOX_ROOT": root, "OF_RUNNER_EXEC_COMMAND": "cat"}
+	exe := func() (string, error) { return "/bin/openfactory-runtime", nil }
+	opts, err := localBackendOptions(func(k string) string { return env[k] }, exe)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.SandboxBackend != config.BackendLocal || !cfg.Dev {
-		t.Fatalf("config = %+v", cfg)
+	if opts.Root != filepath.Join(root, "tasks") || !reflect.DeepEqual(opts.Command, []string{"/bin/openfactory-runtime", "runner"}) || opts.ExtraEnv["OF_RUNNER_EXEC_COMMAND"] != "cat" {
+		t.Fatalf("options = %+v", opts)
 	}
-	b, _, err := server.BuildTaskBackend(cfg, cfg.Logger())
+	env = map[string]string{"OF_DATA_DIR": root, "OF_RUNNER_COMMAND": "/x/of runner --flag"}
+	opts, err = localBackendOptions(func(k string) string { return env[k] }, exe)
+	if err != nil || opts.Root != filepath.Join(root, "sandboxes", "tasks") || len(opts.Command) != 3 {
+		t.Fatalf("options = %+v, %v", opts, err)
+	}
+	if _, err := localBackendOptions(func(string) string { return "" }, func() (string, error) { return "", errors.New("no") }); err == nil {
+		t.Fatal("a missing executable must fail")
+	}
+}
+
+func TestBuildWorkerBackend(t *testing.T) {
+	root := t.TempDir()
+	b, err := buildWorkerBackend(func(k string) string {
+		if k == "OF_SANDBOX_ROOT" {
+			return root
+		}
+		return ""
+	})
 	if err != nil || b.Name() != "local" {
 		t.Fatalf("backend = %v, %v", b, err)
 	}

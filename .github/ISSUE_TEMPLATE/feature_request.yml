@@ -17,7 +17,7 @@ body:
     id: proposal
     attributes:
       label: Proposed solution
-      description: The behavior you want. Include definition fields, API calls, CLI commands or Helm values if you know them.
+      description: The behavior you want. Include definition fields, API calls, or CLI commands if you know them.
     validations:
       required: true
   - type: textarea
@@ -34,10 +34,10 @@ body:
         - Automations and work sources
         - Integrations
         - Harnesses
-        - Sandbox backends and workers
+        - Sandbox providers and workers
         - Dashboard
-        - REST API, CLI or SDK
-        - Helm chart and operations
+        - REST API or CLI
+        - Deployment and operations
         - Scorers and benchmarks
         - Documentation
         - Other
@@ -45,7 +45,7 @@ body:
     id: breaking
     attributes:
       label: Does this change a public contract?
-      description: The definition schema, the REST API, the Helm values or the database upgrade path.
+      description: The definition schema, the REST API, the runner or worker protocol, or the plugin API.
       options:
         - "No"
         - "Yes"

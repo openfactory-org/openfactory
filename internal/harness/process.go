@@ -12,10 +12,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 )
 
-// Event kinds (core.HarnessEvent.Kind).
+// Event kinds (rtcore.HarnessEvent.Kind).
 const (
 	EventMessage    = "message"
 	EventToolCall   = "tool_call"
@@ -28,10 +28,10 @@ const (
 )
 
 // WriteFile creates parent directories (via `mkdir -p`) and writes data into the sandbox.
-func WriteFile(ctx context.Context, sb core.Sandbox, p string, data []byte, mode uint32) error {
+func WriteFile(ctx context.Context, sb rtcore.Sandbox, p string, data []byte, mode uint32) error {
 	dir := path.Dir(p)
 	if dir != "." && dir != "/" {
-		res, err := sb.Exec(ctx, core.ExecRequest{Cmd: []string{"mkdir", "-p", dir}, Timeout: 30 * time.Second})
+		res, err := sb.Exec(ctx, rtcore.ExecRequest{Cmd: []string{"mkdir", "-p", dir}, Timeout: 30 * time.Second})
 		if err != nil {
 			return fmt.Errorf("mkdir %s: %w", dir, err)
 		}
@@ -54,7 +54,7 @@ func MergeEnv(ms ...map[string]string) map[string]string {
 }
 
 // WorkDir returns req.WorkDir, falling back to the sandbox work dir.
-func WorkDir(sb core.Sandbox, req core.HarnessRequest) string {
+func WorkDir(sb rtcore.Sandbox, req rtcore.HarnessRequest) string {
 	if req.WorkDir != "" {
 		return req.WorkDir
 	}
@@ -71,7 +71,7 @@ const stderrTail = 16 << 10
 
 // StreamLines starts req in the sandbox, writes stdin (then closes it), and calls onLine for
 // every stdout line (without the trailing newline). The process is killed when ctx is done.
-func StreamLines(ctx context.Context, sb core.Sandbox, req core.ExecRequest, stdin string, onLine func([]byte)) (StreamResult, error) {
+func StreamLines(ctx context.Context, sb rtcore.Sandbox, req rtcore.ExecRequest, stdin string, onLine func([]byte)) (StreamResult, error) {
 	req.Stdin = nil
 	proc, err := sb.Start(ctx, req)
 	if err != nil {
@@ -156,17 +156,17 @@ func (t *tailBuffer) String() string {
 // Emitter sends events on a channel without blocking forever once ctx is done.
 type Emitter struct {
 	ctx context.Context
-	ch  chan core.HarnessEvent
+	ch  chan rtcore.HarnessEvent
 }
 
 // NewEmitter returns an emitter and the receive side of its channel (buffer 256).
-func NewEmitter(ctx context.Context) (*Emitter, <-chan core.HarnessEvent) {
-	ch := make(chan core.HarnessEvent, 256)
+func NewEmitter(ctx context.Context) (*Emitter, <-chan rtcore.HarnessEvent) {
+	ch := make(chan rtcore.HarnessEvent, 256)
 	return &Emitter{ctx: ctx, ch: ch}, ch
 }
 
 // Emit sends ev; it returns false when ctx is done and the event could not be delivered.
-func (e *Emitter) Emit(ev core.HarnessEvent) bool {
+func (e *Emitter) Emit(ev rtcore.HarnessEvent) bool {
 	select {
 	case e.ch <- ev:
 		return true
@@ -182,7 +182,7 @@ func (e *Emitter) Emit(ev core.HarnessEvent) bool {
 
 // Log emits a log event.
 func (e *Emitter) Log(format string, args ...any) {
-	e.Emit(core.HarnessEvent{Kind: EventLog, Role: "log", Content: fmt.Sprintf(format, args...)})
+	e.Emit(rtcore.HarnessEvent{Kind: EventLog, Role: "log", Content: fmt.Sprintf(format, args...)})
 }
 
 // Close closes the channel. Call exactly once, after the final done/error event.

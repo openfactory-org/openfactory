@@ -1,10 +1,10 @@
 description: Larger Linux machine for API builds
 instanceShape:
-  vcpus: 8
-  memoryGb: 32
+  vcpus: 4
+  memoryGb: 8
 platform:
   os: linux
-  arch: aarch64
+  arch: x86_64
   linux:
     image: ghcr.io/acme/platform-dev:2026.10
     registryCredentialSecretName: GHCR_PULL_CREDENTIAL

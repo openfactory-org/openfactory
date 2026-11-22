@@ -4,8 +4,8 @@
 //	go run ./scripts/openapi-baseline            # write api/openapi.v1.baseline.json
 //	go run ./scripts/openapi-baseline -check     # fail when the baseline is missing or invalid
 //
-// The source is internal/api/openapi.json, the file the server embeds
-// (internal/api.OpenAPISpec). Regenerate the baseline only when a release
+// The source is api/openapi.json, the REST API document
+// Regenerate the baseline only when a release
 // ships: the baseline is the contract of the last released v1 API.
 package main
 
@@ -20,7 +20,7 @@ import (
 )
 
 func main() {
-	spec := flag.String("spec", "internal/api/openapi.json", "OpenAPI document embedded by the server")
+	spec := flag.String("spec", "api/openapi.json", "OpenAPI document of the REST API")
 	out := flag.String("out", "api/openapi.v1.baseline.json", "baseline file to write")
 	check := flag.Bool("check", false, "only verify that the baseline exists and is a v1 OpenAPI document")
 	flag.Parse()

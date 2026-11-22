@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openfactory-org/openfactory/internal/core"
 	"github.com/openfactory-org/openfactory/internal/harness"
 	"github.com/openfactory-org/openfactory/internal/harness/claude"
 	"github.com/openfactory-org/openfactory/internal/harness/harnesstest"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 )
 
 func writeFile(t *testing.T, p, content string) {
@@ -68,12 +68,12 @@ func TestDiscoverRepoWithoutExec(t *testing.T) {
 }
 
 func TestMergeRepoSkillsOrder(t *testing.T) {
-	req := []core.Skill{
+	req := []rtcore.Skill{
 		{Name: "github", Scope: "builtin", Content: "builtin"},
 		{Name: "checks", Scope: "factory", Content: "factory"},
 		{Name: "chat", Scope: "builtin"},
 	}
-	repo := []core.Skill{{Name: "github", Scope: "repository", Content: "repo"}, {Name: "checks", Scope: "repository", Content: "repo"}}
+	repo := []rtcore.Skill{{Name: "github", Scope: "repository", Content: "repo"}, {Name: "checks", Scope: "repository", Content: "repo"}}
 	got := harness.MergeRepoSkills(req, repo)
 	var names []string
 	for _, s := range got {
@@ -89,17 +89,17 @@ func TestMergeRepoSkillsOrder(t *testing.T) {
 type capture struct {
 	*harnesstest.Local
 	mu     sync.Mutex
-	starts []core.ExecRequest
+	starts []rtcore.ExecRequest
 }
 
-func (c *capture) Start(_ context.Context, req core.ExecRequest) (core.Process, error) {
+func (c *capture) Start(_ context.Context, req rtcore.ExecRequest) (rtcore.Process, error) {
 	c.mu.Lock()
 	c.starts = append(c.starts, req)
 	c.mu.Unlock()
 	return harnesstest.NewProcess(`{"type":"result","subtype":"success","result":"ok","session_id":"s"}`+"\n", "", 0), nil
 }
 
-func drain(t *testing.T, ch <-chan core.HarnessEvent) {
+func drain(t *testing.T, ch <-chan rtcore.HarnessEvent) {
 	t.Helper()
 	timeout := time.After(10 * time.Second)
 	for {
@@ -136,8 +136,8 @@ func TestSameRepositoryInstructions(t *testing.T) {
 			// claude: the CLI reads CLAUDE.md and .claude/skills itself; the
 			// harness adds every other rule file and skill.
 			sb := &capture{Local: harnesstest.NewLocal(dir)}
-			ch, err := claude.New(claude.Options{}).Run(context.Background(), sb, core.HarnessRequest{
-				Run: &core.Run{ID: "run_c"}, Prompt: "go", SystemPrompt: "Factory prompt.", WorkDir: dir,
+			ch, err := claude.New(claude.Options{}).Run(context.Background(), sb, rtcore.HarnessRequest{
+				RunID: "run_c", Prompt: "go", SystemPrompt: "Factory prompt.", WorkDir: dir,
 				Auth: map[string]string{"ANTHROPIC_API_KEY": "k"},
 			})
 			if err != nil {

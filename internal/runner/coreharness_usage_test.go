@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 	"github.com/openfactory-org/openfactory/internal/runnerproto"
 )
 
@@ -33,41 +33,41 @@ func TestCoreHarnessUsageTotals(t *testing.T) {
 	turns := []struct {
 		name   string
 		cancel bool // the turn is interrupted before its events
-		events []core.HarnessEvent
+		events []rtcore.HarnessEvent
 		want   runnerproto.UsageData // last usage event of the turn
 	}{
 		{
 			name: "reported duration",
-			events: []core.HarnessEvent{
-				{Kind: "usage", Usage: &core.Usage{InputTokens: 10, OutputTokens: 2, CostUSD: 0.5, DurationMS: 4000}},
-				{Kind: "done", Content: "a", Usage: &core.Usage{InputTokens: 10, OutputTokens: 2, CostUSD: 0.5, DurationMS: 4000}},
+			events: []rtcore.HarnessEvent{
+				{Kind: "usage", Usage: &rtcore.Usage{InputTokens: 10, OutputTokens: 2, CostUSD: 0.5, DurationMS: 4000}},
+				{Kind: "done", Content: "a", Usage: &rtcore.Usage{InputTokens: 10, OutputTokens: 2, CostUSD: 0.5, DurationMS: 4000}},
 			},
 			want: runnerproto.UsageData{InputTokens: 10, OutputTokens: 2, CostUSD: 0.5, DurationMS: 4000, Cumulative: true, Coverage: "known"},
 		},
 		{
 			name:   "no reported duration uses wall time",
-			events: []core.HarnessEvent{{Kind: "done", Content: "b", Usage: &core.Usage{InputTokens: 5, OutputTokens: 1}}},
+			events: []rtcore.HarnessEvent{{Kind: "done", Content: "b", Usage: &rtcore.Usage{InputTokens: 5, OutputTokens: 1}}},
 			want:   runnerproto.UsageData{InputTokens: 15, OutputTokens: 3, CostUSD: 0.5, DurationMS: 5000, Cumulative: true, Coverage: "known"},
 		},
 		{
 			name:   "interrupted turn keeps partial usage",
 			cancel: true,
-			events: []core.HarnessEvent{
+			events: []rtcore.HarnessEvent{
 				{Kind: "message", Content: "late"},
-				{Kind: "usage", Usage: &core.Usage{InputTokens: 100, OutputTokens: 7, Coverage: core.UsagePartial}},
+				{Kind: "usage", Usage: &rtcore.Usage{InputTokens: 100, OutputTokens: 7, Coverage: rtcore.UsagePartial}},
 				{Kind: "error", Content: "claude: context canceled"},
 			},
 			want: runnerproto.UsageData{InputTokens: 115, OutputTokens: 10, CostUSD: 0.5, DurationMS: 6000, Cumulative: true, Coverage: "partial"},
 		},
 		{
 			name:   "partial stays after a known turn",
-			events: []core.HarnessEvent{{Kind: "usage", Usage: &core.Usage{InputTokens: 1, DurationMS: 500}}, {Kind: "done", Content: "d"}},
+			events: []rtcore.HarnessEvent{{Kind: "usage", Usage: &rtcore.Usage{InputTokens: 1, DurationMS: 500}}, {Kind: "done", Content: "d"}},
 			want:   runnerproto.UsageData{InputTokens: 116, OutputTokens: 10, CostUSD: 0.5, DurationMS: 6500, Cumulative: true, Coverage: "partial"},
 		},
 	}
 	n := 0
 	var cancel context.CancelFunc
-	f := &fakeCoreHarness{script: func(int, core.HarnessRequest) []core.HarnessEvent {
+	f := &fakeCoreHarness{script: func(int, rtcore.HarnessRequest) []rtcore.HarnessEvent {
 		if turns[n].cancel {
 			cancel()
 		}

@@ -1,0 +1,27 @@
+{
+  "name": "openfactory",
+  "version": "0.0.0",
+  "private": false,
+  "description": "The openfactory command-line client.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "openfactory": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc -b"
+  },
+  "files": [
+    "dist/index.js",
+    "dist/index.js.map",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

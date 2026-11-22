@@ -1,0 +1,11 @@
+# Test factory of the end-to-end checks. The agents use the claude harness.
+# With the claude CLI stand-in in the sandbox image, they need no credential.
+schemaVersion: v1
+name: of-local-check
+alias: of-local-check
+description: Test factory of the end-to-end checks.
+repositories: []
+automations:
+  githubOnboardingNotices: false
+agentDefaults:
+  model: claude-sonnet-5-5

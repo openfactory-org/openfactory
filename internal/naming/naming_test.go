@@ -72,14 +72,29 @@ func TestOneMachineName(t *testing.T) {
 	}
 }
 
-// glossaryScope lists the paths whose text users read. The Go files of the
-// CLI count for their help strings, so comment lines there are skipped.
+// glossaryScope lists the paths whose text users read. The code of the
+// CLIs, the control plane and the runtime counts for its help strings and
+// messages, so comment lines in code files are skipped. A directory that
+// does not exist yet adds nothing.
 var glossaryScope = []string{
 	"docs/",
 	"examples/",
 	"web/src/",
-	"deploy/helm/",
+	"cmd/openfactory-runtime/",
 	"cmd/openfactory/",
+	"apps/cli/",
+	"apps/control-plane/src/",
+	"deploy/sandbox/",
+	"deploy/machine/",
+}
+
+// codeScope lists the directories whose files are code. Only some
+// suffixes count there (see isCodeText), and comment lines are skipped.
+var codeScope = []string{
+	"cmd/openfactory-runtime/",
+	"cmd/openfactory/",
+	"apps/cli/",
+	"apps/control-plane/src/",
 }
 
 // forbidden lists the words that the glossary replaced. Each entry
@@ -90,23 +105,63 @@ var forbidden = []struct {
 }{
 	{regexp.MustCompile(`openfactory task\b`), "openfactory work-item"},
 	{regexp.MustCompile(`\b(list_tasks|search_task|get_task|send_task|complete_task)\b`), "the *_work_item tools"},
-	{regexp.MustCompile(`(?i)\btask backends?\b`), "sandbox backend"},
+	{regexp.MustCompile(`(?i)\btask backends?\b`), "sandbox provider"},
+	{regexp.MustCompile(`(?i)\bsandbox backends?\b`), "sandbox provider"},
 	{regexp.MustCompile(`(?i)\btask images?\b`), "sandbox image"},
+	{regexp.MustCompile(`(?i)\btool images?\b`), "sandbox image"},
 	{regexp.MustCompile(`\bdockerImage\b`), "image"},
 	{regexp.MustCompile(`\bdocker_image\b`), "image"},
 	{regexp.MustCompile(`openfactory mcp-server\b`), "openfactory mcp-registry"},
 	{regexp.MustCompile(`workerHost: local\b`), "workerHost: server"},
 	{regexp.MustCompile(`\brunners/`), "machines/"},
+	// Removed platforms. Open Factory runs on Cloudflare, hosted sandbox
+	// providers and microVM workers.
+	{regexp.MustCompile(`(?i)\b(kubernetes|k8s|helm)\b`), "nothing: Open Factory has no Kubernetes or Helm support"},
+	{regexp.MustCompile(`(?i)\b(aws|amazon|bedrock|eks|irsa)\b`), "nothing: Open Factory has no AWS support (name R2 as S3-compatible storage)"},
+	{regexp.MustCompile(`\bopenfactory serve\b`), "wrangler deploy or wrangler dev"},
+	{regexp.MustCompile(`\bOF_PLUGIN_DIR\b`), "plugin Workers"},
+	{regexp.MustCompile(`\bopenfactory-plugin-`), "plugin Workers"},
+	{regexp.MustCompile(`(?i)\breplicas?\b`), "nothing: there is one control plane"},
+	{regexp.MustCompile(`\bOF_SANDBOX_BACKEND\b`), "OF_SANDBOX_PROVIDER"},
+}
+
+// isCodeText reports whether a file in a code directory has user text: the
+// source of the CLIs, the control plane and the runtime. Tests, generated type files and fixtures do not count.
+func isCodeText(path string) bool {
+	switch {
+	case strings.HasSuffix(path, "_test.go"),
+		strings.HasSuffix(path, ".test.ts"),
+		strings.HasSuffix(path, ".d.ts"),
+		strings.Contains(path, "/test/"),
+		strings.Contains(path, "/node_modules/"),
+		strings.Contains(path, "/dist/"):
+		return false
+	}
+	return strings.HasSuffix(path, ".go") || strings.HasSuffix(path, ".ts") || strings.HasSuffix(path, ".sh")
+}
+
+func inCodeScope(path string) bool {
+	for _, p := range codeScope {
+		if strings.HasPrefix(path, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func inGlossaryScope(path string) bool {
 	for _, p := range glossaryScope {
 		if strings.HasPrefix(path, p) {
-			return !strings.HasPrefix(path, "cmd/openfactory/") ||
-				(strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go"))
+			return !inCodeScope(path) || isCodeText(path)
 		}
 	}
 	return false
+}
+
+// isCommentLine reports whether a code line is only a comment.
+func isCommentLine(line string) bool {
+	t := strings.TrimSpace(line)
+	return strings.HasPrefix(t, "//") || strings.HasPrefix(t, "/*") || strings.HasPrefix(t, "*")
 }
 
 // TestGlossaryWords fails when user text has a word that the glossary
@@ -131,9 +186,9 @@ func TestGlossaryWords(t *testing.T) {
 		if err != nil || bytes.IndexByte(data, 0) >= 0 {
 			continue // deleted, a directory, or binary
 		}
-		goFile := strings.HasSuffix(path, ".go")
+		code := inCodeScope(path)
 		for i, line := range strings.Split(string(data), "\n") {
-			if goFile && strings.HasPrefix(strings.TrimSpace(line), "//") {
+			if code && isCommentLine(line) {
 				continue
 			}
 			for _, f := range forbidden {

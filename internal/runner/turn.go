@@ -4,8 +4,9 @@ import (
 	"context"
 	"sync/atomic"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 	"github.com/openfactory-org/openfactory/internal/runnerproto"
+	"github.com/openfactory-org/openfactory/internal/sandbox/netlock"
 )
 
 // Harness runs the turns of one agent CLI or loop.
@@ -50,6 +51,10 @@ type TurnRequest struct {
 	// SessionToken returns the session token to send now. The token changes
 	// during a session, so a caller reads it for each request.
 	SessionToken func() string
+	// Agent is the user that the harness processes run as, and that owns
+	// the files the harness writes. Nil means the user of the runner (the
+	// egress lock is off).
+	Agent *netlock.Credential
 }
 
 // TurnResult is the end of one turn.
@@ -99,6 +104,7 @@ func (r *runner) startTurn(data runnerproto.TurnStartData) *turn {
 		ResumeSessionID: r.start.Harness.ResumeSessionID,
 		ControlURL:      r.cfg.ControlURL,
 		SessionToken:    r.client.Token,
+		Agent:           r.agent,
 	}
 	emit := func(typ runnerproto.EventType, d any) {
 		r.noteHarnessEvent(typ, d)
@@ -125,13 +131,13 @@ func endOfTurn(res TurnResult, interrupted bool) runnerproto.TurnEndedData {
 	if !res.Outcome.Valid() {
 		return runnerproto.TurnEndedData{
 			Outcome:     runnerproto.OutcomeError,
-			FailureCode: string(core.FailureAgentFailed),
+			FailureCode: string(rtcore.FailureAgentFailed),
 			Message:     "harness returned an invalid outcome",
 		}
 	}
 	d := runnerproto.TurnEndedData{Outcome: res.Outcome, Result: res.Result, FailureCode: res.FailureCode, Message: res.Message}
 	if d.Outcome == runnerproto.OutcomeError && d.FailureCode == "" {
-		d.FailureCode = string(core.FailureAgentFailed)
+		d.FailureCode = string(rtcore.FailureAgentFailed)
 	}
 	return d
 }

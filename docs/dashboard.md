@@ -2,7 +2,7 @@
 
 The dashboard is the web interface of Open Factory. Use it to send work, follow work items and runs, answer the inbox, edit managed definitions, and read metrics, scores and benchmarks.
 
-`openfactory serve` serves the dashboard at the root of `OF_PUBLIC_URL`, for example `https://factories.example.com/`. It uses the same data and roles as the [REST API](api.md).
+The control plane serves the dashboard at the root of `OF_PUBLIC_URL`, for example `https://factories.example.com/`. It uses the same data and roles as the [REST API](api.md).
 
 ## Sign in
 
@@ -10,7 +10,7 @@ Open `${OF_PUBLIC_URL}/login` and enter one of your API keys (`of_<prefix>_<secr
 
 - If the server has OIDC single sign-on (`OF_OIDC_*`), the page also shows a single sign-on button. Your identity provider groups decide your role. See [OIDC login](self-hosting/oidc.md).
 - If you have no key, bootstrap the server or ask an admin. See [Get the first key](api.md#get-the-first-key).
-- For local development, `OF_DEV=true` prints an admin API key once. See [Development mode](security.md#development-mode).
+- For local development, `openfactory bootstrap` prints an admin API key once. See [Quickstart](quickstart.md).
 - **Sign out** ends the session. See [Dashboard sign-in](security.md#dashboard-sign-in) for the cookie and its lifetime.
 
 ### Roles in the dashboard
@@ -63,7 +63,7 @@ The top of the sidebar has the team menu (theme, keyboard shortcuts, **About**, 
 | Integrations | `/integrations` | Slack, Microsoft Teams, Linear, Jira and code-host connections. See [Integrations](integrations/README.md). |
 | Environments | `/environments` | Environments for agent runs. See [Machines and environments](machines-and-environments.md). |
 | MCP servers | `/mcp-servers` | The team MCP server registry and Factory MCP sign-ins. See [MCP servers](mcp-servers.md). |
-| Workers | `/workers` | Self-hosted workers and their state. See [Workers](self-hosting/workers.md). |
+| Workers | `/workers` | Workers, their status, slots in use, labels, version and last connection, with drain, resume and revoke. See [Self-hosted workers](self-hosted-machines.md). |
 
 ## Keyboard shortcuts
 

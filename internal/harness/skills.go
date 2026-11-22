@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 )
 
 // Directories (relative to the run's work dir) used for injected state.
@@ -39,8 +39,8 @@ func SkillDirName(name string) string {
 
 // DedupeSkills returns skills unique by directory name; agent-scoped skills override
 // factory-scoped skills with the same name. Output is sorted by name.
-func DedupeSkills(skills []core.Skill) []core.Skill {
-	byName := map[string]core.Skill{}
+func DedupeSkills(skills []rtcore.Skill) []rtcore.Skill {
+	byName := map[string]rtcore.Skill{}
 	for _, s := range skills {
 		k := SkillDirName(s.Name)
 		prev, ok := byName[k]
@@ -48,7 +48,7 @@ func DedupeSkills(skills []core.Skill) []core.Skill {
 			byName[k] = s
 		}
 	}
-	out := make([]core.Skill, 0, len(byName))
+	out := make([]rtcore.Skill, 0, len(byName))
 	for _, s := range byName {
 		out = append(out, s)
 	}
@@ -69,7 +69,7 @@ func ResolvePath(workDir, p string) string {
 
 // EnsureStateDir creates <workDir>/.openfactory with a .gitignore so injected files
 // never show up in the repository's git status.
-func EnsureStateDir(ctx context.Context, sb core.Sandbox, workDir string) error {
+func EnsureStateDir(ctx context.Context, sb rtcore.Sandbox, workDir string) error {
 	return WriteFile(ctx, sb, ResolvePath(workDir, StateDir+"/.gitignore"), []byte(stateGitignore), 0o644)
 }
 
@@ -87,7 +87,7 @@ type SkillWriteOptions struct {
 // WriteSkills writes each skill's SKILL.md and supporting files to <root>/<name>/ for every root.
 // It returns the directory (relative to workDir when the root is relative) of each written skill
 // in the first root, keyed by skill name.
-func WriteSkills(ctx context.Context, sb core.Sandbox, workDir string, skills []core.Skill, opts SkillWriteOptions) (map[string]string, error) {
+func WriteSkills(ctx context.Context, sb rtcore.Sandbox, workDir string, skills []rtcore.Skill, opts SkillWriteOptions) (map[string]string, error) {
 	dirs := opts.Dirs
 	if len(dirs) == 0 {
 		dirs = []string{SkillsDir}
@@ -130,7 +130,7 @@ func WriteSkills(ctx context.Context, sb core.Sandbox, workDir string, skills []
 
 // SkillsIndex renders a markdown list of skills for inclusion in a system prompt.
 // dir is the skills root shown to the agent (e.g. ".openfactory/skills").
-func SkillsIndex(skills []core.Skill, dir string) string {
+func SkillsIndex(skills []rtcore.Skill, dir string) string {
 	skills = DedupeSkills(skills)
 	if len(skills) == 0 {
 		return ""

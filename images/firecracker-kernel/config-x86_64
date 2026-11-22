@@ -1,0 +1,7 @@
+# Open Factory guest kernel options for x86_64 (amd64), on top of
+# config-common. ACPI and the KVM guest support are needed for a root
+# block device on x86_64; VMGenID uses ACPI.
+CONFIG_ACPI=y
+CONFIG_KVM_GUEST=y
+CONFIG_PARAVIRT=y
+CONFIG_SERIAL_8250_NR_UARTS=1

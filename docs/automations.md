@@ -85,7 +85,7 @@ Each message that an event causes carries the event context, written to `.openfa
 - A file that cannot be read does not stop the run. `envelope.json` and the prompt list it as left out, with the reason. Examples: the integration credential cannot read the pull request, a GitHub file has no patch because it is binary or very large, or a forge plugin does not support the operation.
 - Secret values of the run are replaced with `[REDACTED]`.
 - `.openfactory/` is in the local git exclude of each repository.
-- The database keeps the event context only while the run needs it, and removes it when the run ends. The leader replica removes leftover context older than 7 days. The workspace files stay as long as the workspace.
+- The database keeps the event context only while the run needs it, and removes it when the run ends. A background job removes leftover context older than 7 days. The workspace files stay as long as the workspace.
 
 ## Write a trigger
 

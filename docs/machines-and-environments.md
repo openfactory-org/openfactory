@@ -1,12 +1,12 @@
 # Machines and environments
 
-Three settings decide where and how an agent's sandbox runs: the **worker host** (which host or backend), the **machine** (image, compute shape and setup) and the **environment** (a reusable workspace of repositories, image, setup and variables).
+Three settings decide where and how an agent's sandbox runs: the **worker host** (which provider or worker), the **machine** (image, compute shape and setup) and the **environment** (a reusable workspace of repositories, image, setup and variables).
 
 ## How the settings combine
 
 | Setting | Declared in | Selected by | Controls |
 |---|---|---|---|
-| Worker host | The server and worker configuration | `workerHost` | Which sandbox backend or remote worker runs the sandbox. |
+| Worker host | The control plane and its workers | `workerHost` | Which sandbox provider or worker runs the sandbox. |
 | Machine | `machines/<name>.yaml` in the definition | `machine` | Platform, container image, CPU and memory, setup commands, registry credential, failed-sandbox retention. |
 | Environment | The Open Factory API (team resource) | `environmentId` | Repositories to check out, container image, setup commands, environment variables. |
 
@@ -14,8 +14,8 @@ All three are [execution settings](definition-reference.md#execution-settings): 
 
 When a sandbox starts:
 
-1. The worker host selects the backend.
-2. The image is the environment's `image`, else the machine's `platform.linux.image`, else the backend's default image.
+1. The worker host selects the provider or worker.
+2. The image is the environment's `image`, else the machine's `platform.linux.image`, else the default sandbox image of the provider.
 3. The repositories are the environment's `repos`, else the factory's `repositories`.
 4. The machine's `setupCommands` run, then the environment's `setup_commands`.
 5. The environment variables are the environment's `env_vars`, then the agent's secrets, then the run metadata and `OF_*` variables. A later source wins for the same name.
@@ -24,15 +24,16 @@ When a sandbox starts:
 
 | Value | Where the run executes |
 |---|---|
-| empty or `server` (default) | The Open Factory server, with its configured sandbox backend. |
-| `kubernetes`, `direct` | The server's backend with that name, if the server has it configured. |
-| any other value | The remote worker with that ID, which runs the sandbox on its own host. |
+| empty or `server` (default) | The default sandbox provider of the team (`OF_SANDBOX_PROVIDER`). |
+| a provider ID: `cloudflare-sandbox`, `daytona`, `boatdev` | That provider. |
+| a worker ID or name | That enrolled worker. |
+| `pool:<label>` | The online, non-draining worker that has the label, allows the factory and has the most free slots. |
 
-- The preflight refuses a worker that the team has not registered. A run for a registered worker that is not connected waits in the queue.
+- The preflight refuses a worker that the team has not registered. A run for a registered worker that is not connected waits in the queue with the reason `waiting_for_worker`.
 - `workerHost: null` at the agent or automation level clears an inherited value, so the run uses `server`.
-- The `workerEnvironment` harness auth needs a self-hosted worker. See [Use the worker environment](harnesses.md#use-the-worker-environment).
+- The `workerEnvironment` harness auth works only on development process workers. See [Use the worker environment](harnesses.md#use-the-worker-environment).
 
-To start a remote worker in your own Kubernetes cluster, run `openfactory worker --server URL --api-key KEY --backend kubernetes --id ID`. It connects outbound to the server, and `--id` is the `workerHost` value for agents. `GET /api/v1/workers` lists the workers. See [Workers](self-hosting/workers.md).
+To run sessions on your own Linux hosts, enroll them as workers. See [Self-hosted workers](self-hosted-machines.md). `GET /api/v1/workers` lists the workers. For the providers, see [Sandbox providers](sandbox-providers.md).
 
 ## Machines
 
@@ -44,38 +45,37 @@ description: Larger Linux machine for API builds
 setupCommands:
   - make bootstrap
 instanceShape:
-  vcpus: 8
-  memoryGb: 32
+  vcpus: 4
+  memoryGb: 8
 failureSessionRetentionMinutes: 30
 platform:
   os: linux
-  arch: aarch64
+  arch: x86_64
   linux:
     image: ghcr.io/acme/platform-dev:2026.10
     registryCredentialSecretName: GHCR_PULL_CREDENTIAL
 ```
 
-The field list and validation rules are in the [definition reference](definition-reference.md#machinesnameyaml). `platform` is required, `os` defaults to `linux`, a Linux machine requires `platform.linux.image`, and `agentDefaults.machine` must be a Linux machine.
+The field list and validation rules are in the [definition reference](definition-reference.md#machinesnameyaml). `platform` is required, `os` is `linux` (the only value), and a Linux machine requires `platform.linux.image`.
 
 ### What each machine field does
 
 | Field | Effect |
 |---|---|
-| `platform.linux.image` | The container image of the sandbox pod on the `kubernetes` backend, unless the environment sets an image. |
-| `platform.linux.registryCredentialSecretName` | The secret with a pull credential for a private image. The `kubernetes` backend ignores it and uses the pod template's `imagePullSecrets`. See [Private registries](self-hosting/private-registries.md). |
-| `platform.linux.user` | The user of the sandbox pod on the `kubernetes` backend: a number (the default is `1000`), or `image` to keep the user of the image. See [Sandbox user](self-hosting/kubernetes.md#sandbox-user). |
-| `instanceShape` | The CPU and memory requests and limits of the sandbox container on the `kubernetes` backend (`vcpus` CPUs, `memoryGb` GiB). |
+| `platform.linux.image` | The image of the sandbox, unless the environment sets an image. Providers that build images ahead of time (`cloudflare-sandbox`, `daytona`, `boatdev`) use the image that you built into them. See [Private registries](self-hosting/private-registries.md). |
+| `platform.linux.registryCredentialSecretName` | The secret with a pull credential for a private image. Only microVM workers pull images at run time and use it. |
+| `platform.linux.user` | The user of the sandbox: a number (the default is `1000`), or `image` to keep the user of the image. Root is not allowed. |
+| `platform.arch` | `x86_64` or `aarch64`. The hosted providers run `x86_64`. A run fails with `invalid_configuration` if the target has no sandbox of that architecture. |
+| `instanceShape` | CPU and memory of the sandbox. The control plane maps it to the smallest instance type of the provider that is at least as large. A shape above the largest type fails with `invalid_configuration`. See [Machine sizes](sandbox-providers.md#machine-sizes). |
 | `setupCommands` | Shell commands that run after checkout, each in a new shell (`sh -c`) in the workspace working directory. A `cd`, `export` or shell variable does not carry over to the next command, so join dependent steps (`cd app && npm ci`). Files and installed tools stay. The whole workspace setup (clones and all commands) can run for at most 30 minutes. A failed command fails the sandbox setup. |
-| `failureSessionRetentionMinutes` | How long the sandbox of a failed run is kept for inspection (1–60 minutes). Unset, the sandbox is released when the run fails. |
-| `platform.os`, `platform.arch`, `platform.mac.version` | Declare the platform that the agent needs. |
+| `failureSessionRetentionMinutes` | How long the sandbox of a failed run is kept for inspection (1–60 minutes), where the provider supports it. Unset, the sandbox is released when the run fails. |
 
 If the environment sets no git identity, the runner gives every sandbox process, including the harness, the identity `openfactory <openfactory@localhost>` so that an agent can commit. To use another identity, grant `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME` and `GIT_COMMITTER_EMAIL` as [secrets](secrets.md#grant-a-secret-to-agents).
 
 Platform support:
 
-- The `kubernetes` backend runs Linux containers. It is the only production backend.
-- The `local` backend runs commands on its host, without an image, resource limits or isolation. It is for development and tests: the default with `OF_DEV=true`, and outside dev mode it must be selected explicitly and logs a warning.
-- Open Factory does not create macOS or Windows hosts. For such a machine, run a remote worker with `--backend local` on a macOS or Windows host and set `workerHost` to its ID. That worker has no isolation, so use it only for trusted input.
+- Sandboxes run Linux. Open Factory does not support macOS or Windows agents.
+- The development process worker runs commands on its Linux host with no image, resource limits or isolation. It is for development and tests.
 
 ### Use a machine
 
@@ -88,9 +88,9 @@ agentDefaults:
 
 ```markdown
 ---
-# agents/ios/agent.md: one agent uses a macOS machine on a Mac worker
-machine: macos-xcode
-workerHost: mac-mini-01
+# agents/build/agent.md: one agent runs on a larger machine on a worker pool
+machine: linux-large
+workerHost: pool:big
 ---
 ```
 

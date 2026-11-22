@@ -5,13 +5,13 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 	"github.com/openfactory-org/openfactory/internal/runnerproto"
 )
 
 func TestCoreHarnessMergesMCPEnv(t *testing.T) {
-	f := &fakeCoreHarness{script: func(int, core.HarnessRequest) []core.HarnessEvent {
-		return []core.HarnessEvent{{Kind: "done"}}
+	f := &fakeCoreHarness{script: func(int, rtcore.HarnessRequest) []rtcore.HarnessEvent {
+		return []rtcore.HarnessEvent{{Kind: "done"}}
 	}}
 	c := &CoreHarness{H: f}
 	req := baseTurnRequest()

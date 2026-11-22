@@ -1,7 +1,7 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { IntegrationsPage } from "../pages/Team";
+import { IntegrationsPage } from "../pages/Integrations";
 import { ME, mockFetch, renderAt } from "./utils";
 
 const now = new Date().toISOString();

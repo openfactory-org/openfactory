@@ -57,6 +57,10 @@ const (
 	// control plane already ended the session and failed the run. The status
 	// is 422, and a retry gives the same result.
 	CodeConfigurationError = "configuration_error"
+	// CodeRunnerVersionMismatch means that the runner_version of the session
+	// start request is not the version that the control plane serves. The
+	// status is 409. The runner stops: a retry gives the same result.
+	CodeRunnerVersionMismatch = "runner_version_mismatch"
 )
 
 // ErrorBody is the JSON body of an error response.

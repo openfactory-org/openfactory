@@ -1,0 +1,23 @@
+# syntax=docker/dockerfile:1.7
+#
+# Sandbox image for the cloudflare-sandbox provider. Wrangler builds it at
+# `wrangler deploy` (providers/cloudflare-sandbox/wrangler.jsonc,
+# containers[].images.runner). linux/amd64 only.
+#
+# It adds nothing to the shared sandbox image: OfTaskSandbox passes the
+# entrypoint (tini + bootstrap.sh) to ctx.container.start, and bootstrap.sh
+# trusts the intercept CA named by OF_TRUST_CA.
+#
+#   docker build -f deploy/sandbox/Dockerfile.cloudflare \
+#     --build-arg SANDBOX_IMAGE=ghcr.io/openfactory-org/sandbox:dev deploy/sandbox
+
+ARG SANDBOX_IMAGE=ghcr.io/openfactory-org/sandbox:latest
+FROM --platform=linux/amd64 ${SANDBOX_IMAGE}
+
+LABEL org.opencontainers.image.title="openfactory-sandbox-cloudflare" \
+      org.opencontainers.image.description="Sandbox image for the Open Factory cloudflare-sandbox provider"
+
+USER root
+WORKDIR /workspace
+ENTRYPOINT ["/usr/bin/tini", "-g", "--"]
+CMD ["/opt/openfactory/bootstrap.sh"]

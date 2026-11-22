@@ -1,2 +1,0 @@
-{{- /* Renders nothing; fails the install on unsupported value combinations. */ -}}
-{{- include "openfactory.validate" . }}

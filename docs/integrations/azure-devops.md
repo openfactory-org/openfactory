@@ -2,7 +2,7 @@
 
 A factory starts work from pull requests, work items and mentions in Azure DevOps Services, and replies in pull request threads and work item comments. For Azure DevOps Server, see [Other code forges](other-forges.md).
 
-Azure DevOps support is the `openfactory-plugin-azuredevops` plugin. The server image and the Helm chart load it; for other installs, see [Plugins](../self-hosting/plugins.md). To create service hooks, you need Project Collection Administrator access, or Project Administrator access to each project. For the shared setup steps and variables, see [Integrations](README.md#common-setup).
+Azure DevOps support is a plugin Worker, bound to the control plane as `PLUGIN_AZUREDEVOPS`. Deploy it with `npx wrangler deploy -c plugins/azuredevops/wrangler.jsonc` (see [Plugins](../self-hosting/plugins.md)). To create service hooks, you need Project Collection Administrator access, or Project Administrator access to each project. For the shared setup steps and variables, see [Integrations](README.md#common-setup).
 
 ## Identities
 

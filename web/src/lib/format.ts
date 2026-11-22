@@ -166,7 +166,7 @@ export function humanizeError(raw?: string | null): { message: string; detail: s
   return { message, detail: text };
 }
 
-/** Sentences for the run failure codes (internal/core/failure.go), for a run error that is only a code. */
+/** Sentences for the run failure codes (FAILURE_CODES of @openfactory/core), for a run error that is only a code. */
 export const FAILURE_TEXT: Record<string, string> = {
   invalid_configuration: "A secret, machine, MCP server or code-forge integration that the agent needs is missing or not valid.",
   environment_setup_failed: "The environment setup failed: a clone, a setup command or an MCP server did not start.",
@@ -175,7 +175,7 @@ export const FAILURE_TEXT: Record<string, string> = {
   integration_disabled: "The integration that this run needs is not active.",
   agent_failed: "The agent ended its turn with an error.",
   out_of_memory: "The sandbox ran out of memory. Give the agent a larger machine.",
-  resource_unavailable: "The sandbox backend had no capacity. The run can be tried again.",
+  resource_unavailable: "The sandbox provider had no capacity. The run can be tried again.",
   sandbox_create_failed: "The sandbox could not be created or did not start in time.",
   network_policy_timeout: "The network policy did not take effect in time, so the task did not start.",
   sandbox_lost: "The sandbox was lost: it was evicted or its node went away.",

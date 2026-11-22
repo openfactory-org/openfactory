@@ -81,3 +81,10 @@ func IsRetryable(err error) bool {
 	}
 	return true
 }
+
+// IsVersionMismatch reports whether err is a response with the code
+// runner_version_mismatch: the control plane serves another runner version.
+func IsVersionMismatch(err error) bool {
+	var se *StatusError
+	return errors.As(err, &se) && se.Code == runnerproto.CodeRunnerVersionMismatch
+}

@@ -1,0 +1,572 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openfactory.dev/schemas/runner/v1/session.json",
+  "title": "Open Factory runner protocol v1: session messages (start, secrets, end, token, errors)",
+  "description": "Generated from internal/runnerproto and kept in step by internal/runnerproto/schema_test.go. A change to a field name is a breaking change of the protocol.",
+  "$defs": {
+    "CloudGCP": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "audience": {
+          "type": "string"
+        },
+        "project_number": {
+          "type": "string"
+        },
+        "service_account_email": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "audience",
+        "project_number"
+      ]
+    },
+    "CloudIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "gcp": {
+          "$ref": "#/$defs/CloudGCP"
+        }
+      }
+    },
+    "EndRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "exit": {
+          "$ref": "#/$defs/ExitInfo"
+        },
+        "failure_code": {
+          "type": "string"
+        },
+        "last_event_seq": {
+          "type": "integer"
+        },
+        "message": {
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "idle",
+            "stopped",
+            "cancelled",
+            "setup_failed",
+            "deadline",
+            "fatal"
+          ]
+        }
+      },
+      "required": [
+        "reason",
+        "last_event_seq"
+      ]
+    },
+    "ErrorBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ack": {
+          "type": "integer"
+        },
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code"
+      ]
+    },
+    "ExitInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "code"
+      ]
+    },
+    "Harness": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "mcp_servers": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "$ref": "#/$defs/MCPServer"
+          }
+        },
+        "model": {
+          "type": "string"
+        },
+        "reasoning_level": {
+          "type": "string"
+        },
+        "resume_session_id": {
+          "type": "string"
+        },
+        "system_prompt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "model",
+        "reasoning_level",
+        "system_prompt",
+        "resume_session_id",
+        "mcp_servers"
+      ]
+    },
+    "Limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "event_batch_bytes": {
+          "type": "integer"
+        },
+        "max_session_seconds": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_session_seconds",
+        "event_batch_bytes"
+      ]
+    },
+    "MCPServer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "auth": {
+          "type": "string"
+        },
+        "command": {
+          "type": "string"
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "url": {
+          "type": "string"
+        }
+      }
+    },
+    "NetworkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowed_hosts": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "always_allow": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "denied_hosts": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "restricted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "restricted",
+        "allowed_hosts",
+        "denied_hosts"
+      ]
+    },
+    "Platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "arch": {
+          "type": "string"
+        },
+        "os": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "os",
+        "arch"
+      ]
+    },
+    "Repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "clone_url": {
+          "type": "string"
+        },
+        "forge": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "forge",
+        "clone_url",
+        "path",
+        "ref"
+      ]
+    },
+    "SecretFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "content_base64": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "mode",
+        "content_base64"
+      ]
+    },
+    "SecretsResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "env": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "files": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/SecretFile"
+          }
+        },
+        "harness_auth": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "harness_auth_default": {
+          "type": "boolean"
+        },
+        "mcp_env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "mcp_headers": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "redact": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "env",
+        "files",
+        "harness_auth",
+        "mcp_headers",
+        "redact"
+      ]
+    },
+    "SetupCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "origin": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "origin",
+        "command"
+      ]
+    },
+    "Skill": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "files"
+      ]
+    },
+    "SnapshotConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "max_part_bytes": {
+          "type": "integer"
+        },
+        "restore": {
+          "type": "boolean"
+        },
+        "skip_workspace": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "restore",
+        "enabled"
+      ]
+    },
+    "StartRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "instance_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "platform": {
+          "$ref": "#/$defs/Platform"
+        },
+        "runner_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sandbox_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "instance_id",
+        "runner_version",
+        "sandbox_id",
+        "platform"
+      ]
+    },
+    "StartResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cloud": {
+          "$ref": "#/$defs/CloudIdentity"
+        },
+        "conversation_id": {
+          "type": "string"
+        },
+        "egress_lock": {
+          "enum": [
+            "required",
+            "off"
+          ]
+        },
+        "env": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "harness": {
+          "$ref": "#/$defs/Harness"
+        },
+        "idle_timeout_seconds": {
+          "type": "integer"
+        },
+        "idle_timeout_set": {
+          "type": "boolean"
+        },
+        "limits": {
+          "$ref": "#/$defs/Limits"
+        },
+        "network_policy": {
+          "$ref": "#/$defs/NetworkPolicy"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "runner_version": {
+          "type": "string"
+        },
+        "session": {
+          "type": "integer"
+        },
+        "session_token": {
+          "type": "string"
+        },
+        "session_token_expires_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "workspace": {
+          "$ref": "#/$defs/Workspace"
+        }
+      },
+      "required": [
+        "session_token",
+        "session_token_expires_at",
+        "run_id",
+        "session",
+        "conversation_id",
+        "workspace",
+        "harness",
+        "env",
+        "idle_timeout_seconds",
+        "limits"
+      ]
+    },
+    "TokenResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "session_token": {
+          "type": "string"
+        },
+        "session_token_expires_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_token",
+        "session_token_expires_at"
+      ]
+    },
+    "Workspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repositories": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/Repository"
+          }
+        },
+        "setup_commands": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/SetupCommand"
+          }
+        },
+        "setup_timeout_seconds": {
+          "type": "integer"
+        },
+        "skills": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/Skill"
+          }
+        },
+        "snapshot": {
+          "$ref": "#/$defs/SnapshotConfig"
+        }
+      },
+      "required": [
+        "repositories",
+        "setup_commands",
+        "setup_timeout_seconds",
+        "skills",
+        "snapshot"
+      ]
+    }
+  }
+}

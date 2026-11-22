@@ -1,5 +1,5 @@
 ---
-description: Implements billing changes with Claude Code using worker credentials
+description: Implements billing changes with Claude Code on the self-hosted worker
 agentType: IMPLEMENT
 ---
 

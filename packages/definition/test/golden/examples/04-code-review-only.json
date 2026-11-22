@@ -1,0 +1,163 @@
+{
+ "compiled": {
+  "schemaVersion": "v1",
+  "name": "code-review",
+  "description": "Reviews every pull request opened against main; never writes code.",
+  "alias": "reviewbot",
+  "repositories": [
+   {
+    "codeForge": "GITHUB",
+    "owner": "acme",
+    "name": "api-service"
+   },
+   {
+    "codeForge": "GITHUB",
+    "owner": "acme",
+    "name": "web-app"
+   }
+  ],
+  "integrationsSet": false,
+  "githubOnboardingNotices": true,
+  "factoryConfigChecks": "main",
+  "agents": [
+   {
+    "id": "",
+    "factory_id": "",
+    "name": "foreman",
+    "description": "Answers questions about reviews and routes re-review requests",
+    "type": "FOREMAN",
+    "instructions": "This factory only reviews code. When someone mentions you or requests a\nreview, dispatch the `reviewer` agent with the pull request and the\nrequester's question, then relay its verdict. Never write code, push commits,\napprove or merge.",
+    "harness": {
+     "type": "claude",
+     "model": "claude-opus-5-5",
+     "auth": {
+      "source": "managedSecret",
+      "secretName": "ANTHROPIC_API_KEY"
+     }
+    },
+    "network_policy": {
+     "restricted": true,
+     "allowed_hosts": [],
+     "denied_hosts": []
+    },
+    "spawnable_by": null
+   },
+   {
+    "id": "",
+    "factory_id": "",
+    "name": "reviewer",
+    "description": "Reviews pull requests and posts findings and a verdict",
+    "type": "REVIEW",
+    "instructions": "Review the pull request you are given.\n\n1. If it is a draft, stop without commenting.\n2. Read the description, linked issues and the full diff. Check correctness,\n   tests, security, performance and the repository's conventions.\n3. Run the tests that cover the change when the repository makes that\n   practical.\n4. Post one review comment on the pull request with a verdict (`accept`,\n   `revise` or `needs-human-decision`), a short summary, and numbered findings\n   with severity, file and line, and a suggested fix.\n\nUse a comment, not an approval or a \"request changes\" review. Never push\ncommits or merge.",
+    "harness": {
+     "type": "claude",
+     "model": "claude-sonnet-5-5",
+     "auth": {
+      "source": "managedSecret",
+      "secretName": "ANTHROPIC_API_KEY"
+     }
+    },
+    "network_policy": {
+     "restricted": true,
+     "allowed_hosts": [],
+     "denied_hosts": []
+    },
+    "spawnable_by": [
+     "foreman"
+    ],
+    "idle_timeout_minutes": 15,
+    "idle_timeout_set": true
+   }
+  ],
+  "automations": [
+   {
+    "id": "",
+    "factory_id": "",
+    "name": "pr-opened",
+    "enabled": true,
+    "agent": "reviewer",
+    "prompt": "A pull request was opened or marked ready for review against `main`. If it is\na draft, stop silently. Otherwise review it and post your findings and\nverdict on the pull request.",
+    "triggers": [
+     {
+      "provider": "github",
+      "event": "pull_request_opened",
+      "filter": {
+       "base_branches": [
+        "main"
+       ],
+       "labels": {
+        "not_in": [
+         "wip",
+         "no-review"
+        ]
+       },
+       "repos": [
+        "acme/api-service",
+        "acme/web-app"
+       ]
+      }
+     },
+     {
+      "provider": "github",
+      "event": "pull_request_ready",
+      "filter": {
+       "base_branches": [
+        "main"
+       ],
+       "repos": [
+        "acme/api-service",
+        "acme/web-app"
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "id": "",
+    "factory_id": "",
+    "name": "review-requested",
+    "enabled": true,
+    "agent": "foreman",
+    "prompt": "Someone mentioned the factory on a pull request asking for a review. Dispatch\nthe reviewer with their request and reply in the same thread with the result.",
+    "triggers": [
+     {
+      "provider": "github",
+      "event": "pull_request_mentioned",
+      "filter": {
+       "keywords": [
+        "review",
+        "re-review"
+       ],
+       "mentioned": [
+        "reviewbot"
+       ],
+       "repos": [
+        "acme/api-service",
+        "acme/web-app"
+       ]
+      }
+     }
+    ]
+   }
+  ],
+  "machines": {},
+  "scorers": [],
+  "scorerDefaults": {
+   "harness": {
+    "type": "claude",
+    "model": "claude-opus-5-5",
+    "auth": {
+     "source": "managedSecret",
+     "secretName": "ANTHROPIC_API_KEY"
+    }
+   },
+   "secrets": null,
+   "mcp_servers": null
+  },
+  "webhooks": [],
+  "benchmarks": [],
+  "skills": []
+ },
+ "errors": null,
+ "example": "04-code-review-only"
+}

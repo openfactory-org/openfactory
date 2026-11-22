@@ -14,12 +14,34 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  goreleaser:
-    name: Binaries and server image
+  test:
+    name: Test
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - name: Go tests
+        run: make test-race
+      - name: TypeScript tests and build
+        run: |
+          npm test
+          npm run build
+
+  runtime:
+    name: Runtime binaries
+    runs-on: ubuntu-latest
+    needs: test
     permissions:
       contents: write   # GitHub release
-      packages: write   # server image on GHCR
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,21 +49,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      # The GoReleaser before-hook builds the dashboard with npm.
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - name: Test
-        run: go test -race -count=1 ./...
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
       - uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
@@ -50,48 +57,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  sandbox-image:
-    name: Sandbox image
+  sandbox-images:
+    name: Sandbox images
     runs-on: ubuntu-latest
-    # Publish only after the tests in the goreleaser job pass.
-    needs: goreleaser
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/openfactory-org/sandbox
-          tags: |
-            type=semver,pattern={{version}}
-            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: deploy/sandbox
-          file: deploy/sandbox/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  # The server image (GoReleaser job) is also the runner image. These jobs
-  # build only the tool images with the harness CLIs.
-  tool-images:
-    name: Tool images
-    runs-on: ubuntu-latest
-    # Publish only after the tests in the goreleaser job pass.
-    needs: goreleaser
+    needs: test
     permissions:
       contents: read
       packages: write
@@ -99,6 +68,10 @@ jobs:
       REGISTRY: ghcr.io/openfactory-org
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
@@ -112,47 +85,83 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           echo "value=$version" >> "$GITHUB_OUTPUT"
-          for tool in claude codex; do
-            tags="${REGISTRY}/tool-$tool:$version"
-            case "$version" in *-*) ;; *) tags="$tags,${REGISTRY}/tool-$tool:latest" ;; esac
-            echo "$tool=$tags" >> "$GITHUB_OUTPUT"
+          for image in sandbox sandbox-cloudflare; do
+            tags="${REGISTRY}/${image}:${version}"
+            case "$version" in *-*) ;; *) tags="${tags},${REGISTRY}/${image}:latest" ;; esac
+            echo "${image}=${tags}" >> "$GITHUB_OUTPUT"
           done
-      - name: Tool image with the claude CLI
+      - name: Bake the runtime into the image context
+        run: |
+          make build-linux VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p deploy/sandbox/runner
+          for a in amd64 arm64; do
+            cp "bin/linux-$a/openfactory-runtime" "deploy/sandbox/runner/openfactory-runtime-linux-$a"
+          done
+      - name: Sandbox image
         uses: docker/build-push-action@v6
         with:
-          context: images/tool-claude
-          file: images/tool-claude/Dockerfile
+          context: deploy/sandbox
+          file: deploy/sandbox/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.version.outputs.claude }}
-      - name: Tool image with the codex CLI
+          tags: ${{ steps.version.outputs.sandbox }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Cloudflare sandbox image
         uses: docker/build-push-action@v6
         with:
-          context: images/tool-codex
-          file: images/tool-codex/Dockerfile
-          platforms: linux/amd64,linux/arm64
+          context: deploy/sandbox
+          file: deploy/sandbox/Dockerfile.cloudflare
+          build-args: SANDBOX_IMAGE=${{ env.REGISTRY }}/sandbox:${{ steps.version.outputs.value }}
+          platforms: linux/amd64
           push: true
-          tags: ${{ steps.version.outputs.codex }}
+          tags: ${{ steps.version.outputs.sandbox-cloudflare }}
 
-  helm-chart:
-    name: Helm chart
+  kernel:
+    name: Firecracker kernel
     runs-on: ubuntu-latest
-    # Publish only after the tests in the goreleaser job pass.
-    needs: goreleaser
+    needs: runtime
     permissions:
-      contents: read
-      packages: write
+      contents: write   # upload to the GitHub release
     steps:
       - uses: actions/checkout@v4
-      - uses: azure/setup-helm@v4
-      # The chart has no dependencies: users install it from one OCI reference,
-      # oci://ghcr.io/openfactory-org/charts/openfactory.
-      - name: Package and push to GHCR (OCI)
+      - name: Build the kernel
+        run: make kernel
+      - name: Upload kernel artifacts and checksums
         env:
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          dir=dist/kernel
+          test -d "$dir" || { echo "::error::make kernel wrote no $dir"; exit 1; }
+          (cd "$dir" && sha256sum -- * | grep -v 'kernel-checksums.txt' > kernel-checksums.txt)
+          gh release upload "$GITHUB_REF_NAME" "$dir"/* --clobber
+
+  npm:
+    name: npm packages
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: read
+      id-token: write   # npm provenance
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - name: Set the version from the tag
         run: |
           version="${GITHUB_REF_NAME#v}"
-          echo "$GHCR_TOKEN" | helm registry login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          helm lint deploy/helm/openfactory
-          helm package deploy/helm/openfactory --version "$version" --app-version "$version" -d dist
-          helm push "dist/openfactory-${version}.tgz" oci://ghcr.io/openfactory-org/charts
+          npm version "$version" --no-git-tag-version -w openfactory -w @openfactory/control-plane
+      - run: npm run build
+      - name: Publish the CLI and the control plane
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          tag=latest
+          case "$GITHUB_REF_NAME" in *-*) tag=next ;; esac
+          npm publish --access public --provenance --tag "$tag" -w openfactory -w @openfactory/control-plane

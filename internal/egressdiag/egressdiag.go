@@ -1,5 +1,5 @@
 // Package egressdiag makes the diagnostic network/egress_blocked for a
-// host that the egress proxy sidecar of a sandbox blocked. The runner uses it.
+// host that the egress proxy of a sandbox blocked. The runner uses it.
 package egressdiag
 
 import (

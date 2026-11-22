@@ -1,0 +1,61 @@
+{
+  "name": "openfactory-workspace",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Open Factory npm workspace: Cloudflare control plane, CLI, packages, providers, plugins, dashboard and tests.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "workspaces": [
+    "web",
+    "apps/*",
+    "packages/*",
+    "providers/*",
+    "plugins/*",
+    "tests/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc -b",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "gen:api": "openapi-typescript api/openapi.json -o packages/api-client/src/schema.d.ts",
+    "gen:protos": "node tools/gen/schema-types.mjs schemas/runner/v1 packages/runner-proto/src/generated && node tools/gen/schema-types.mjs schemas/worker/v2 packages/worker-proto/src/generated",
+    "gen:schemas": "npm run gen:schemas -w @openfactory/definition --if-present",
+    "gen:docs": "npm run docs-gen -w @openfactory/definition --if-present",
+    "gen:skills": "node packages/core/scripts/gen-skills.mjs",
+    "gen:cf-types": "npm run cf-types --workspaces --if-present",
+    "gen": "npm run gen:api && npm run gen:protos && npm run gen:schemas && npm run gen:docs && npm run gen:skills && npm run gen:cf-types",
+    "gen:check": "npm run gen && node tools/gen/check-clean.mjs",
+    "build": "npm run build --workspaces --if-present",
+    "validate-examples": "node apps/cli/dist/index.js validate examples/*/",
+    "contract": "node tools/contract/run.mjs --target worker",
+    "dev": "wrangler dev -c apps/control-plane/wrangler.jsonc",
+    "ci": "npm run format:check && npm run lint && npm run typecheck && npm run gen:check && npm run test && npm run build && npm run validate-examples && npm run contract"
+  },
+  "devDependencies": {
+    "@cfworker/json-schema": "4.1.6",
+    "@cloudflare/vitest-plugin": "1.9.0",
+    "@cloudflare/workers-types": "5.20261121.1",
+    "@eslint/js": "10.0.1",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "@noble/curves": "2.4.0",
+    "@types/node": "24.19.2",
+    "esbuild": "0.28.2",
+    "eslint": "10.15.0",
+    "jose": "6.2.18",
+    "json-schema-to-typescript": "16.0.0",
+    "lossless-json": "4.3.4",
+    "openapi-fetch": "0.17.0",
+    "openapi-typescript": "7.13.0",
+    "prettier": "3.10.1",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.73.0",
+    "vitest": "4.1.12",
+    "wrangler": "4.166.0",
+    "yaml": "2.9.1"
+  }
+}

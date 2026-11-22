@@ -3,8 +3,8 @@ package runner
 import (
 	"strings"
 
-	"github.com/openfactory-org/openfactory/internal/core"
 	"github.com/openfactory-org/openfactory/internal/harness"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 	"github.com/openfactory-org/openfactory/internal/runnerproto"
 )
 
@@ -24,7 +24,7 @@ func (r *runner) dropDefaultAuth() {
 			env[k] = v
 		}
 	}
-	if !harness.HasCredentialEnv(core.HarnessType(r.start.Harness.Type), env) {
+	if !harness.HasCredentialEnv(rtcore.HarnessType(r.start.Harness.Type), env) {
 		return
 	}
 	r.harnessAuth = nil

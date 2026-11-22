@@ -1,0 +1,197 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openfactory.dev/schemas/runner/v1/transfer.json",
+  "title": "Open Factory runner protocol v1: uploads, downloads, git credentials and cloud tokens",
+  "description": "Generated from internal/runnerproto and kept in step by internal/runnerproto/schema_test.go. A change to a field name is a breaking change of the protocol.",
+  "$defs": {
+    "CloudTokenRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "audience": {
+          "type": "string"
+        },
+        "ttl_seconds": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "audience",
+        "ttl_seconds"
+      ]
+    },
+    "CloudTokenResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "expires_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "token",
+        "expires_at"
+      ]
+    },
+    "DownloadFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bytes": {
+          "type": "integer"
+        },
+        "expires_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "part": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "url",
+        "bytes",
+        "expires_at"
+      ]
+    },
+    "DownloadsResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/DownloadFile"
+          }
+        }
+      },
+      "required": [
+        "files"
+      ]
+    },
+    "GitCredentialRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "host": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "protocol": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol",
+        "host",
+        "path"
+      ]
+    },
+    "GitCredentialResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "expires_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "password": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "username",
+        "password",
+        "expires_at"
+      ]
+    },
+    "UploadRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bytes": {
+          "type": "integer"
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "artifact",
+            "snapshot",
+            "transcript"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "part": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name",
+        "bytes",
+        "sha256"
+      ]
+    },
+    "UploadResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "expires_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "headers": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "method": {
+          "type": "string"
+        },
+        "upload_id": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "upload_id",
+        "method",
+        "url",
+        "headers",
+        "expires_at"
+      ]
+    }
+  }
+}

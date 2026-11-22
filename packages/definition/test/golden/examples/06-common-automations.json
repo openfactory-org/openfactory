@@ -1,0 +1,372 @@
+{
+ "compiled": {
+  "schemaVersion": "v1",
+  "name": "common-automations",
+  "description": "A catalog of everyday automations for Slack, Linear, schedules and GitHub.",
+  "alias": "builder",
+  "repositories": [
+   {
+    "codeForge": "GITHUB",
+    "owner": "acme",
+    "name": "api"
+   },
+   {
+    "codeForge": "GITHUB",
+    "owner": "acme",
+    "name": "web"
+   }
+  ],
+  "integrations": [
+   {
+    "type": "slack"
+   },
+   {
+    "type": "linear"
+   }
+  ],
+  "integrationsSet": true,
+  "githubOnboardingNotices": false,
+  "factoryConfigChecks": "all",
+  "agents": [
+   {
+    "id": "",
+    "factory_id": "",
+    "name": "foreman",
+    "description": "Handles requests from Slack, Linear and GitHub",
+    "type": "FOREMAN",
+    "instructions": "Own each work item from intake to handoff. Restate the request, ask the\nrequester about anything ambiguous, do or delegate the work, and hand back a\ndraft pull request with validation evidence. Reply in the thread or issue\nwhere the work started. Never merge.",
+    "harness": {
+     "type": "claude",
+     "model": "claude-opus-5-5",
+     "auth": {
+      "source": "managedSecret",
+      "secretName": "ANTHROPIC_API_KEY"
+     }
+    },
+    "machine": {
+     "name": "linux",
+     "description": "Default Linux machine",
+     "os": "linux",
+     "arch": "x86_64",
+     "image": "ubuntu:24.04"
+    },
+    "network_policy": {
+     "restricted": false,
+     "allowed_hosts": [],
+     "denied_hosts": []
+    },
+    "spawnable_by": null
+   },
+   {
+    "id": "",
+    "factory_id": "",
+    "name": "reporter",
+    "description": "Writes scheduled reports and digests; never changes code",
+    "type": "CUSTOM",
+    "instructions": "You write concise reports. Gather the data the prompt asks for from GitHub,\nLinear and the factory's work items, then post the report where the prompt\nsays. Use short sections and bullet points, link every item you mention, and\nnever modify repositories.",
+    "harness": {
+     "type": "claude",
+     "model": "claude-sonnet-5-5",
+     "auth": {
+      "source": "managedSecret",
+      "secretName": "ANTHROPIC_API_KEY"
+     }
+    },
+    "machine": {
+     "name": "linux",
+     "description": "Default Linux machine",
+     "os": "linux",
+     "arch": "x86_64",
+     "image": "ubuntu:24.04"
+    },
+    "network_policy": {
+     "restricted": false,
+     "allowed_hosts": [],
+     "denied_hosts": []
+    },
+    "spawnable_by": []
+   }
+  ],
+  "automations": [
+   {
+    "id": "",
+    "factory_id": "",
+    "name": "ci-failure",
+    "display_name": "Main branch CI failure",
+    "enabled": true,
+    "agent": "foreman",
+    "prompt": "CI failed on `main`. Find the failing job and the commit that broke it. If\nthe cause is clear and the fix is small, open a draft pull request with the\nfix; otherwise post a diagnosis on the commit and ask the author.",
+    "triggers": [
+     {
+      "provider": "github",
+      "event": "workflow_run_completed",
+      "filter": {
+       "branches": [
+        "main"
+       ],
+       "conclusions": [
+        "failure"
+       ],
+       "repos": [
+        "acme/api",
+        "acme/web"
+       ],
+       "workflows": [
+        "CI"
+       ]
+      }
+     },
+     {
+      "provider": "github",
+      "event": "commit_status",
+      "filter": {
+       "contexts": [
+        "ci/build"
+       ],
+       "repos": [
+        "acme/api"
+       ],
+       "states": [
+        "failure",
+        "error"
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "id": "",
+    "factory_id": "",
+    "name": "linear-agent-session",
+    "enabled": true,
+    "agent": "foreman",
+    "prompt": "Someone started an agent session on a Linear issue. Work on the issue and\nreport progress in the session.",
+    "triggers": [
+     {
+      "provider": "linear",
+      "event": "agent_session_created",
+      "filter": {
+       "keywords": [
+        "build",
+        "fix",
+        "investigate"
+       ],
+       "team_ids": [
+        "2f1c1a5e-8f0a-4c55-9e1c-3d2b7a9e4f10"
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "id": "",
+    "factory_id": "",
+    "name": "linear-comments",
+    "enabled": true,
+    "agent": "foreman",
+    "prompt": "Handle the new comment in the issue's context. Do not assume a previous run\nexists. Do not merge changes.",
+    "triggers": [
+     {
+      "provider": "linear",
+      "event": "comment_created",
+      "filter": {
+       "labels": [
+        "factory-ready"
+       ],
+       "teams": [
+        "Engineering"
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "id": "",
+    "factory_id": "",
+    "name": "linear-intake",
+    "enabled": true,
+    "agent": "foreman",
+    "prompt": "Assess the labeled issue and identify the next action. Ask a human about\nunresolved requirements. Do not merge changes.",
+    "triggers": [
+     {
+      "provider": "linear",
+      "event": "issue_labeled",
+      "filter": {
+       "labels": {
+        "in": [
+         "factory-ready"
+        ],
+        "not_in": [
+         "blocked"
+        ]
+       },
+       "teams": [
+        "Engineering"
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "id": "",
+    "factory_id": "",
+    "name": "nightly-dependency-audit",
+    "display_name": "Nightly dependency audit",
+    "enabled": true,
+    "agent": "foreman",
+    "prompt": "Audit dependencies in every repository for known vulnerabilities. For each\nfixable high or critical advisory, open a draft pull request with the upgrade\nand passing tests. Summarize the results in #engineering.",
+    "triggers": [
+     {
+      "provider": "schedule",
+      "event": "cron_fired",
+      "schedule": {
+       "cron": "@daily"
+      }
+     },
+     {
+      "provider": "schedule",
+      "event": "cron_fired",
+      "schedule": {
+       "name": "midday-recheck",
+       "cron": "@every 12h"
+      }
+     }
+    ],
+    "overrides": {
+     "secrets": null,
+     "mcp_servers": null,
+     "idle_timeout_minutes": 5
+    }
+   },
+   {
+    "id": "",
+    "factory_id": "",
+    "name": "pr-review-requested",
+    "enabled": true,
+    "agent": "foreman",
+    "prompt": "The factory was requested as a reviewer. Review the pull request and post a\ncomment with findings and a verdict. Do not approve or merge.",
+    "triggers": [
+     {
+      "provider": "github",
+      "event": "pull_request_review_requested",
+      "filter": {
+       "repos": [
+        "acme/api",
+        "acme/web"
+       ],
+       "reviewers": [
+        "builder-bot"
+       ],
+       "skip_bots": "none"
+      }
+     }
+    ]
+   },
+   {
+    "id": "",
+    "factory_id": "",
+    "name": "slack-incident-channel",
+    "display_name": "Outage reports in",
+    "enabled": true,
+    "agent": "foreman",
+    "prompt": "A possible outage was reported in the incidents channel. Summarize what is\nknown, check recent deploys and errors, and reply in the thread with findings.\nDo not take production actions.",
+    "triggers": [
+     {
+      "provider": "slack",
+      "event": "message_posted",
+      "filter": {
+       "channel_ids": {
+        "in": [
+         "C0123456789"
+        ]
+       },
+       "keywords": [
+        "outage",
+        "sev1",
+        "down"
+       ]
+      }
+     },
+     {
+      "provider": "slack",
+      "event": "reaction_added",
+      "filter": {
+       "channel_ids": [
+        "C0123456789"
+       ],
+       "emojis": [
+        "rotating_light"
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "id": "",
+    "factory_id": "",
+    "name": "slack-mention",
+    "enabled": true,
+    "agent": "foreman",
+    "prompt": "Someone mentioned the factory in Slack. Treat the message and its thread as\nthe request. Reply in the thread to confirm what you will do, ask clarifying\nquestions there, and post the handoff in the same thread.",
+    "triggers": [
+     {
+      "provider": "slack",
+      "event": "app_mention",
+      "filter": {
+       "channels": [
+        "#engineering",
+        "#product"
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "id": "",
+    "factory_id": "",
+    "name": "weekly-digest",
+    "display_name": "Weekly factory digest",
+    "enabled": true,
+    "agent": "reporter",
+    "prompt": "Write the weekly factory digest: work items completed, pull requests opened\nand merged, items waiting on humans, and failed runs, for the past seven days.\nPost it to the #engineering Slack channel.",
+    "triggers": [
+     {
+      "provider": "schedule",
+      "event": "cron_fired",
+      "schedule": {
+       "name": "monday-morning",
+       "cron": "0 9 * * 1"
+      }
+     }
+    ]
+   }
+  ],
+  "machines": {
+   "linux": {
+    "name": "linux",
+    "description": "Default Linux machine",
+    "os": "linux",
+    "arch": "x86_64",
+    "image": "ubuntu:24.04"
+   }
+  },
+  "scorers": [],
+  "scorerDefaults": {
+   "harness": {
+    "type": "claude",
+    "model": "claude-opus-5-5",
+    "auth": {
+     "source": "managedSecret",
+     "secretName": "ANTHROPIC_API_KEY"
+    }
+   },
+   "secrets": null,
+   "mcp_servers": null
+  },
+  "webhooks": [],
+  "benchmarks": [],
+  "skills": []
+ },
+ "errors": null,
+ "example": "06-common-automations"
+}

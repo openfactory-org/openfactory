@@ -60,17 +60,12 @@ func TestSetupCloudWritesFilesWithoutSessionToken(t *testing.T) {
 	srv, auds := cloudTokenServer(t)
 	r := newCloudRunner(t, srv.URL, "'/bin/openfactory' runner cloud-token --state-dir '/state'")
 	ci := &runnerproto.CloudIdentity{
-		AWS: &runnerproto.CloudAWS{RoleARN: "arn:aws:iam::1:role/x", Audience: "sts.amazonaws.com", SessionName: "openfactory-run_1"},
 		GCP: &runnerproto.CloudGCP{Audience: "//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/p/providers/q", ProjectNumber: "1"},
 	}
 	if _, err := r.setupCloud(context.Background(), ci); err != nil {
 		t.Fatal(err)
 	}
-	awsFile := r.cloudEnv["AWS_WEB_IDENTITY_TOKEN_FILE"]
-	if b, err := os.ReadFile(awsFile); err != nil || string(b) != "tok-1" {
-		t.Fatalf("aws token file %q: %q, %v", awsFile, b, err)
-	}
-	if r.cloudEnv["AWS_ROLE_ARN"] != "arn:aws:iam::1:role/x" || r.cloudEnv["GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES"] != "1" || r.cloudEnv["OF_CLOUD_TOKEN_COMMAND"] == "" {
+	if r.cloudEnv["GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES"] != "1" || r.cloudEnv["OF_CLOUD_TOKEN_COMMAND"] == "" {
 		t.Fatalf("env %v", r.cloudEnv)
 	}
 	cred, err := os.ReadFile(r.cloudEnv["GOOGLE_APPLICATION_CREDENTIALS"])
@@ -93,16 +88,16 @@ func TestSetupCloudWritesFilesWithoutSessionToken(t *testing.T) {
 	if strings.Contains(string(cred), "ofs_test") {
 		t.Fatal("the credential file holds the session token")
 	}
-	// GCP uses the executable source, so only the AWS token is fetched now.
-	if got := auds(); len(got) != 1 || got[0] != "sts.amazonaws.com" {
+	// GCP uses the executable source, so no token is fetched now.
+	if got := auds(); len(got) != 0 {
 		t.Fatalf("audiences %v", got)
 	}
-	if len(r.cloudFiles) != 1 {
+	if len(r.cloudFiles) != 0 {
 		t.Fatalf("refreshed files %v", r.cloudFiles)
 	}
 }
 
-// TestCloudTokenFileRefreshedDuringLongTurn shows that the AWS token file
+// TestCloudTokenFileRefreshedDuringLongTurn shows that the GCP token file
 // gets a new token while a turn runs, so a turn longer than the token life
 // keeps its cloud access.
 func TestCloudTokenFileRefreshedDuringLongTurn(t *testing.T) {
@@ -112,17 +107,16 @@ func TestCloudTokenFileRefreshedDuringLongTurn(t *testing.T) {
 	srv, _ := cloudTokenServer(t)
 	r := newCloudRunner(t, srv.URL, "")
 	ci := &runnerproto.CloudIdentity{
-		AWS: &runnerproto.CloudAWS{RoleARN: "arn:aws:iam::1:role/x", Audience: "sts.amazonaws.com"},
 		GCP: &runnerproto.CloudGCP{Audience: "gcp-aud", ProjectNumber: "1"},
 	}
 	if _, err := r.setupCloud(context.Background(), ci); err != nil {
 		t.Fatal(err)
 	}
-	// Without a helper command, GCP reads a token file too.
-	if len(r.cloudFiles) != 2 {
+	// Without a helper command, GCP reads a token file.
+	if len(r.cloudFiles) != 1 {
 		t.Fatalf("files %v", r.cloudFiles)
 	}
-	file := r.cloudEnv["AWS_WEB_IDENTITY_TOKEN_FILE"]
+	file := filepath.Join(r.cfg.StateDir, "cloud", "gcp-subject-token")
 	first, _ := os.ReadFile(file)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})

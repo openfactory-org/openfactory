@@ -7,7 +7,7 @@ import { AgentPage } from "../pages/Agents";
 import { AutomationPage, AutomationsPage, fmtUTC, setFrontmatterEnabled } from "../pages/Automations";
 import { defaultChangeMessage } from "../pages/Definition";
 import { changedIdentity, gitRepoError, SettingsPage } from "../pages/Settings";
-import { EnvironmentPage } from "../pages/Team";
+import { EnvironmentPage } from "../pages/Environments";
 import { deliveryReason, filterHeadline, WebhookPage, WebhooksPage, webhookUsage } from "../pages/Webhooks";
 import { ME, mockFetch, renderAt, renderFactoryPage } from "./utils";
 

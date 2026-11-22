@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/rtcore"
 )
 
 func newBackendOpts(t *testing.T, o Options) *Backend {
@@ -33,26 +33,26 @@ func newBackend(t *testing.T, script string, max int) *Backend {
 	return newBackendOpts(t, Options{Command: []string{"/bin/sh", "-c", script}, MaxTasks: max})
 }
 
-func task(runID string) core.Task {
-	return core.Task{
-		TaskID:   core.TaskID(runID, 1),
+func task(runID string) rtcore.Task {
+	return rtcore.Task{
+		TaskID:   rtcore.TaskID(runID, 1),
 		RunID:    runID,
 		Session:  1,
 		TeamID:   "team",
 		Image:    "local",
-		Platform: core.TaskPlatform{OS: "linux", Arch: "amd64"},
+		Platform: rtcore.TaskPlatform{OS: "linux", Arch: "amd64"},
 		Env: map[string]string{
-			core.TaskEnvControlURL:     "http://127.0.0.1:1",
-			core.TaskEnvRunID:          runID,
-			core.TaskEnvSession:        "1",
-			core.TaskEnvBootstrapToken: "token",
+			rtcore.TaskEnvControlURL:     "http://127.0.0.1:1",
+			rtcore.TaskEnvRunID:          runID,
+			rtcore.TaskEnvSession:        "1",
+			rtcore.TaskEnvBootstrapToken: "token",
 		},
 		MaxSessionSeconds: 60,
 	}
 }
 
 // start starts the task and registers the cleanup.
-func start(t *testing.T, b *Backend, tk core.Task) core.TaskStatus {
+func start(t *testing.T, b *Backend, tk rtcore.Task) rtcore.TaskStatus {
 	t.Helper()
 	t.Cleanup(func() { _ = b.Destroy(context.Background(), tk.TaskID) })
 	st, err := b.Start(context.Background(), tk)
@@ -62,7 +62,7 @@ func start(t *testing.T, b *Backend, tk core.Task) core.TaskStatus {
 	return st
 }
 
-func waitExited(t *testing.T, b *Backend, taskID string) core.TaskStatus {
+func waitExited(t *testing.T, b *Backend, taskID string) rtcore.TaskStatus {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -70,7 +70,7 @@ func waitExited(t *testing.T, b *Backend, taskID string) core.TaskStatus {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if st.State == core.TaskExited {
+		if st.State == rtcore.TaskExited {
 			return st
 		}
 		if time.Now().After(deadline) {
@@ -89,7 +89,7 @@ func TestStartRunsAndCompletes(t *testing.T) {
 	tk := task("r1")
 	start(t, b, tk)
 	st := waitExited(t, b, tk.TaskID)
-	if st.Reason != core.SandboxCompleted || st.ExitCode == nil || *st.ExitCode != 0 {
+	if st.Reason != rtcore.SandboxCompleted || st.ExitCode == nil || *st.ExitCode != 0 {
 		t.Fatalf("unexpected status %+v", st)
 	}
 	if st.StartedAt == nil || st.EndedAt == nil {
@@ -102,7 +102,7 @@ func TestStartNonZeroExit(t *testing.T) {
 	tk := task("r1")
 	start(t, b, tk)
 	st := waitExited(t, b, tk.TaskID)
-	if st.Reason != core.SandboxProcessFailed || st.ExitCode == nil || *st.ExitCode != 3 {
+	if st.Reason != rtcore.SandboxProcessFailed || st.ExitCode == nil || *st.ExitCode != 3 {
 		t.Fatalf("unexpected status %+v", st)
 	}
 }
@@ -176,7 +176,7 @@ func TestStartMissingProgram(t *testing.T) {
 	b := newBackendOpts(t, Options{Command: []string{"/no/such/program"}})
 	tk := task("r1")
 	st := start(t, b, tk)
-	if st.State != core.TaskExited || st.Reason != core.SandboxInvalidSpec || st.Message == "" {
+	if st.State != rtcore.TaskExited || st.Reason != rtcore.SandboxInvalidSpec || st.Message == "" {
 		t.Fatalf("unexpected status %+v", st)
 	}
 }
@@ -186,7 +186,7 @@ func TestCapacity(t *testing.T) {
 	t1, t2 := task("r1"), task("r2")
 	start(t, b, t1)
 	t.Cleanup(func() { _ = b.Destroy(context.Background(), t2.TaskID) })
-	if _, err := b.Start(context.Background(), t2); !errors.Is(err, core.ErrAtCapacity) {
+	if _, err := b.Start(context.Background(), t2); !errors.Is(err, rtcore.ErrAtCapacity) {
 		t.Fatalf("got %v, want ErrAtCapacity", err)
 	}
 	if err := b.Destroy(context.Background(), t1.TaskID); err != nil {
@@ -200,13 +200,13 @@ func TestCapacity(t *testing.T) {
 func TestStatusNotFound(t *testing.T) {
 	b := newBackend(t, "exit 0", 0)
 	ctx := context.Background()
-	if _, err := b.Status(ctx, "nope.1"); !errors.Is(err, core.ErrNotFound) {
+	if _, err := b.Status(ctx, "nope.1"); !errors.Is(err, rtcore.ErrNotFound) {
 		t.Fatalf("status: %v", err)
 	}
-	if _, err := b.Watch(ctx, "nope.1"); !errors.Is(err, core.ErrNotFound) {
+	if _, err := b.Watch(ctx, "nope.1"); !errors.Is(err, rtcore.ErrNotFound) {
 		t.Fatalf("watch: %v", err)
 	}
-	if err := b.Cancel(ctx, "nope.1", 1); !errors.Is(err, core.ErrNotFound) {
+	if err := b.Cancel(ctx, "nope.1", 1); !errors.Is(err, rtcore.ErrNotFound) {
 		t.Fatalf("cancel: %v", err)
 	}
 }
@@ -221,7 +221,7 @@ func TestCancelGraceful(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := waitExited(t, b, tk.TaskID)
-	if time.Since(begin) > 2*time.Second || st.Reason != core.SandboxCancelled {
+	if time.Since(begin) > 2*time.Second || st.Reason != rtcore.SandboxCancelled {
 		t.Fatalf("took %v, status %+v", time.Since(begin), st)
 	}
 }
@@ -239,7 +239,7 @@ func TestCancelHardStopAfterGrace(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := waitExited(t, b, tk.TaskID)
-	if time.Since(begin) > 4*time.Second || st.Reason != core.SandboxCancelled {
+	if time.Since(begin) > 4*time.Second || st.Reason != rtcore.SandboxCancelled {
 		t.Fatalf("took %v, status %+v", time.Since(begin), st)
 	}
 }
@@ -253,7 +253,7 @@ func TestCancelExitedIsNoop(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, _ := b.Status(context.Background(), tk.TaskID)
-	if st.Reason != core.SandboxCompleted {
+	if st.Reason != rtcore.SandboxCompleted {
 		t.Fatalf("reason changed: %+v", st)
 	}
 }
@@ -266,7 +266,7 @@ func TestDestroyRunningTask(t *testing.T) {
 	if err := b.Destroy(ctx, tk.TaskID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Status(ctx, tk.TaskID); !errors.Is(err, core.ErrNotFound) {
+	if _, err := b.Status(ctx, tk.TaskID); !errors.Is(err, rtcore.ErrNotFound) {
 		t.Fatalf("status: %v", err)
 	}
 	if _, err := os.Stat(taskDir(b, tk.TaskID)); !os.IsNotExist(err) {
@@ -321,21 +321,21 @@ func TestWatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	timeout := time.After(5 * time.Second)
-	next := func() (core.TaskStatus, bool) {
+	next := func() (rtcore.TaskStatus, bool) {
 		select {
 		case st, ok := <-ch:
 			return st, ok
 		case <-timeout:
 			t.Fatal("timeout")
-			return core.TaskStatus{}, false
+			return rtcore.TaskStatus{}, false
 		}
 	}
 	st, ok := next()
-	if !ok || st.State != core.TaskRunning {
+	if !ok || st.State != rtcore.TaskRunning {
 		t.Fatalf("first: %+v %v", st, ok)
 	}
 	st, ok = next()
-	if !ok || st.State != core.TaskExited {
+	if !ok || st.State != rtcore.TaskExited {
 		t.Fatalf("second: %+v %v", st, ok)
 	}
 	if _, ok = next(); ok {
@@ -353,7 +353,7 @@ func TestWatchExitedTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, ok := <-ch
-	if !ok || st.State != core.TaskExited {
+	if !ok || st.State != rtcore.TaskExited {
 		t.Fatalf("got %+v %v", st, ok)
 	}
 	if _, ok := <-ch; ok {
@@ -389,7 +389,7 @@ func TestDeadline(t *testing.T) {
 	start(t, b, tk)
 	begin := time.Now()
 	st := waitExited(t, b, tk.TaskID)
-	if time.Since(begin) > 4*time.Second || st.Reason != core.SandboxDeadlineExceeded {
+	if time.Since(begin) > 4*time.Second || st.Reason != rtcore.SandboxDeadlineExceeded {
 		t.Fatalf("took %v, status %+v", time.Since(begin), st)
 	}
 }

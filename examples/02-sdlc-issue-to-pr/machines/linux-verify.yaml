@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=https://openfactory-org.github.io/schemas/v1/machine.schema.json
+description: Linux machine with a headless browser for UI verification
+setupCommands:
+  - corepack enable
+  - pnpm install --frozen-lockfile
+instanceShape:
+  vcpus: 4
+  memoryGb: 8
+failureSessionRetentionMinutes: 30
+platform:
+  os: linux
+  arch: x86_64
+  linux:
+    image: mcr.microsoft.com/playwright:v1.50.0-noble

@@ -1,0 +1,62 @@
+# Open Factory guest kernel options, shared by both architectures.
+# build.sh merges this file and config-<arch> on top of the Firecracker
+# microvm-kernel-ci-<arch>-6.18.config. Everything is built in: no modules,
+# no initrd.
+
+# Devices (MMIO transport; PCI kept for the later PCI transport)
+CONFIG_VIRTIO=y
+CONFIG_VIRTIO_MMIO=y
+CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES=y
+CONFIG_VIRTIO_BLK=y
+CONFIG_VIRTIO_NET=y
+CONFIG_PCI=y
+CONFIG_VIRTIO_PCI=y
+
+# Control stream (Firecracker hybrid vsock)
+CONFIG_VSOCKETS=y
+CONFIG_VIRTIO_VSOCKETS=y
+
+# Entropy device and reseed after a snapshot restore
+CONFIG_HW_RANDOM=y
+CONFIG_HW_RANDOM_VIRTIO=y
+CONFIG_VMGENID=y
+
+# Filesystems
+CONFIG_EXT4_FS=y
+CONFIG_OVERLAY_FS=y
+CONFIG_TMPFS=y
+CONFIG_TMPFS_POSIX_ACL=y
+CONFIG_DEVTMPFS=y
+CONFIG_DEVTMPFS_MOUNT=y
+CONFIG_UNIX98_PTYS=y
+CONFIG_PROC_FS=y
+CONFIG_SYSFS=y
+
+# Networking: IPv4 only at run time (the command line has ipv6.disable=1)
+CONFIG_NET=y
+CONFIG_INET=y
+CONFIG_PACKET=y
+CONFIG_UNIX=y
+
+# Harness tools read cgroup limits; agents use their own sandboxes
+CONFIG_CGROUPS=y
+CONFIG_MEMCG=y
+CONFIG_SECCOMP=y
+CONFIG_SECCOMP_FILTER=y
+CONFIG_NAMESPACES=y
+CONFIG_USER_NS=y
+CONFIG_PID_NS=y
+CONFIG_NET_NS=y
+
+# Debug console only (serial_console: true)
+CONFIG_PRINTK=y
+CONFIG_SERIAL_8250=y
+CONFIG_SERIAL_8250_CONSOLE=y
+
+# Off
+# CONFIG_MODULES is not set
+# CONFIG_KEXEC is not set
+# CONFIG_HIBERNATION is not set
+# CONFIG_DEVMEM is not set
+# CONFIG_DEVPORT is not set
+# CONFIG_BLK_DEV_INITRD is not set

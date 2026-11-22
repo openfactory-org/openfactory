@@ -1,0 +1,276 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openfactory.dev/schemas/worker/v2/protocol.json",
+  "title": "Open Factory worker protocol v2 frame",
+  "description": "One JSON text frame of the WebSocket subprotocol openfactory.worker.v2 at GET /api/v1/workers/connect. Kept in step with internal/sandbox/direct by internal/sandbox/direct/schema_test.go. An enrolled worker gets auth.challenge first and answers with auth.response before hello. A worker in drain refuses task.assign with the error at_capacity.",
+  "oneOf": [
+    {"$ref": "#/$defs/authChallengeFrame"},
+    {"$ref": "#/$defs/authResponseFrame"},
+    {"$ref": "#/$defs/helloFrame"},
+    {"$ref": "#/$defs/welcomeFrame"},
+    {"$ref": "#/$defs/heartbeatFrame"},
+    {"$ref": "#/$defs/pingFrame"},
+    {"$ref": "#/$defs/pongFrame"},
+    {"$ref": "#/$defs/requestFrame"},
+    {"$ref": "#/$defs/responseFrame"},
+    {"$ref": "#/$defs/eventFrame"}
+  ],
+  "$defs": {
+    "id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "workerId": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},
+    "taskId": {"type": "string", "pattern": "^.+\\.[1-9][0-9]*$", "maxLength": 200},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "base64url": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
+
+    "authChallengeFrame": {
+      "type": "object", "required": ["type", "params"], "additionalProperties": false,
+      "properties": {"type": {"const": "auth.challenge"}, "params": {"$ref": "#/$defs/authChallenge"}}
+    },
+    "authChallenge": {
+      "type": "object", "required": ["nonce", "connection_id"], "additionalProperties": false,
+      "properties": {
+        "nonce": {"description": "32 random bytes, base64url without padding", "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$"},
+        "connection_id": {"$ref": "#/$defs/id"},
+        "protocols": {"description": "minor versions that the hub accepts", "type": "array", "items": {"type": "integer", "minimum": 0}}
+      }
+    },
+    "authResponseFrame": {
+      "type": "object", "required": ["type", "params"], "additionalProperties": false,
+      "properties": {"type": {"const": "auth.response"}, "params": {"$ref": "#/$defs/authResponse"}}
+    },
+    "authResponse": {
+      "description": "sig is the Ed25519 signature of the bytes \"openfactory-worker-auth-v1\\n<worker_id>\\n<connection_id>\\n<nonce>\\n\", base64url without padding",
+      "type": "object", "required": ["worker_id", "alg", "sig"], "additionalProperties": false,
+      "properties": {
+        "worker_id": {"$ref": "#/$defs/workerId"},
+        "alg": {"const": "ed25519"},
+        "sig": {"type": "string", "pattern": "^[A-Za-z0-9_-]{86}$"}
+      }
+    },
+
+    "helloFrame": {
+      "type": "object", "required": ["type", "params"], "additionalProperties": false,
+      "properties": {"type": {"const": "hello"}, "params": {"$ref": "#/$defs/hello"}}
+    },
+    "hello": {
+      "type": "object", "required": ["worker_id", "backend", "capacity", "tasks"], "additionalProperties": false,
+      "properties": {
+        "worker_id": {"$ref": "#/$defs/workerId"},
+        "name": {"type": "string"},
+        "backend": {"type": "string"},
+        "labels": {"type": "object", "additionalProperties": {"type": "string"}},
+        "capacity": {"description": "limit for tasks that are not exited; 0 means no limit", "type": "integer", "minimum": 0},
+        "version": {"type": "string"},
+        "one_shot": {"type": "boolean"},
+        "tasks": {"type": ["array", "null"], "items": {"$ref": "#/$defs/heldTask"}},
+        "protocol_minor": {"type": "integer", "minimum": 0},
+        "features": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "facts": {"$ref": "#/$defs/facts"},
+        "slots": {"type": "integer", "minimum": 0, "maximum": 256},
+        "slot": {"$ref": "#/$defs/slotSize"},
+        "draining": {"type": "boolean"}
+      }
+    },
+    "facts": {
+      "type": "object", "required": ["arch", "vcpus"], "additionalProperties": false,
+      "properties": {
+        "arch": {"enum": ["amd64", "arm64"]},
+        "os": {"type": "string"},
+        "kernel": {"type": "string"},
+        "vcpus": {"type": "integer", "minimum": 1},
+        "memory_mib": {"type": "integer", "minimum": 0},
+        "disk_total_bytes": {"type": "integer", "minimum": 0},
+        "disk_free_bytes": {"type": "integer", "minimum": 0},
+        "firecracker_version": {"type": "string"},
+        "guest_kernel": {"type": "string"},
+        "runtime_version": {"type": "string"},
+        "kvm": {"type": "boolean"},
+        "warnings": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "slotSize": {
+      "type": "object", "required": ["vcpus", "memory_mib"], "additionalProperties": false,
+      "properties": {
+        "vcpus": {"type": "integer", "minimum": 1, "maximum": 32},
+        "memory_mib": {"type": "integer", "minimum": 1},
+        "scratch_gib": {"type": "integer", "minimum": 0}
+      }
+    },
+    "heldTask": {
+      "type": "object", "required": ["task_id", "status"], "additionalProperties": false,
+      "properties": {"task_id": {"$ref": "#/$defs/taskId"}, "status": {"$ref": "#/$defs/taskStatus"}}
+    },
+
+    "welcomeFrame": {
+      "type": "object", "required": ["type", "result"], "additionalProperties": false,
+      "properties": {"type": {"const": "welcome"}, "result": {"$ref": "#/$defs/welcome"}}
+    },
+    "welcome": {
+      "type": "object", "required": ["connection_id", "heartbeat_ms"], "additionalProperties": false,
+      "properties": {
+        "connection_id": {"$ref": "#/$defs/id"},
+        "heartbeat_ms": {"type": "integer", "minimum": 0},
+        "access_token": {"type": "string", "pattern": "^ofw_"},
+        "access_token_expires_at": {"$ref": "#/$defs/timestamp"},
+        "min_runtime_version": {"type": "string"},
+        "recommended_runtime_version": {"type": "string"},
+        "draining": {"type": "boolean"}
+      }
+    },
+    "heartbeatFrame": {
+      "type": "object", "required": ["type", "params"], "additionalProperties": false,
+      "properties": {
+        "type": {"const": "heartbeat"},
+        "params": {
+          "type": "object", "required": ["active", "capacity"], "additionalProperties": false,
+          "properties": {"active": {"type": "integer", "minimum": 0}, "capacity": {"type": "integer", "minimum": 0}}
+        }
+      }
+    },
+    "pingFrame": {"type": "object", "required": ["type"], "additionalProperties": false, "properties": {"type": {"const": "ping"}}},
+    "pongFrame": {"type": "object", "required": ["type"], "additionalProperties": false, "properties": {"type": {"const": "pong"}}},
+
+    "requestFrame": {
+      "type": "object", "required": ["type", "id", "method"],
+      "properties": {
+        "type": {"const": "request"}, "id": {"$ref": "#/$defs/id"}, "method": {"type": "string"},
+        "params": true
+      },
+      "additionalProperties": false,
+      "oneOf": [
+        {"properties": {"method": {"const": "task.assign"}, "params": {"$ref": "#/$defs/assignParams"}}, "required": ["params"]},
+        {"properties": {"method": {"enum": ["task.status", "task.destroy"]}, "params": {"$ref": "#/$defs/taskRef"}}, "required": ["params"]},
+        {"properties": {"method": {"const": "task.cancel"}, "params": {"$ref": "#/$defs/cancelParams"}}, "required": ["params"]},
+        {"properties": {"method": {"const": "task.list"}, "params": {"type": "object", "maxProperties": 0}}},
+        {"properties": {"method": {"const": "drain"}, "params": {"$ref": "#/$defs/drainParams"}}, "required": ["params"]}
+      ]
+    },
+    "assignParams": {
+      "type": "object", "required": ["task"], "additionalProperties": false,
+      "properties": {"task": {"$ref": "#/$defs/task"}, "worker": {"$ref": "#/$defs/workerExtras"}}
+    },
+    "workerExtras": {
+      "description": "Extras of task.assign for a microVM worker.",
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "git_cache": {
+          "type": "array", "maxItems": 4,
+          "items": {
+            "type": "object", "required": ["key", "clone_url"], "additionalProperties": false,
+            "properties": {"key": {"type": "string", "pattern": "^[0-9a-f]{16}$"}, "clone_url": {"type": "string", "minLength": 1}}
+          }
+        }
+      }
+    },
+    "taskRef": {
+      "type": "object", "required": ["task_id"], "additionalProperties": false,
+      "properties": {"task_id": {"$ref": "#/$defs/taskId"}}
+    },
+    "cancelParams": {
+      "type": "object", "required": ["task_id", "grace_seconds"], "additionalProperties": false,
+      "properties": {"task_id": {"$ref": "#/$defs/taskId"}, "grace_seconds": {"type": "integer", "minimum": 0}}
+    },
+    "drainParams": {
+      "type": "object", "required": ["draining"], "additionalProperties": false,
+      "properties": {"draining": {"type": "boolean"}}
+    },
+    "task": {
+      "description": "One session of one run, as a worker receives it.",
+      "type": "object",
+      "required": ["task_id", "run_id", "session", "team_id", "image", "platform", "resources", "env", "max_session_seconds", "failure_retention_seconds"],
+      "additionalProperties": false,
+      "properties": {
+        "task_id": {"$ref": "#/$defs/taskId"},
+        "run_id": {"type": "string", "minLength": 1},
+        "session": {"type": "integer", "minimum": 1},
+        "team_id": {"type": "string", "minLength": 1},
+        "factory_id": {"type": "string"},
+        "image": {"type": "string", "minLength": 1},
+        "platform": {
+          "type": "object", "required": ["os", "arch"], "additionalProperties": false,
+          "properties": {"os": {"const": "linux"}, "arch": {"enum": ["amd64", "arm64"]}, "user": {"type": "string"}}
+        },
+        "resources": {
+          "type": "object", "additionalProperties": false,
+          "properties": {"cpu": {"type": "string"}, "memory": {"type": "string"}}
+        },
+        "env": {
+          "type": "object",
+          "required": ["OF_CONTROL_URL", "OF_RUN_ID", "OF_SESSION", "OF_BOOTSTRAP_TOKEN"],
+          "additionalProperties": {"type": "string"}
+        },
+        "network_policy": {
+          "type": "object", "required": ["mode", "allowed_hosts", "denied_hosts"], "additionalProperties": false,
+          "properties": {
+            "mode": {"type": "string"},
+            "allowed_hosts": {"type": ["array", "null"], "items": {"type": "string"}},
+            "denied_hosts": {"type": ["array", "null"], "items": {"type": "string"}}
+          }
+        },
+        "max_session_seconds": {"type": "integer", "minimum": 1},
+        "failure_retention_seconds": {"type": "integer", "minimum": 0},
+        "workspace_size_limit": {"type": "string"},
+        "labels": {"type": "object", "additionalProperties": {"type": "string"}}
+      }
+    },
+
+    "responseFrame": {
+      "type": "object", "required": ["type", "id"], "additionalProperties": false,
+      "properties": {
+        "type": {"const": "response"},
+        "id": {"$ref": "#/$defs/id"},
+        "result": {
+          "anyOf": [
+            {"$ref": "#/$defs/statusResult"},
+            {"$ref": "#/$defs/taskListResult"},
+            {"type": "object", "maxProperties": 0}
+          ]
+        },
+        "error": {
+          "type": "object", "required": ["code", "message"], "additionalProperties": false,
+          "properties": {
+            "code": {"enum": ["not_found", "at_capacity", "invalid_spec", "internal", "unknown_method"]},
+            "message": {"type": "string"}
+          }
+        }
+      },
+      "not": {"required": ["result", "error"]}
+    },
+    "statusResult": {
+      "type": "object", "required": ["status"], "additionalProperties": false,
+      "properties": {"status": {"$ref": "#/$defs/taskStatus"}}
+    },
+    "taskListResult": {
+      "type": "object", "required": ["tasks"], "additionalProperties": false,
+      "properties": {"tasks": {"type": ["array", "null"], "items": {"$ref": "#/$defs/heldTask"}}}
+    },
+
+    "eventFrame": {
+      "type": "object", "required": ["type", "method", "params"], "additionalProperties": false,
+      "properties": {
+        "type": {"const": "event"},
+        "method": {"const": "task.state"},
+        "params": {
+          "type": "object", "required": ["status"], "additionalProperties": false,
+          "properties": {"status": {"$ref": "#/$defs/taskStatus"}}
+        }
+      }
+    },
+    "taskStatus": {
+      "type": "object", "required": ["task_id", "state"], "additionalProperties": false,
+      "properties": {
+        "task_id": {"$ref": "#/$defs/taskId"},
+        "state": {"enum": ["accepted", "starting", "running", "exited"]},
+        "reason": {"enum": ["completed", "process_failed", "image_pull", "unschedulable", "network_policy_timeout",
+                            "invalid_spec", "container_oom", "evicted", "node_lost", "deadline_exceeded", "cancelled", "unknown"]},
+        "exit_code": {"type": ["integer", "null"]},
+        "message": {"type": "string"},
+        "sandbox_id": {"type": "string"},
+        "started_at": {"$ref": "#/$defs/timestamp"},
+        "ended_at": {"$ref": "#/$defs/timestamp"}
+      },
+      "if": {"properties": {"state": {"const": "exited"}}, "required": ["state"]},
+      "then": {"required": ["reason"]}
+    }
+  }
+}

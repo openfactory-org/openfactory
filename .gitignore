@@ -2,7 +2,6 @@
 /bin/
 /dist/
 /openfactory
-/openfactory.exe
 *.test
 
 # Test and coverage output
@@ -18,14 +17,9 @@ coverage.out
 node_modules/
 __pycache__/
 
-# Helm dependency output
-deploy/helm/openfactory/charts/
-deploy/helm/openfactory/Chart.lock
-
 # Local tool state
 /.owner/
 /.claude/
-/.aws-emulator/
 .env
 .env.local
 
@@ -35,3 +29,13 @@ deploy/helm/openfactory/Chart.lock
 .vscode/
 *.swp
 *~
+
+# TypeScript workspace
+node_modules/
+**/dist/
+.wrangler/
+.dev.vars
+*.tsbuildinfo
+deploy/sandbox/runner/
+dist/runner/
+/.openfactory-runner/

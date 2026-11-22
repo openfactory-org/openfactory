@@ -1,10 +1,10 @@
-# REST API and Go SDK
+# REST API
 
-Use the REST API to send work to factories, start and steer runs, and resolve inbox items from scripts, CI jobs and services. The dashboard, the [Factory MCP server](factory-mcp.md) and the Go SDK use the same API keys, roles and error format.
+Use the REST API to send work to factories, start and steer runs, and resolve inbox items from scripts, CI jobs and services. The dashboard, the [command-line client](cli.md), the [Factory MCP server](factory-mcp.md) and the TypeScript client use the same API keys, roles and error format.
 
 ## Base URL and OpenAPI document
 
-All endpoints are under `/api/v1`. In the examples, `OF_PUBLIC_URL` is the external URL of your server (default `http://localhost:8080`) and `OF_API_KEY` is an API key.
+All endpoints are under `/api/v1`. In the examples, `OF_PUBLIC_URL` is the external URL of your control plane (for `wrangler dev`: `http://localhost:8787`) and `OF_API_KEY` is an API key.
 
 ```bash
 export OF_PUBLIC_URL=https://factories.example.com
@@ -12,7 +12,7 @@ export OF_API_KEY=of_abcd1234_...
 curl -s "$OF_PUBLIC_URL/api/v1/me" -H "Authorization: Bearer $OF_API_KEY"
 ```
 
-The full schema is an OpenAPI 3.1 document, served at `GET /api/v1/openapi.json` (no authentication). The source is [`internal/api/openapi.json`](../internal/api/openapi.json). See [OpenAPI document](#openapi-document).
+The full schema is an OpenAPI 3.1 document, served at `GET /api/v1/openapi.json` (no authentication). The source is [`api/openapi.json`](../api/openapi.json). See [OpenAPI document](#openapi-document).
 
 ### Path style
 
@@ -153,11 +153,11 @@ curl -s -X POST "$OF_PUBLIC_URL/api/v1/runs" \
 | `agent_identity_uid` | The UID of an agent. |
 | `factory_id`, `agent_name` | A factory UID or alias, and an agent of that factory. |
 | `metadata` | See [Run metadata](#run-metadata). |
-| `config.harness` | Overrides the agent's harness. `auth` is `source: managedSecret` with `secretName`, or `source: workerEnvironment` (needs a self-hosted `worker_host`). |
+| `config.harness` | Overrides the agent's harness. `auth` is `source: managedSecret` with `secretName`, or `source: workerEnvironment` (development process workers only). |
 | `config.model_id` | Overrides the model, when you do not give `harness`. |
 | `config.environment_id` | An environment of your team. |
 | `config.machine` | A machine name. |
-| `config.worker_host` | `server` (default) or a self-hosted worker ID. |
+| `config.worker_host` | `server` (the team's default provider, the default), a provider ID (`cloudflare-sandbox`, `daytona`, `boatdev`), a worker ID or name, or `pool:<label>`. |
 | `config.mcp_servers` | Extra MCP servers. Each sets exactly one of `managedId`, `command` or `url`. `allowWrite` is valid only with a built-in `managedId`. See [MCP servers](mcp-servers.md). |
 | `config.secrets` | Extra secret names to inject. |
 | `config.idle_timeout_minutes` | 0 to 60. |
@@ -173,7 +173,7 @@ See [Harnesses](harnesses.md), [Machines and environments](machines-and-environm
 | `state` | `phase` | Meaning |
 |---|---|---|
 | `QUEUED` | `queued` | Waits for a worker slot. |
-| `PENDING` | `pending`, `starting` | A backend prepares the sandbox. |
+| `PENDING` | `pending`, `starting` | A provider prepares the sandbox. |
 | `CLAIMED` | `claimed` | The runner does its setup. |
 | `RUNNING` | `running` | The agent works. |
 | `BLOCKED` | `blocked` | The last turn ended with an open request. See `blocked_reason`. |
@@ -446,7 +446,7 @@ Paths are relative to `/api/v1`. The OpenAPI document has the full schemas.
 | Agent runs | `GET\|POST /runs`, `GET /runs/{runId}`, `GET\|POST /runs/{runId}/messages`, `GET /runs/{runId}/transcript`, `GET /runs/{runId}/inputs\|events\|conversation\|timeline\|diagnostics\|sessions`, `POST /runs/{runId}/followups\|cancel\|interrupt`, `POST /attachments`, `GET\|POST /runs/{runId}/attachments`, `GET /runs/{runId}/attachments/{name}`, `GET /runs/{runId}/artifacts`, `GET /runs/{runId}/artifacts/{name}` |
 | Webhooks | `GET\|POST /factories/{uid}/webhooks`, `GET\|PATCH\|DELETE /webhooks/{id}`, `POST /webhooks/{id}/rotate-secret`, `GET /webhooks/{id}/deliveries`, `GET /webhooks/{id}/deliveries/{deliveryId}`, `POST /webhooks/{id}/test-filter` |
 | Measure | `GET /factories/{uid}/scorers`, `GET /factories/{uid}/scores`, `POST /runs/{runId}/score`, `GET /factories/{uid}/benchmarks`, `GET\|POST /factories/{uid}/benchmarks/{suite}/runs`, `POST /factories/{uid}/benchmarks/{suite}/tasks` (a task from a finished run, with `from_run_id`), `GET /factories/{uid}/benchmark-runs`, `GET /benchmark-runs/{id}`, `POST /benchmark-runs/{id}/cancel`, `GET /factories/{uid}/metrics` |
-| Platform | `GET\|POST /secrets`, `GET\|PUT\|DELETE /secrets/{name}`, `GET\|POST /environments`, `GET\|PATCH\|DELETE /environments/{id}`, `GET /machines`, `GET /workers`, `GET /workers/{id}`, `GET /outbox/dead`, `POST /outbox/{id}/redrive` (admin: dead-lettered events), `GET\|POST /integrations`, `GET\|PATCH\|DELETE /integrations/{id}`, `GET /networking/policies`, `GET\|POST /mcp-servers`, `GET\|PATCH\|DELETE /mcp-servers/{id}`, `POST /mcp-servers/{id}/oauth/connect\|disconnect`, `GET /mcp-servers/oauth/callback` (see [MCP servers](mcp-servers.md#rest-api)) |
+| Platform | `GET\|POST /secrets`, `GET\|PUT\|DELETE /secrets/{name}`, `GET\|POST /environments`, `GET\|PATCH\|DELETE /environments/{id}`, `GET /machines`, `GET /workers`, `POST /workers/enrollments`, `GET\|PATCH\|DELETE /workers/{id}`, `POST /workers/{id}/drain\|resume\|revoke`, `GET /workers/{id}/git-credential`, `POST /secrets/rewrap`, `GET /outbox/dead`, `POST /outbox/{id}/redrive` (admin: dead-lettered events), `GET\|POST /integrations`, `GET\|PATCH\|DELETE /integrations/{id}`, `GET /networking/policies`, `GET\|POST /mcp-servers`, `GET\|PATCH\|DELETE /mcp-servers/{id}`, `POST /mcp-servers/{id}/oauth/connect\|disconnect`, `GET /mcp-servers/oauth/callback` (see [MCP servers](mcp-servers.md#rest-api)) |
 
 ### Personal forge tokens
 
@@ -480,116 +480,50 @@ curl -s -X POST "$OF_PUBLIC_URL/api/v1/factories" \
 
 ## Command-line client
 
-The `openfactory` binary has a client for common API calls. Global flags:
-
-| Flag | Environment variable | Default |
-|---|---|---|
-| `--server` | `OF_SERVER` | `http://localhost:8080` |
-| `--api-key` | `OF_API_KEY` | None |
-| `-o`, `--output` | | `text`. `json` prints the raw API response. |
+The `openfactory` command has a client for common API calls. See [Command-line client](cli.md) for installation and global flags (`--server`, `OF_SERVER`, default `http://localhost:8787`; `--api-key`, `OF_API_KEY`).
 
 A `<factory>` argument accepts the UID, alias or name. A `<prompt>` of `-` reads stdin. `-f` streams the transcript.
 
 | Command | Subcommands |
 |---|---|
-| `bootstrap --email EMAIL` | Bootstraps a new server and prints the first key. |
+| `bootstrap --email EMAIL` | Bootstraps a new control plane and prints the first key. |
 | `factory` | `list`, `get <factory>`, `create` (default agents, the tree in `--from DIR`, or `--source git`), `apply <dir>` (to `--factory`, else the factory with the tree's alias or name, else a new one), `run <factory> <prompt>`. |
 | `run` | `list`, `get <run>`, `logs <run> [-f]`, `followup <run> <message> [-f]`, `cancel <run>`. |
 | `work-item` | `list <factory>`, `get <id>`, `send <factory> <prompt>`, `complete <id>`. |
 | `inbox` | `list` (`--all` adds resolved items, `--team` all people), `resolve <id> <resolution>`, `unresolve <id>`. |
-| `secret` | `set <name> [value]` (stdin when the value is missing or `-`), `list`, `delete <name>`. |
+| `secret` | `set <name> [value]` (stdin when the value is missing or `-`), `list`, `delete <name>`, `rewrap`. |
 | `mcp-registry` | `list`, `get`, `add`, `delete`, `connect` (prints the OAuth URL), `disconnect`. See [Register a server](mcp-servers.md#register-a-server). |
 | `webhook` | `list <factory>`, `create <factory> --name ...`, `deliveries <webhook-id>`. |
 | `benchmark` | `run <factory> <suite>`, `list <factory>`. |
-| `worker list` | Lists registered remote workers. |
+| `worker list` | Lists the workers of the team. |
 
 Run `openfactory <command> --help` for all flags.
 
 ## Clients
 
-### Go SDK
+### TypeScript client
 
-The CLI uses the Go SDK, `github.com/openfactory-org/openfactory/pkg/sdk` ([source](../pkg/sdk)).
+The package `@openfactory/api-client` ([source](../packages/api-client)) is the typed client that the CLI and the dashboard use. It has types generated from the OpenAPI document, retries with backoff, pagination and resumable run streams.
 
-- It retries with exponential backoff and obeys `Retry-After`.
-- It retries `429` and `503` for each method, because the server did not process the request.
-- It retries `500`, `502`, `504` and connection errors only for methods other than `POST` and `PATCH`, so it does not create an object two times.
-- It gets the next pages for you and streams run events with automatic resume.
+```ts
+import { createApiClient } from "@openfactory/api-client";
 
-`sdk.NewClientFromEnv()` reads the base URL from `OF_API_URL`, then `OF_PUBLIC_URL` (default `http://localhost:8080`), and the key from `OF_API_KEY`.
-
-```bash
-go get github.com/openfactory-org/openfactory/pkg/sdk
+const client = createApiClient({ baseUrl: "https://factory.example.com", apiKey: process.env.OF_API_KEY });
 ```
 
-```go
-package main
-
-import (
-	"context"
-	"fmt"
-	"log"
-	"os"
-
-	"github.com/openfactory-org/openfactory/pkg/sdk"
-)
-
-func main() {
-	ctx := context.Background()
-	client := sdk.NewClient("https://factories.example.com", os.Getenv("OF_API_KEY"))
-
-	// Find the factory. All() fetches the next pages when necessary.
-	var uid string
-	for f, err := range client.Factories.List(ctx, &sdk.FactoryListOptions{Search: "payments"}).All(ctx) {
-		if err != nil {
-			log.Fatal(err)
-		}
-		uid = f.UID
-		break
-	}
-
-	run, err := client.Factories.Dispatch(ctx, uid, sdk.DispatchParams{
-		Prompt:    "Fix the flaky payment webhook retry test",
-		TicketRef: "linear:PAY-123",
-	})
-	if err != nil {
-		log.Fatal(sdk.ErrorCode(err), err)
-	}
-
-	// Stream the transcript until the run is terminal.
-	st, err := client.Runs.Stream(ctx, run.RunID, nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer st.Close()
-	for st.Next() {
-		ev := st.Event()
-		if ev.Type == "message" {
-			fmt.Println(ev.Message.Role, ev.Message.Content)
-		}
-	}
-	if err := st.Err(); err != nil {
-		log.Fatal(err)
-	}
-}
-```
-
-- Options: `WithHTTPClient`, `WithMaxRetries` (default 3), `WithBackoff` (default 500 ms to 8 s), `WithUserAgent`.
-- `client.Runs.Wait(ctx, runID, interval, untilIdle)` polls until the run is finished. With `untilIdle`, it also returns at `BLOCKED`.
-- Error helpers: `sdk.ErrorCode`, `sdk.IsNotFound`, `sdk.IsConflict`, `sdk.IsUnauthorized`, `sdk.IsForbidden`, `sdk.IsInvalid`.
-- The Go documentation of `pkg/sdk` lists all services and methods.
+See the source for the options and the helpers.
 
 ### OpenAPI document
 
-The OpenAPI 3.1 document is the contract for clients in other languages and for the dashboard's TypeScript types (`make web-check-api`).
+The OpenAPI 3.1 document is the contract for clients in other languages and for the TypeScript types of `@openfactory/api-client` (`npm run gen:api`).
 
-- [`internal/api/openapi.json`](../internal/api/openapi.json) is written by hand. `TestOpenAPICoversRoutes` makes sure that it has each server route.
-- The binary embeds it and serves it at `GET /api/v1/openapi.json`. If `OF_PUBLIC_URL` is set, the `servers` field is `OF_PUBLIC_URL/api/v1`.
-- `make openapi-check` compares it with `api/openapi.v1.baseline.json` to find breaking changes.
+- [`api/openapi.json`](../api/openapi.json) is the contract of the control plane. Each route of the Worker has an operation in it.
+- The control plane serves it at `GET /api/v1/openapi.json`.
+- CI compares it with `api/openapi.v1.baseline.json` to find breaking changes.
 
 ### Make a client in another language
 
-There is no SDK for other languages. Generate a client, for example with [OpenAPI Generator](https://openapi-generator.tech):
+There is no other SDK. Generate a client, for example with [OpenAPI Generator](https://openapi-generator.tech):
 
 1. Download the document:
 

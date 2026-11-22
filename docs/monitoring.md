@@ -1,88 +1,92 @@
 # Monitoring
 
-Health endpoints, Prometheus metrics for the server and remote workers, API queries and logs.
+Health endpoints, logs, dashboard metrics, API queries and worker metrics.
 
 ## Health endpoints
 
-`openfactory serve` serves these on the `OF_LISTEN` address, without authentication. Requests to them are logged at `debug` level only.
+The control plane serves these without authentication:
 
 | Endpoint | Response |
 |---|---|
-| `GET /healthz` | Liveness. Always `200` with `{"status": "ok", "version": "..."}` while the process serves HTTP. |
-| `GET /readyz` | Readiness. `200` with `{"status": "ready"}` after startup, when a database query succeeds within 3 seconds. `503` with `{"status": "starting"}` during startup, or `{"status": "unavailable", "error": "store: ..."}` when the database fails. |
-| `GET /metrics` | Prometheus text exposition format. The server computes the values at most once every 5 seconds. |
+| `GET /healthz` | Liveness. `200` with `ok` while the Worker serves requests. |
+| `GET /readyz` | Readiness. `200` with `ok`. |
 
-Kubernetes probe example:
+`/metrics` is not public on Cloudflare. The dashboard shows run and queue state, and the API returns the same data (see [Monitor with the API](#monitor-with-the-api)).
 
-```yaml
-livenessProbe:
-  httpGet: { path: /healthz, port: 8080 }
-  periodSeconds: 10
-readinessProbe:
-  httpGet: { path: /readyz, port: 8080 }
-  periodSeconds: 5
+## Logs
+
+Observability is on for the Worker. Read logs in the Cloudflare dashboard, or stream them:
+
+```bash
+npx wrangler tail -c apps/control-plane/wrangler.jsonc
 ```
 
-## Scrape metrics
+`OF_LOG_LEVEL` sets the level: `debug`, `info`, `warn` or `error`.
 
-`/metrics` is on the main listener, so it is reachable wherever the API is. If the server is public, block `/metrics` at your reverse proxy and scrape from inside your network.
+Useful log messages:
 
-```yaml
-# prometheus.yml
-scrape_configs:
-  - job_name: openfactory
-    metrics_path: /metrics
-    static_configs:
-      - targets: ["openfactory.internal:8080"]
+| Message | Meaning |
+|---|---|
+| `worker connected` / `worker disconnected` | A worker opened or closed its connection. |
+| `worker heartbeat timeout` | The control plane closed a silent worker connection. |
+| `worker connection lost; reconnecting` | Worker side: the connection dropped. |
+| `network policy blocked egress` | The egress proxy of a sandbox blocked a host. The entry has the host. |
+
+Logs of a sandbox provider Worker are separate. Tail it with `npx wrangler tail -c providers/cloudflare-sandbox/wrangler.jsonc`.
+
+## Dashboard
+
+The dashboard shows runs by state, the queue, workers (status, slots in use, last connection), dead-lettered deliveries and the factory metrics. See [Dashboard and inbox](dashboard.md).
+
+## Monitor with the API
+
+### Workers
+
+```bash
+curl -sS "${OF_PUBLIC_URL}/api/v1/workers" -H "Authorization: Bearer $OF_API_KEY"
 ```
 
-## Server metrics
+Each worker has `kind` (`microvm` or `process`), `labels`, `slots`, `slots_used`, `last_seen`, `version` and `status` (`pending`, `online`, `offline`, `draining` or `revoked`). For a worker of a self-hosted host, see [Self-hosted workers](self-hosted-machines.md#operate).
 
-All server series are gauges. Series that end in `_total` count since the process started, so `rate()` and `increase()` work on them.
+### Runs
 
-| Metric | Labels | Description |
-|---|---|---|
-| `of_build_info` | `version` | Build information (always `1`). |
-| `of_runs` | `state` | Agent runs by state: `queued`, `starting`, `running`, `idle`, `pending`, `claimed`, `blocked`, `succeeded`, `failed`, `error`, `cancelled`. Counting stops at 100,000 runs per state. |
-| `of_run_queue_depth` | | Runs that wait to be claimed (the same value as `of_runs{state="queued"}`). |
-| `of_workers_connected` | | Connected remote workers (distinct worker ids). |
-| `of_worker_connections` | `worker`, `backend` | Live connections per remote worker id. |
-| `of_worker_capacity` | `worker` | Sandbox capacity per remote worker, summed over its connections. `0` means no limit. |
-| `of_worker_active_sandboxes` | `worker` | Active sandboxes per remote worker. |
-| `of_event_bus_published_total` | | Events published on the in-process event bus. |
-| `of_event_bus_dropped_total` | | Events dropped because a subscriber was too slow. |
-| `of_outbox_deliveries_total` | `result` | Durable outbox deliveries of this replica by result: `delivered`, `retried`, `dead_lettered`, `in_process_fallback`. |
-| `of_leader` | `replica` | `1` when this replica holds the leader lease, else `0`. |
-| `of_plugins_loaded` | | Plugins that run in this replica. |
-| `of_notifications_total` | `result` | Outbound notifications by result: `delivered`, `failed`, `unroutable`, `retried`. |
+Failed runs of the last day:
 
-`of_runs` counts all runs in the database, so terminal states grow over time; use `delta()` on them. `starting` and `idle` appear only for older stored runs.
-
-Example queries:
-
-```promql
-of_run_queue_depth > 10                                        # queue backlog
-of_worker_active_sandboxes / (of_worker_capacity > 0)          # remote worker saturation
-increase(of_event_bus_dropped_total[15m]) > 0                  # dropped events
-increase(of_notifications_total{result="failed"}[15m]) > 0     # failed notifications
+```bash
+curl -sS "${OF_PUBLIC_URL}/api/v1/runs?state=FAILED&since=1d" \
+  -H "Authorization: Bearer $OF_API_KEY"
 ```
 
-### Suggested server alerts
+`state` accepts `QUEUED`, `PENDING`, `CLAIMED`, `RUNNING`, `BLOCKED`, `SUCCEEDED`, `FAILED`, `ERROR` and `CANCELLED`, and can repeat. `since` accepts an RFC 3339 time, a date (`2026-11-01`), or days or weeks (`1d`, `2w`). Runs that stay `QUEUED` mean that no worker serves their `workerHost` or that a limit is reached; see [Troubleshooting](troubleshooting.md#runs-stay-queued).
+
+### Inbox failures
+
+A failed run of a work item creates an inbox item of kind `failure` ("Run failed: ..."):
+
+```bash
+curl -sS "${OF_PUBLIC_URL}/api/v1/inbox" -H "Authorization: Bearer $OF_API_KEY"
+```
+
+### Factory metrics
+
+`GET /api/v1/factories/{uid}/metrics?since=30d` returns the dashboard metrics of a factory: pull request activity, autonomy, cycle time and cost. See [Measure and improve](measure-and-improve.md).
+
+## Suggested alerts
 
 | Alert | Condition |
 |---|---|
-| Server down | `up{job="openfactory"} == 0`, or `/readyz` fails. |
-| Queue grows | `of_run_queue_depth` rises for 15 minutes. Check `workerHost` values and worker status. |
-| Worker missing | `of_workers_connected` is lower than the number of workers you run. |
-| Events dropped | `of_event_bus_dropped_total` increases. |
+| Control plane down | `/readyz` fails. |
+| Queue grows | The number of `queued` runs rises for 15 minutes. Check `workerHost` values and worker status. |
+| Worker offline | A worker has status `offline` for 5 minutes. |
+| Worker saturated | `slots_used` equals `slots` for 15 minutes. |
 
 ## Worker metrics
 
-A remote worker started with `--metrics-addr` (or `OF_METRICS_ADDR`, or the Helm value `worker.metricsAddr`, for example `":9090"`) serves `GET /metrics` without authentication. The listener is off by default.
+A worker that runs `openfactory-runtime worker` with `--metrics-addr` (or `OF_METRICS_ADDR`, for example `":9090"`) serves `GET /metrics` without authentication. The listener is off by default.
 
 ```bash
-openfactory worker --id cluster-eu-1 --backend kubernetes --metrics-addr :9090
-curl -s http://cluster-eu-1:9090/metrics
+openfactory-runtime worker --process --id dev-box-1 --metrics-addr :9090
+curl -s http://dev-box-1:9090/metrics
 ```
 
 ```yaml
@@ -90,7 +94,7 @@ curl -s http://cluster-eu-1:9090/metrics
 scrape_configs:
   - job_name: openfactory-workers
     static_configs:
-      - targets: ["cluster-eu-1:9090"]
+      - targets: ["dev-box-1:9090"]
 ```
 
 All series exist from startup with the value `0`, so dashboards and alerts work before the first sandbox.
@@ -116,16 +120,16 @@ In `of_worker_sandbox_failures_total`, `phase` is `setup` for a sandbox that nev
 
 | `phase` | `reason` | Cause |
 |---|---|---|
-| `setup` | `image_pull` | The image pull failed (`ImagePullBackOff` or `InvalidImageName`). |
-| `setup` | `unschedulable` | The Kubernetes Pod stayed unschedulable. |
+| `setup` | `image_pull` | The image pull failed . |
+| `setup` | `unschedulable` | No slot or resource was free. |
 | `setup` | `network_policy_timeout` | The NetworkPolicy of a restricted sandbox did not take effect in time. |
-| `setup` | `invalid_spec` | The backend refused the sandbox spec. |
+| `setup` | `invalid_spec` | The provider refused the sandbox spec. |
 | `run` | `process_failed` | The main process ended with a non-zero exit code. |
 | `run` | `container_oom` | The container was killed for memory. |
-| `run` | `evicted` | Kubernetes evicted the Pod. |
-| `run` | `node_lost` | The node was lost or shut down. |
+| `run` | `evicted` | The platform evicted the sandbox. |
+| `run` | `node_lost` | The host was lost or shut down. |
 | `run` | `deadline_exceeded` | The sandbox passed its deadline. |
-| `run` | `unknown` | The backend cannot tell the reason. |
+| `run` | `unknown` | The provider cannot tell the reason. |
 
 A sandbox that ends with `completed` or `cancelled` is not a failure.
 
@@ -156,50 +160,3 @@ sum by (reason) (increase(of_worker_sandbox_failures_total{phase="setup"}[1h]))
 | Image pull failures | `of_worker_sandbox_failures_total{reason="image_pull"}` increases. |
 | Reconnect loop | `increase(of_worker_websocket_reconnects_total[10m]) > 5`. |
 
-## Monitor with the API
-
-### Workers
-
-```bash
-curl -sS "${OF_PUBLIC_URL}/api/v1/workers" -H "Authorization: Bearer $OF_API_KEY"
-```
-
-Each worker has `backend`, `labels`, `capacity`, `active`, `last_heartbeat`, `version` and `status` (`online` when the last heartbeat is under two minutes old, else `offline`).
-
-### Runs
-
-Failed runs of the last day:
-
-```bash
-curl -sS "${OF_PUBLIC_URL}/api/v1/runs?state=FAILED&since=1d" \
-  -H "Authorization: Bearer $OF_API_KEY"
-```
-
-`state` accepts `QUEUED`, `PENDING`, `CLAIMED`, `RUNNING`, `BLOCKED`, `SUCCEEDED`, `FAILED`, `ERROR` and `CANCELLED`, and can repeat. `since` accepts an RFC 3339 time, a date (`2026-11-01`), or days or weeks (`1d`, `2w`). Runs that stay `QUEUED` mean that no worker serves their `workerHost` or that a limit is reached; see [Troubleshooting](troubleshooting.md#runs-stay-queued).
-
-### Inbox failures
-
-A failed run of a work item creates an inbox item of kind `failure` ("Run failed: ..."):
-
-```bash
-curl -sS "${OF_PUBLIC_URL}/api/v1/inbox" -H "Authorization: Bearer $OF_API_KEY"
-```
-
-### Factory metrics
-
-`GET /api/v1/factories/{uid}/metrics?since=30d` returns the dashboard metrics of a factory: pull request activity, autonomy, cycle time and cost. See [Measure and improve](measure-and-improve.md).
-
-## Logs
-
-- `OF_LOG_LEVEL` sets the level: `debug`, `info`, `warn` or `error`.
-- `OF_LOG_FORMAT=json` writes one JSON object per line. Use it with a log collector.
-
-Useful log messages:
-
-| Message | Meaning |
-|---|---|
-| `worker connected` / `worker disconnected` | A remote worker opened or closed its connection. |
-| `worker heartbeat timeout` | The server closed a silent worker connection. |
-| `worker connection lost; reconnecting` | Worker side: the connection dropped. |
-| `task job created` | The `kubernetes` backend created the Job of a sandbox. The entry has the task, the Job and the namespace. |
-| `network policy blocked egress` | The egress proxy of a sandbox blocked a host. The entry has the host. |
