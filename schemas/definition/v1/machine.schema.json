@@ -16,7 +16,7 @@
     },
     "instanceShape": {
       "additionalProperties": false,
-      "description": "CPU and memory of the sandbox. For linux and windows, both values must be powers of two. For macos, the shape must be 4/7, 6/14, 8/14, 12/28 or 12/56 (vCPUs/GB).",
+      "description": "CPU and memory of the sandbox. Both values must be powers of two.",
       "properties": {
         "memoryGb": {
           "description": "Memory in GB.",
@@ -37,102 +37,11 @@
     },
     "platform": {
       "additionalProperties": false,
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "os": {
-                "const": "macos"
-              }
-            },
-            "required": [
-              "os"
-            ]
-          },
-          "then": {
-            "not": {
-              "required": [
-                "linux"
-              ]
-            },
-            "properties": {
-              "arch": {
-                "const": "aarch64"
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "os": {
-                "const": "windows"
-              }
-            },
-            "required": [
-              "os"
-            ]
-          },
-          "then": {
-            "not": {
-              "anyOf": [
-                {
-                  "required": [
-                    "linux"
-                  ]
-                },
-                {
-                  "required": [
-                    "mac"
-                  ]
-                }
-              ]
-            },
-            "properties": {
-              "arch": {
-                "const": "x86_64"
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "anyOf": [
-              {
-                "properties": {
-                  "os": {
-                    "const": "linux"
-                  }
-                },
-                "required": [
-                  "os"
-                ]
-              },
-              {
-                "not": {
-                  "required": [
-                    "os"
-                  ]
-                }
-              }
-            ]
-          },
-          "then": {
-            "not": {
-              "required": [
-                "mac"
-              ]
-            },
-            "required": [
-              "linux"
-            ]
-          }
-        }
-      ],
       "description": "Operating system, architecture and image of the sandbox.",
       "properties": {
         "arch": {
-          "description": "CPU architecture. macos allows only aarch64. windows allows only x86_64. Default: x86_64, or aarch64 for macos.",
+          "default": "x86_64",
+          "description": "CPU architecture.",
           "enum": [
             "x86_64",
             "aarch64"
@@ -141,7 +50,7 @@
         },
         "linux": {
           "additionalProperties": false,
-          "description": "Linux settings. Required when os is linux, and allowed only then.",
+          "description": "Linux settings.",
           "properties": {
             "image": {
               "description": "Container image of the sandbox. No spaces or tabs.",
@@ -150,7 +59,7 @@
             },
             "registryCredentialSecretName": {
               "$ref": "common.schema.json#/$defs/secretName",
-              "description": "Secret with the credential to pull a private image. The kubernetes backend ignores it and pulls with the imagePullSecrets of the pod template."
+              "description": "Secret with the credential to pull a private image."
             },
             "user": {
               "anyOf": [
@@ -163,7 +72,7 @@
                 }
               ],
               "default": 1000,
-              "description": "User of the sandbox on the kubernetes backend. A number sets runAsUser, runAsGroup and fsGroup. image keeps the user of the image. Root (0) is not allowed."
+              "description": "User of the sandbox. A number sets the user and group IDs. image keeps the user of the image. Root (0) is not allowed."
             }
           },
           "required": [
@@ -171,35 +80,18 @@
           ],
           "type": "object"
         },
-        "mac": {
-          "additionalProperties": false,
-          "description": "macOS settings. Allowed only when os is macos.",
-          "properties": {
-            "version": {
-              "default": "26",
-              "description": "macOS version. Quote the value.",
-              "enum": [
-                "14",
-                "15",
-                "26",
-                "27"
-              ],
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
         "os": {
           "default": "linux",
-          "description": "Operating system of the sandbox.",
+          "description": "Operating system of the sandbox. Machines run Linux only.",
           "enum": [
-            "linux",
-            "macos",
-            "windows"
+            "linux"
           ],
           "type": "string"
         }
       },
+      "required": [
+        "linux"
+      ],
       "type": "object"
     },
     "setupCommands": {

@@ -1,0 +1,200 @@
+package definition
+
+// Golden capture entry point. capture.sh adds this file to
+// internal/definition through `go test -overlay`. After the Go tests ran (and
+// rec.go recorded every Compile, Diff and ValidateSchema call), it adds the
+// examples, default definitions, trigger catalog, cron and network policy
+// vectors, and writes the corpus to $OF_GOLDEN_OUT.
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"testing"
+
+	"github.com/openfactory-org/openfactory/internal/core"
+	"github.com/openfactory-org/openfactory/internal/networkpolicy"
+)
+
+type vector struct {
+	Kind   string          `json:"kind"`
+	Input  json.RawMessage `json:"input"`
+	Output json.RawMessage `json:"output"`
+}
+
+func mustJSON(v any) json.RawMessage {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	out := os.Getenv("OF_GOLDEN_OUT")
+	if out == "" || code != 0 {
+		os.Exit(code)
+	}
+	if err := writeGoldens(out); err != nil {
+		fmt.Fprintln(os.Stderr, "golden capture:", err)
+		os.Exit(1)
+	}
+	os.Exit(code)
+}
+
+func writeGoldens(out string) error {
+	// Examples: one file per example tree.
+	entries, err := os.ReadDir(examplesDir)
+	if err != nil {
+		return err
+	}
+	exDir := filepath.Join(out, "examples")
+	if err := os.MkdirAll(exDir, 0o755); err != nil {
+		return err
+	}
+	for _, e := range entries {
+		dir := filepath.Join(examplesDir, e.Name())
+		if _, err := os.Stat(filepath.Join(dir, "factory.yaml")); err != nil {
+			continue
+		}
+		files, err := LoadDir(dir)
+		if err != nil {
+			return err
+		}
+		def, errs := compileOrig(files)
+		rec := map[string]any{"example": e.Name(), "compiled": goldenJSON(def), "errors": errs}
+		if err := writeJSON(filepath.Join(exDir, e.Name()+".json"), rec); err != nil {
+			return err
+		}
+	}
+
+	var vecs []vector
+	add := func(kind string, in, outv any) {
+		vecs = append(vecs, vector{Kind: kind, Input: mustJSON(in), Output: mustJSON(outv)})
+	}
+
+	// Default definitions.
+	for _, opts := range []DefaultDefinitionOptions{
+		{Name: "payments", Alias: "payments", Repositories: []core.RepoRef{{Owner: "acme", Name: "api"}, {Owner: "acme", Name: "web"}}},
+		{Name: "mixed", Agents: []string{"implement"}, Repositories: []core.RepoRef{{CodeForge: "GITHUB", Owner: "acme", Name: "api"}, {CodeForge: "GITLAB", Owner: "acme/platform", Name: "infra"}}},
+		{Name: "only gitlab", Description: "Has: a colon\nand a line", Model: "gpt-5", Repositories: []core.RepoRef{{CodeForge: "GITLAB", Owner: "g", Name: "r"}}},
+		{Name: "empty"},
+		{Name: "ado", Agents: []string{"review", "spec"}, Repositories: []core.RepoRef{{CodeForge: "AZURE_DEVOPS", Owner: "org/proj", Name: "repo"}}},
+		{Name: "yes", Alias: "true", Description: "123"},
+		{Name: ""},
+		{Name: "x", Agents: []string{"nope"}},
+	} {
+		files, err := DefaultDefinition(opts)
+		o := map[string]any{"files": files}
+		if err != nil {
+			o = map[string]any{"error": err.Error()}
+		}
+		in := map[string]any{"name": opts.Name, "description": opts.Description, "alias": opts.Alias, "model": opts.Model, "agents": opts.Agents, "repositories": opts.Repositories}
+		add("default", in, o)
+	}
+
+	// Trigger catalog.
+	for _, p := range append(TriggerProviders(), "teams", "nope") {
+		add("events", p, TriggerEvents(p))
+	}
+	add("providers", nil, TriggerProviders())
+
+	// Cron expressions.
+	for _, c := range []string{
+		"0 9 * * 1-5", "@daily", "@every 1h", "@every 1h30m", "@every 90s", "@every 1.5h", "@every", "@every x", "@every 1",
+		"@every 1d", "@every -1h", "@every .5h", "@every 1h2", "@yearly", "@annually", "@monthly", "@weekly", "@midnight", "@hourly",
+		"@reboot", "@", "TZ=UTC 0 * * * *", "CRON_TZ=UTC 0 * * * *", "* * * *", "* * * * * *", "60 * * * *", "* 24 * * *",
+		"* * 0 * *", "* * 32 * *", "* * * 13 *", "* * * * 7", "* * * jan-dec sun-sat", "* * * JAN MON", "* * * foo *",
+		"*/0 * * * *", "*/15 * * * *", "5/15 * * * *", "1-5/2 * * * *", "1-2-3 * * * *", "1/2/3 * * * *", "5-1 * * * *",
+		"a * * * *", "-1 * * * *", "1,,2 * * * *", ", * * * *", "? * * * *", "+5 * * * *", "99999999999999999999 * * * *",
+		"0x1 * * * *", " 0 0 * * * ", "0\t0 * * *", "1_0 * * * *", "@every 1µs", "@every 2562047h", "@every 9999999999999h",
+		"@every 1h\"", "@every 1é",
+	} {
+		e := ValidateCron(c)
+		msg := ""
+		if e != nil {
+			msg = e.Error()
+		}
+		add("cron", c, msg)
+	}
+
+	// Network policy references and hosts.
+	for _, r := range []string{
+		"builtin/package-registries@^1", "builtin/package-registries@1.0.0", "builtin/package-registries@latest",
+		"builtin/claude-code@^1.0", "builtin/claude-code@^1.1.0", "builtin/codex@1.0.0", "builtin/codex@2.0.0", "builtin/codex@^2",
+		"builtin/codex@^0", "builtin/codex@^0.0", "builtin/codex", "@1", "builtin/nope@1.0.0", "builtin/codex@1.0", "builtin/codex@01.0.0",
+		"builtin/codex@^1.x", "builtin/codex@1.0.0-beta", "builtin/codex@1.0.0-", " builtin/codex@latest ", "builtin/codex@^1.0.0.0",
+	} {
+		v, hosts, err := networkpolicy.Resolve(r)
+		o := map[string]any{"version": v, "hosts": hosts}
+		if err != nil {
+			o = map[string]any{"error": err.Error()}
+		}
+		add("resolve", r, o)
+	}
+	for _, h := range []string{
+		"Example.COM", "example.com.", " x.y ", "", "https://x.com", "*.x.com", "10.0.0.0/8", "x.com/path", "10.0.0.1",
+		"010.0.0.1", "::1", "[::1]", "x.com:443", "2001:DB8::1", "::ffff:10.1.2.3", "fe80::1%eth0", "a..b", "-a.com", "a-.com",
+		"a_b.com", "ä.com", "1.2.3", "256.1.1.1", "2001:db8:0:0:0:0:2:1", "2001:0db8:0000:0000:0001:0000:0000:0001", "::",
+		"0:0:0:0:0:0:0:1", "1:2:3:4:5:6:7:8", "1::2:3:4:5:6:7", "::ffff:1.2.3.4/120", "a/b", "AB",
+	} {
+		n, err := networkpolicy.NormalizeHost(h)
+		o := map[string]any{"host": n}
+		if err != nil {
+			o = map[string]any{"error": err.Error()}
+		}
+		add("host", h, o)
+	}
+	// Literal rounding of samplingRate.
+	for _, l := range []string{"12.345", "12.344", "-12.345", "0.005", "0.004999", "33.333333", "100", "1e1", "0x10", "1_0", ".5", "5."} {
+		add("round", l, roundHundredths(l, 0))
+	}
+	// Webhook header and secret helpers.
+	for _, h := range []string{"X-Request-Id", "x-request-id", "bad header", "Authorization", "", "X-Hub-Signature-256", "a!#$%&'*+-.^_`|~"} {
+		ok, why := ValidDeliveryIDHeader(h)
+		add("header", h, map[string]any{"ok": ok, "why": why})
+	}
+	for _, s := range []string{"abc", "a-b.c_d~e", "", "a b", "a/b", "ä"} {
+		add("urltoken", s, ValidURLTokenSecret(s))
+	}
+	for _, s := range []string{"github.com:acme/api@0123456789abcdef0123456789abcdef01234567", "gitlab.com:g/s/r@0123456789abcdef0123456789abcdef01234567",
+		"github.com:g/s/r@0123456789abcdef0123456789abcdef01234567", "github.com:acme/api@main", "bitbucket.org:a/b@0123456789abcdef0123456789abcdef01234567",
+		"github.com:/api@0123456789abcdef0123456789abcdef01234567", "github.com:acme/@0123456789abcdef0123456789abcdef01234567", "noColon"} {
+		r, ok := ParseRepoAtCommit(s)
+		add("repoat", s, map[string]any{"ok": ok, "ref": r})
+	}
+
+	goldenMu.Lock()
+	recs := goldenDedupe(goldenRecords)
+	goldenMu.Unlock()
+	if err := writeJSON(filepath.Join(out, "corpus.json"), recs); err != nil {
+		return err
+	}
+	return writeJSON(filepath.Join(out, "vectors.json"), vecs)
+}
+
+func goldenDedupe(recs []goldenRecord) []goldenRecord {
+	seen := map[string]bool{}
+	var out []goldenRecord
+	for _, r := range recs {
+		b, _ := json.Marshal(r)
+		if seen[string(b)] {
+			continue
+		}
+		seen[string(b)] = true
+		out = append(out, r)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Kind < out[j].Kind })
+	return out
+}
+
+func writeJSON(path string, v any) error {
+	b, err := json.MarshalIndent(v, "", " ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(b, '\n'), 0o644)
+}

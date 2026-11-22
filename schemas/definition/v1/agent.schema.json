@@ -157,7 +157,7 @@
           "type": "null"
         }
       ],
-      "description": "Worker host that runs the agent. The value is trimmed. null or empty clears an inherited host. Where the agent sessions execute. server: the team's default sandbox provider. A sandbox provider ID (for example cloudflare-sandbox, daytona, boatdev): that provider. A worker ID or name: that enrolled worker. pool:<label>: the least-loaded online worker with that label."
+      "description": "Worker that runs the agent. The value is trimmed. null or empty clears an inherited host. Where the agent sessions execute. server: the team's default sandbox provider. A sandbox provider ID (for example cloudflare-sandbox, daytona, boatdev): that provider. A worker ID or name: that enrolled worker. pool:<label>: the least-loaded online worker with that label."
     }
   },
   "title": "Agent frontmatter",
