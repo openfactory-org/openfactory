@@ -155,7 +155,7 @@ export class DispatchDO extends BaseDO {
   }
 
   private maxSandboxes(): number {
-    return Number((this.env as unknown as Record<string, string>).OF_MAX_SANDBOXES ?? "") || 0;
+    return Number(this.env.OF_MAX_SANDBOXES ?? "") || 0;
   }
 
   // ---------- requests ----------

@@ -3,8 +3,8 @@
 // and rewrap (internal/rewrap) over every sealed value of the team.
 //
 // Other modules seal their own values (MCP OAuth tokens, user forge tokens)
-// with sealValue/openValue and register a RewrapSource so that
-// POST /secrets/rewrap covers them.
+// with sealValue/openValue and declare RewrapSources in their `rewrapSources`
+// export, so that POST /secrets/rewrap covers them (kit.rewrapSources).
 import { OfError, newId } from "@openfactory/core";
 import type { CallMeta } from "../../contracts/do-messages";
 import { bodyObject, optString, str } from "../../lib/body";
@@ -15,7 +15,7 @@ import { all, first } from "../../lib/sql/query";
 import { Envelopes, envelopes, type SecretIdentity } from "../../secrets/envelope";
 import { API_NAME_RE, isSecretType, validateApiValue, validateName, validateValue } from "../../secrets/validate";
 import { findFactory } from "./factories";
-import { created, noContent, type OpCall, type TeamKit, type TeamOp } from "./index";
+import { created, noContent, type OpCall, type TeamKit, type TeamOp } from "./kit";
 
 export const migrations: readonly Migration[] = [
   {
@@ -74,13 +74,6 @@ export interface RewrapSource {
   list(kit: TeamKit): { key: string; id: SecretIdentity; envelope: Uint8Array }[];
   /** Sync compare-and-swap write inside a transaction. Return false when the stored value changed. */
   replace(kit: TeamKit, key: string, old: Uint8Array, next: Uint8Array): boolean;
-}
-
-const rewrapSources: RewrapSource[] = [];
-
-/** Registers a source of sealed values (call from a module's setup). */
-export function registerRewrapSource(s: RewrapSource): void {
-  if (!rewrapSources.some((x) => x.name === s.name)) rewrapSources.push(s);
 }
 
 // ---------- secret records ----------
@@ -219,7 +212,7 @@ export async function rewrapAll(
   let rewrapped = 0;
   let skipped = 0;
   const errors: string[] = [];
-  const sources: RewrapSource[] = [secretSource, ...rewrapSources];
+  const sources: RewrapSource[] = [secretSource, ...kit.rewrapSources];
   for (const src of sources) {
     for (const it of src.list(kit)) {
       try {

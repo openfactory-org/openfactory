@@ -2,7 +2,7 @@
 // verification with jose). Port of internal/auth/oidc.go. Discovery is lazy
 // and cached per isolate.
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
-import type { Env } from "../contracts/env";
+import type { Env, Secrets, Vars } from "../contracts/env";
 import { readTextCapped } from "@openfactory/core";
 import { b64url, randomToken, sha256, timingSafeEqual, utf8 } from "../lib/bytes";
 import type { Identity } from "../do/team/auth";
@@ -41,15 +41,13 @@ export class LoginFailure extends Error {
 }
 
 /**
- * Reads the OIDC settings. OF_OIDC_ISSUER_URL, OF_OIDC_CLIENT_ID and the
- * secret OF_OIDC_CLIENT_SECRET are in Env; the other OF_OIDC_* names are
- * optional extra vars. Returns null when no issuer is set. Throws a list of
+ * Reads the OIDC settings (the OF_OIDC_* vars and the secret
+ * OF_OIDC_CLIENT_SECRET). Returns null when no issuer is set. Throws a list of
  * problems for an invalid configuration.
  */
 export function oidcConfigFromEnv(env: Env): OIDCConfig | null {
-  const e = env as unknown as Record<string, string | undefined>;
-  const get = (k: string) => (e[k] ?? "").trim();
-  const issuer = get("OF_OIDC_ISSUER_URL") || get("OF_OIDC_ISSUER");
+  const get = (k: keyof Vars | keyof Secrets) => (env[k] ?? "").trim();
+  const issuer = get("OF_OIDC_ISSUER_URL");
   if (!issuer) return null;
   const pub = get("OF_PUBLIC_URL").replace(/\/+$/, "");
   const cfg: OIDCConfig = {

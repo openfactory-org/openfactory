@@ -2,9 +2,9 @@
 // openfactory.worker.v2 at /api/v1/workers/connect). Every frame in both
 // directions is validated against schemas/worker/v2/protocol.json.
 //
-// Auth: an enrolled worker answers auth.challenge with an Ed25519 signature
-// (new control plane); a worker with a team API key sends it as a bearer
-// header (Go server).
+// Auth: an enrolled worker answers auth.challenge with an Ed25519 signature;
+// a development process worker sends a team API key as a bearer header
+// (OF_DEV_PROCESS_WORKERS=true on the control plane).
 import type { Loose } from "./loose.ts";
 import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
 import { assertWorkerFrame } from "./schemas.ts";

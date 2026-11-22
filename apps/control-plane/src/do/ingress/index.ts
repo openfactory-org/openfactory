@@ -10,7 +10,7 @@ import { OfError, type WebhookDelivery } from "@openfactory/core";
 import type { CoreEvent } from "../../contracts/do-messages";
 import type { Env } from "../../contracts/env";
 import { BaseDO, type Migration } from "../../lib/base";
-import { outboxBackoff, type EnqueueInput } from "../../lib/outbox/outbox";
+import { outboxBackoff } from "../../lib/outbox/outbox";
 import { all, first } from "../../lib/sql/query";
 
 export const INGRESS_MAX_ATTEMPTS = 12;
@@ -25,11 +25,29 @@ export type IntakeHandler = (
   event: CoreEvent,
 ) => Promise<IntakeResult>;
 
-let intake: IntakeHandler = async () => ({ done: true });
+let intake: IntakeHandler | undefined;
 
-/** The integrations workstream sets the HandleEvent port here. */
-export function setIntakeHandler(fn: IntakeHandler): void {
+/**
+ * Sets the HandleEvent port (bootstrapControlPlane in src/wiring.ts; tests
+ * replace it). Returns the handler it replaces, so a test can restore it.
+ */
+export function setIntakeHandler(fn: IntakeHandler | undefined): IntakeHandler | undefined {
+  const prev = intake;
   intake = fn;
+  return prev;
+}
+
+/**
+ * The HandleEvent port. Without a registration it throws: the event stays
+ * pending, retries with backoff and goes to the dead letter list, from where
+ * an operator can redrive it. It is never dropped in silence.
+ */
+export function intakeHandler(): IntakeHandler {
+  if (!intake) {
+    console.error("ingress: no intake handler is registered: call bootstrapControlPlane()");
+    throw new OfError("internal_error", "no intake handler is registered");
+  }
+  return intake;
 }
 
 const m0001: Migration = {
@@ -104,7 +122,7 @@ export class IngressDO extends BaseDO {
     this.onMessage("ingress.deliver", (p) => {
       this.insert(p.event, p.dedupeKey);
     });
-    this.onTimerAsync("deliver", (t) => this.deliverHead(t.due_ms));
+    this.onTimerAsync("deliver", () => this.deliverHead());
     this.onTimer("purge", () => {
       this.sql.exec("DELETE FROM events WHERE state = 'done' AND received_ms < ?", Date.now() - EVENT_TTL_MS);
       if (first(this.sql, "SELECT 1 FROM events WHERE state = 'done' LIMIT 1"))
@@ -145,31 +163,19 @@ export class IngressDO extends BaseDO {
     return { accepted: true, deduplicated: false };
   }
 
-  // IngressRpc.enqueue (frozen contract) shares its name with BaseDO.enqueue
-  // (outbox). The overloads keep both: an object argument is an outbox row.
-  override enqueue<K extends string>(input: EnqueueInput<K>): string;
-  override enqueue(
-    partition: string,
+  /** Stores one event for ordered delivery (IngressRpc.enqueueEvent). */
+  async enqueueEvent(
+    _partition: string,
     event: CoreEvent,
     dedupeKey: string,
-  ): Promise<{ accepted: boolean; deduplicated: boolean }>;
-  override enqueue<K extends string>(
-    a: EnqueueInput<K> | string,
-    event?: CoreEvent,
-    dedupeKey?: string,
-  ): string | Promise<{ accepted: boolean; deduplicated: boolean }> {
-    if (typeof a !== "string") return this.outbox.enqueue(a);
-    return this.rpc(() => this.tx(() => this.insert(event!, dedupeKey ?? ""))).then((res) => {
-      this.ctx.waitUntil(this.alarm());
-      return res;
-    });
+  ): Promise<{ accepted: boolean; deduplicated: boolean }> {
+    const res = await this.rpc(() => this.tx(() => this.insert(event, dedupeKey)));
+    this.ctx.waitUntil(this.alarm());
+    return res;
   }
 
-  /**
-   * Delivers pending events in order until one fails or none is due.
-   * firedAt is the due_ms of the "deliver" timer that runs this step.
-   */
-  private async deliverHead(firedAt: number): Promise<void> {
+  /** Delivers pending events in order until one fails or none is due. */
+  private async deliverHead(): Promise<void> {
     for (let i = 0; i < 25; i++) {
       const head = first<EventRow & Record<string, SqlStorageValue>>(
         this.sql,
@@ -182,7 +188,7 @@ export class IngressDO extends BaseDO {
       }
       let res: IntakeResult;
       try {
-        res = await intake(
+        res = await intakeHandler()(
           this.env,
           { teamId: this.teamId(), partition: this.partition() },
           JSON.parse(head.payload) as CoreEvent,
@@ -224,9 +230,9 @@ export class IngressDO extends BaseDO {
       });
       return;
     }
-    // More events wait: continue in the next alarm. BaseDO deletes the timer
-    // that fired when its due_ms is unchanged, so the new due_ms must differ.
-    this.tx(() => this.setTimer("deliver", "deliver", Math.max(Date.now(), firedAt + 1)));
+    // More events wait: continue in the next alarm. The new timer row has a new
+    // seq, so BaseDO does not delete it as the timer that fired.
+    this.tx(() => this.setTimer("deliver", "deliver", Date.now()));
   }
 
   private enqueue_dead(id: string, attempts: number, error: string): void {

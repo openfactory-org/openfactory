@@ -80,10 +80,10 @@ describe("IngressDO", () => {
     });
     const t = "i" + newToken("w");
     const g = ingress(t, "webhook:w1");
-    expect(await g.enqueue("webhook:w1", ev("e1"), "e1")).toEqual({ accepted: true, deduplicated: false });
-    expect(await g.enqueue("webhook:w1", ev("e1"), "e1")).toEqual({ accepted: false, deduplicated: true });
-    await g.enqueue("webhook:w1", ev("e2"), "e2");
-    await g.enqueue("webhook:w1", ev("e3"), "e3");
+    expect(await g.enqueueEvent("webhook:w1", ev("e1"), "e1")).toEqual({ accepted: true, deduplicated: false });
+    expect(await g.enqueueEvent("webhook:w1", ev("e1"), "e1")).toEqual({ accepted: false, deduplicated: true });
+    await g.enqueueEvent("webhook:w1", ev("e2"), "e2");
+    await g.enqueueEvent("webhook:w1", ev("e3"), "e3");
     await g.pump();
     // e3 waits behind the failed e2.
     expect(seen).toEqual(["e1"]);

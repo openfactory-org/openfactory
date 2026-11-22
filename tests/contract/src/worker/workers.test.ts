@@ -5,7 +5,7 @@ import { Api, uniq, waitFor } from "../harness/api.ts";
 import { adminApi, createTestFactory } from "../harness/context.ts";
 import { FakeRunner } from "../harness/runner.ts";
 import { assertWorkerDef } from "../harness/schemas.ts";
-import { describeFeature, supports, TAGS } from "../harness/target.ts";
+import { describeFeature, TAGS } from "../harness/target.ts";
 import { FakeWorker, newWorkerKey, type WorkerKeyPair } from "../harness/worker.ts";
 
 interface Worker {
@@ -20,7 +20,7 @@ interface Enrolled {
   key: WorkerKeyPair;
 }
 
-/** Enrollment token, then POST /workers/enroll (new control plane). */
+/** Enrollment token, then POST /workers/enroll. */
 async function enroll(api: Api, opts: { labels?: Record<string, string>; slots?: number } = {}): Promise<Enrolled> {
   const name = uniq("ct-w");
   const enrollment = await api.post<{ id: string; token: string; expires_at: string }>(
@@ -47,26 +47,17 @@ async function enroll(api: Api, opts: { labels?: Record<string, string>; slots?:
   return { workerId: enrolled.worker_id, name, key };
 }
 
-/** Connects a fake worker with the auth that the target supports. */
+/** Enrolls a worker and connects it as a fake worker with Ed25519 auth. */
 async function connectWorker(
   api: Api,
   opts: { labels?: Record<string, string> } = {},
 ): Promise<{ worker: FakeWorker; id: string; name: string }> {
-  if (supports(TAGS.workerEnrollment)) {
-    const e = await enroll(api, opts);
-    const worker = await FakeWorker.connect(
-      { kind: "ed25519", workerId: e.workerId, privateKey: e.key.privateKey },
-      { workerId: e.workerId, name: e.name, backend: "microvm", capacity: 2, slots: 2, labels: opts.labels },
-    );
-    return { worker, id: e.workerId, name: e.name };
-  }
-  // Go server: a team API key as the bearer token, any worker ID.
-  const name = uniq("ct-w");
+  const e = await enroll(api, opts);
   const worker = await FakeWorker.connect(
-    { kind: "bearer", token: api.key ?? "" },
-    { workerId: name, name, backend: "local", capacity: 2, labels: opts.labels },
+    { kind: "ed25519", workerId: e.workerId, privateKey: e.key.privateKey },
+    { workerId: e.workerId, name: e.name, backend: "microvm", capacity: 2, slots: 2, labels: opts.labels },
   );
-  return { worker, id: name, name };
+  return { worker, id: e.workerId, name: e.name };
 }
 
 describeFeature([TAGS.rest], "workers list", () => {

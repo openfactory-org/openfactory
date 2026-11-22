@@ -46,9 +46,6 @@ export function systemMeta(teamId: string, requestId = `scoring-${crypto.randomU
   return { requestId, principal: systemPrincipal(teamId) };
 }
 
-/** Re-exported for the callers that import it from here. */
-export { unwrapOp };
-
 const notFoundToNull = async <T>(p: Promise<T>): Promise<T | null> => {
   try {
     return await p;

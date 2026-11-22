@@ -10,7 +10,6 @@ import { loadBundle } from "../eventctx/index";
 import { b64 } from "../lib/bytes";
 import { EVENT_FILES_REF } from "../do/work/engine";
 import { plannedSecrets, plannedStartConfig, plannerFor } from "./planner";
-import { buildSecrets, buildStartConfig, setSecretsBuilder, setStartConfigBuilder } from "./startconfig";
 import {
   attachmentDownload,
   CLOUD_TOKEN_TTL,
@@ -22,9 +21,6 @@ import {
 } from "./transfer";
 import { issuerFor } from "../cloudid/issuer";
 import { mergeMessages, readCompactedMessages } from "../compaction/compact";
-
-setStartConfigBuilder(plannedStartConfig);
-setSecretsBuilder(plannedSecrets);
 import { mintSessionToken, runnerKeys, sha256Hex, verifySessionToken, type SessionClaims } from "./token";
 
 export const RUNNER_PREFIX = "/runner/v1";
@@ -156,7 +152,7 @@ async function start(request: Request, env: Env): Promise<Response> {
   if (isErr(res)) return fromErr(res);
   let cfg;
   try {
-    cfg = await buildStartConfig(env, res.run, res.session);
+    cfg = await plannedStartConfig(env, res.run, res.session);
   } catch (e) {
     const { error } = toOfError(e);
     if (error.code === "invalid_request" || error.code === "resource_not_found") {
@@ -196,7 +192,7 @@ async function sessionRoute(
     case "GET /runner/v1/session/secrets": {
       const a = (await stub.runnerAuth(claims.run, claims.ses)) as { run: Run; session: RunSession } | RunnerErr;
       if (isErr(a)) return fromErr(a);
-      const sec = await buildSecrets(env, a.run, a.session);
+      const sec = await plannedSecrets(env, a.run, a.session);
       const names = [
         ...new Set([
           ...Object.keys(sec.env ?? {}),

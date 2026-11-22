@@ -3,17 +3,13 @@
 // Runs the black-box contract suite (tests/contract) against one target.
 //
 //   node tools/contract/run.mjs --target worker [--port N] [-- <vitest args>]
-//   node tools/contract/run.mjs --target go --binary bin/openfactory-go-final [--port N]
 //   node tools/contract/run.mjs --target url --url http://127.0.0.1:8787 [--api-key K]
 //
 // worker  starts `wrangler dev -c apps/control-plane/wrangler.jsonc` on a free
 //         port with development variables (local provider, a test master key,
 //         a test signing key) and a fresh persistence directory.
-// go      starts `<binary> serve` with SQLite in a temporary directory, the
-//         local sandbox backend and tools/contract/runner-shim.mjs as the
-//         runner command (the fake runner takes over each session).
-// url     uses a server that is already running (no session source unless
-//         OF_CONTRACT_RENDEZVOUS_DIR is set).
+// url     uses a control plane that is already running. The runner suites
+//         need OF_SANDBOX_PROVIDER=local and OF_DEV_PROCESS_WORKERS=true there.
 //
 // Options:
 //   --keep             keep the temporary directory and print its path
@@ -24,7 +20,7 @@
 // Exit code: the exit code of vitest (0 when every selected test passed).
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { createWriteStream, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createWriteStream, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -32,20 +28,11 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
-/** Feature tags that each target does not support (see tests/contract/src/harness/target.ts). */
-const SKIP_TAGS = {
-  // The Go server has no enrollment routes, no Ed25519 worker auth and no rewrap route.
-  go: ["worker-enrollment", "secrets-rewrap"],
-  worker: [],
-  url: [],
-};
-
 const RUNNER_VERSION = "1.0.0-contract";
 
 function parseArgs(argv) {
   const out = {
     target: "",
-    binary: "",
     port: 0,
     url: "",
     apiKey: "",
@@ -66,7 +53,6 @@ function parseArgs(argv) {
       out.rest = argv.slice(i + 1);
       break;
     } else if (a === "--target") out.target = next();
-    else if (a === "--binary") out.binary = next();
     else if (a === "--port") out.port = Number(next());
     else if (a === "--url") out.url = next();
     else if (a === "--api-key") out.apiKey = next();
@@ -78,14 +64,13 @@ function parseArgs(argv) {
       console.log(
         readFileSync(fileURLToPath(import.meta.url), "utf8")
           .split("\n")
-          .slice(1, 25)
+          .slice(1, 20)
           .join("\n"),
       );
       process.exit(0);
     } else throw new Error(`unknown argument ${a}`);
   }
-  if (!["worker", "go", "url"].includes(out.target)) throw new Error("--target must be worker, go or url");
-  if (out.target === "go" && !out.binary) throw new Error("--target go needs --binary");
+  if (!["worker", "url"].includes(out.target)) throw new Error("--target must be worker or url");
   if (out.target === "url" && !out.url) throw new Error("--target url needs --url");
   return out;
 }
@@ -136,7 +121,7 @@ function stopProcess(p) {
     const done = () => res();
     p.once("exit", done);
     try {
-      // The process group: wrangler starts workerd, the Go server starts runners.
+      // The process group: wrangler starts workerd.
       process.kill(-p.pid, "SIGTERM");
     } catch {
       p.kill("SIGTERM");
@@ -150,37 +135,6 @@ function stopProcess(p) {
       res();
     }, 8000).unref();
   });
-}
-
-async function startGo(args, tmp) {
-  const binary = resolve(ROOT, args.binary);
-  if (!existsSync(binary)) throw new Error(`binary ${binary} does not exist (build it first)`);
-  const port = args.port || (await freePort());
-  const base = `http://127.0.0.1:${port}`;
-  const rendezvous = join(tmp, "rendezvous");
-  mkdirSync(rendezvous, { recursive: true });
-  const env = {
-    ...process.env,
-    OF_LISTEN: `127.0.0.1:${port}`,
-    OF_PUBLIC_URL: base,
-    OF_DATABASE_URL: `sqlite://${join(tmp, "openfactory.db")}`,
-    OF_DATA_DIR: join(tmp, "data"),
-    OF_SECRET_KEY: randomBytes(32).toString("base64"),
-    OF_SIGNING_KEY: randomBytes(32).toString("base64"),
-    OF_SANDBOX_BACKEND: "local",
-    OF_DEV: "false",
-    OF_LOG_LEVEL: "info",
-    // Each session starts the shim; the test is the runner.
-    OF_RUNNER_COMMAND: `${process.execPath} ${join(ROOT, "tools/contract/runner-shim.mjs")}`,
-    // Selects the exec harness, so that no model credential is needed.
-    OF_RUNNER_EXEC_COMMAND: "cat",
-    OF_CONTRACT_RENDEZVOUS_DIR: rendezvous,
-  };
-  delete env.OF_CONFIG;
-  delete env.OF_API_KEY;
-  const p = startProcess(binary, ["serve"], { cwd: tmp, env }, join(tmp, "server.log"), args.log);
-  await waitReady(`${base}/readyz`, p, 30_000);
-  return { proc: p, base, extraEnv: { OF_CONTRACT_RENDEZVOUS_DIR: rendezvous } };
 }
 
 async function startWorker(args, tmp) {
@@ -232,7 +186,7 @@ async function startWorker(args, tmp) {
     args.log,
   );
   await waitReady(`${base}/healthz`, p, 120_000);
-  return { proc: p, base, extraEnv: {} };
+  return { proc: p, base };
 }
 
 function summarize(reportFile, targetName) {
@@ -267,26 +221,16 @@ async function main() {
   };
   process.on("SIGINT", () => void cleanup().then(() => process.exit(130)));
   try {
-    if (args.target === "go") server = await startGo(args, tmp);
-    else if (args.target === "worker") server = await startWorker(args, tmp);
-    else server = { proc: undefined, base: args.url.replace(/\/+$/, ""), extraEnv: {} };
+    if (args.target === "worker") server = await startWorker(args, tmp);
+    else server = { proc: undefined, base: args.url.replace(/\/+$/, "") };
     console.log(`contract: target ${args.target} ready at ${server.base} (temporary directory ${tmp})`);
 
     const reportFile = args.report ? resolve(args.report) : join(tmp, "report.json");
     const env = {
       ...process.env,
-      ...server.extraEnv,
-      OF_CONTRACT_TARGET: args.target === "url" ? process.env.OF_CONTRACT_TARGET || "worker" : args.target,
       OF_CONTRACT_BASE_URL: server.base,
-      OF_CONTRACT_SKIP_TAGS: [
-        ...SKIP_TAGS[args.target],
-        ...(process.env.OF_CONTRACT_SKIP_TAGS ?? "").split(",").filter(Boolean),
-      ].join(","),
       OF_CONTRACT_RUNNER_VERSION: RUNNER_VERSION,
-      OF_CONTRACT_DEVIATIONS_FILE: join(tmp, "deviations.txt"),
     };
-    // The Go reference writes nil slices as null; count null as absent there.
-    if (args.target === "go") env.OF_CONTRACT_LENIENT_NULLS = "1";
     if (args.apiKey) env.OF_CONTRACT_API_KEY = args.apiKey;
     if (args.realRunner) env.OF_CONTRACT_REAL_RUNNER = "1";
     const vitest = join(ROOT, "node_modules/.bin/vitest");
@@ -304,12 +248,6 @@ async function main() {
       p.on("exit", (c) => res(c ?? 1));
     });
     summarize(reportFile, args.target);
-    const dev = join(tmp, "deviations.txt");
-    if (existsSync(dev)) {
-      const lines = [...new Set(readFileSync(dev, "utf8").split("\n").filter(Boolean))].sort();
-      console.log(`deviations from api/openapi.json accepted for target ${args.target} (${lines.length}):`);
-      for (const l of lines) console.log(`  - ${l}`);
-    }
     if (code !== 0) console.log(`server log: ${join(tmp, "server.log")}${args.keep ? "" : " (deleted; use --keep)"}`);
   } catch (e) {
     console.error(`contract: ${e.message}`);

@@ -562,14 +562,14 @@ func (p *Proxy) Close() error {
 const ReportPath = "/blocked"
 
 // Report is the body of the blocked-host report. The runner of a task
-// reads it from the sidecar and sends one diagnostic for each host.
+// reads it from the proxy and sends one diagnostic for each host.
 type Report struct {
 	Blocked []BlockedHost `json:"blocked"`
 }
 
 // ReportHandler serves the hosts that the proxy blocked, as JSON at
-// ReportPath. It has no secret. Serve it on a loopback address only: the task
-// container and the sidecar share the network of the Pod.
+// ReportPath. It has no secret. Serve it where only the task can reach it: on
+// a loopback address in a sandbox, or on the tap address of a microVM.
 func (p *Proxy) ReportHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+ReportPath, func(w http.ResponseWriter, r *http.Request) {

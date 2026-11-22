@@ -23,9 +23,6 @@ jobs:
     if: github.event_name != 'schedule'
     steps:
       - uses: actions/checkout@v4
-        with:
-          # The test ledger check reads the tree of an older commit.
-          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -46,8 +43,6 @@ jobs:
         run: npm run build
       - name: Validate example definitions
         run: npm run validate-examples
-      - name: Test ledger covers every deleted Go test
-        run: npm run check:ledger
 
   contract:
     name: Contract suite

@@ -26,7 +26,7 @@ import { dispatchPrincipals, factoryPrincipal, isApprover as approverMatch } fro
 import { prFactsKey } from "../../metrics/build";
 import { applyOverrides } from "../../scoring/overrides";
 import { matchingAutomations } from "../../triggers/match";
-import { setIntakeHandler, type IntakeResult } from "./index";
+import type { IntakeHandler, IntakeResult } from "./index";
 import { build as buildBundle, promptSection, storeBundle, type Builder } from "../../eventctx/index";
 import { resolverFor } from "../../forges/env";
 import { githubActorEligible, postOnboardingNotice, type OnboardingReason } from "./onboarding";
@@ -40,9 +40,18 @@ export interface BundleRef {
 
 /** Provider context builders of the event context (integrations, forge review threads). */
 export type BuildersFor = (env: Env) => Builder[];
-let buildersFor: BuildersFor = () => [];
-export function setEventContextBuilders(fn: BuildersFor): void {
+let buildersFor: BuildersFor | undefined;
+
+/** Sets the builders (bootstrapControlPlane in src/wiring.ts). Returns the ones it replaces. */
+export function setEventContextBuilders(fn: BuildersFor | undefined): BuildersFor | undefined {
+  const prev = buildersFor;
   buildersFor = fn;
+  return prev;
+}
+
+function contextBuilders(env: Env): Builder[] {
+  if (!buildersFor) throw new Error("no event context builders are registered: call bootstrapControlPlane()");
+  return buildersFor(env);
 }
 
 /**
@@ -54,7 +63,7 @@ export function setEventContextBuilders(fn: BuildersFor): void {
 export async function storeEventBundle(env: Env, ev: CoreEvent, withContext: boolean): Promise<BundleRef | undefined> {
   try {
     const messageId = newId("msg");
-    const b = await buildBundle(messageId, ev as unknown as Event, withContext, buildersFor(env));
+    const b = await buildBundle(messageId, ev as unknown as Event, withContext, contextBuilders(env));
     if (!b) return undefined;
     return { ref: await storeBundle(env.DATA, b), messageId, promptSection: promptSection(b) };
   } catch (e) {
@@ -592,14 +601,9 @@ async function handleForFactory(
   return served;
 }
 
-/** The IngressDO intake handler over the platform bindings. */
-export function registerIntake(): void {
-  setIntakeHandler((env, ctx, event) =>
-    handleEvent(platformIntakeDeps(env, ctx.teamId), ctx.teamId, structuredClone(event)),
-  );
-}
-
-registerIntake();
+/** The IngressDO intake handler over the platform bindings (bootstrapControlPlane registers it). */
+export const platformIntakeHandler: IntakeHandler = (env, ctx, event) =>
+  handleEvent(platformIntakeDeps(env, ctx.teamId), ctx.teamId, structuredClone(event));
 
 /**
  * A manual run of an automation (POST .../schedules/{id}/run): one work item

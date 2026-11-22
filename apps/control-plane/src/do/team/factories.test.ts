@@ -4,7 +4,7 @@ import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { configSnapshot } from "./factories";
-import type { TeamKit } from "./index";
+import type { TeamKit } from "./kit";
 
 const FACTORY_ID = "fac_snapshot_cache";
 

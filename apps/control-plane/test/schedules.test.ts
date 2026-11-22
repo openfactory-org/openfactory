@@ -3,7 +3,7 @@
 import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import type { TeamKit } from "../src/do/team/index";
+import type { TeamKit } from "../src/do/team/kit";
 import { fireSchedule, getUserForgeToken, syncSchedules } from "../src/do/team/schedules";
 
 const automation = (cron: string, extra: Record<string, unknown> = {}) => ({

@@ -19,6 +19,7 @@ class FakeProvider implements SandboxProvider {
   readonly id = "local";
   started: SandboxTask[] = [];
   destroyed: string[] = [];
+  acked: string[] = [];
   async capabilities(): Promise<ProviderCapabilities> {
     return {
       egress: "none",
@@ -47,6 +48,9 @@ class FakeProvider implements SandboxProvider {
   }
   async list(): Promise<TaskStatus[]> {
     return [];
+  }
+  async ack(taskId: string): Promise<void> {
+    this.acked.push(taskId);
   }
 }
 
@@ -279,6 +283,17 @@ describe("run loop (C2)", () => {
     const all = await runner(`/runner/v1/session/commands?after=0&wait=0`, { token: fr.token });
     const cmds = ((await all.json()) as { commands: { type: string }[] }).commands;
     expect(cmds.filter((c) => c.type === "turn.start")).toHaveLength(1);
+  });
+
+  it("acks the provider once after session start", async () => {
+    const token = newToken("w");
+    const root = await newRootRun(token);
+    await pump(token);
+    const fr = new FakeRunner(taskFor(root.id));
+    expect((await fr.start()).status).toBe(200);
+    expect((await fr.start()).status).toBe(200);
+    await pump(token);
+    expect(provider.acked).toEqual([fr.task.taskId]);
   });
 
   it("refuses a mismatched runner_version", async () => {

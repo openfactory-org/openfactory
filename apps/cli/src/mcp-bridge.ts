@@ -1,7 +1,8 @@
 // A stdio bridge to a streamable HTTP MCP endpoint. It relays newline-delimited
 // JSON-RPC messages from stdin to the endpoint and writes the answers to
-// stdout. Port of mcpBridge in cmd/openfactory/mcp.go.
+// stdout.
 
+import { readSSE } from "@openfactory/api-client";
 import type { Writer } from "./framework.ts";
 
 interface RpcEnvelope {
@@ -104,41 +105,14 @@ export class McpBridge {
       throw new Error(`server returned ${res.status} ${res.statusText}: ${body}`);
     }
     if ((res.headers.get("Content-Type") ?? "").startsWith("text/event-stream")) {
-      await this.#readSSE(res, env);
+      // Deliver the data of each event. A last block without a blank line after it counts too.
+      if (!res.body) return;
+      for await (const ev of readSSE(res.body, this.#o.signal, { flushAtEnd: true }))
+        if (ev.data !== "") this.#deliver(ev.data, env);
       return;
     }
     const body = await res.text();
     if (body.trim() !== "") this.#deliver(body, env);
-  }
-
-  async #readSSE(res: Response, env: RpcEnvelope): Promise<void> {
-    if (!res.body) return;
-    const decoder = new TextDecoder();
-    const reader = res.body.getReader();
-    let buf = "";
-    let data: string[] = [];
-    const flush = (): void => {
-      if (data.length > 0) {
-        this.#deliver(data.join("\n"), env);
-        data = [];
-      }
-    };
-    const line = (l: string): void => {
-      if (l === "") flush();
-      else if (l.startsWith("data:")) data.push(l.slice(5).replace(/^ /, ""));
-    };
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      let nl: number;
-      while ((nl = buf.indexOf("\n")) >= 0) {
-        line(buf.slice(0, nl).replace(/\r$/, ""));
-        buf = buf.slice(nl + 1);
-      }
-    }
-    if (buf !== "") line(buf.replace(/\r$/, ""));
-    flush();
   }
 
   /** Writes a server message to stdout and records the protocol version of the initialize result. */

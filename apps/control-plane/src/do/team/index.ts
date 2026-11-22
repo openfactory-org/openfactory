@@ -1,31 +1,31 @@
 // TeamDO (key team:<id>): users, identities, API keys, service accounts,
-// secrets, factories, definition versions and compiled runtime, settings
-// (WS4); worker records (WS6); integrations and schedules (WS10); MCP
-// registry and mcpauth state (WS11).
+// secrets, factories, definition versions and compiled runtime, settings,
+// worker records, integrations and schedules, MCP registry and mcpauth state.
 //
-// One class composed of modules. Each module file exports:
+// One class composed of modules. Each module file exports a TeamModule
+// (./kit.ts):
 //
-//   migrations: readonly Migration[]   numbers in its range (05 §4.5):
-//                                      WS4 1-99, WS10 100-199, WS11 200-299,
-//                                      WS6 300-399, WS13 400-499
+//   migrations: readonly Migration[]   numbers in its range: auth, secrets,
+//                                      factories, settings 1-99; integrations,
+//                                      schedules 100-199; mcp 200-299;
+//                                      workers 300-399; scoring 400-499
 //   ops: Record<string, TeamOp>        handlers of TeamDO.api(meta, op, ...),
 //                                      keyed by openapi operationId (or an
 //                                      internal name for DO-to-DO calls)
 //   setup?(kit: TeamKit): void         registers timers and outbox handlers
 //
-// The typed RPC methods of TeamRpc delegate to named exports of the modules.
+// Modules import their types from ./kit, never from this file. The typed RPC
+// methods of TeamRpc delegate to named exports of the modules.
 import { OfError, notImplemented, toOfError } from "@openfactory/core";
-import type { ApiKeyLookup, CallMeta, OutboxKind, Principal, Role, TeamRpc } from "../../contracts/do-messages";
+import type { ApiKeyLookup, CallMeta, Principal, Role, TeamRpc } from "../../contracts/do-messages";
 import type { Env } from "../../contracts/env";
-import { ROUTES } from "../../http/routes";
-import type { RouteRole } from "../../http/handler";
+import { ROUTE_META, type RouteMeta, type RouteRole } from "../../contracts/routes";
 import { isFactoryScoped, requireRole } from "../../auth/roles";
-import { BaseDO, type MessageHandler } from "../../lib/base";
+import { BaseDO } from "../../lib/base";
 import { pruneAttachments, retentionMs, type RetentionRpc } from "../../retention/sweep";
 import { LiveHub, isUpgrade } from "../../lib/live/index";
-import type { EnqueueInput } from "../../lib/outbox/outbox";
+import type { OpError } from "../../lib/rpc";
 import type { Migration } from "../../lib/sql/migrate";
-import type { AsyncTimerHandler, SyncTimerHandler, Timers } from "../../lib/timers/timers";
 import * as auth from "./auth";
 import * as factories from "./factories";
 import * as integrations from "./integrations";
@@ -36,96 +36,10 @@ import * as scoring from "./scoring";
 import * as secrets from "./secrets";
 import * as settings from "./settings";
 import * as workers from "./workers";
+import type { OpCall, TeamKit, TeamModule, TeamOp } from "./kit";
 
-/** What a module sees of the TeamDO. */
-export interface TeamKit {
-  readonly env: Env;
-  readonly sql: SqlStorage;
-  readonly storage: DurableObjectStorage;
-  readonly timers: Timers;
-  readonly live: LiveHub;
-  teamId(): string;
-  doName(): string;
-  /** One transactionSync; re-arms the alarm after. No await inside. */
-  tx<T>(fn: () => T): T;
-  /** Outbox row; call inside tx with the state change. */
-  enqueue<K extends string>(input: EnqueueInput<K>): string;
-  setTimer(name: string, kind: string, dueMs: number, payload?: unknown): void;
-  clearTimer(name: string): boolean;
-  onTimer<P = unknown>(kind: string, handler: SyncTimerHandler<P>): void;
-  onTimerAsync<P = unknown>(kind: string, handler: AsyncTimerHandler<P>): void;
-  onMessage<K extends OutboxKind>(kind: K, handler: MessageHandler<K>): void;
-  /** Receiver-side dedupe helpers for custom flows. */
-  seen(msgId: string): boolean;
-  markSeen(msgId: string): void;
-}
-
-/** One call of TeamDO.api. */
-export interface OpCall {
-  op: string;
-  meta: CallMeta;
-  /** Path parameters. */
-  params: Record<string, string>;
-  /** Query parameters (single values). */
-  query: Record<string, string>;
-  body: unknown;
-  /** Minimum role of the route ("" for ops that are not routes). */
-  role: RouteRole | "";
-  /** The principal, or throws 401. */
-  principal(): Principal;
-  /**
-   * Checks the route role against the principal's role for this factory
-   * ("" = team role). Factory-scoped routes must call it before reading
-   * the resource, with "" when the factory does not exist (then 404).
-   */
-  authorize(factoryId: string): Principal;
-}
-
-export type TeamOp = (kit: TeamKit, call: OpCall) => unknown;
-
-export interface TeamModule {
-  migrations: readonly Migration[];
-  ops: Record<string, TeamOp>;
-  setup?: (kit: TeamKit) => void;
-}
-
-/** A non-200 result of an op. Plain objects cross the RPC boundary. */
-export interface OpResponse {
-  $status: number;
-  body?: unknown;
-  headers?: Record<string, string>;
-}
-
-export const created = (body: unknown, headers?: Record<string, string>): OpResponse => ({
-  $status: 201,
-  body,
-  ...(headers ? { headers } : {}),
-});
-export const noContent = (): OpResponse => ({ $status: 204 });
-export const withStatus = (status: number, body?: unknown): OpResponse => ({ $status: status, body });
-
-export function isOpResponse(v: unknown): v is OpResponse {
-  return typeof v === "object" && v !== null && typeof (v as OpResponse).$status === "number";
-}
-
-/** Error result of api(): OfError fields, so that detail and extra survive RPC. */
-export interface OpError {
-  $error: {
-    code: string;
-    detail: string;
-    reason?: string;
-    provider?: string;
-    authUrl?: string;
-    setupUrl?: string;
-    extra?: Record<string, unknown>;
-  };
-}
-
-export function isOpError(v: unknown): v is OpError {
-  return typeof v === "object" && v !== null && typeof (v as OpError).$error === "object";
-}
-
-export const QUERY_PREFIX = "?";
+/** Prefix of query parameters in the params of api() ("?limit"). */
+const QUERY_PREFIX = "?";
 
 const MODULES: Record<string, TeamModule> = {
   auth,
@@ -164,7 +78,7 @@ function allOps(): Map<string, TeamOp> {
   return ops;
 }
 
-const ROUTE_BY_OP = new Map(ROUTES.map((r) => [r.operationId, r]));
+const ROUTE_BY_OP = new Map<string, RouteMeta>(ROUTE_META.map((r) => [r.operationId, r]));
 
 /**
  * Minimum role of internal ops (no REST route) that authorize a caller.
@@ -176,13 +90,10 @@ const INTERNAL_OP_ROLE: Record<string, RouteRole> = {
   webhookForRoute: "user",
   scoringBenchmarkPlan: "editor",
 };
-// Computed on first use: the modules import ./index, so a module-level call
-// could run while one of them is still initializing (import cycle).
-let opsCache: Map<string, TeamOp> | undefined;
-function opsMap(): Map<string, TeamOp> {
-  opsCache ??= allOps();
-  return opsCache;
-}
+const OPS = allOps();
+const MIGRATIONS = allMigrations();
+const PREFLIGHTS = Object.values(MODULES).flatMap((m) => m.preflights ?? []);
+const REWRAP_SOURCES = Object.values(MODULES).flatMap((m) => m.rewrapSources ?? []);
 
 export class TeamDO extends BaseDO implements TeamRpc, RetentionRpc {
   readonly live: LiveHub;
@@ -199,6 +110,8 @@ export class TeamDO extends BaseDO implements TeamRpc, RetentionRpc {
       storage: ctx.storage,
       timers: this.timers,
       live: this.live,
+      preflights: PREFLIGHTS,
+      rewrapSources: REWRAP_SOURCES,
       teamId: () => self.teamId(),
       doName: () => self.doName(),
       tx: (fn) => self.tx(fn),
@@ -215,7 +128,7 @@ export class TeamDO extends BaseDO implements TeamRpc, RetentionRpc {
   }
 
   protected migrations(): readonly Migration[] {
-    return allMigrations();
+    return MIGRATIONS;
   }
 
   /** Liveness probe for tests and the readiness check. */
@@ -240,7 +153,7 @@ export class TeamDO extends BaseDO implements TeamRpc, RetentionRpc {
    */
   async api(meta: CallMeta, op: string, params: Record<string, string>, body: unknown): Promise<unknown> {
     try {
-      const fn = opsMap().get(op);
+      const fn = OPS.get(op);
       if (!fn) throw notImplemented(`${op} is not implemented yet`);
       const route = ROUTE_BY_OP.get(op);
       const role: RouteRole | "" = route?.role ?? INTERNAL_OP_ROLE[op] ?? "";

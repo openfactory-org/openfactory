@@ -2,7 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defaultCredential, factoryCredentialState, HARNESS_CREDENTIAL_TYPES, mergeSecrets, useUsableSecrets } from "../lib/secrets";
-import { SecretsPage } from "../pages/Team";
+import { SecretsPage } from "../pages/Secrets";
 import { ME, mockFetch, renderAt } from "./utils";
 
 const now = new Date().toISOString();

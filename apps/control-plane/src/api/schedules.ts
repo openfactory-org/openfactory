@@ -59,6 +59,6 @@ export const runAutomation: Handler = async (_request, env, ctx) => {
     return json(run, 201);
   }
   const partition = "manual:" + out.automation.id;
-  await env.INGRESS.getByName(doName.ingress(out.team_id, partition)).enqueue(partition, ev as never, ev.id);
+  await env.INGRESS.getByName(doName.ingress(out.team_id, partition)).enqueueEvent(partition, ev as never, ev.id);
   return json({ event_id: ev.id, automation_id: out.automation.id, status: "accepted" }, 202);
 };

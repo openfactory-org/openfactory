@@ -18,7 +18,6 @@ package direct
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -61,12 +60,6 @@ const (
 	codeInternal   = "internal"
 )
 
-// ErrAtCapacity is returned when the selected worker has no free slot.
-var ErrAtCapacity = errors.New("worker at capacity")
-
-// ErrNoWorker is returned when no suitable worker is connected.
-var ErrNoWorker = errors.New("no connected worker")
-
 type message struct {
 	Type   string          `json:"type"`
 	ID     string          `json:"id,omitempty"`
@@ -83,19 +76,7 @@ type rpcError struct {
 
 func (e *rpcError) Error() string { return e.Message }
 
-// Hello describes a connected worker. A worker sends HelloV2 when it connects;
-// the hub keeps the fields below.
-type Hello struct {
-	WorkerID string            `json:"worker_id"`
-	Name     string            `json:"name,omitempty"`
-	Backend  string            `json:"backend"`
-	Labels   map[string]string `json:"labels,omitempty"`
-	Capacity int               `json:"capacity"` // 0 = unlimited
-	Active   int               `json:"active"`
-	Version  string            `json:"version,omitempty"`
-}
-
-// Welcome is the hub's reply to Hello.
+// Welcome is the hub's reply to HelloV2.
 type Welcome struct {
 	ConnectionID string `json:"connection_id"`
 	HeartbeatMS  int64  `json:"heartbeat_ms"`

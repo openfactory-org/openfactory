@@ -1,7 +1,7 @@
 import createClient, { type Middleware } from "openapi-fetch";
 import type { components, paths } from "@openfactory/api-client";
 
-/** Every schema of the embedded OpenAPI document (internal/api/openapi.json). */
+/** Every schema of the REST API (api/openapi.json, generated into @openfactory/api-client). */
 export type Schemas = components["schemas"];
 
 export type Factory = Schemas["Factory"];
@@ -49,7 +49,7 @@ export class ApiError extends Error {
 
 /**
  * Session and CSRF handling shared by every request: cookies are always sent,
- * and unsafe methods carry `X-OF-CSRF: 1` (checked by internal/auth for
+ * and unsafe methods carry `X-OF-CSRF: 1` (the control plane checks it for
  * cookie-authenticated requests).
  */
 const sessionMiddleware: Middleware = {
@@ -102,7 +102,7 @@ async function problemFrom(res: Response): Promise<Problem> {
   }
 }
 
-/** Signs in with an API key; internal/auth answers with a session cookie. */
+/** Signs in with an API key; the control plane answers with a session cookie. */
 export async function loginWithAPIKey(apiKey: string): Promise<void> {
   const res = await authFetch("/auth/session", {
     method: "POST",

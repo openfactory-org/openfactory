@@ -3,8 +3,8 @@
 // scorers, factory integrations). Ports internal/api/factories.go,
 // internal/api/dashboard.go (settings, integrations, restore, agent spec,
 // automation files) and engine.ApplyDefinition + the preflight checks this
-// module owns (alias, secrets, environments). Other modules add checks with
-// registerPreflight.
+// module owns (alias, secrets, environments). Other modules declare their
+// checks in their `preflights` export; TeamDO hands them over in kit.preflights.
 //
 // Definition apply (plan rule 2): compile and preflight run before the write;
 // network work (name resolution, skill fetches) happens in the Worker before
@@ -34,8 +34,8 @@ import type { Migration } from "../../lib/sql/migrate";
 import { all, first } from "../../lib/sql/query";
 import { diffFiles, mergeProposal, proposalError } from "../../scoring/proposals";
 import { improveTrackKey, type ImprovementTrack } from "../../scoring/service";
-import * as schedules from "./schedules";
-import { created, noContent, type OpCall, type TeamKit, type TeamOp } from "./index";
+import { syncSchedules, syncWebhooks } from "./schedules";
+import { created, noContent, type OpCall, type TeamKit, type TeamOp } from "./kit";
 
 export const migrations: readonly Migration[] = [
   {
@@ -287,13 +287,6 @@ export type PreflightCheck = (
   chk: DefinitionCheck,
 ) => void | Promise<void>;
 
-const preflights: { name: string; fn: PreflightCheck }[] = [];
-
-/** Registers a preflight check (call from a module's setup). */
-export function registerPreflight(name: string, fn: PreflightCheck): void {
-  if (!preflights.some((p) => p.name === name)) preflights.push({ name, fn });
-}
-
 /** The definition file of an agent, automation, scorer or webhook (paths in preflight messages). */
 export const agentFile = (n: string) => `agents/${n}/agent.md`;
 export const automationFile = (n: string) => `automations/${n}/automation.md`;
@@ -469,7 +462,7 @@ export async function checkDefinition(
   chk.errors.push(...checkAlias(kit, f, def));
   preflightSecrets(kit, f, def, files, chk);
   preflightEnvironments(kit, f, def, files, chk);
-  for (const p of preflights) {
+  for (const p of kit.preflights) {
     try {
       await p.fn(kit, f, def, files, chk);
     } catch (e) {
@@ -768,12 +761,8 @@ export async function applyDefinition(kit: TeamKit, factoryId: string, input: Ap
     }
     putFactory(kit, nf);
     // Other modules' tables, in the same transaction (no I/O).
-    const s = schedules as unknown as {
-      syncSchedules?: (kit: TeamKit, factoryId: string, automations: unknown[]) => void;
-      syncWebhooks?: (kit: TeamKit, factoryId: string, webhooks: unknown[]) => void;
-    };
-    s.syncSchedules?.(kit, factoryId, m.automations);
-    s.syncWebhooks?.(kit, factoryId, webhooksWithIds(kit, factoryId, def));
+    syncSchedules(kit, factoryId, m.automations);
+    syncWebhooks(kit, factoryId, webhooksWithIds(kit, factoryId, def));
     kit.enqueue({
       dest: dest.dispatch(kit.teamId()),
       kind: "dispatch.limits",
@@ -1639,12 +1628,8 @@ export const ops: Record<string, TeamOp> = {
     const f = factoryFor(kit, c);
     kit.tx(() => {
       deleteFactoryRows(kit, f.id);
-      const s = schedules as unknown as {
-        syncSchedules?: (k: TeamKit, id: string, a: unknown[]) => void;
-        syncWebhooks?: (k: TeamKit, id: string, w: unknown[]) => void;
-      };
-      s.syncSchedules?.(kit, f.id, []);
-      s.syncWebhooks?.(kit, f.id, []);
+      syncSchedules(kit, f.id, []);
+      syncWebhooks(kit, f.id, []);
     });
     return noContent();
   },

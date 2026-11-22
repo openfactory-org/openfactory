@@ -720,9 +720,8 @@ export class Planner {
 // ---------- start config and secrets (runnerContent) ----------
 
 function idleSeconds(env: Env, minutes: number | undefined, set: boolean | undefined): number {
-  const e = env as unknown as Record<string, string | undefined>;
-  const def = parseDuration(e.OF_IDLE_TIMEOUT_DEFAULT, 10 * 60_000);
-  const max = parseDuration(e.OF_IDLE_TIMEOUT_MAX, 60 * 60_000);
+  const def = parseDuration(env.OF_IDLE_TIMEOUT_DEFAULT, 10 * 60_000);
+  const max = parseDuration(env.OF_IDLE_TIMEOUT_MAX, 60 * 60_000);
   let d = def;
   if (set || (minutes ?? 0) > 0) d = (minutes ?? 0) * 60_000;
   if (d > max) d = max;

@@ -7,10 +7,9 @@
 // preflightMachines keeps only the registryCredentialSecretName warning: the
 // compiler rejects macOS and Windows machines. preflightNameFilters resolves
 // filter names with the name resolver that wiring.ts sets (setNameResolver).
-import { OfError } from "@openfactory/core";
+import { OfError, models as harnessModels, normalizeType as normalizeHarnessType } from "@openfactory/core";
 import {
   WEBHOOK_UID_PREFIX,
-  harnessModels,
   keyLine,
   validURLTokenSecret,
   type AgentConfig,
@@ -28,7 +27,6 @@ import { listIntegrations } from "./integrations";
 import {
   agentFile,
   automationFile,
-  registerPreflight,
   scorerFile,
   webhookFile,
   type DefinitionCheck,
@@ -36,7 +34,7 @@ import {
 } from "./factories";
 import { getSecretValue } from "./secrets";
 import { isProviderHost } from "./workers";
-import type { TeamKit, TeamOp } from "./index";
+import type { Preflight, TeamKit, TeamOp } from "./kit";
 
 export const migrations: readonly Migration[] = [];
 
@@ -267,7 +265,7 @@ const DATED = /-\d{8}$/;
 
 /** knownModel: model is in the list of harness type t. A harness without a list accepts any name. */
 export function knownModel(t: string, model: string): boolean {
-  const list = harnessModels.models(t);
+  const list = harnessModels(t);
   if (list.length === 0) return true;
   let m = model.trim().toLowerCase();
   if (m.endsWith("[1m]")) m = m.slice(0, -4);
@@ -294,7 +292,7 @@ export function preflightModels(def: CompiledDefinition, files: Record<string, s
     chk.warnings.push({
       file,
       field,
-      message: `model ${q(model)} is not in the model list of the ${harnessModels.normalizeType(t)} harness; check the spelling`,
+      message: `model ${q(model)} is not in the model list of the ${normalizeHarnessType(t)} harness; check the spelling`,
     });
   };
   for (const a of def.agents ?? []) check(agentFile(a.name), "harness.model", a.harness?.type ?? "", a.harness?.model);
@@ -379,7 +377,7 @@ export function preflightCredentials(
   const found = new Map<string, DefaultCredential>();
   for (const a of def.agents ?? []) {
     if (a.harness?.auth) continue;
-    const h = String(harnessModels.normalizeType(a.harness?.type ?? ""));
+    const h = String(normalizeHarnessType(a.harness?.type ?? ""));
     const env = runEnvNames(kit, a);
     if ((CREDENTIAL_ENV[h] ?? []).some((k) => env.has(k))) continue;
     const types = CREDENTIAL_TYPES[h] ?? [];
@@ -678,14 +676,14 @@ export const ops: Record<string, TeamOp> = {
   },
 };
 
-export function setup(_kit: TeamKit): void {
-  registerPreflight("webhooks", (kit, f, def, _files, chk) => preflightWebhooks(kit, f, def, chk));
-  registerPreflight("webhook filters", (kit, f, def, _files, chk) => preflightWebhookFilters(kit, f, def, chk));
-  registerPreflight("runAs", (kit, f, def, _files, chk) => preflightRunAs(kit, f, def, chk));
-  registerPreflight("approvers", (kit, _f, def, _files, chk) => preflightApprovers(kit, def, chk));
-  registerPreflight("models", (_kit, _f, def, files, chk) => preflightModels(def, files, chk));
-  registerPreflight("credentials", (kit, f, def, _files, chk) => preflightCredentials(kit, f, def, chk));
-  registerPreflight("worker environment", (kit, _f, def, _files, chk) => preflightWorkerEnvironment(kit, def, chk));
-  registerPreflight("machines", (_kit, _f, def, _files, chk) => preflightMachines(def, chk));
-  registerPreflight("name filters", (kit, _f, def, _files, chk) => preflightNameFilters(kit, def, chk));
-}
+export const preflights: readonly Preflight[] = [
+  { name: "webhooks", fn: (kit, f, def, _files, chk) => preflightWebhooks(kit, f, def, chk) },
+  { name: "webhook filters", fn: (kit, f, def, _files, chk) => preflightWebhookFilters(kit, f, def, chk) },
+  { name: "runAs", fn: (kit, f, def, _files, chk) => preflightRunAs(kit, f, def, chk) },
+  { name: "approvers", fn: (kit, _f, def, _files, chk) => preflightApprovers(kit, def, chk) },
+  { name: "models", fn: (_kit, _f, def, files, chk) => preflightModels(def, files, chk) },
+  { name: "credentials", fn: (kit, f, def, _files, chk) => preflightCredentials(kit, f, def, chk) },
+  { name: "worker environment", fn: (kit, _f, def, _files, chk) => preflightWorkerEnvironment(kit, def, chk) },
+  { name: "machines", fn: (_kit, _f, def, _files, chk) => preflightMachines(def, chk) },
+  { name: "name filters", fn: (kit, _f, def, _files, chk) => preflightNameFilters(kit, def, chk) },
+];

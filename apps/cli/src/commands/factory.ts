@@ -1,27 +1,12 @@
+import { unwrap } from "@openfactory/api-client";
 import { compile } from "@openfactory/definition";
 import { loadDir } from "@openfactory/definition/node";
 import { ago, emit, parseKV, table } from "../format.ts";
-import { enc, explain, isJSON, makeClient, resolveFactory, type Factory } from "../client.ts";
+import { enc, isJSON, makeClient, resolveFactory, type Factory, type Schemas } from "../client.ts";
 import { CliError, exactArgs, minArgs, noArgs, type Command, type RunContext } from "../framework.ts";
 import { parseRepoSpec } from "../repo.ts";
 import { formatValidationError } from "./local.ts";
 import { streamLogs } from "./run.ts";
-
-interface Agent {
-  name: string;
-  type: string;
-  harness?: { type?: string; model?: string };
-}
-
-interface Run {
-  run_id: string;
-  work_item_id?: string;
-  run_url?: string;
-}
-
-interface FactoryCreated {
-  factory: Factory;
-}
 
 function createdLine(f: Factory): string {
   return `Created factory ${f.name} (@${f.alias}): ${f.uid}\n`;
@@ -51,9 +36,9 @@ const getCommand: Command = {
     const c = makeClient(globals, env);
     const f = await resolveFactory(c, args[0] ?? "");
     if (isJSON(globals)) return emit(env.stdout, f);
-    let agents: Agent[] = [];
+    let agents: Schemas["AgentConfig"][] = [];
     try {
-      agents = await c.list<Agent>(`factories/${enc(f.uid)}/agents`).collect();
+      agents = await c.list<Schemas["AgentConfig"]>(`factories/${enc(f.uid)}/agents`).collect();
     } catch {
       // The agent list is a courtesy: show the factory without it.
     }
@@ -98,32 +83,32 @@ factory to a definition repository instead (--git-repo, --git-branch, --git-path
   ],
   async run({ flags, globals, env }) {
     const c = makeClient(globals, env);
-    const body: Record<string, unknown> = {};
-    const set = (k: string, v: string): void => {
+    type Body = Schemas["CreateFactoryRequest"];
+    const body: Body = {};
+    const set = <K extends "name" | "alias" | "description" | "model" | "git_repo" | "git_branch" | "git_path">(
+      k: K,
+      v: string,
+    ): void => {
       if (v !== "") body[k] = v;
     };
     set("name", flags.string("name"));
     set("alias", flags.string("alias"));
     set("description", flags.string("description"));
     set("model", flags.string("model"));
-    set("source", flags.string("source"));
+    // The server checks the values of --source, --repo forges and --agents.
+    if (flags.string("source") !== "") body.source = flags.string("source") as Body["source"];
     set("git_repo", flags.string("git-repo"));
     set("git_branch", flags.string("git-branch"));
     set("git_path", flags.string("git-path"));
     const repos = flags.list("repo").map((r) => {
       const ref = parseRepoSpec(r);
-      return { codeForge: ref.codeForge, owner: ref.owner, name: ref.name };
+      return { codeForge: ref.codeForge as Schemas["RepoRef"]["codeForge"], owner: ref.owner, name: ref.name };
     });
-    if (repos.length > 0) body["repositories"] = repos;
-    if (flags.changed("agents")) body["agents"] = flags.list("agents");
+    if (repos.length > 0) body.repositories = repos;
+    if (flags.changed("agents")) body.agents = flags.list("agents") as Body["agents"];
     const from = flags.string("from");
-    if (from !== "") body["files"] = loadDir(from);
-    let res: FactoryCreated;
-    try {
-      res = await c.request<FactoryCreated>("POST", "factories", { body });
-    } catch (err) {
-      throw explain(err);
-    }
+    if (from !== "") body.files = loadDir(from);
+    const res = await unwrap(c.api.POST("/factories", { body }));
     if (isJSON(globals)) return emit(env.stdout, res);
     env.stdout.write(createdLine(res.factory));
   },
@@ -158,25 +143,19 @@ Invalid definitions are rejected and the last valid version stays active.`,
       f = await resolveFactory(c, ref);
     } catch (err) {
       if (explicit || !(err instanceof CliError)) throw err;
-      let res: FactoryCreated;
-      try {
-        res = await c.request<FactoryCreated>("POST", "factories", { body: { files } });
-      } catch (e) {
-        throw explain(e);
-      }
+      const res = await unwrap(c.api.POST("/factories", { body: { files } }));
+      if (isJSON(globals)) return emit(env.stdout, res);
       env.stdout.write(createdLine(res.factory));
       return;
     }
-    let out: { version: { id: string } };
-    try {
-      out = await c.request("PUT", `factories/${enc(f.uid)}/definition`, {
+    const out = await unwrap(
+      c.api.PUT("/factories/{uid}/definition", {
+        params: { path: { uid: f.uid } },
         body: { files, message: flags.string("message") },
-      });
-    } catch (err) {
-      throw explain(err);
-    }
+      }),
+    );
     if (isJSON(globals)) return emit(env.stdout, out.version);
-    env.stdout.write(`Applied version ${out.version.id} to ${f.name} (@${f.alias})\n`);
+    env.stdout.write(`Applied version ${out.version?.id ?? ""} to ${f.name} (@${f.alias})\n`);
   },
 };
 
@@ -203,16 +182,11 @@ async function dispatch({ args, flags, globals, env }: RunContext): Promise<void
   let prompt = args.slice(1).join(" ");
   if (prompt === "-") prompt = await env.readStdin();
   const metadata = parseKV(flags.list("metadata"), "--metadata");
-  const body: Record<string, unknown> = { prompt };
-  if (flags.string("title") !== "") body["title"] = flags.string("title");
-  if (flags.string("agent") !== "") body["agent"] = flags.string("agent");
-  if (metadata) body["metadata"] = metadata;
-  let r: Run;
-  try {
-    r = await c.request<Run>("POST", `factories/${enc(f.uid)}/runs`, { body });
-  } catch (err) {
-    throw explain(err);
-  }
+  const body: Schemas["DispatchRequest"] = { prompt };
+  if (flags.string("title") !== "") body.title = flags.string("title");
+  if (flags.string("agent") !== "") body.agent = flags.string("agent");
+  if (metadata) body.metadata = metadata;
+  const r = await unwrap(c.api.POST("/factories/{uid}/runs", { params: { path: { uid: f.uid } }, body }));
   const follow = flags.bool("follow");
   if (isJSON(globals) && !follow) return emit(env.stdout, r);
   env.stdout.write(`Started run ${r.run_id} (work item ${r.work_item_id ?? ""})\n${r.run_url ?? ""}\n`);

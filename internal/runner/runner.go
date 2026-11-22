@@ -64,8 +64,8 @@ type Config struct {
 	HomeDir string
 	// SnapshotDeclarations is the path from OF_SNAPSHOT_DECLARATIONS; empty means none.
 	SnapshotDeclarations string
-	// EgressReportURL is the URL of the report of blocked hosts of the proxy
-	// sidecar (OF_NETGUARD_REPORT). Empty means no report.
+	// EgressReportURL is the URL of the report of blocked hosts of the egress
+	// proxy (OF_NETGUARD_REPORT). Empty means no report.
 	EgressReportURL string
 	// EgressLock is the in-sandbox lock mode (OF_EGRESS_LOCK). With a mode
 	// other than none, the runner must run as root: it locks the network and

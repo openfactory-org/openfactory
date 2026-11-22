@@ -1,29 +1,7 @@
+import { unwrap } from "@openfactory/api-client";
 import { ago, emit, table } from "../format.ts";
-import { enc, explain, isJSON, makeClient, resolveFactory } from "../client.ts";
+import { enc, isJSON, makeClient, resolveFactory, type Schemas } from "../client.ts";
 import { exactArgs, type Command } from "../framework.ts";
-
-interface Webhook {
-  id: string;
-  name: string;
-  auth_mode: string;
-  signature_scheme?: string;
-  enabled: boolean;
-}
-
-interface WebhookCreated {
-  webhook: Webhook;
-  ingress_url: string;
-  secret?: string;
-  awaiting_secret?: boolean;
-}
-
-interface Delivery {
-  id: string;
-  status: string;
-  reason?: string;
-  run_ids?: string[];
-  received_at?: string;
-}
 
 const listCommand: Command = {
   use: "list <factory>",
@@ -32,7 +10,7 @@ const listCommand: Command = {
   async run({ args, globals, env }) {
     const c = makeClient(globals, env);
     const f = await resolveFactory(c, args[0] ?? "");
-    const list = await c.list<Webhook>(`factories/${enc(f.uid)}/webhooks`).collect();
+    const list = await c.list<Schemas["Webhook"]>(`factories/${enc(f.uid)}/webhooks`).collect();
     if (isJSON(globals)) return emit(env.stdout, list);
     table(
       env.stdout,
@@ -60,20 +38,17 @@ const createCommand: Command = {
   async run({ args, flags, globals, env }) {
     const c = makeClient(globals, env);
     const f = await resolveFactory(c, args[0] ?? "");
-    const body: Record<string, string> = { name: flags.string("name") };
-    const opt = (k: string, v: string): void => {
+    type Body = Schemas["CreateWebhookRequest"];
+    const body: Body = { name: flags.string("name") };
+    const opt = (k: "signature_scheme" | "secret_name" | "delivery_id_header", v: string): void => {
       if (v !== "") body[k] = v;
     };
-    opt("auth_mode", flags.string("auth-mode"));
+    // The server checks the value of --auth-mode.
+    if (flags.string("auth-mode") !== "") body.auth_mode = flags.string("auth-mode") as Body["auth_mode"];
     opt("signature_scheme", flags.string("signature-scheme"));
     opt("secret_name", flags.string("secret-name"));
     opt("delivery_id_header", flags.string("delivery-id-header"));
-    let res: WebhookCreated;
-    try {
-      res = await c.request<WebhookCreated>("POST", `factories/${enc(f.uid)}/webhooks`, { body });
-    } catch (err) {
-      throw explain(err);
-    }
+    const res = await unwrap(c.api.POST("/factories/{uid}/webhooks", { params: { path: { uid: f.uid } }, body }));
     if (isJSON(globals)) return emit(env.stdout, res);
     let out = `Created webhook ${res.webhook.name} (${res.webhook.id})\nIngress URL: ${res.ingress_url}\n`;
     if (res.secret) out += `Secret (shown once): ${res.secret}\n`;
@@ -92,7 +67,7 @@ const deliveriesCommand: Command = {
     const c = makeClient(globals, env);
     const limit = flags.int("limit");
     const list = await c
-      .list<Delivery>(`webhooks/${enc(args[0] ?? "")}/deliveries`, limit > 0 ? { limit } : {})
+      .list<Schemas["Delivery"]>(`webhooks/${enc(args[0] ?? "")}/deliveries`, limit > 0 ? { limit } : {})
       .collect();
     if (isJSON(globals)) return emit(env.stdout, list);
     table(

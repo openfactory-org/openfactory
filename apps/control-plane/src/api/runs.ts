@@ -18,8 +18,8 @@ import {
 import type { MachineSpec as CoreMachineSpec, MCPServer } from "@openfactory/core";
 import type { CallMeta, CoreEvent } from "../contracts/do-messages";
 import type { Env } from "../contracts/env";
-import { registerCronHook, registerServerRoute } from "../builder";
 import { runView } from "../engine/view";
+import { authorizeInTeam } from "../auth/roles";
 import { callerPrincipal } from "../engine/principal";
 import {
   isTerminal,
@@ -39,8 +39,6 @@ import {
   type Handler,
   type RouteContext,
 } from "../http/handler";
-import { handleRunMcp, RUN_MCP_PREFIX } from "../orchestration/index";
-import { handleRunnerApi, RUNNER_PREFIX } from "../runner-api/index";
 import { isOpError, opError, unwrapOp } from "../lib/rpc";
 import { sseResponse, subscribe } from "../stream/index";
 import { checkAttachments } from "./attachments";
@@ -67,18 +65,6 @@ export const manualRunDispatcher: ManualRunDispatcher = async (env, input) => {
   const run = (await env.WORK.getByName(doName.work(input.teamId, partitionOf(out.runId))).getRun(out.runId)) as Run;
   return runView(run, { publicUrl: (env.OF_PUBLIC_URL ?? "").replace(/\/+$/, "") });
 };
-
-// ---------- server routes and cron owned by WS5 ----------
-
-registerServerRoute(RUNNER_PREFIX + "/", (req, env, ctx) => handleRunnerApi(req, env, ctx));
-registerServerRoute(RUN_MCP_PREFIX, (req, env) => handleRunMcp(req, env));
-registerCronHook(async (env) => {
-  await env.DISPATCH.getByName(doName.dispatch(teamOfEnv())).ensureAlarm();
-});
-
-function teamOfEnv(): string {
-  return "default";
-}
 
 // ---------- helpers ----------
 
@@ -372,6 +358,8 @@ export const dispatchRun: Handler = async (req, env, ctx) => {
   const source = dispatchSource(b, title);
   const resolved = await resolveAgent(env, ctx, ctx.params.uid ?? "", b.agent || b.agent_name || "foreman");
   const { factoryId } = resolved;
+  // WorkDO checks again; this check comes first so that a refused caller leaves no router reservation.
+  authorizeInTeam(ctx.principal, teamOf(ctx), factoryId, ctx.route.role);
   if (b.overrides?.environment_id) await checkEnvironment(env, ctx, b.overrides.environment_id);
   const agent = b.overrides
     ? (applyOverrides(resolved.agent as never, b.overrides, resolved.machines as never) as unknown as AgentConfig)

@@ -1,17 +1,22 @@
-// Wiring of the control-plane modules (integration step). src/index.ts imports
-// this module for its side effects:
+// The composition root of the control plane. bootstrapControlPlane() at the
+// end of this file registers, in one place, every built-in part that other
+// modules reach through a registry:
 //
-// - server routes: /webhooks/w/*, /integrations/github/webhook (WS10a);
-//   /integrations/{slack/events,slack/interactions,teams/messages,linear/webhook,jira/webhook}
-//   and the account linker pages /integrations/link*, /integrations/links/* (WS10b)
-// - responders and tracker write-backs of Slack, Teams, Linear and Jira (notify)
-// - the integration clients of the built-in MCP servers (WS11)
-// - the in-process sandbox providers daytona and boatdev (credentials: Worker secrets)
-// - the active-run check of schedules with concurrency "skip"
-// - the git credential minter of the worker git cache
+// - server routes: /runner/v1, /mcp/run/, /webhooks/w/*, /integrations/github/webhook,
+//   /integrations/{slack/events,slack/interactions,teams/messages,linear/webhook,jira/webhook},
+//   the account linker pages /integrations/link*, /integrations/links/*, and /plugins/
+// - the bearer authenticators of worker access tokens (ofw_) and Factory MCP tokens (ofm_)
+// - the IngressDO intake handler and the event context builders
+// - the notice deliverer of WorkDO and the responders of Slack, Teams, Linear and Jira
+// - the integration clients of the built-in MCP servers
+// - the sandbox providers local, daytona and boatdev (credentials: Worker secrets)
+// - the active-run check of schedules with concurrency "skip", manual automation runs
+// - the name resolver of the definition preflight and the git source check
 // - the git definition sync (push webhook, pull request check, periodic sync)
-// TeamDO first: its modules import each other through do/team/index.
-import "./do/team/index";
+// - the git credential minter of the worker git cache
+//
+// The modules themselves have no registration side effects. A registry that
+// is still empty when it is used fails with an error.
 import {
   DEFAULT_TEAM,
   FINISHED_RUN_STATES,
@@ -28,13 +33,19 @@ import {
 import { createBoatdevProvider } from "@openfactory/boatdev";
 import { createDaytonaProvider } from "@openfactory/daytona";
 import { manualRunDispatcher } from "./api/runs";
+import { workerTokenAuthenticator } from "./api/workers";
+import { registerBearerAuthenticator } from "./auth/authenticate";
 import { setManualRunDispatcher } from "./api/schedules";
 import { routeWebhookIngress } from "./api/webhooks";
 import { authenticate } from "./auth/authenticate";
-import { registerCronHook, registerServerRoute } from "./builder";
+import { registerCronHook, registerServerRoute, type CronHook, type ServerRouteHandler } from "./builder";
 import type { CallMeta, Principal } from "./contracts/do-messages";
 import type { Env } from "./contracts/env";
 import { registerProvider } from "./do/dispatch/providers";
+import { setIntakeHandler } from "./do/ingress/index";
+import { WORKER_TOKEN_PREFIX } from "./do/workerhub/token";
+import { localProvider } from "./do/workerhub/providers";
+import { setNoticeDeliverer } from "./do/work/index";
 import {
   activeFiles,
   applyDefinition,
@@ -46,13 +57,14 @@ import {
   setDefSyncRunner,
   setGitSourceChecker,
   type DefSyncRunner,
+  type GitSourceChecker,
 } from "./do/team/factories";
-import type { TeamKit } from "./do/team/index";
+import type { TeamKit } from "./do/team/kit";
 import { getSetting, setSetting } from "./do/team/settings";
 import { listIntegrations } from "./do/team/integrations";
-import { setNameResolver } from "./do/team/preflight";
-import { setScheduleActiveRunCheck } from "./do/team/schedules";
-import { normalizeRepo, setGitCredentialMinter } from "./do/team/workers";
+import { setNameResolver, type FilterNameResolver } from "./do/team/preflight";
+import { setScheduleActiveRunCheck, type ActiveRunCheck } from "./do/team/schedules";
+import { normalizeRepo, setGitCredentialMinter, type GitCredentialMinter } from "./do/team/workers";
 import {
   checkGitSource,
   checkPullRequest,
@@ -67,7 +79,7 @@ import { compile, diff, diffCounts, diffEmpty, diffSummary } from "@openfactory/
 import { resolverFor } from "./forges/env";
 import type { ForgeResolver } from "./forges/forge";
 import { reviewBuilders } from "./eventctx/index";
-import { setEventContextBuilders } from "./do/ingress/intake";
+import { platformIntakeHandler, setEventContextBuilders, type BuildersFor } from "./do/ingress/intake";
 import { b64url, sha256 } from "./lib/bytes";
 import { adfText, markdownToAdf } from "./integrations/jira/adf";
 import { newApiClient as jiraApiClient } from "./integrations/jira/jira";
@@ -80,9 +92,14 @@ import { SlackClient } from "./integrations/slack/client";
 import type { InboxItemRef, WorkSide } from "./integrations/types";
 import { integrationSecret } from "./integrations/util";
 import { integrationDeps, rpcSecrets, rpcStore } from "./integrations/worker";
-import { setMcpBackendResolver } from "./mcp/index";
+import { ACCESS_TOKEN_PREFIX } from "./mcp/auth/core";
+import { setMcpBackendResolver, verifyFactoryMcpToken } from "./mcp/index";
 import type { IntegrationBackend, IntegrationRecord } from "./mcp/registry/builtin";
-import { registerResponders } from "./notify/index";
+import { deliverNotice, registerResponders } from "./notify/index";
+import { handleRunMcp, RUN_MCP_PREFIX } from "./orchestration/index";
+import { PLUGIN_ROUTE_PREFIX, pluginWebhookRoute } from "./plugins/routes";
+import { handleRunnerApi, RUNNER_PREFIX } from "./runner-api/index";
+import { isOpError } from "./lib/rpc";
 
 const META: CallMeta = { requestId: "integrations" };
 
@@ -108,7 +125,7 @@ export async function publishEvents(env: Env, events: Event[]): Promise<void> {
   for (const ev of events) {
     const teamId = ev.team_id || DEFAULT_TEAM;
     const partition = await integrationPartition(ev);
-    await env.INGRESS.getByName(doName.ingress(teamId, partition)).enqueue(
+    await env.INGRESS.getByName(doName.ingress(teamId, partition)).enqueueEvent(
       partition,
       ev as never,
       ev.delivery_id || ev.id,
@@ -208,9 +225,10 @@ function isLinkerPath(path: string): boolean {
   );
 }
 
-registerServerRoute("/webhooks/w/", (request, env, ctx) => routeWebhookIngress(request, env, ctx));
-registerServerRoute("/integrations/github/webhook", (request, env, ctx) => routeWebhookIngress(request, env, ctx));
-registerServerRoute("/integrations/", async (request, env, ctx, url) => {
+const webhookIngressRoute: ServerRouteHandler = (request, env, ctx) => routeWebhookIngress(request, env, ctx);
+
+/** The inbound chat and tracker events, and the account linker pages. Other /integrations/ paths pass. */
+const integrationsRoute: ServerRouteHandler = async (request, env, ctx, url) => {
   const path = url.pathname;
   if (INBOUND.has(path)) {
     const out = await integrationsFor(env).handlers.handleRequest(request);
@@ -223,18 +241,16 @@ registerServerRoute("/integrations/", async (request, env, ctx, url) => {
   }
   if (isLinkerPath(path)) return integrationsFor(env).linker.handle(request);
   return null;
-});
+};
 
-registerResponders((env) => Object.values(integrationsFor(env).handlers.responders));
-
-// Event context builders of intake: chat threads (slack, teams) and forge review threads.
-setEventContextBuilders((env) => [
+/** Event context builders of intake: chat threads (slack, teams) and forge review threads. */
+const eventContextBuilders: BuildersFor = (env) => [
   ...reviewBuilders(resolverFor(env)),
   ...Object.entries(integrationsFor(env).handlers.contextBuilders).map(([provider, b]) => ({
     provider: () => provider,
     eventContext: (ev: Event) => b.eventContext(ev),
   })),
-]);
+];
 
 // ---------- built-in MCP integration servers (WS11) ----------
 
@@ -292,9 +308,6 @@ function integrationBackendFor(env: Env): IntegrationBackend {
   return b;
 }
 
-// Each MCP request resolves the integration clients of its own env.
-setMcpBackendResolver((env) => ({ integrations: integrationBackendFor(env) }));
-
 /**
  * Builds the integration clients of env ahead of the first MCP request. The
  * MCP surface resolves its backends per request, so this sets no shared state.
@@ -308,8 +321,9 @@ export function bindMcpBackends(env: Env): void {
 // daytona and boatdev run in-process. Their credentials are Worker secrets
 // (OF_DAYTONA_API_KEY, OF_BOATDEV_API_KEY), with OF_DAYTONA_TIER and
 // OF_DAYTONA_TARGET as vars. The install ID that labels the sandboxes is the
-// host of OF_PUBLIC_URL. local is registered by src/do/workerhub/providers.ts;
-// cloudflare-sandbox is the service binding (src/do/dispatch/providers.ts).
+// host of OF_PUBLIC_URL. local is the provider of the development process
+// workers (src/do/workerhub/providers.ts); cloudflare-sandbox is the service
+// binding (src/do/dispatch/providers.ts).
 
 function installId(env: Env): string {
   try {
@@ -319,7 +333,7 @@ function installId(env: Env): string {
   }
 }
 
-registerProvider("daytona", (env) => {
+function daytonaProvider(env: Env) {
   const apiKey = env.OF_DAYTONA_API_KEY ?? "";
   if (apiKey === "")
     throw new OfError(
@@ -333,9 +347,9 @@ registerProvider("daytona", (env) => {
     ...(env.OF_DAYTONA_TARGET ? { target: env.OF_DAYTONA_TARGET } : {}),
     allowUnenforcedNetworkPolicy: env.OF_ALLOW_UNENFORCED_NETWORK_POLICY,
   });
-});
+}
 
-registerProvider("boatdev", (env) => {
+function boatdevProvider(env: Env) {
   const apiKey = env.OF_BOATDEV_API_KEY ?? "";
   if (apiKey === "")
     throw new OfError(
@@ -343,13 +357,13 @@ registerProvider("boatdev", (env) => {
       "sandbox provider boatdev is not configured: set the OF_BOATDEV_API_KEY secret",
     );
   return createBoatdevProvider({ apiKey, installId: installId(env) });
-});
+}
 
 // ---------- schedules: concurrency "skip" ----------
 
 const FINISHED = new Set<string>(FINISHED_RUN_STATES);
 
-setScheduleActiveRunCheck(async (kit, factoryId, automationId) => {
+const scheduleActiveRunCheck: ActiveRunCheck = async (kit, factoryId, automationId) => {
   const idx = kit.env.INDEX.getByName(doName.index(kit.teamId()));
   let cursor = "";
   for (let page = 0; page < 50; page++) {
@@ -369,27 +383,25 @@ setScheduleActiveRunCheck(async (kit, factoryId, automationId) => {
     if (!cursor) break;
   }
   return "";
-});
-
-// ---------- manual automation runs ----------
-
-setManualRunDispatcher(manualRunDispatcher);
+};
 
 // ---------- definition preflight: names in automation filters ----------
 
 /** SetNameResolver (server.go): the name resolvers of the integrations, by trigger provider. */
-setNameResolver((kit) => ({
-  resolveNames: (teamId, provider, kind, names, scope) => {
-    const r = integrationsFor(kit.env).handlers.nameResolvers[provider];
-    if (!r) return Promise.reject(new Error(`this server cannot list ${provider} objects`));
-    return r.resolveNames(teamId, provider, kind, names, scope);
-  },
-}));
+function nameResolverOf(kit: TeamKit): FilterNameResolver {
+  return {
+    resolveNames: (teamId, provider, kind, names, scope) => {
+      const r = integrationsFor(kit.env).handlers.nameResolvers[provider];
+      if (!r) return Promise.reject(new Error(`this server cannot list ${provider} objects`));
+      return r.resolveNames(teamId, provider, kind, names, scope);
+    },
+  };
+}
 
 // ---------- git definition source: the branch check of the factory routes ----------
 
 /** CheckGitSource (server.go): defsync.CheckBranch with the TeamDO preflight. */
-setGitSourceChecker((kit, f, outcome) =>
+const gitSourceChecker: GitSourceChecker = (kit, f, outcome) =>
   checkGitSource(
     {
       resolver: resolverFor(kit.env),
@@ -401,8 +413,7 @@ setGitSourceChecker((kit, f, outcome) =>
     f,
     outcome,
     listIntegrations(kit),
-  ),
-);
+  );
 
 // ---------- git definition sync (internal/server/defsync.go) ----------
 
@@ -472,22 +483,18 @@ export function defSyncRunner(resolverOf: (kit: TeamKit) => ForgeResolver): DefS
   };
 }
 
-setDefSyncRunner(defSyncRunner((kit) => resolverFor(kit.env)));
-
 const DEFSYNC_EVERY_MINUTES = 5;
 
 /** The periodic sync (every 5 minutes); it also covers forges that deliver no webhooks. */
-registerCronHook(async (env, ctx) => {
+const defSyncCron: CronHook = async (env, ctx) => {
   if (new Date().getUTCMinutes() % DEFSYNC_EVERY_MINUTES !== 0) return;
   const team = env.TEAM.getByName(doName.team(DEFAULT_TEAM));
   const run = async () => {
-    const out = (await team.api({ requestId: "defsync-cron" }, "defsyncAll", {}, null)) as {
-      $error?: { detail: string };
-    } | null;
-    if (out?.$error) console.warn("defsync: periodic sync", out.$error.detail);
+    const out: unknown = await team.api({ requestId: "defsync-cron" }, "defsyncAll", {}, null);
+    if (isOpError(out)) console.warn("defsync: periodic sync", out.$error.detail);
   };
   ctx.waitUntil(run().catch((e: unknown) => console.warn("defsync: periodic sync", e)));
-});
+};
 
 // ---------- worker git cache: read-only credential of one repository ----------
 
@@ -511,7 +518,7 @@ function withoutCredentials(u: string): string {
  * credential of the forge clone URL. The integration of that factory decides
  * the credential, the same as for a run.
  */
-setGitCredentialMinter(async (kit, input) => {
+const gitCredentialMinter: GitCredentialMinter = async (kit, input) => {
   const factoryIds = input.factories.length > 0 ? input.factories : listFactories(kit).map((f) => f.id);
   const resolver = resolverFor(kit.env);
   for (const factoryId of factoryIds) {
@@ -541,4 +548,57 @@ setGitCredentialMinter(async (kit, input) => {
     }
   }
   throw new OfError("not_authorized", `${input.repo} is not a repository of the worker's factories`);
-});
+};
+
+// ---------- the composition root ----------
+
+let bootstrapped = false;
+
+/**
+ * Registers every built-in route, hook, provider and port of the control
+ * plane. src/index.ts calls it when the Worker module loads. Every isolate
+ * (the Worker and each Durable Object) loads that module before it serves,
+ * so all registries are filled before the first request, alarm or RPC. A
+ * second call does nothing. A custom build adds its own routes and hooks with
+ * the extension points of src/builder.ts.
+ */
+export function bootstrapControlPlane(): void {
+  if (bootstrapped) return;
+  bootstrapped = true;
+
+  // Server routes outside /api/v1.
+  registerServerRoute(RUNNER_PREFIX + "/", (req, env, ctx) => handleRunnerApi(req, env, ctx));
+  registerServerRoute(RUN_MCP_PREFIX, (req, env) => handleRunMcp(req, env));
+  registerServerRoute("/webhooks/w/", webhookIngressRoute);
+  registerServerRoute("/integrations/github/webhook", webhookIngressRoute);
+  registerServerRoute("/integrations/", integrationsRoute);
+  registerServerRoute(PLUGIN_ROUTE_PREFIX, pluginWebhookRoute);
+
+  // Bearer tokens besides API keys: worker access tokens and Factory MCP tokens.
+  registerBearerAuthenticator(WORKER_TOKEN_PREFIX, workerTokenAuthenticator);
+  registerBearerAuthenticator(ACCESS_TOKEN_PREFIX, verifyFactoryMcpToken);
+
+  // Events in, notices out.
+  setIntakeHandler(platformIntakeHandler);
+  setEventContextBuilders(eventContextBuilders);
+  setNoticeDeliverer((env, envelope) => deliverNotice(env, envelope));
+  registerResponders((env) => Object.values(integrationsFor(env).handlers.responders));
+
+  // Each MCP request resolves the integration clients of its own env.
+  setMcpBackendResolver((env) => ({ integrations: integrationBackendFor(env) }));
+
+  // In-process sandbox providers.
+  registerProvider("local", localProvider);
+  registerProvider("daytona", daytonaProvider);
+  registerProvider("boatdev", boatdevProvider);
+
+  // TeamDO ports.
+  setScheduleActiveRunCheck(scheduleActiveRunCheck);
+  setManualRunDispatcher(manualRunDispatcher);
+  setNameResolver(nameResolverOf);
+  setGitSourceChecker(gitSourceChecker);
+  setDefSyncRunner(defSyncRunner((kit) => resolverFor(kit.env)));
+  setGitCredentialMinter(gitCredentialMinter);
+
+  registerCronHook(defSyncCron);
+}

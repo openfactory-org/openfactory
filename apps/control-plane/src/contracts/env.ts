@@ -69,6 +69,12 @@ export interface Vars {
   OF_OIDC_EDITOR_GROUPS?: string;
   OF_OIDC_DEFAULT_ROLE?: string;
   OF_OIDC_DISPLAY_NAME?: string;
+  /** "false" (or "0") accepts an ID token without email_verified. Default: required. */
+  OF_OIDC_REQUIRE_VERIFIED_EMAIL?: string;
+  /** Default idle timeout of a finished run (a duration). Empty: 10m. */
+  OF_IDLE_TIMEOUT_DEFAULT?: string;
+  /** Upper limit of the idle timeout of a run (a duration). Empty: 1h. */
+  OF_IDLE_TIMEOUT_MAX?: string;
   /** Daytona organization tier (1-4; tiers 1 and 2 are refused). Default 3. */
   OF_DAYTONA_TIER?: string;
   /** Daytona shared region: "eu" or "us". Empty: the account default. */
@@ -113,7 +119,8 @@ export interface Bindings {
   // Dashboard (Static Assets)
   ASSETS: Fetcher;
   // Service bindings (typed RPC)
-  PROVIDER_CLOUDFLARE_SANDBOX: ServiceBinding<SandboxProviderRpc>;
+  /** The provider Worker also serves ack(taskId), sent after session start (OutboxPayloads "provider.ack"). */
+  PROVIDER_CLOUDFLARE_SANDBOX: ServiceBinding<SandboxProviderRpc & { ack(taskId: string): Promise<void> }>;
   PLUGIN_GITLAB: ServiceBinding<ForgePlugin & IngressPlugin>;
   PLUGIN_AZUREDEVOPS: ServiceBinding<ForgePlugin & IngressPlugin>;
 }
@@ -153,6 +160,9 @@ export const VAR_NAMES = [
   "OF_OIDC_EDITOR_GROUPS",
   "OF_OIDC_DEFAULT_ROLE",
   "OF_OIDC_DISPLAY_NAME",
+  "OF_OIDC_REQUIRE_VERIFIED_EMAIL",
+  "OF_IDLE_TIMEOUT_DEFAULT",
+  "OF_IDLE_TIMEOUT_MAX",
   "OF_DAYTONA_TIER",
   "OF_DAYTONA_TARGET",
 ] as const satisfies readonly (keyof Vars)[];

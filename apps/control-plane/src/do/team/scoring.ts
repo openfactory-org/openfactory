@@ -1,8 +1,6 @@
 // TeamDO module: scoring (WS13). Scores and markers of the scoring service,
 // scorer and benchmark suite lists, the benchmark plan, and the review of
 // proposed definition changes. Migration range 0400-0499.
-//
-// Needs one line in src/do/team/index.ts: add `scoring` to MODULES.
 import {
   OfError,
   newId,
@@ -40,7 +38,7 @@ import {
   definitionApply,
 } from "./factories";
 import type { DefinitionVersion } from "./factories";
-import type { OpCall, TeamKit, TeamOp } from "./index";
+import type { OpCall, TeamKit, TeamOp } from "./kit";
 import { scoringSweep } from "../../scoring/sweep";
 
 void _unused;

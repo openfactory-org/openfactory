@@ -1,5 +1,5 @@
-// REST handler: GET /networking/policies (WS4). The built-in policy catalog.
-import { networkPolicy } from "@openfactory/definition";
+// REST handler: GET /networking/policies. The built-in policy catalog.
+import { catalog } from "@openfactory/core";
 import { json, type Handler } from "../http/handler";
 
-export const listNetworkPolicies: Handler = async () => json(networkPolicy.catalog());
+export const listNetworkPolicies: Handler = async () => json(catalog());

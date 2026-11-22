@@ -1,5 +1,6 @@
 // The command tree of the openfactory CLI.
 
+import { explain } from "./client.ts";
 import { App, CliError, type Command, type Env, type FlagSpec, type Globals, noArgs } from "./framework.ts";
 import { bootstrapCommand } from "./commands/bootstrap.ts";
 import { benchmarkCommand } from "./commands/benchmark.ts";
@@ -88,11 +89,15 @@ OF_SERVER and OF_API_KEY environment variables.`,
 };
 
 export function createApp(): App {
-  return new App(root, [
-    { id: "run", title: "Running Open Factory:" },
-    { id: "local", title: "Local definition tools:" },
-    { id: "client", title: "Client commands (talk to a server):" },
-  ]);
+  return new App(
+    root,
+    [
+      { id: "run", title: "Running Open Factory:" },
+      { id: "local", title: "Local definition tools:" },
+      { id: "client", title: "Client commands (talk to a server):" },
+    ],
+    { mapError: explain },
+  );
 }
 
 /** The connection settings: the environment first, flags override them in the framework. */

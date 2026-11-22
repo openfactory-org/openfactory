@@ -1,7 +1,7 @@
 // Output helpers: aligned tables (as Go text/tabwriter with padding 2),
 // relative times, truncation and indented JSON.
 
-import type { Writer } from "./framework.ts";
+import { CliError, type Writer } from "./framework.ts";
 
 /** Prints v as JSON indented with two spaces, with a newline. */
 export function emit(w: Writer, v: unknown): void {
@@ -69,14 +69,19 @@ export function trunc(s: string | undefined, n: number): string {
   return chars.slice(0, n - 1).join("") + "…";
 }
 
-/** Parses key=value flags. */
-export function parseKV(list: string[], flag: string): Record<string, string> | undefined {
+/**
+ * Parses key=value flags. The key is trimmed and must not be empty; the value
+ * is everything after the first "=". want names the form in the error, for
+ * example "NAME=VALUE". Returns undefined for no flags.
+ */
+export function parseKV(list: string[], flag: string, want = "key=value"): Record<string, string> | undefined {
   if (list.length === 0) return undefined;
   const out: Record<string, string> = {};
   for (const kv of list) {
     const i = kv.indexOf("=");
-    if (i <= 0) throw new Error(`invalid ${flag} ${JSON.stringify(kv)} (want key=value)`);
-    out[kv.slice(0, i)] = kv.slice(i + 1);
+    const key = i < 0 ? "" : kv.slice(0, i).trim();
+    if (key === "") throw new CliError(`invalid ${flag} ${JSON.stringify(kv)} (want ${want})`);
+    out[key] = kv.slice(i + 1);
   }
   return out;
 }

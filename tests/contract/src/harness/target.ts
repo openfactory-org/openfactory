@@ -3,14 +3,12 @@
 // plain workspace test run (`npm test`) stays green without a server.
 import { describe } from "vitest";
 
-export type TargetName = "go" | "worker";
-
 /**
  * Feature tags. A suite names the features it needs; a target skips the
  * suites whose tags it lists in OF_CONTRACT_SKIP_TAGS.
  */
 export const TAGS = {
-  /** Core REST API (both targets). */
+  /** Core REST API. */
   rest: "rest",
   /** Fake runner sessions over /runner/v1. Needs a session source. */
   runner: "runner",
@@ -22,9 +20,9 @@ export const TAGS = {
   workerProtocol: "worker-protocol",
   /** A run dispatched to a connected worker (task.assign). */
   workerDispatch: "worker-dispatch",
-  /** Enrollment tokens, Ed25519 worker auth, drain, resume, revoke, git credential. New routes. */
+  /** Enrollment tokens, Ed25519 worker auth, drain, resume, revoke, git credential. */
   workerEnrollment: "worker-enrollment",
-  /** POST /secrets/rewrap. New route. */
+  /** POST /secrets/rewrap. */
   secretsRewrap: "secrets-rewrap",
   /** C2 scenarios with the fake runner (foreman, child, lifecycle, concurrency). */
   scenario: "scenario",
@@ -37,10 +35,7 @@ export type Tag = (typeof TAGS)[keyof typeof TAGS];
 const env = process.env;
 
 export const target = {
-  name: (env.OF_CONTRACT_TARGET ?? "") as TargetName | "",
   baseUrl: (env.OF_CONTRACT_BASE_URL ?? "").replace(/\/+$/, ""),
-  /** Go target: where tools/contract/runner-shim.mjs writes the task variables. */
-  rendezvousDir: env.OF_CONTRACT_RENDEZVOUS_DIR ?? "",
   /** The runner version that the fake runner sends. */
   runnerVersion: env.OF_CONTRACT_RUNNER_VERSION ?? "1.0.0-contract",
   /** A version that session start must refuse. */

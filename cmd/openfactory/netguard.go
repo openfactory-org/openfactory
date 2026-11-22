@@ -6,8 +6,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -43,22 +41,23 @@ name that resolves to it. --allow-private-host names the exact hosts that may
 resolve to such an address, for example a control plane on a private network.
 
 --report-listen serves the blocked hosts at GET /blocked. The report has no
-secret, so it must stay on a loopback address.`,
+secret, but every client that reaches the address can read it: use a loopback
+address, or the tap address of the VM on a microVM worker host.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			policy := rtcore.EffectiveNetworkPolicy{Restricted: !unrestricted, AllowedHosts: allow, DeniedHosts: deny}
 			p := netguard.New(policy, alwaysAllow)
 			p.AllowPrivateHosts(privateHosts)
 			p.Logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
-			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGTERM, syscall.SIGINT)
-			defer stop()
+			// main cancels the context on SIGTERM or SIGINT.
+			ctx := cmd.Context()
 			addr, err := p.Start(listen)
 			if err != nil {
 				return fmt.Errorf("netguard: listen on %s: %w", listen, err)
 			}
 			if reportListen != "" {
-				if !loopbackAddr(reportListen) {
-					p.Logger.Warn("the report listens on an address that is not loopback: every client can read it",
+				if !specificAddr(reportListen) {
+					p.Logger.Warn("the report listens on a wildcard address: every client can read it",
 						"addr", reportListen)
 				}
 				// The runner of the task reads the blocked hosts here.
@@ -76,7 +75,7 @@ secret, so it must stay on a loopback address.`,
 		},
 	}
 	cmd.Flags().StringVar(&listen, "listen", "127.0.0.1:3128", "address to listen on")
-	cmd.Flags().StringVar(&reportListen, "report-listen", "", "address for the report of blocked hosts (GET /blocked), for example 127.0.0.1:3129; use a loopback address")
+	cmd.Flags().StringVar(&reportListen, "report-listen", "", "address for the report of blocked hosts (GET /blocked), for example 127.0.0.1:3129; use a loopback or tap address")
 	cmd.Flags().StringSliceVar(&allow, "allow", nil, "allowed host (repeat the flag or separate values with commas)")
 	cmd.Flags().StringSliceVar(&deny, "deny", nil, "denied host (repeat the flag or separate values with commas)")
 	cmd.Flags().StringSliceVar(&alwaysAllow, "always-allow", nil, "host that is always reachable; a leading \".\" matches subdomains")
@@ -85,12 +84,14 @@ secret, so it must stay on a loopback address.`,
 	return cmd
 }
 
-// loopbackAddr reports whether a listen address is a loopback IP address.
-func loopbackAddr(addr string) bool {
+// specificAddr reports whether a listen address names one IP address, for
+// example a loopback address or the tap address of a microVM. A host name, an
+// empty host or a wildcard address (0.0.0.0, ::) gives false.
+func specificAddr(addr string) bool {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		return false
 	}
 	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+	return ip != nil && !ip.IsUnspecified()
 }

@@ -42,6 +42,8 @@ After you change the file, redeploy with `npx wrangler deploy -c apps/control-pl
 | `OF_CORRECTNESS_MODEL` | empty | Model of the built-in correctness judge. Empty uses the built-in default. See [Measure and improve](../measure-and-improve.md). |
 | `OF_ANALYSIS_MODEL` | empty | Model of the self-improvement failure analysis. Empty uses the built-in default. |
 | `OF_IMPROVEMENT_AGENT` | empty | Agent that runs self-improvement. Empty uses the built-in default. |
+| `OF_IDLE_TIMEOUT_DEFAULT` | `10m` | Time that a finished run keeps its sandbox and session for follow-ups, when the agent sets no `idleTimeoutMinutes`. |
+| `OF_IDLE_TIMEOUT_MAX` | `1h` | Upper limit of the idle timeout of a run. A larger `idleTimeoutMinutes` gets this value. |
 | `OF_CLOUD_ID_ISSUER_URL` | empty (`OF_PUBLIC_URL`) | Issuer URL (`iss` claim) of the [cloud identity](../definition-reference.md#cloudproviders) tokens of runs. Cloud providers read its `/.well-known/` documents. Do not confuse it with `OF_OIDC_ISSUER_URL`, the identity provider for dashboard sign-in. |
 | `OF_DAYTONA_TIER` | `3` | Tier of the Daytona organization, `1` to `4`. The control plane refuses tiers 1 and 2. See [Sandbox providers](../sandbox-providers.md). |
 | `OF_DAYTONA_TARGET` | empty (account default) | Daytona shared region: `eu` or `us`. |

@@ -90,7 +90,7 @@ export function sessionStart(
       runner_version: s.runner_version ?? "",
     });
     fx.clearTimer(timerName.start(s.task_id));
-    // The provider stops its own start watchdog (cloudflare-sandbox ack).
+    // The provider forgets the bootstrap token of the task (providers with ack only).
     fx.enqueue({
       dest: `provider:${s.backend ?? ""}`,
       kind: "provider.ack",

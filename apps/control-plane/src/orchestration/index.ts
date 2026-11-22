@@ -14,7 +14,8 @@ import { redact } from "../secrets/expand";
 import { applyOverrides } from "../scoring/overrides";
 import { META_SELF_IMPROVEMENT, type Overrides } from "../scoring/types";
 import { proposalBody, proposalTitle } from "../scoring/proposals";
-import { systemPrincipal, unwrapOp } from "../scoring/clients";
+import { unwrapOp } from "../lib/rpc";
+import { systemPrincipal } from "../scoring/clients";
 import { issueRef, type LinkIssueInput } from "./linkissue";
 import { prReference, prRef, type LinkPullRequestInput } from "./linkpr";
 

@@ -5,18 +5,19 @@
 // only stores and decides. Migrations use the range 200-299.
 import { BUILTIN_MCP_PREFIX, MCP_OAUTH_ERROR, OfError, newId, type MCPServer } from "@openfactory/core";
 import type { CompiledDefinition } from "@openfactory/definition";
-import { agentFile, automationFile, registerPreflight, scorerFile, type DefinitionCheck } from "./factories";
+import { agentFile, automationFile, scorerFile, type DefinitionCheck } from "./factories";
 import { inUseError, teamResourceUses, type ReferenceDefinition } from "./settings";
+import { listIntegrations } from "./integrations";
 import { actorId, roleRank } from "../../auth/roles";
 import * as authStore from "../../mcp/auth/store";
 import * as reg from "../../mcp/registry/store";
 import type { Migration } from "../../lib/sql/migrate";
 import { listResponse } from "../../lib/page";
 import { all, first } from "../../lib/sql/query";
-import { noContent, type OpCall, type TeamKit, type TeamOp } from "./index";
+import { noContent, type OpCall, type Preflight, type TeamKit, type TeamOp } from "./kit";
 import { MCP_STATE_TYPE, MCP_TOKEN_TYPE } from "../../secrets/envelope";
 import { b64, fromB64, timingSafeEqual } from "../../lib/bytes";
-import { registerRewrapSource, type RewrapSource } from "./secrets";
+import type { RewrapSource } from "./secrets";
 
 export const migrations: readonly Migration[] = [
   {
@@ -52,16 +53,9 @@ const s = (o: JsonObject, k: string): string => (typeof o[k] === "string" ? (o[k
 /** Clock of internal ops: the Worker passes `now` (tests move it); else Date.now(). */
 const nowOf = (o: JsonObject): number => (typeof o.now === "number" ? o.now : Date.now());
 
-/**
- * Providers of the team's integration records, for the `configured` flag of
- * the built-in servers. Reads the integrations module's table when it exists.
- */
+/** Providers of the team's integration records, for the `configured` flag of the built-in servers. */
 function integrationProviders(kit: TeamKit): string[] {
-  try {
-    return all<{ provider: string }>(kit.sql, "SELECT provider FROM integrations").map((r) => String(r.provider));
-  } catch {
-    return [];
-  }
+  return listIntegrations(kit).map((i) => i.provider);
 }
 
 function signedInUser(call: OpCall, what: string): string {
@@ -343,11 +337,12 @@ const internalOps: Record<string, TeamOp> = {
 
 export const ops: Record<string, TeamOp> = { ...restOps, ...internalOps };
 
-export function setup(_kit: TeamKit): void {
-  registerPreflight("mcp servers", preflightMCPServers);
-  registerRewrapSource(mcpEnvelopes("mcp_oauth_tokens", "server_id", (id) => `mcp-oauth:${id}`, MCP_TOKEN_TYPE));
-  registerRewrapSource(mcpEnvelopes("mcp_oauth_states", "state", (id) => `mcp-oauth-state:${id}`, MCP_STATE_TYPE));
-}
+export const preflights: readonly Preflight[] = [{ name: "mcp servers", fn: preflightMCPServers }];
+
+export const rewrapSources: readonly RewrapSource[] = [
+  mcpEnvelopes("mcp_oauth_tokens", "server_id", (id) => `mcp-oauth:${id}`, MCP_TOKEN_TYPE),
+  mcpEnvelopes("mcp_oauth_states", "state", (id) => `mcp-oauth-state:${id}`, MCP_STATE_TYPE),
+];
 
 /**
  * The MCP OAuth token and state envelopes (base64 text, src/secrets/envelope.ts):

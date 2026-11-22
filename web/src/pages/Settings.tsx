@@ -13,7 +13,7 @@ type UpdateFactory = Schemas["UpdateFactoryRequest"];
 
 /**
  * Checks a git repository of a definition source with the rule of the server
- * (internal/server/defsync.go ParseGitRepo): it must name owner/repository,
+ * (parseGitRepo of the control plane): it must name owner/repository,
  * with or without a host. It returns an error text, or null when it is valid.
  */
 export function gitRepoError(raw: string): string | null {

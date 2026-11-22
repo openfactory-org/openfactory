@@ -19,7 +19,9 @@ import { isServerPath, LoginPage, safeReturnTo } from "./pages/LoginPage";
 import { BenchmarkPage, BenchmarksPage, ScorersPage } from "./pages/Measure";
 import { RunPage, RunsPage } from "./pages/Runs";
 import { FactoryIntegrationsPage, SettingsPage } from "./pages/Settings";
-import { EnvironmentPage, EnvironmentsPage, IntegrationsPage, SecretsPage } from "./pages/Team";
+import { EnvironmentPage, EnvironmentsPage } from "./pages/Environments";
+import { IntegrationsPage } from "./pages/Integrations";
+import { SecretsPage } from "./pages/Secrets";
 import { WorkersPage } from "./pages/Workers";
 import { WebhookPage, WebhooksPage } from "./pages/Webhooks";
 import { WorkItemPage, WorkItemRedirect, WorkItemsPage } from "./pages/Work";
@@ -49,7 +51,7 @@ function FactoryRuns() {
   return <RunsPage factoryID={fid} />;
 }
 
-/** Route table. URLs match internal/links so links in notifications resolve (checked by internal/server/links_test.go). */
+/** Route table. URLs match the links of @openfactory/core, so links in notifications resolve. */
 export function AppRoutes() {
   const { me, loading, error } = useAuth();
   if (loading) return <Loading label="Loading Open Factory…" />;

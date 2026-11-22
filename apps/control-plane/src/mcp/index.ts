@@ -9,7 +9,7 @@
 // /mcp/run/{runId} (the per-run factory tools) belongs to WS5 (src/orchestration).
 import type { Principal } from "../contracts/do-messages";
 import type { Env } from "../contracts/env";
-import { apiKeyPrincipal, registerBearerAuthenticator } from "../auth/authenticate";
+import { apiKeyPrincipal } from "../auth/authenticate";
 import { bearerToken, isApiKey } from "../auth/apikeys";
 import { ACCESS_TOKEN_PREFIX, FACTORY_MCP_ALIAS_PATH, FACTORY_MCP_PATH } from "./auth/core";
 import { handleOAuthRequest, resourceMetadataURL, verifyFactoryMcpToken } from "./auth/handlers";
@@ -25,9 +25,6 @@ import { FACTORY_MCP_INSTRUCTIONS, FACTORY_TOOLS, type FactoryCtx } from "./serv
 
 export { verifyFactoryMcpToken } from "./auth/handlers";
 export { setMcpRuntime } from "./runtime";
-
-// ofm_ bearers on /api/v1 authenticate through WS4's authenticate().
-registerBearerAuthenticator(ACCESS_TOKEN_PREFIX, verifyFactoryMcpToken);
 
 export interface McpBackends {
   run: McpRunBackend;

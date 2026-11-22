@@ -45,8 +45,8 @@ describe("IngressDO delivery loop", () => {
       return { done: true };
     });
     const g = ingress("i" + newToken("w"), "webhook:w1") as unknown as IngressDO;
-    // enqueue() starts an alarm pass with waitUntil; the platform alarm and pump() overlap it.
-    await g.enqueue("webhook:w1", ev("e1"), "e1");
+    // enqueueEvent() starts an alarm pass with waitUntil; the platform alarm and pump() overlap it.
+    await g.enqueueEvent("webhook:w1", ev("e1"), "e1");
     await Promise.all([g.pump(), g.pump()]);
     await eventually(async () => {
       const list = (await g.deliveries(null, "listEvents", {})) as { events: { state: string }[] };

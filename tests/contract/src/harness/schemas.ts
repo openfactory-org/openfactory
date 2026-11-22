@@ -1,7 +1,7 @@
 // JSON Schema validation for the contract suite: REST responses against
 // api/openapi.json, runner frames against schemas/runner/v1, worker frames
 // against schemas/worker/v2.
-import { appendFileSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { Validator, type OutputUnit, type Schema } from "@cfworker/json-schema";
 import { repoPath } from "./paths.ts";
 
@@ -50,48 +50,6 @@ function cached(key: string, make: () => Validator): Validator {
     validators.set(key, v);
   }
   return v;
-}
-
-// ---------------------------------------------------------------- Go leniency
-
-/**
- * Known differences of the Go reference from api/openapi.json, accepted only
- * with OF_CONTRACT_LENIENT_NULLS=1 (go target). Each case is written to
- * OF_CONTRACT_DEVIATIONS_FILE so that the report lists it.
- *   - nil slices and maps are written as null where the spec says array/object
- *     (a null property counts as absent);
- *   - RunMessage.data is a string (the message source) on user messages.
- */
-const lenient = process.env.OF_CONTRACT_LENIENT_NULLS === "1";
-const seenDeviations = new Set<string>();
-
-function recordDeviation(d: string): void {
-  if (seenDeviations.has(d)) return;
-  seenDeviations.add(d);
-  const file = process.env.OF_CONTRACT_DEVIATIONS_FILE;
-  if (file) appendFileSync(file, d + "\n");
-}
-
-function normalize(v: unknown, op: string, at: string): unknown {
-  if (Array.isArray(v)) return v.map((x) => normalize(x, op, `${at}/*`));
-  if (v === null || typeof v !== "object") return v;
-  const out: Record<string, unknown> = {};
-  for (const [k, x] of Object.entries(v)) {
-    if (x === null) {
-      recordDeviation(`${op}: ${at}/${k} is null`);
-      continue;
-    }
-    if (k === "data" && typeof x === "string" && /\/messages\/\*$/.test(at)) {
-      recordDeviation(`${op}: ${at}/data is a string`);
-      continue;
-    }
-    out[k] = normalize(x, op, `${at}/${k}`);
-  }
-  return out;
-}
-
-function lenientValue(value: unknown, op: string): unknown {
-  return lenient ? normalize(value, op, "") : value;
 }
 
 function check(v: Validator, what: string, value: unknown): void {
@@ -161,7 +119,7 @@ export function assertOpenApiResponse(method: string, path: string, status: numb
   const key = `openapi:${method}:${found?.template}:${status}`;
   const v = cached(key, () => new Validator({ ...schema, components: openapi.components }, "2020-12", false));
   const what = `${method.toUpperCase()} ${found?.template ?? path}`;
-  check(v, `${what} ${status} response`, lenientValue(body, what));
+  check(v, `${what} ${status} response`, body);
 }
 
 /** Validates a value against a component schema of api/openapi.json. */
@@ -170,7 +128,7 @@ export function assertComponent(name: string, value: unknown): void {
     `component:${name}`,
     () => new Validator({ $ref: `#/components/schemas/${name}`, components: openapi.components }, "2020-12", false),
   );
-  check(v, `components/schemas/${name}`, lenientValue(value, `components/schemas/${name}`));
+  check(v, `components/schemas/${name}`, value);
 }
 
 // ---------------------------------------------------------------- runner/v1

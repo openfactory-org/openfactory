@@ -20,7 +20,7 @@ const (
 	skillsDir         = ".openfactory/skills"
 )
 
-// CoreHarness runs a harness of internal/harness (claude, codex or open) inside the runner.
+// CoreHarness runs a harness of internal/harness (claude or codex) inside the runner.
 // The sandbox of the harness is the local machine, in the workspace.
 // One value serves one session: it keeps the harness session ID and the
 // usage totals between turns. It runs one turn at a time.
@@ -419,23 +419,8 @@ func cutBytes(s string, n int) string {
 // StateFiles returns the session files of the harness, relative to home. It
 // returns no credential files.
 func (c *CoreHarness) StateFiles(home, workDir string) ([]string, error) {
-	var roots []string
-	switch c.H.Type() {
-	case rtcore.HarnessClaude:
-		dirs := []string{workDir}
-		if real, err := filepath.EvalSymlinks(workDir); err == nil && real != workDir {
-			dirs = append(dirs, real)
-		}
-		for _, d := range dirs {
-			roots = append(roots, ".claude/projects/"+encodeClaudeDir(d))
-		}
-	case rtcore.HarnessCodex:
-		roots = []string{".codex/sessions"}
-	default:
-		return nil, nil
-	}
 	var out []string
-	for _, root := range roots {
+	for _, root := range c.stateRoots(workDir) {
 		err := filepath.WalkDir(filepath.Join(home, filepath.FromSlash(root)), func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
 				if errors.Is(err, fs.ErrNotExist) {
@@ -458,6 +443,28 @@ func (c *CoreHarness) StateFiles(home, workDir string) ([]string, error) {
 		}
 	}
 	return out, nil
+}
+
+// stateRoots returns the session directories of the harness, relative to the
+// home directory and with forward slashes. The claude harness keys them by
+// the work directory, also by its target when it is a symbolic link. Other
+// harnesses have none.
+func (c *CoreHarness) stateRoots(workDir string) []string {
+	switch c.H.Type() {
+	case rtcore.HarnessClaude:
+		dirs := []string{workDir}
+		if real, err := filepath.EvalSymlinks(workDir); err == nil && real != workDir {
+			dirs = append(dirs, real)
+		}
+		roots := make([]string, 0, len(dirs))
+		for _, d := range dirs {
+			roots = append(roots, ".claude/projects/"+encodeClaudeDir(d))
+		}
+		return roots
+	case rtcore.HarnessCodex:
+		return []string{".codex/sessions"}
+	}
+	return nil
 }
 
 // encodeClaudeDir replaces each character that is not an ASCII letter or
@@ -521,25 +528,10 @@ func (c *CoreHarness) TranscriptPath(home, workDir string) string {
 	c.mu.Lock()
 	id := c.sessionID
 	c.mu.Unlock()
-	var roots []string
-	switch c.H.Type() {
-	case rtcore.HarnessClaude:
-		dirs := []string{workDir}
-		if real, err := filepath.EvalSymlinks(workDir); err == nil && real != workDir {
-			dirs = append(dirs, real)
-		}
-		for _, d := range dirs {
-			roots = append(roots, filepath.Join(home, ".claude", "projects", encodeClaudeDir(d)))
-		}
-	case rtcore.HarnessCodex:
-		roots = []string{filepath.Join(home, ".codex", "sessions")}
-	default:
-		return ""
-	}
 	var best string
 	var bestTime time.Time
-	for _, root := range roots {
-		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+	for _, root := range c.stateRoots(workDir) {
+		_ = filepath.WalkDir(filepath.Join(home, filepath.FromSlash(root)), func(p string, d fs.DirEntry, err error) error {
 			if err != nil || !d.Type().IsRegular() || !strings.HasSuffix(d.Name(), ".jsonl") {
 				return nil //nolint:nilerr // best-effort search: an unreadable entry or a missing root is skipped
 			}

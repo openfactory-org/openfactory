@@ -40,7 +40,7 @@ describeFeature([TAGS.rest], "meta and probes", () => {
 
 describeFeature([TAGS.rest], "problem+json", () => {
   it("an unknown API path is 404", async () => {
-    // Outside the spec: the Go server answers text/plain, the Worker a problem document.
+    // Outside the spec: no operation, so the body is not validated.
     const res = await adminApi().request("GET", "/no-such-resource", { noValidate: true });
     expect(res.status).toBe(404);
   });
@@ -58,10 +58,10 @@ describeFeature([TAGS.rest], "problem+json", () => {
     await adminApi().problem(400, "POST", "/secrets", { raw: "{not json", code: "invalid_request" });
   });
 
-  it("a wrong method is refused (405, or 404 on the Go server)", async () => {
+  it("a wrong method is refused (405)", async () => {
     const res = await adminApi().request("PATCH", "/runs", { body: {}, noValidate: true });
-    expect([404, 405]).toContain(res.status);
-    if (res.status === 405) expect(res.headers.get("allow") ?? "").toMatch(/GET|POST/);
+    expect(res.status).toBe(405);
+    expect(res.headers.get("allow") ?? "").toMatch(/GET|POST/);
   });
 
   it("echoes a given X-Request-Id", async () => {

@@ -103,6 +103,23 @@ describe("McpBridge", () => {
     expect(err.split("\n").filter(Boolean)).toHaveLength(2);
   });
 
+  it("delivers the last SSE event when the stream ends without a blank line", async () => {
+    const url = await listen((_req, res) => {
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.end('event: message\ndata: {"jsonrpc":"2.0","id":3,"result":{}}');
+    });
+    let out = "";
+    const bridge = new McpBridge({
+      url,
+      apiKey: "k",
+      fetch,
+      out: { write: (c) => void (out += c) },
+      errLog: { write: () => undefined },
+    });
+    await bridge.run(lines('{"jsonrpc":"2.0","id":3,"method":"ping"}'));
+    expect(out).toBe('{"jsonrpc":"2.0","id":3,"result":{}}\n');
+  });
+
   it("handles a message that is split across chunks and a last line without newline", async () => {
     const url = await listen(async (req, res) => {
       const b = await readBody(req);

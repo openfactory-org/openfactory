@@ -275,6 +275,41 @@ describe("completeWorkItem behind every entry point", () => {
   });
 });
 
+describe("REST workItemStage cancelled", () => {
+  it("cancels the root run tree and the work item (Engine.SetStage)", async () => {
+    const f = await setup();
+    const wi = (await workStub(f.token).api(
+      meta,
+      "workItemStage",
+      { id: f.ids.wi! },
+      { stage: "cancelled", reason: "No longer needed." },
+    )) as WorkItem;
+    expect(wi.stage).toBe("cancelled");
+    await withFx(f.token, (fx) => {
+      expect(fx.repo.getRun(f.ids.root!)!.state).toBe("cancelled");
+      expect(fx.repo.getRun(f.ids.child!)!.state).toBe("cancelled");
+    });
+    const again = (await workStub(f.token).api(
+      meta,
+      "workItemStage",
+      { id: f.ids.wi! },
+      { stage: "cancelled" },
+    )) as WorkItem;
+    expect(again.stage).toBe("cancelled");
+  });
+
+  it("without a root run only sets the stage", async () => {
+    const f = await setup(true);
+    const wi = (await workStub(f.token).api(
+      meta,
+      "workItemStage",
+      { id: f.ids.wi! },
+      { stage: "cancelled" },
+    )) as WorkItem;
+    expect(wi.stage).toBe("cancelled");
+  });
+});
+
 describe("answerInbox", () => {
   it("the timeline keeps at most 4000 bytes of the resolution", async () => {
     const f = await setup();

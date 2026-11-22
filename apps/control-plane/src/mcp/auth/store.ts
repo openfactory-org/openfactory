@@ -5,7 +5,7 @@
 import { newId } from "@openfactory/core";
 import type { Principal } from "../../contracts/do-messages";
 import { USER_KIND_SERVICE_ACCOUNT, getUser, principalOf, type User } from "../../do/team/auth";
-import type { TeamKit } from "../../do/team/index";
+import type { TeamKit } from "../../do/team/kit";
 import { b64url, sha256, sha256Hex, timingSafeEqual } from "../../lib/bytes";
 import { all, first } from "../../lib/sql/query";
 import {

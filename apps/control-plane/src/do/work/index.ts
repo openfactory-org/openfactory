@@ -13,12 +13,19 @@ import {
   partitionOf,
   sourceKey,
 } from "@openfactory/core";
-import { failureForSandboxReason, gateNetworkPolicy, parseProviderError, type TaskStatus } from "@openfactory/sandbox";
+import {
+  failureForSandboxReason,
+  gateNetworkPolicy,
+  parseProviderError,
+  type SandboxProvider,
+  type TaskStatus,
+} from "@openfactory/sandbox";
 import type { EndRequest, StartRequest } from "@openfactory/runner-proto";
 import type { Ack, CallMeta, CoreEvent, OutboxEnvelope, OutboxPayloads, Role } from "../../contracts/do-messages";
 import { authorizeInTeam } from "../../auth/roles";
 import type { Env } from "../../contracts/env";
 import { BaseDO, type Migration } from "../../lib/base";
+import { unwrapOp } from "../../lib/rpc";
 import { LiveHub, isUpgrade } from "../../lib/live/index";
 import type { OutboxRow } from "../../lib/outbox/outbox";
 import type { TimerRow } from "../../lib/timers/timers";
@@ -27,6 +34,7 @@ import { parseDuration } from "../../engine/sessions";
 import {
   isTerminal,
   STAGES,
+  stageTerminal,
   type InboxItem,
   type PullRequestRef,
   type Run,
@@ -94,13 +102,24 @@ import {
   type ApplyActionResult,
 } from "./intake";
 
-/** Delivers notices (notify service). The integrations workstream sets it; the default logs and acks. */
+/** Delivers notices (the notify service). bootstrapControlPlane in src/wiring.ts sets it. */
 export type NoticeDeliverer = (env: Env, envelope: OutboxEnvelope) => Promise<void>;
-let noticeDeliverer: NoticeDeliverer = async (_env, e) => {
-  console.info("work: notice without a deliverer", e.kind, e.msgId);
-};
-export function setNoticeDeliverer(fn: NoticeDeliverer): void {
+let noticeDeliverer: NoticeDeliverer | undefined;
+
+/** Sets the deliverer (tests replace it). Returns the one it replaces. */
+export function setNoticeDeliverer(fn: NoticeDeliverer | undefined): NoticeDeliverer | undefined {
+  const prev = noticeDeliverer;
   noticeDeliverer = fn;
+  return prev;
+}
+
+/** The deliverer. Without a registration it throws, so the outbox keeps the notice and retries it. */
+function deliverer(): NoticeDeliverer {
+  if (!noticeDeliverer) {
+    console.error("work: no notice deliverer is registered: call bootstrapControlPlane()");
+    throw new OfError("internal_error", "no notice deliverer is registered");
+  }
+  return noticeDeliverer;
 }
 
 /** OF_OBJECT_STORE_RETENTION in ms; an invalid value keeps data (0) and is logged. */
@@ -127,7 +146,7 @@ export function engineConfig(env: Env): EngineConfig {
     stopGraceMs: parseDuration(env.OF_SESSION_STOP_GRACE, 2 * 60_000),
     startTimeoutMs: parseDuration(env.OF_SANDBOX_START_TIMEOUT, 30 * 60_000),
     lostAfterMs: DEFAULT_LOST_AFTER_MS,
-    maxDepth: Number((env as unknown as Record<string, string>).OF_MAX_ORCHESTRATION_DEPTH ?? "") || 1,
+    maxDepth: Number(env.OF_MAX_ORCHESTRATION_DEPTH ?? "") || 1,
     runnerVersion: env.OF_RUNNER_VERSION ?? "",
     allowUnenforced: env.OF_ALLOW_UNENFORCED_NETWORK_POLICY ?? "",
     sandboxImage: (env.OF_SANDBOX_IMAGE ?? "").trim() || DEFAULT_SANDBOX_IMAGE,
@@ -271,12 +290,12 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
     return this.withFx(fn);
   }
 
-  /** One transaction with an Fx, then live pushes and an outbox kick. */
+  /**
+   * One transaction with an Fx; live pushes and an outbox kick follow its
+   * commit. Inside an outer step they wait for the outer commit.
+   */
   private txFx<T>(fn: (fx: Fx) => T): T {
-    const wakes = { cmd: new Set<string>(), run: new Set<string>() };
-    const out = this.tx(() => fn(this.makeFx(wakes)));
-    this.afterCommit(wakes);
-    return out;
+    return this.tx(() => this.withFx(fn));
   }
 
   private afterCommit(wakes: { cmd: Set<string>; run: Set<string> }): void {
@@ -716,6 +735,17 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
               throw invalid(`invalid stage ${JSON.stringify(b.stage ?? "")}`);
             // Engine.SetStage: the stage complete is a completion (write-back, inbox, notice).
             if (b.stage === "complete") return completeWorkItem(fx, params.id ?? "", actorOfMeta(meta), b.reason ?? "");
+            // The stage cancelled with a root run cancels the root run tree, which cancels the work item.
+            if (b.stage === "cancelled") {
+              const wi = fx.repo.getWorkItem(params.id ?? "");
+              if (!wi) throw notFound(`work item ${params.id}`);
+              if (wi.stage === "cancelled") return wi;
+              if (stageTerminal(wi.stage)) throw conflict(`work item is ${wi.stage}`);
+              if (wi.root_run_id && fx.repo.getRun(wi.root_run_id)) {
+                cancel(fx, wi.root_run_id, actorOfMeta(meta), true);
+                return fx.repo.getWorkItem(wi.id)!;
+              }
+            }
             return setStage(fx, params.id ?? "", b.stage as Stage, actorOfMeta(meta), b.reason ?? "");
           });
         default:
@@ -1051,7 +1081,7 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
 
   protected override async deliverCustom(envelope: OutboxEnvelope, row: OutboxRow): Promise<Ack | void> {
     if (row.dest.startsWith("notice:") || row.dest === "svc:notify") {
-      await noticeDeliverer(this.env, envelope);
+      await deliverer()(this.env, envelope);
       return { ok: true };
     }
     if (row.dest.startsWith("provider:")) return this.deliverProvider(envelope);
@@ -1080,10 +1110,10 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
         }
         return { ok: true };
       }
-      case "provider.ack" as never: {
-        const p = envelope.payload as unknown as OutboxPayloads["provider.destroy"];
-        const prov = providerOf(this.env, team, p.providerId, p.workerId) as { ack?: (id: string) => Promise<void> };
-        if (typeof prov.ack === "function") await ignoreNotFound(prov.ack(p.taskId));
+      case "provider.ack": {
+        const p = envelope.payload as OutboxPayloads["provider.ack"];
+        const prov = providerOf(this.env, team, p.providerId, p.workerId);
+        if (canAck(prov)) await ignoreNotFound(prov.ack(p.taskId));
         return { ok: true };
       }
       case "provider.cancel": {
@@ -1337,6 +1367,13 @@ function isDevVersion(v: string): boolean {
   return major === "" || !/^\d+$/.test(major);
 }
 
+/** A provider that can forget the bootstrap token of a started task. `ack` is not part of SandboxProvider. */
+type AckingProvider = SandboxProvider & { ack(taskId: string): Promise<void> };
+
+function canAck(p: SandboxProvider): p is AckingProvider {
+  return "ack" in p && typeof p.ack === "function";
+}
+
 function providerOf(env: Env, team: string, backend: string, workerId?: string) {
   if (workerId) return providerFor(env, team, "", workerId);
   return providerFor(
@@ -1359,13 +1396,9 @@ async function environmentImage(env: Env, run: Run): Promise<string | undefined>
       requestId: `env-image:${run.id}`,
       principal: { kind: "run", id: run.id, runId: run.id, teamId: run.team_id, role: "admin", factoryRoles: {} },
     };
-    const out = (await env.TEAM.getByName(doName.team(run.team_id || "default")).api(
-      meta,
-      "getEnvironment",
-      { id },
-      null,
-    )) as { image?: string; $error?: { detail: string } };
-    if (out?.$error) throw new Error(out.$error.detail);
+    const out = unwrapOp<{ image?: string } | null>(
+      await env.TEAM.getByName(doName.team(run.team_id || "default")).api(meta, "getEnvironment", { id }, null),
+    );
     return out?.image?.trim() || undefined;
   } catch (e) {
     console.warn("work: sandbox image: read environment failed, using the next image", run.id, id, e);

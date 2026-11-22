@@ -31,8 +31,8 @@ import { API_NAME_RE } from "../../secrets/validate";
 import type { Migration } from "../../lib/sql/migrate";
 import { all, first, run } from "../../lib/sql/query";
 import { getUser } from "./auth";
-import { findFactory } from "./factories";
-import { created, noContent, type OpCall, type TeamKit, type TeamOp } from "./index";
+import { findFactory, getFactoryIntegrations } from "./factories";
+import { created, noContent, type OpCall, type TeamKit, type TeamOp } from "./kit";
 
 export const migrations: readonly Migration[] = [
   {
@@ -380,21 +380,7 @@ export const ops: Record<string, TeamOp> = {
     if (e === "") return null;
     return jsonOf<User>(first<{ data: string }>(kit.sql, "SELECT data FROM users WHERE email = ?", e));
   },
-  factorySettings: (kit, c) => {
-    const out: Record<string, Record<string, string>> = {};
-    try {
-      for (const r of all<{ provider: string; settings: string }>(
-        kit.sql,
-        "SELECT provider, settings FROM factory_integrations WHERE factory_id = ?",
-        c.params["factory_id"]!,
-      )) {
-        out[r.provider] = JSON.parse(r.settings) as Record<string, string>;
-      }
-    } catch {
-      /* the factories module has not created the table */
-    }
-    return out;
-  },
+  factorySettings: (kit, c) => getFactoryIntegrations(kit, c.params["factory_id"]!),
   "kv.get": (kit, c) =>
     first<{ value: string }>(kit.sql, "SELECT value FROM integration_kv WHERE key = ?", c.params["key"]!)?.value ??
     null,

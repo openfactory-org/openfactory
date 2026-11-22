@@ -1,15 +1,7 @@
+import { unwrap } from "@openfactory/api-client";
 import { ago, emit, table, trunc } from "../format.ts";
-import { enc, isJSON, makeClient, resolveFactory } from "../client.ts";
+import { isJSON, makeClient, resolveFactory, type Schemas } from "../client.ts";
 import { exactArgs, minArgs, noArgs, type Command } from "../framework.ts";
-
-interface InboxItem {
-  id: string;
-  kind: string;
-  title: string;
-  resolved: boolean;
-  resolution?: string;
-  created_at?: string;
-}
 
 const listCommand: Command = {
   use: "list",
@@ -26,7 +18,7 @@ const listCommand: Command = {
     if (flags.string("factory") !== "") query["factory_id"] = (await resolveFactory(c, flags.string("factory"))).uid;
     if (flags.bool("all")) query["include_resolved"] = "true";
     if (flags.bool("team")) query["scope"] = "team";
-    const items = await c.list<InboxItem>("inbox", query).collect();
+    const items = await c.list<Schemas["InboxItem"]>("inbox", query).collect();
     if (isJSON(globals)) return emit(env.stdout, items);
     table(
       env.stdout,
@@ -48,7 +40,7 @@ const unresolveCommand: Command = {
   args: exactArgs(1),
   async run({ args, globals, env }) {
     const c = makeClient(globals, env);
-    const it = await c.request<InboxItem>("POST", `inbox/${enc(args[0] ?? "")}/unresolve`);
+    const it = await unwrap(c.api.POST("/inbox/{id}/unresolve", { params: { path: { id: args[0] ?? "" } } }));
     if (isJSON(globals)) return emit(env.stdout, it);
     env.stdout.write(`Reopened ${it.id}\n`);
   },
@@ -61,9 +53,13 @@ const resolveCommand: Command = {
   args: minArgs(2),
   async run({ args, globals, env }) {
     const c = makeClient(globals, env);
-    const it = await c.request<InboxItem>("POST", `inbox/${enc(args[0] ?? "")}/resolve`, {
-      body: { resolution: args.slice(1).join(" ") },
-    });
+    const it = await unwrap(
+      c.api.POST("/inbox/{id}/resolve", {
+        params: { path: { id: args[0] ?? "" } },
+        body: { resolution: args.slice(1).join(" ") },
+      }),
+    );
+    if (isJSON(globals)) return emit(env.stdout, it);
     env.stdout.write(`Resolved ${it.id}: ${it.resolution ?? ""}\n`);
   },
 };

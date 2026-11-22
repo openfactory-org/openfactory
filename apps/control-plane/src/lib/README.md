@@ -92,8 +92,8 @@ Same cursor format as Go (`base64url("<unix-nanos>:<id>")`).
 
 ## TeamDO modules
 
-See `src/do/team/index.ts`: each module exports `migrations`, `ops` (keyed by operationId) and
-optional `setup(kit)`. `TeamKit` gives `sql`, `env`, `tx`, `enqueue`, timers and message handlers.
+See `src/do/team/kit.ts`: each module exports `migrations`, `ops` (keyed by operationId),
+optional `setup(kit)`, `preflights` and `rewrapSources`. `TeamKit` gives `sql`, `env`, `tx`, `enqueue`, timers and message handlers.
 An op receives `OpCall` (`params`, `query`, `body`, `principal()`, `authorize(factoryId)`); team-wide
 routes are authorized before the op runs, factory-scoped routes must call `authorize`. Return a body
 (200) or `created(body)`, `noContent()`, `withStatus(n, body)`. Worker handlers call it with

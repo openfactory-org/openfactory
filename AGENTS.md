@@ -10,7 +10,7 @@ Open Factory runs teams of AI coding agents ("factories") against your repositor
 
 | Path | Contents |
 |---|---|
-| `apps/control-plane/` | The control plane Worker (`@openfactory/control-plane`): `wrangler.jsonc`, `src/index.ts` (fetch, scheduled, queue; exports the DO classes), `src/builder.ts` (extension points), `src/contracts/` (`env.ts`, `do-messages.ts`), `src/http/` (router, `routes.ts`), `src/api/` (REST handlers), `src/do/<name>/` (DO classes and `migrations/`), `src/lib/` (DO base, outbox, timers, SQL), `src/engine/`, `src/runner-api/`, `src/auth/`, `src/secrets/`, `src/storage/`, `src/forges/`, `src/integrations/`, `src/mcp/`, `src/plugins/`, `src/scoring/`. Tests in `test/` and next to the code. |
+| `apps/control-plane/` | The control plane Worker (`@openfactory/control-plane`): `wrangler.jsonc`, `src/index.ts` (fetch, scheduled, queue; exports the DO classes), `src/builder.ts` (extension points), `src/contracts/` (`env.ts`, `do-messages.ts`, `routes.ts`: route metadata), `src/http/` (router, `routes.ts`), `src/api/` (REST handlers), `src/do/<name>/` (DO classes and `migrations/`), `src/lib/` (DO base, outbox, timers, SQL), `src/engine/`, `src/runner-api/`, `src/auth/`, `src/secrets/`, `src/storage/`, `src/forges/`, `src/integrations/`, `src/mcp/`, `src/plugins/`, `src/scoring/`. Tests in `test/` and next to the code. |
 | `apps/cli/` | The `openfactory` CLI: client commands, `validate`, `schema`, `init`, `mcp` (stdio bridge), forwarding of runtime commands to `openfactory-runtime`. Bundled to `dist/` by esbuild. |
 | `packages/core/` | Domain types, IDs (`newId`, `newRoutedId`), errors (`OfError`), run states, network policy, redaction, prompts, built-in skills. |
 | `packages/definition/` | Parses, validates and compiles definitions; schema and docs generators; goldens from the Go reference. |
@@ -25,7 +25,7 @@ Open Factory runs teams of AI coding agents ("factories") against your repositor
 | `tests/e2e/` | Opt-in live scenarios (providers, cloud identity). They skip without credentials. |
 | `api/` | `openapi.json` (the REST contract, edited by hand) and `openapi.v1.baseline.json` (breaking-change baseline). |
 | `schemas/` | `definition/v1` (definition JSON Schemas, generated), `runner/v1` and `worker/v2` (protocol frames), `testdata/` (vectors shared by Go and TypeScript). |
-| `tools/` | `gen/` (generators and the generated-file check), `contract/run.mjs`, `test-ledger.json` and its check, `go-allowlist.txt`, ownership check. |
+| `tools/` | `gen/` (generators and the generated-file check), `contract/run.mjs`, `go-allowlist.txt`. |
 | `cmd/openfactory/` | The `openfactory-runtime` binary: `runner`, `netguard`, `worker` (`enroll`, `run`, `status`, `drain`, `doctor`, or the dev process worker with `--process`), `vm-init`, `version`. |
 | `internal/rtcore/` | Core types of the runtime (harness, task, sandbox reasons, failure codes). |
 | `internal/runner/`, `internal/runnerclient/`, `internal/runnerproto/` | The in-sandbox runner, its `/runner/v1` client and the protocol structs. |
@@ -70,7 +70,7 @@ make -k ci     # shows every failure
 npm run ci     # only the TypeScript checks
 ```
 
-`npm run ci` runs: `format:check lint typecheck gen:check test build validate-examples contract`. `make go-ci` runs: `fmt-check vet lint vuln test-race build naming go-allowlist go-deps-check`. CI also runs `npm run check:ledger` (every deleted Go test file is mapped in `tools/test-ledger.json`).
+`npm run ci` runs: `format:check lint typecheck gen:check test build validate-examples contract`. `make go-ci` runs: `fmt-check vet lint vuln test-race build naming go-allowlist go-deps-check`.
 
 Other targets: `make help` lists all of them.
 
@@ -93,7 +93,7 @@ Generated files are committed. CI fails when they are stale. Never edit generate
 
 | If you change | Also do | Check |
 |---|---|---|
-| `api/openapi.json` | `npm run gen:api`; add or change the handler and its entry in `apps/control-plane/src/http/routes.ts`; add a contract test. | `gen:check`, route-coverage test, `make openapi-check`, `npm run contract` |
+| `api/openapi.json` | `npm run gen:api`; add the route row in `apps/control-plane/src/contracts/routes.ts` and its handler in `apps/control-plane/src/http/routes.ts`; add a contract test. | `gen:check`, route-coverage test, `make openapi-check`, `npm run contract` |
 | A definition field (`packages/definition`) | Update validation and the schema generator; `npm run gen:schemas gen:docs`; update `examples/` and the prose of `docs/definition-reference.md`. | `gen:check`, `validate-examples` |
 | `schemas/runner/v1` | Edit the `internal/runnerproto` structs; `npm run gen:protos`; update `apps/control-plane/src/runner-api`. | `go test ./internal/runnerproto`, `gen:check`, contract runner section |
 | `schemas/worker/v2` | Edit the `internal/sandbox/direct` frames; `npm run gen:protos`; update `apps/control-plane/src/do/workerhub`. | `go test ./internal/sandbox/direct`, `gen:check` |

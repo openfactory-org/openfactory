@@ -8,6 +8,7 @@ import { compile } from "@openfactory/definition";
 import type { Principal } from "../../contracts/do-messages";
 import type { Env } from "../../contracts/env";
 import { API_PREFIX, Router } from "../../http/router";
+import { unwrapOp } from "../../lib/rpc";
 import { ROUTES } from "../../http/routes";
 import type { PullRequestRef } from "./refs";
 
@@ -155,10 +156,7 @@ export function withExecutionCtx(b: FactoryMcpBackend, executionCtx: ExecutionCo
 
 async function workOp(env: Env, p: Principal, id: string, op: string, body: unknown): Promise<unknown> {
   const stub = env.WORK.getByName(doName.work(p.teamId, partitionOf(id)));
-  const out = (await stub.api({ requestId: "mcp", principal: p }, op, { id }, body)) as unknown;
-  const e = (out as { $error?: { code: string; detail: string } } | null)?.$error;
-  if (e) throw new OfError(e.code as ErrorCode, e.detail);
-  return out;
+  return unwrapOp(await stub.api({ requestId: "mcp", principal: p }, op, { id }, body));
 }
 
 export const defaultFactoryBackend: FactoryMcpBackend = {

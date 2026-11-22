@@ -1,16 +1,15 @@
-// Sandbox providers backed by workers (WS6):
+// Sandbox providers backed by workers:
 // - "local": development process workers (OF_SANDBOX_PROVIDER=local), registered
-//   in the DispatchDO provider registry at module load.
+//   in the DispatchDO provider registry by bootstrapControlPlane (src/wiring.ts).
 // - workerProvider(): the microvm provider of one enrolled worker, for
 //   providerFor() when a grant names a worker.
 import { doName, newId } from "@openfactory/core";
 import type { Arch, SandboxProvider } from "@openfactory/sandbox";
-import { LocalProvider, type DevWorker } from "../../../../../packages/sandbox/src/local/index";
-import { MicroVMProvider, type WorkerShape } from "../../../../../packages/sandbox/src/microvm/provider";
+import { LocalProvider, type DevWorker } from "@openfactory/sandbox/local";
+import { MicroVMProvider, type WorkerShape } from "@openfactory/sandbox/microvm";
 import type { TeamRpc } from "../../contracts/do-messages";
 import type { Env } from "../../contracts/env";
-import { registerProvider, setWorkerProviderFactory } from "../dispatch/providers";
-import { isOpError } from "./op";
+import { unwrapOp } from "../../lib/rpc";
 import type { WorkerRecord, WorkerStatus } from "../team/workers";
 
 type ListedWorker = WorkerRecord & { status: WorkerStatus; slotsUsed: number; arch: string };
@@ -22,8 +21,7 @@ async function listWorkers(env: Env, teamId: string): Promise<ListedWorker[]> {
     {},
     null,
   );
-  if (isOpError(r)) throw new Error(`workers.list: ${r.$error.detail}`);
-  return r as ListedWorker[];
+  return unwrapOp<ListedWorker[]>(r, "workers.list");
 }
 
 function archOf(a: string): Arch[] {
@@ -74,6 +72,3 @@ export function workerProvider(env: Env, teamId: string, workerId: string): Sand
     return cached;
   });
 }
-
-registerProvider("local", localProvider);
-setWorkerProviderFactory(workerProvider);

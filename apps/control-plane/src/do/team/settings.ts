@@ -9,7 +9,7 @@ import { listResponse } from "../../lib/page";
 import type { Migration } from "../../lib/sql/migrate";
 import { all, first } from "../../lib/sql/query";
 import { listAgents, listAutomations, listFactories } from "./factories";
-import { created, noContent, type TeamKit, type TeamOp } from "./index";
+import { created, noContent, type TeamKit, type TeamOp } from "./kit";
 
 export const migrations: readonly Migration[] = [
   {

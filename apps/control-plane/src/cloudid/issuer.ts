@@ -266,8 +266,7 @@ export function parseScalar(s: string): Uint8Array {
 
 /** Issuer URL: OF_CLOUD_ID_ISSUER_URL (optional extra var), else OF_PUBLIC_URL. */
 export function issuerUrl(env: Env): string {
-  const e = env as unknown as Record<string, string | undefined>;
-  return (e["OF_CLOUD_ID_ISSUER_URL"] || env.OF_PUBLIC_URL || "").replace(/\/+$/, "");
+  return (env.OF_CLOUD_ID_ISSUER_URL || env.OF_PUBLIC_URL || "").replace(/\/+$/, "");
 }
 
 const cache = new Map<string, Promise<Issuer>>();

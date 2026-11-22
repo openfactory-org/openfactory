@@ -1,15 +1,13 @@
 // Handler and route types shared by src/http/routes.ts and the owner files in
 // src/api/, plus the helpers that forward a request to an owner DO.
 import { OfError, doName, isOfError, notImplemented, problemResponse, toOfError } from "@openfactory/core";
-import type { CallMeta, Principal, Role } from "../contracts/do-messages";
+import type { CallMeta, Principal } from "../contracts/do-messages";
 import type { Env } from "../contracts/env";
+import type { RouteMeta } from "../contracts/routes";
 import { readTextCapped } from "../lib/body";
 import { isOpResponse, unwrapOp } from "../lib/rpc";
 
-/** Minimum role of a route ("public": no authentication; "worker": worker access token). */
-export type RouteRole = "public" | "worker" | Role;
-
-export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+export type { HttpMethod, RouteRole } from "../contracts/routes";
 
 export interface RouteContext {
   /** Path parameters, by openapi name ({uid}, {id}, ...), URL-decoded. */
@@ -24,12 +22,8 @@ export interface RouteContext {
 
 export type Handler = (request: Request, env: Env, ctx: RouteContext) => Promise<Response>;
 
-export interface RouteDef {
-  method: HttpMethod;
-  /** openapi path under /api/v1, for example "/factories/{uid}/runs". */
-  path: string;
-  operationId: string;
-  role: RouteRole;
+/** A route of src/contracts/routes.ts with its handler. */
+export interface RouteDef extends RouteMeta {
   handler: Handler;
 }
 

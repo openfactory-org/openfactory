@@ -58,22 +58,18 @@ type SlotSize struct {
 
 // Disk holds the disk limits.
 type Disk struct {
-	// ReserveGiB is never used.
+	// ReserveGiB is disk that the worker leaves free.
 	ReserveGiB int `yaml:"reserve_gib"`
 	// ImagesMaxGiB is the LRU limit of images and tools disks.
 	ImagesMaxGiB int `yaml:"images_max_gib"`
 	// GitcacheMaxGiB is the LRU limit of the git mirror cache.
 	GitcacheMaxGiB int `yaml:"gitcache_max_gib"`
-	// FailedRetentionMaxGiB limits the jails that failed tasks keep.
-	FailedRetentionMaxGiB int `yaml:"failed_retention_max_gib"`
 }
 
 // Network holds the VM network settings.
 type Network struct {
 	// Subnet holds one /30 per slot.
 	Subnet string `yaml:"subnet"`
-	// Uplink is the interface of the default route, or "auto".
-	Uplink string `yaml:"uplink"`
 	// BlockSMTP rejects tcp/25 in unrestricted mode. Nil means true.
 	BlockSMTP *bool `yaml:"block_smtp,omitempty"`
 	// InternalAllow lists ip:port exceptions to the private-range drop,
@@ -122,10 +118,10 @@ func Default() Config {
 		Slots:   2,
 		Slot:    SlotSize{VCPUs: 2, MemoryMiB: 4096, ScratchGiB: 40},
 		DataDir: "/var/lib/openfactory",
-		Disk:    Disk{ReserveGiB: 20, ImagesMaxGiB: 60, GitcacheMaxGiB: 50, FailedRetentionMaxGiB: 40},
+		Disk:    Disk{ReserveGiB: 20, ImagesMaxGiB: 60, GitcacheMaxGiB: 50},
 		Network: Network{
-			Subnet: "10.213.0.0/16", Uplink: "auto",
-			Rate: Rate{TxMbit: 200, RxMbit: 400, MaxConns: 2048},
+			Subnet: "10.213.0.0/16",
+			Rate:   Rate{TxMbit: 200, RxMbit: 400, MaxConns: 2048},
 		},
 		Jail:        Jail{UIDBase: 900000, OfnetUID: 899999},
 		Firecracker: Firecracker{Version: FirecrackerVersion},

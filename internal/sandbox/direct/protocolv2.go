@@ -57,12 +57,6 @@ const (
 	codeUnknownMethod = "unknown_method"
 )
 
-// WorkerBackendPrefix is the prefix of the name of a worker backend.
-const WorkerBackendPrefix = "worker:"
-
-// WorkerBackendName returns the name of the backend of one worker ID.
-func WorkerBackendName(workerID string) string { return WorkerBackendPrefix + workerID }
-
 // HelloV2 is sent by a worker when it connects.
 type HelloV2 struct {
 	WorkerID string            `json:"worker_id"`
@@ -189,7 +183,7 @@ func errorForV2(err error) *rpcError {
 		code = codeNotFound
 	case errors.Is(err, rtcore.ErrInvalid):
 		code = codeInvalidSpec
-	case errors.Is(err, rtcore.ErrAtCapacity), errors.Is(err, ErrAtCapacity):
+	case errors.Is(err, rtcore.ErrAtCapacity):
 		code = codeAtCapacity
 	case errors.Is(err, errUnknownMethod):
 		code = codeUnknownMethod

@@ -115,6 +115,34 @@ func TestRenderVM(t *testing.T) {
 	}
 }
 
+// The template tap drops every packet, and the remove script undoes each
+// line of the add script.
+func TestRenderTemplate(t *testing.T) {
+	v := TemplateVM(900255)
+	if v.Tap != TemplateTap || v.Slot != 255 || v.Owner != 900255 || !v.HostIP.IsLinkLocalUnicast() || !v.GuestIP.IsLinkLocalUnicast() {
+		t.Fatalf("template VM %+v", v)
+	}
+	add, rm := RenderTemplate()
+	for _, want := range []string{
+		"add rule inet openfactory tpl_in drop",
+		`add element inet openfactory vm_in  { "oftpl0" : jump tpl_in }`,
+		`add element inet openfactory vm_fwd { "oftpl0" : jump tpl_in }`,
+	} {
+		if !strings.Contains(add, want) {
+			t.Errorf("add script has no %q:\n%s", want, add)
+		}
+	}
+	for _, want := range []string{
+		`delete element inet openfactory vm_in  { "oftpl0" }`,
+		`delete element inet openfactory vm_fwd { "oftpl0" }`,
+		"delete chain inet openfactory tpl_in",
+	} {
+		if !strings.Contains(rm, want) {
+			t.Errorf("remove script has no %q:\n%s", want, rm)
+		}
+	}
+}
+
 func TestRenderBase(t *testing.T) {
 	base, err := RenderBase(testConfig())
 	if err != nil {

@@ -13,9 +13,8 @@ import (
 var egressPollEvery = 5 * time.Second
 
 // watchEgress sends a diagnostic network/egress_blocked for each host that the
-// proxy sidecar of the Pod blocked. The backend gives the runner the URL
-// of the report in OF_NETGUARD_REPORT. The sidecar serves the report on a
-// loopback address of the Pod.
+// egress proxy blocked. The backend gives the runner the URL of the report in
+// OF_NETGUARD_REPORT, or the in-sandbox lock serves it on a loopback address.
 //
 // Without the URL, the runner does nothing. The runner
 // sends one diagnostic for each host, so a host that is blocked many times

@@ -15,7 +15,7 @@ import {
   type MCPServer,
   type RegisteredMCPServer,
 } from "@openfactory/core";
-import type { TeamKit } from "../../do/team/index";
+import type { TeamKit } from "../../do/team/kit";
 import { bodyObject, optString, optStringArray, optStringMap, type JsonObject } from "../../lib/body";
 import { all, first } from "../../lib/sql/query";
 import { msOf } from "../../lib/page";

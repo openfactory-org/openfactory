@@ -64,6 +64,8 @@ describe("other helpers", () => {
     expect(parseKV(["a=b", "c=d=e"], "--metadata")).toEqual({ a: "b", c: "d=e" });
     expect(parseKV([], "--metadata")).toBeUndefined();
     expect(() => parseKV(["x"], "--metadata")).toThrow('invalid --metadata "x" (want key=value)');
+    expect(() => parseKV([" =v"], "--header", "NAME=VALUE")).toThrow('invalid --header " =v" (want NAME=VALUE)');
+    expect(parseKV([" Authorization =Bearer x"], "--header")).toEqual({ Authorization: "Bearer x" });
   });
   it("formats RFC 3339", () => {
     expect(rfc3339Local(new Date(2026, 10, 22, 1, 2, 3))).toMatch(/^2026-11-22T01:02:03(Z|[+-]\d\d:\d\d)$/);

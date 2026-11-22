@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -34,8 +33,6 @@ workspace and talks to the control plane. The first SIGTERM or SIGINT stops the
 session in a graceful way. A second signal exits at once.
 
 The harnesses "claude" and "codex" run the matching CLI inside the sandbox.
-The harness "open" runs its loop in this process. It calls the model through
-the control plane and holds no provider key.
 The harness "exec" is available if OF_RUNNER_EXEC_COMMAND is set. The runner
 runs its value with "sh -c" for each turn.
 
@@ -58,18 +55,17 @@ another runner version, it exits with code 65.`,
 			if cfg.CloudTokenCommand, err = cloudTokenCommand(stateDir); err != nil {
 				return err
 			}
-			ctx, cancel := context.WithCancel(cmd.Context())
-			defer cancel()
+			// main cancels the context on the first SIGTERM or SIGINT. The
+			// second signal exits at once.
 			sigs := make(chan os.Signal, 2)
 			signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT)
 			defer signal.Stop(sigs)
 			go func() {
 				<-sigs
-				cancel()
 				<-sigs
 				os.Exit(1)
 			}()
-			return runnerExit(runner.Run(ctx, cfg))
+			return runnerExit(runner.Run(cmd.Context(), cfg))
 		},
 	}
 	cmd.Flags().StringVar(&workdir, "workdir", envOr("OF_WORKSPACE", "./workspace"), "workspace directory (env OF_WORKSPACE)")

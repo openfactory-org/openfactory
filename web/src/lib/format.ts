@@ -166,7 +166,7 @@ export function humanizeError(raw?: string | null): { message: string; detail: s
   return { message, detail: text };
 }
 
-/** Sentences for the run failure codes (internal/core/failure.go), for a run error that is only a code. */
+/** Sentences for the run failure codes (FAILURE_CODES of @openfactory/core), for a run error that is only a code. */
 export const FAILURE_TEXT: Record<string, string> = {
   invalid_configuration: "A secret, machine, MCP server or code-forge integration that the agent needs is missing or not valid.",
   environment_setup_failed: "The environment setup failed: a clone, a setup command or an MCP server did not start.",

@@ -37,6 +37,18 @@ func TestLoadDefaultsAndOverrides(t *testing.T) {
 	}
 }
 
+// A worker.yaml written by an older release still loads after its keys
+// failed_retention_max_gib and network.uplink were removed.
+func TestLoadIgnoresRemovedKeys(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "worker.yaml")
+	if err := os.WriteFile(p, []byte("disk: {failed_retention_max_gib: 40}\nnetwork: {uplink: auto}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if c, err := Load(p); err != nil || c.Network.Subnet != "10.213.0.0/16" {
+		t.Fatalf("load = %+v, %v", c, err)
+	}
+}
+
 func TestValidate(t *testing.T) {
 	tests := []struct {
 		name string

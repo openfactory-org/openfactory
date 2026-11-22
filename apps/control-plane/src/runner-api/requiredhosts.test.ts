@@ -8,7 +8,7 @@ import type { Run, RunSession } from "../engine/types";
 import type { Fx } from "../do/work/engine";
 import { taskPolicy } from "../do/work/grant";
 import { startConfigOf, type RunnerPlan } from "./planner";
-import { defaultStartConfig, mcpServerUrlsOf } from "./startconfig";
+import { mcpServerUrlsOf } from "./startconfig";
 
 const env = { OF_PUBLIC_URL: "https://cp.example.com", OF_R2_ACCOUNT_ID: "acct" } as unknown as Env;
 const fx = { cfg: { controlUrl: "https://cp.example.com", r2AccountId: "acct" } } as unknown as Fx;
@@ -58,7 +58,7 @@ describe("required hosts of a restricted run", () => {
     expect(mcpServerUrlsOf({ mcp_servers: servers as Run["config"]["mcp_servers"] })).toEqual(want);
   });
 
-  it("the task policy and both start configurations allow MCP server hosts", async () => {
+  it("the task policy and the start configuration allow MCP server hosts", async () => {
     const r = run({ mcp_servers: { tracker: { url: "https://mcp.example.com/sse" } } });
     const required = ["cp.example.com", "acct.r2.cloudflarestorage.com", "mcp.example.com", "api.anthropic.com"];
 
@@ -68,11 +68,10 @@ describe("required hosts of a restricted run", () => {
     expect(task.allowedHosts).toContain("mcp.example.com");
 
     const session = { session: 1 } as RunSession;
-    for (const sc of [startConfigOf(env, r, session, plan), await defaultStartConfig(env, r, session)]) {
-      expect(sc.network_policy?.always_allow).toEqual(required);
-      expect(sc.network_policy?.denied_hosts).toEqual(["evil.test"]);
-      expect(sc.network_policy?.allowed_hosts).toEqual([...required, "pypi.org"].sort());
-    }
+    const sc = startConfigOf(env, r, session, plan);
+    expect(sc.network_policy?.always_allow).toEqual(required);
+    expect(sc.network_policy?.denied_hosts).toEqual(["evil.test"]);
+    expect(sc.network_policy?.allowed_hosts).toEqual([...required, "pypi.org"].sort());
   });
 
   it("an unrestricted run has no task policy", () => {

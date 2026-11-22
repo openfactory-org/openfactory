@@ -167,14 +167,21 @@ export function formatFlags(flags: FlagSpec[]): string {
   return lines.map((l) => `${l.left.padEnd(width)}   ${l.usage}`).join("\n");
 }
 
+export interface AppOptions {
+  /** Rewrites an error of a command before it is printed, for example to add details. */
+  mapError?: (err: unknown) => unknown;
+}
+
 export class App {
   readonly root: Command;
   readonly groups: GroupSpec[];
   readonly rootName: string;
-  constructor(root: Command, groups: GroupSpec[] = []) {
+  readonly #mapError: (err: unknown) => unknown;
+  constructor(root: Command, groups: GroupSpec[] = [], options: AppOptions = {}) {
     this.root = root;
     this.groups = groups;
     this.rootName = commandName(root);
+    this.#mapError = options.mapError ?? ((err) => err);
   }
 
   /** The path of commands from the root to the target, and the arguments left. */
@@ -265,7 +272,8 @@ export class App {
     try {
       await this.#execute(argv, env, globals);
       return 0;
-    } catch (err) {
+    } catch (thrown) {
+      const err = this.#mapError(thrown);
       if (err instanceof CliError) {
         if (!err.silent) env.stderr.write(`error: ${err.message}\n`);
         return err.exitCode;
@@ -340,9 +348,7 @@ export class App {
         case "int": {
           const s = String(raw);
           if (!/^[+-]?\d+$/.test(s))
-            throw new CliError(
-              `invalid argument "${s}" for "--${f.name}" flag: strconv.ParseInt: parsing "${s}": invalid syntax`,
-            );
+            throw new CliError(`invalid argument "${s}" for "--${f.name}" flag: not an integer`);
           values.set(f.name, Number(s));
           break;
         }

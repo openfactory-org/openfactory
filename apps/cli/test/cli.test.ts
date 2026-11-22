@@ -242,6 +242,6 @@ describe("argument errors", () => {
   it("rejects a bad integer", async () => {
     const r = await runCli(["run", "list", "--limit", "x"], { vars: { OF_API_KEY: "k" } });
     expect(r.code).toBe(1);
-    expect(r.err).toContain('invalid argument "x" for "--limit" flag');
+    expect(r.err).toBe('error: invalid argument "x" for "--limit" flag: not an integer\n');
   });
 });

@@ -122,6 +122,16 @@ describe("factory", () => {
     expect(r.err).toContain("\n  factory.yaml:3: bad\n  x.md: worse\n");
   });
 
+  it("expands validation errors of the API for every command", async () => {
+    const r = await runCli(["secret", "set", "TOKEN", "v1", "--type", "nope"], {
+      vars: KEY,
+      handler: () =>
+        problem(400, "invalid_request", "Invalid", { errors: [{ file: "type", message: "unknown secret type" }] }),
+    });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("\n  type: unknown secret type\n");
+  });
+
   it("dispatches a prompt of several words with metadata", async () => {
     const r = await runCli(["factory", "run", "fac_1", "fix", "the", "bug", "--title", "T", "--metadata", "a=b"], {
       vars: KEY,
@@ -345,6 +355,39 @@ describe("work-item and inbox", () => {
       handler: router({ "POST /inbox/i1/unresolve": json({ id: "i1" }) }),
     });
     expect(u.out).toBe("Reopened i1\n");
+  });
+});
+
+describe("--output json", () => {
+  // Every command that gets a resource back prints it with -o json.
+  const cases: { args: string[]; route: string; answer: Record<string, unknown> }[] = [
+    {
+      args: ["run", "followup", "r", "more"],
+      route: "POST /runs/r/followups",
+      answer: { run_id: "r", state: "RUNNING" },
+    },
+    { args: ["run", "cancel", "r"], route: "POST /runs/r/cancel", answer: { run_id: "r" } },
+    {
+      args: ["work-item", "complete", "wi_1"],
+      route: "POST /work-items/wi_1/complete",
+      answer: { id: "wi_1", stage: "complete" },
+    },
+    { args: ["inbox", "resolve", "i1", "ok"], route: "POST /inbox/i1/resolve", answer: { id: "i1", resolution: "ok" } },
+    { args: ["secret", "set", "T", "v"], route: "POST /secrets", answer: { name: "T", type: "generic" } },
+  ];
+  for (const c of cases) {
+    it(`prints the answer of ${c.args.slice(0, 2).join(" ")}`, async () => {
+      const r = await runCli(["-o", "json", ...c.args], { vars: KEY, handler: router({ [c.route]: json(c.answer) }) });
+      expect(r.code).toBe(0);
+      expect(JSON.parse(r.out)).toEqual(c.answer);
+    });
+  }
+
+  it("rejects an unknown output format", async () => {
+    const r = await runCli(["-o", "yaml", "factory", "list"], { vars: KEY });
+    expect(r.code).toBe(1);
+    expect(r.err).toBe('error: invalid --output "yaml" (want text or json)\n');
+    expect(r.calls).toEqual([]);
   });
 });
 
@@ -633,7 +676,26 @@ describe("mcp-registry", () => {
 
   it("rejects a header without a name", async () => {
     const r = await runCli(["mcp-registry", "add", "x", "--url", "u", "--header", "=v"], { vars: KEY });
-    expect(r.err).toBe('error: --header "=v": want NAME=VALUE\n');
+    expect(r.err).toBe('error: invalid --header "=v" (want NAME=VALUE)\n');
+  });
+
+  it("reads the registry and the built-in servers with one request", async () => {
+    const r = await runCli(["-o", "json", "mcp-registry", "list"], {
+      vars: KEY,
+      handler: router({
+        "GET /mcp-servers": json({
+          items: [{ id: "m1", name: "sentry", url: "https://mcp.sentry.dev/mcp" }],
+          page_info: {},
+          builtin: [{ managed_id: "linear", provider: "linear", configured: true }],
+        }),
+      }),
+    });
+    expect(r.code).toBe(0);
+    expect(r.calls.map((c) => `${c.method} ${new URL(c.url).pathname}`)).toEqual(["GET /api/v1/mcp-servers"]);
+    expect(JSON.parse(r.out)).toEqual({
+      mcp_servers: [{ id: "m1", name: "sentry", url: "https://mcp.sentry.dev/mcp" }],
+      builtin: [{ managed_id: "linear", provider: "linear", configured: true }],
+    });
   });
 
   it("connects, disconnects and deletes", async () => {
@@ -651,6 +713,16 @@ describe("mcp-registry", () => {
     expect((await runCli(["mcp-registry", "delete", "notion"], { vars: KEY, handler })).out).toBe(
       "Deleted MCP server notion\n",
     );
+  });
+
+  it("prints the OAuth URL as JSON with -o json", async () => {
+    const r = await runCli(["-o", "json", "mcp-registry", "connect", "notion"], {
+      vars: KEY,
+      handler: router({
+        "POST /mcp-servers/notion/oauth/connect": json({ authorization_url: "https://auth.test/x" }),
+      }),
+    });
+    expect(JSON.parse(r.out)).toEqual({ authorization_url: "https://auth.test/x" });
   });
 
   it("describes the mode", () => {

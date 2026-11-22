@@ -10,7 +10,7 @@ import { handleAuthRoute, loginProviders } from "./auth/routes";
 import { clearSessionCookie } from "./auth/session";
 import { cronHooksList, matchServerRoutes } from "./builder";
 import { handleCloudIdRoute } from "./cloudid/routes";
-import { errorResponse, type Handler, type RouteContext } from "./http/handler";
+import { errorResponse, type RouteContext, type RouteDef } from "./http/handler";
 import { API_PREFIX, Router } from "./http/router";
 import { ROUTES } from "./http/routes";
 import { handleMcpRequest } from "./mcp/index";
@@ -19,8 +19,7 @@ import { expire as expireEventContext } from "./eventctx";
 import { handleRetentionJob } from "./retention/consumer";
 import { SCORING_JOB_KINDS, handleScoringJob } from "./scoring/jobs";
 import { teamOfDoName } from "./lib/outbox/dest";
-// Registers the engine, provider and MCP backends on load.
-import "./wiring";
+import { bootstrapControlPlane } from "./wiring";
 
 export { BenchmarkDO } from "./do/benchmark/index";
 export { DispatchDO } from "./do/dispatch/index";
@@ -33,7 +32,26 @@ export { WorkerHubDO } from "./do/workerhub/index";
 export { registerServerRoute, registerCronHook, type ServerRouteHandler, type CronHook } from "./builder";
 export type { Env } from "./contracts/env";
 
-const router = new Router(ROUTES);
+// The composition root: every isolate loads this module before it serves.
+bootstrapControlPlane();
+
+/**
+ * Routes under /api/v1 that are not REST operations of api/openapi.json.
+ * GET /workers/connect is the worker protocol v2 WebSocket. It is public:
+ * the worker proves itself inside the socket. Its two literal segments win
+ * over GET /workers/{id}.
+ */
+const SOCKET_ROUTES: readonly RouteDef[] = [
+  {
+    method: "GET",
+    path: "/workers/connect",
+    operationId: "connectWorker",
+    role: "public",
+    handler: workersApi.connectWorker,
+  },
+];
+
+const router = new Router([...ROUTES, ...SOCKET_ROUTES]);
 
 /** Server paths outside /api/v1 (wrangler.jsonc run_worker_first). */
 const SERVER_PREFIXES = [
@@ -72,16 +90,6 @@ async function handleApi(
 ): Promise<Response> {
   const path = url.pathname.slice(API_PREFIX.length) || "/";
   const problemCtx = { instance: url.pathname, requestId };
-  // Worker protocol v2 socket: the worker proves itself inside the socket (WS6).
-  const connect = (workersApi as unknown as { connectWorker?: Handler }).connectWorker;
-  if (path === "/workers/connect" && request.method === "GET" && connect) {
-    const route = ROUTES.find((r) => r.operationId === "getWorker")!;
-    try {
-      return await connect(request, env, { params: {}, url, requestId, route, executionCtx: ctx });
-    } catch (e) {
-      return errorResponse(e, problemCtx);
-    }
-  }
   const m = router.match(request.method, path);
   if (m.kind === "not_found")
     return problemResponse(new OfError("resource_not_found", `no route for ${url.pathname}`), problemCtx);
@@ -216,9 +224,7 @@ export default {
     // Safety net (1/min): re-arm the alarms of the team's TeamDO and DispatchDO, then owner hooks.
     const jobs: Promise<unknown>[] = [
       env.TEAM.getByName(doName.team(DEFAULT_TEAM)).ensureAlarm(),
-      (
-        env.DISPATCH.getByName(doName.dispatch(DEFAULT_TEAM)) as unknown as { ensureAlarm?: () => Promise<void> }
-      ).ensureAlarm?.() ?? Promise.resolve(),
+      env.DISPATCH.getByName(doName.dispatch(DEFAULT_TEAM)).ensureAlarm(),
       env.INDEX.getByName(doName.index(DEFAULT_TEAM)).ensureAlarm(),
       ...cronHooksList().map((h) => h(env, ctx)),
       scheduleRetention(env, controller.scheduledTime),

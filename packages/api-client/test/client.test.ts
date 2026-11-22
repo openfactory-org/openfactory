@@ -254,6 +254,20 @@ describe("SSE", () => {
     ]);
   });
 
+  it("yields the last block without a blank line only with flushAtEnd", async () => {
+    const chunks = ["data: a\n\n", "event: done\ndata: b\r"];
+    const got = async (flushAtEnd: boolean) => {
+      const events = [];
+      for await (const ev of readSSE(sseBody(chunks), undefined, { flushAtEnd })) events.push(ev);
+      return events;
+    };
+    expect(await got(false)).toEqual([{ event: "message", id: "", data: "a" }]);
+    expect(await got(true)).toEqual([
+      { event: "message", id: "", data: "a" },
+      { event: "done", id: "", data: "b" },
+    ]);
+  });
+
   it("streams run events and reconnects after the last seq", async () => {
     const f = fakeFetch((req, n) => {
       if (n === 1) {

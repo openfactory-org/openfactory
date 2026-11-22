@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 import type { CallMeta, Principal } from "../../contracts/do-messages";
 import { knownModel, setNameResolver, webhookFilterIds, type FilterNameResolver } from "./preflight";
 import { setGitSourceChecker, type FactoryRecord } from "./factories";
-import type { TeamKit } from "./index";
+import type { TeamKit } from "./kit";
 
 interface Issue {
   file: string;

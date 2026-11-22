@@ -1,8 +1,7 @@
 /**
  * Code host coverage: which repositories of a factory an integration record
- * can serve. This mirrors the server rule in internal/forge/forgeutil
- * (RepoOwner, SelectIntegration) and internal/forge (IntegrationProvider,
- * Resolver.Forge). Keep the two in step.
+ * can serve. This mirrors the server rule in the forges of the control plane
+ * (repoOwner, selectIntegration, integrationProvider). Keep the two in step.
  */
 
 /** The fields of a repository reference that the rule reads. */

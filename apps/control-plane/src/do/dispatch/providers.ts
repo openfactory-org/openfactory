@@ -6,13 +6,14 @@
 //   a provider ID     cloudflare-sandbox, daytona, boatdev, local, process, microvm or a plugin
 //   anything else     a worker ID (WorkerHubDO)
 //
-// Providers that run in-process register a factory with registerProvider().
-// cloudflare-sandbox is the service binding. A worker target goes through its
-// WorkerHubDO.
-import { doName, OfError } from "@openfactory/core";
+// Providers that run in-process register a factory with registerProvider()
+// (bootstrapControlPlane in src/wiring.ts). cloudflare-sandbox is the service
+// binding. A worker target is the microvm provider of its WorkerHubDO.
+import { OfError } from "@openfactory/core";
 import type { ProviderCapabilities, SandboxProvider, SandboxTask, TaskStatus } from "@openfactory/sandbox";
-import type { DispatchTarget, WorkerHubRpc } from "../../contracts/do-messages";
+import type { DispatchTarget } from "../../contracts/do-messages";
 import type { Env } from "../../contracts/env";
+import { workerProvider } from "../workerhub/providers";
 
 export const DEFAULT_PROVIDER = "local";
 
@@ -20,20 +21,13 @@ export type ProviderFactory = (env: Env, teamId: string) => SandboxProvider;
 
 const factories = new Map<string, ProviderFactory>();
 
-/** Registers an in-process provider (daytona, boatdev, local). A second call replaces the first. */
+/** Registers an in-process provider (daytona, boatdev, local, or one of a custom build). A second call replaces the first. */
 export function registerProvider(id: string, factory: ProviderFactory): void {
   factories.set(id, factory);
 }
 
 export function unregisterProvider(id: string): void {
   factories.delete(id);
-}
-
-/** The provider of an enrolled worker. WS6 sets it (MicroVMProvider); the default goes straight to WorkerHubDO. */
-export type WorkerProviderFactory = (env: Env, teamId: string, workerId: string) => SandboxProvider;
-let workerFactory: WorkerProviderFactory | undefined;
-export function setWorkerProviderFactory(f: WorkerProviderFactory): void {
-  workerFactory = f;
 }
 
 export function registeredProviders(): string[] {
@@ -93,51 +87,9 @@ class ServiceBindingProvider implements SandboxProvider {
   list(): Promise<TaskStatus[]> {
     return this.b.list();
   }
-}
-
-/** A worker behind its WorkerHubDO, seen as a provider. Microvm workers enforce egress natively. */
-class WorkerProvider implements SandboxProvider {
-  readonly id: string;
-  constructor(
-    private readonly env: Env,
-    private readonly teamId: string,
-    private readonly workerId: string,
-  ) {
-    this.id = `worker:${workerId}`;
-  }
-  private hub(): WorkerHubRpc {
-    return this.env.WORKER_HUB.getByName(doName.workerHub(this.teamId, this.workerId)) as unknown as WorkerHubRpc;
-  }
-  async capabilities(): Promise<ProviderCapabilities> {
-    return {
-      egress: "native",
-      image: "snapshot",
-      isolation: "microvm",
-      arch: ["amd64", "arm64"],
-      maxLifetimeSeconds: null,
-      startRate: [],
-      instanceTypes: [],
-      customResources: true,
-      loopbackDaemonPorts: [],
-    };
-  }
-  async preflight() {
-    return { ok: true } as const;
-  }
-  start(task: SandboxTask): Promise<TaskStatus> {
-    return this.hub().taskAssign(task);
-  }
-  status(taskId: string): Promise<TaskStatus> {
-    return this.hub().taskStatus(taskId);
-  }
-  cancel(taskId: string, graceSeconds: number): Promise<void> {
-    return this.hub().taskCancel(taskId, graceSeconds);
-  }
-  destroy(taskId: string): Promise<void> {
-    return this.hub().taskDestroy(taskId);
-  }
-  list(): Promise<TaskStatus[]> {
-    return this.hub().taskList();
+  /** Tells the provider that the session started, so it drops the bootstrap token. */
+  ack(taskId: string): Promise<void> {
+    return this.b.ack(taskId);
   }
 }
 
@@ -146,7 +98,7 @@ class WorkerProvider implements SandboxProvider {
  * granted pool slot. Throws OfError invalid_request for an unknown provider.
  */
 export function providerFor(env: Env, teamId: string, providerId: string, workerId?: string): SandboxProvider {
-  if (workerId) return workerFactory ? workerFactory(env, teamId, workerId) : new WorkerProvider(env, teamId, workerId);
+  if (workerId) return workerProvider(env, teamId, workerId);
   const f = factories.get(providerId);
   if (f) return f(env, teamId);
   if (providerId === "cloudflare-sandbox")

@@ -54,6 +54,8 @@ export function WorkersPage() {
   );
   const del = useMutate((w: Worker) => unwrap(api.DELETE("/workers/{id}", { params: { path: { id: w.id ?? "" } } })), { invalidate: [WORKERS_KEY], success: "Worker deleted." });
   const factoryName = (id: string) => (factories.data ?? []).find((f) => f.id === id)?.name ?? id;
+  // The worker that a drain, resume, revoke or delete is running for: its row buttons wait.
+  const busyId = act.isPending ? act.variables?.w.id : del.isPending ? del.variables?.id : undefined;
 
   return (
     <>
@@ -107,6 +109,7 @@ export function WorkersPage() {
                     const state = w.status ?? "offline";
                     const total = w.slots ?? w.capacity ?? 0;
                     const used = w.slots_used ?? w.active ?? 0;
+                    const busy = busyId !== undefined && busyId === w.id;
                     return (
                       <tr key={w.id}>
                         <td>
@@ -140,20 +143,21 @@ export function WorkersPage() {
                         <td className="right">
                           {isAdmin && state !== "revoked" && (
                             <>
-                              <Button variant="ghost" onClick={() => setEditing(w)} aria-label={`Edit factories of ${w.name}`}>
+                              <Button variant="ghost" disabled={busy} onClick={() => setEditing(w)} aria-label={`Edit factories of ${w.name}`}>
                                 Factories
                               </Button>
                               {state === "draining" ? (
-                                <Button variant="ghost" onClick={() => act.mutate({ w, op: "resume" })} aria-label={`Resume ${w.name}`}>
+                                <Button variant="ghost" disabled={busy} onClick={() => act.mutate({ w, op: "resume" })} aria-label={`Resume ${w.name}`}>
                                   Resume
                                 </Button>
                               ) : (
-                                <Button variant="ghost" onClick={() => act.mutate({ w, op: "drain" })} aria-label={`Drain ${w.name}`}>
+                                <Button variant="ghost" disabled={busy} onClick={() => act.mutate({ w, op: "drain" })} aria-label={`Drain ${w.name}`}>
                                   Drain
                                 </Button>
                               )}
                               <Button
                                 variant="ghost"
+                                disabled={busy}
                                 aria-label={`Revoke ${w.name}`}
                                 onClick={() =>
                                   void confirm({
@@ -171,6 +175,7 @@ export function WorkersPage() {
                           {isAdmin && (
                             <Button
                               variant="ghost"
+                              disabled={busy}
                               aria-label={`Delete ${w.name}`}
                               onClick={() => void confirm({ title: `Delete worker ${w.name}?`, body: "The worker is revoked and its record is removed. You cannot undo this.", confirmLabel: "Delete worker", danger: true }).then((ok) => ok && del.mutate(w))}
                             >
@@ -188,7 +193,8 @@ export function WorkersPage() {
         }
       </Query>
       {isAdmin && <EnrollDialog open={enrolling} onClose={() => setEnrolling(false)} />}
-      {isAdmin && <FactoriesDialog worker={editing} onClose={() => setEditing(null)} />}
+      {/* The key gives each worker a fresh dialog, so no selection carries over. */}
+      {isAdmin && <FactoriesDialog key={editing?.id ?? ""} worker={editing} onClose={() => setEditing(null)} />}
       <DeadEvents />
     </>
   );
@@ -269,8 +275,8 @@ function EnrollDialog({ open, onClose }: { open: boolean; onClose: () => void })
           <Field label="Name" htmlFor="we-name" hint="Optional. The host can send a name too.">
             <input id="we-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="build-host-1" />
           </Field>
-          <Field label="Labels" htmlFor="we-labels" hint="One key=value per line. An agent can select workers with workerHost: pool:<label>.">
-            <textarea id="we-labels" rows={3} className="mono" value={form.labels} onChange={(e) => setForm({ ...form, labels: e.target.value })} placeholder="pool=linux" />
+          <Field label="Labels" htmlFor="we-labels" hint="One key=value per line. An agent selects workers by label key with workerHost: pool:<key>, for example pool:gpu.">
+            <textarea id="we-labels" rows={3} className="mono" value={form.labels} onChange={(e) => setForm({ ...form, labels: e.target.value })} placeholder={"gpu=a100\nregion=eu"} />
           </Field>
           <FactoryPicker value={form.factories} onChange={(factories) => setForm({ ...form, factories })} />
           <div className="dialog-footer">
@@ -292,14 +298,10 @@ function FactoriesDialog({ worker, onClose }: { worker: Worker | null; onClose: 
   const save = useMutate((v: { id: string; factories: string[] }) => unwrap(api.PATCH("/workers/{id}", { params: { path: { id: v.id } }, body: { factories: v.factories } })), {
     invalidate: [WORKERS_KEY],
     success: "Worker updated.",
-    onSuccess: () => close(),
+    onSuccess: () => onClose(),
   });
-  function close() {
-    setPicked(null);
-    onClose();
-  }
   return (
-    <Dialog open={!!worker} onOpenChange={(o) => !o && close()} title={`Factories of ${worker?.name ?? "worker"}`} description="Restrict the worker to some factories. With none selected, every factory of the team can use it.">
+    <Dialog open={!!worker} onOpenChange={(o) => !o && onClose()} title={`Factories of ${worker?.name ?? "worker"}`} description="Restrict the worker to some factories. With none selected, every factory of the team can use it.">
       <form
         className="stack stack-sm"
         onSubmit={(e) => {
@@ -310,7 +312,7 @@ function FactoriesDialog({ worker, onClose }: { worker: Worker | null; onClose: 
         <FactoryPicker value={value} onChange={setPicked} />
         {worker?.labels && Object.keys(worker.labels).length > 0 && <p className="small muted mono">{kvLines(worker.labels).replace(/\n/g, ", ")}</p>}
         <div className="dialog-footer">
-          <Button onClick={close}>Cancel</Button>
+          <Button onClick={onClose}>Cancel</Button>
           <Button type="submit" variant="primary" busy={save.isPending}>
             Save
           </Button>

@@ -26,7 +26,7 @@ import {
   type WireError,
   type WireFrame,
   type WireHello,
-} from "../../../../../packages/sandbox/src/microvm/wire";
+} from "@openfactory/sandbox/microvm";
 import type { Ack, OutboxEnvelope, TeamRpc, WorkerHubRpc } from "../../contracts/do-messages";
 import { serverConfig } from "../../config";
 import type { Env } from "../../contracts/env";
@@ -35,13 +35,11 @@ import { b64url, fromAnyB64, fromB64url, randomBytes } from "../../lib/bytes";
 import { dest } from "../../lib/outbox/dest";
 import type { OutboxRow } from "../../lib/outbox/outbox";
 import { isoOf } from "../../lib/page";
+import { isOpError } from "../../lib/rpc";
 import { all, first } from "../../lib/sql/query";
 import type { WorkerRecord } from "../team/workers";
-import { isOpError } from "./op";
 import m0001 from "./migrations/0001_init";
 import { mintWorkerToken } from "./token";
-// Registers the "local" provider (development process workers).
-import "./providers";
 
 /** Heartbeat interval announced in welcome. */
 export const HEARTBEAT_MS = 15_000;
@@ -56,13 +54,17 @@ export const PONG_TEXT = '{"type":"pong"}';
 /** Custom outbox destination: WorkDO.sandboxState of a run. */
 const SANDBOX_STATE_DEST = "sandbox-state:";
 
-/** Settings of the hub; tests may change them. */
-export const hubSettings = {
+/** Settings of the hub. They are constants: nothing sets them at run time. */
+export const hubSettings: Readonly<{
   /** Lowest runtime version (hello.version) the hub accepts; "" = any. */
+  minRuntimeVersion: string;
+  recommendedRuntimeVersion: string;
+  callTimeoutMs: number;
+}> = Object.freeze({
   minRuntimeVersion: "",
   recommendedRuntimeVersion: "",
   callTimeoutMs: CALL_TIMEOUT_MS,
-};
+});
 
 type Mode = "key" | "apikey";
 type Phase = "challenge" | "hello" | "ready";

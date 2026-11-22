@@ -30,14 +30,9 @@ import {
   validURLToken,
 } from "../../webhooks/config";
 import { signatureSchemes } from "../../webhooks/signature";
-import { created, noContent, type OpCall, type TeamKit, type TeamOp } from "./index";
+import { created, noContent, type OpCall, type TeamKit, type TeamOp } from "./kit";
 import * as factories from "./factories";
 import * as secrets from "./secrets";
-import { setNoticeDeliverer } from "../work/index";
-import { deliverNotice } from "../../notify/index";
-
-// Notices of the WorkDO outbox (dest "notice:") are delivered by src/notify.
-setNoticeDeliverer((env, envelope) => deliverNotice(env, envelope));
 
 export const migrations: readonly Migration[] = [
   {
@@ -775,7 +770,11 @@ export function setup(kit: TeamKit): void {
     const key = t.payload?.key ?? t.name.slice("sched:".length);
     await fireSchedule(kit, key);
   });
-  secrets.registerRewrapSource({
+}
+
+/** The sealed personal forge tokens: POST /secrets/rewrap re-encrypts them. */
+export const rewrapSources: readonly secrets.RewrapSource[] = [
+  {
     name: "user_forge_tokens",
     list: (k) =>
       all<{ user_id: string; provider: string; envelope: ArrayBuffer }>(
@@ -799,5 +798,5 @@ export function setup(kit: TeamKit): void {
       k.sql.exec("UPDATE user_forge_tokens SET envelope = ? WHERE user_id = ? AND provider = ?", next, uid, p);
       return true;
     },
-  });
-}
+  },
+];

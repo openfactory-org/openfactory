@@ -8,13 +8,13 @@ import { runInDurableObject } from "cloudflare:test";
 import { doName } from "@openfactory/core";
 import { parseProviderError, type SandboxTask, type TaskStatus } from "@openfactory/sandbox";
 import { afterEach, describe, expect, it } from "vitest";
-import { toWireStatus, workerAuthMessage, type WireFrame } from "../../../../../packages/sandbox/src/microvm/wire";
+import { toWireStatus, workerAuthMessage, type WireFrame } from "@openfactory/sandbox/microvm";
 import type { CallMeta, Principal, TeamRpc } from "../../contracts/do-messages";
 import { drainWorker, resumeWorker, revokeWorker } from "../../api/workers";
 import { ROUTES } from "../../http/routes";
 import type { RouteContext } from "../../http/handler";
-import { preflightWorkerHosts, setFactoryAccess, setGitCredentialMinter } from "../team/workers";
-import type { TeamKit } from "../team/index";
+import { preflightWorkerHosts, setGitCredentialMinter } from "../team/workers";
+import type { TeamKit } from "../team/kit";
 import type { CompiledDefinition } from "@openfactory/definition";
 import { localProvider } from "./providers";
 
@@ -287,7 +287,6 @@ async function workerView(id: string): Promise<any> {
 
 afterEach(() => {
   setGitCredentialMinter(null);
-  setFactoryAccess(null);
 });
 
 describe("enrollment", () => {
@@ -630,12 +629,26 @@ describe("providers and machines", () => {
   });
 
   it("lists the machines of active definitions, sorted, with names filled", async () => {
-    setFactoryAccess({
-      listFactories: () => [{ id: "fac_b", name: "beta" }],
-      activeMachines: () => ({ large: { vcpus: 8, memoryGb: 16 }, small: { name: "tiny", vcpus: 1 } }),
+    const machines = { large: { vcpus: 8, memoryGb: 16 }, small: { name: "tiny", vcpus: 1 } };
+    await runInDurableObject(env.TEAM.getByName(doName.team(TEAM)), async (_i, state) => {
+      const sql = state.storage.sql;
+      sql.exec(
+        "INSERT INTO factories (id, alias, name, created_ms, data) VALUES (?, ?, ?, ?, ?)",
+        "fac_b",
+        "beta",
+        "beta",
+        Date.now(),
+        JSON.stringify({ id: "fac_b", alias: "beta", name: "beta" }),
+      );
+      sql.exec(
+        "INSERT INTO factory_runtime (factory_id, version_id, data) VALUES (?, ?, ?)",
+        "fac_b",
+        "dv_1",
+        JSON.stringify({ machines }),
+      );
     });
     const r = await op("listMachines", {}, null, VIEWER);
-    expect(r.items).toEqual([
+    expect(r.items.filter((m: { factory_id: string }) => m.factory_id === "fac_b")).toEqual([
       { factory_id: "fac_b", factory_name: "beta", name: "large", vcpus: 8, memoryGb: 16 },
       { factory_id: "fac_b", factory_name: "beta", name: "tiny", vcpus: 1 },
     ]);

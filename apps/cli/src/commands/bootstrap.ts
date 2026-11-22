@@ -1,12 +1,7 @@
+import { unwrap } from "@openfactory/api-client";
 import { emit } from "../format.ts";
 import { makeClient, isJSON } from "../client.ts";
 import { CliError, noArgs, type Command } from "../framework.ts";
-
-interface BootstrapResult {
-  team: { id: string; name: string };
-  user: { email: string };
-  key: string;
-}
 
 export const bootstrapCommand: Command = {
   use: "bootstrap",
@@ -24,9 +19,11 @@ bootstrapped.`,
     const email = flags.string("email");
     if (email === "") throw new CliError("--email is required");
     const c = makeClient(globals, env, true);
-    const res = await c.request<BootstrapResult>("POST", "bootstrap", {
-      body: { team_name: flags.string("team"), admin_email: email, admin_name: flags.string("name") },
-    });
+    const res = await unwrap(
+      c.api.POST("/bootstrap", {
+        body: { team_name: flags.string("team"), admin_email: email, admin_name: flags.string("name") },
+      }),
+    );
     if (isJSON(globals)) return emit(env.stdout, res);
     env.stdout.write(
       `Team:    ${res.team.name} (${res.team.id})\nAdmin:   ${res.user.email}\nAPI key: ${res.key}\n\nThe key is shown only once:\n  export OF_SERVER=${globals.server} OF_API_KEY=${res.key}\n`,

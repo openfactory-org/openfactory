@@ -406,6 +406,27 @@ type Applier interface {
 	RemoveVM(ctx context.Context, vm VMNet, rules string) error
 }
 
+// TemplateVM returns the network of a snapshot template VM: slot 255 on the
+// tap TemplateTap with link-local addresses. The caller sets the guest MAC.
+func TemplateVM(owner int) VMNet {
+	return VMNet{
+		Slot: 255, Tap: TemplateTap, Owner: owner,
+		HostIP: netip.MustParseAddr("169.254.255.1"), GuestIP: netip.MustParseAddr("169.254.255.2"),
+	}
+}
+
+// RenderTemplate returns the script that drops every packet of the template
+// tap and the script that removes the rule.
+func RenderTemplate() (add, remove string) {
+	add = "add chain inet openfactory tpl_in\nadd rule inet openfactory tpl_in drop\n" +
+		`add element inet openfactory vm_in  { "` + TemplateTap + `" : jump tpl_in }` + "\n" +
+		`add element inet openfactory vm_fwd { "` + TemplateTap + `" : jump tpl_in }` + "\n"
+	remove = `delete element inet openfactory vm_in  { "` + TemplateTap + `" }` + "\n" +
+		`delete element inet openfactory vm_fwd { "` + TemplateTap + `" }` + "\n" +
+		"flush chain inet openfactory tpl_in\ndelete chain inet openfactory tpl_in\n"
+	return add, remove
+}
+
 // ParseResolvers returns the IPv4 name servers of a resolv.conf.
 func ParseResolvers(resolvConf string) []netip.Addr {
 	var out []netip.Addr

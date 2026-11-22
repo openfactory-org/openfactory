@@ -176,8 +176,6 @@ export interface OutboxPayloads {
     completedMs: number | null;
     version: number;
     keys: string[];
-    /** The work item's source key, stored as kind 'source' (not 'thread'). */
-    sourceKey?: string;
   };
 
   // TeamDO / router / Worker -> IngressDO(partition); key = dedupe key (event.id)
@@ -193,8 +191,8 @@ export interface OutboxPayloads {
   "provider.cancel": { providerId: string; workerId?: string; taskId: string; graceSeconds: number };
   "provider.destroy": { providerId: string; workerId?: string; taskId: string };
   "provider.status": { providerId: string; workerId?: string; taskId: string };
-  /** key (taskId, "ack"). Sent after session.started so the provider stops its start watchdog. */
-  "provider.ack": { target: DispatchTarget; providerId: string; taskId: string };
+  /** key (taskId, "ack"). Sent after session.started so the provider forgets the bootstrap token. */
+  "provider.ack": { providerId: string; workerId?: string; taskId: string };
 
   // Any DO -> IndexDO (unordered, versioned)
   /** key (entity, id, version); upsert if newer. */
@@ -332,6 +330,8 @@ export interface TeamRpc extends OutboxReceiver {
   workersRevoke(meta: CallMeta, workerId: string): Promise<unknown>;
   /** REST handlers of TeamDO-owned routes (factories.*, settings.*, schedules.*, integrations.*, mcp.*). */
   api(meta: CallMeta, op: string, params: Record<string, string>, body: unknown): Promise<unknown>;
+  /** One retention step (queue job retention.sweep); more: call again. */
+  retentionSweep(): Promise<{ more: boolean }>;
 }
 
 /** WorkDO (key team:<id>|work:<token>). Runner calls are keyed by (run, session, seq). */
@@ -376,6 +376,10 @@ export interface WorkRpc extends OutboxReceiver {
   leaseCheck(runId: string, session: number): Promise<"open" | "ended">;
   /** REST handlers of WorkDO-owned routes. */
   api(meta: CallMeta, op: string, params: Record<string, string>, body: unknown): Promise<unknown>;
+  /** One compaction step of a finished run (queue job compaction.run); more: call again. */
+  compactRun(runId: string): Promise<{ more: boolean }>;
+  /** One retention step (queue job retention.sweep); more: call again. */
+  retentionSweep(): Promise<{ more: boolean }>;
 }
 
 /** DispatchDO (key team:<id>|dispatch): admission only. */
@@ -410,11 +414,13 @@ export interface IndexRpc extends OutboxReceiver {
   /** lists.* : paged reads of the read model. */
   list(meta: CallMeta, op: string, params: Record<string, string>): Promise<unknown>;
   markInboxRead(meta: CallMeta, inboxId: string): Promise<void>;
+  /** One retention step (queue job retention.sweep); more: call again. */
+  retentionSweep(): Promise<{ more: boolean }>;
 }
 
 /** IngressDO (key team:<id>|ingress:<partition>). */
 export interface IngressRpc extends OutboxReceiver {
-  enqueue(
+  enqueueEvent(
     partition: string,
     event: CoreEvent,
     dedupeKey: string,

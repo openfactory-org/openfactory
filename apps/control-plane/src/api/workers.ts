@@ -2,21 +2,21 @@
 // the handler tells the worker's WorkerHubDO (configure, revoke), so a live
 // connection sees drain, resume, revoke and label changes at once.
 import { DEFAULT_TEAM, OfError, doName, invalid, problemResponse, toOfError } from "@openfactory/core";
-import { WORKER_ID_RE, WORKER_SUBPROTOCOL } from "../../../../packages/sandbox/src/microvm/wire";
+import { WORKER_ID_RE, WORKER_SUBPROTOCOL } from "@openfactory/sandbox/microvm";
 import type { Principal, TeamRpc } from "../contracts/do-messages";
 import type { Env } from "../contracts/env";
 import { bearerToken } from "../auth/apikeys";
-import { apiKeyPrincipal, registerBearerAuthenticator } from "../auth/authenticate";
+import { apiKeyPrincipal, type BearerAuthenticator } from "../auth/authenticate";
 import { isOpError, opError } from "../lib/rpc";
 import type { WorkerRecord } from "../do/team/workers";
-import { WORKER_TOKEN_PREFIX, verifyWorkerToken } from "../do/workerhub/token";
+import { verifyWorkerToken } from "../do/workerhub/token";
 import { callMeta, callTeam, json, readJson, teamApi, teamOf, type Handler, type RouteContext } from "../http/handler";
 
-// Worker access tokens (ofw_) authenticate routes with role "worker".
-registerBearerAuthenticator(WORKER_TOKEN_PREFIX, async (env, token): Promise<Principal | null> => {
+/** The bearer authenticator of worker access tokens (ofw_): routes with role "worker". bootstrapControlPlane registers it. */
+export const workerTokenAuthenticator: BearerAuthenticator = async (env, token): Promise<Principal | null> => {
   const c = await verifyWorkerToken(env, token);
   return c ? { kind: "worker", id: c.workerId, teamId: c.teamId, role: "user", factoryRoles: {} } : null;
-});
+};
 
 function team(env: Env, teamId: string): TeamRpc {
   return env.TEAM.getByName(doName.team(teamId)) as unknown as TeamRpc;
@@ -97,13 +97,8 @@ export const enrollWorker: Handler = async (request, env) => {
   return json({ worker_id: out.workerId, control_url: (env.OF_PUBLIC_URL ?? "").replace(/\/+$/, "") }, 201);
 };
 
-/** GET /api/v1/workers/{id}. Also catches GET /api/v1/workers/connect until the Worker routes it first. */
-export const getWorker: Handler = async (request, env, ctx) => {
-  if (ctx.params.id === "connect" && (request.headers.get("upgrade") ?? "").toLowerCase() === "websocket") {
-    return connectWorker(request, env, ctx);
-  }
-  return callTeam(env, ctx, "getWorker");
-};
+/** GET /api/v1/workers/{id}. */
+export const getWorker: Handler = (_request, env, ctx) => callTeam(env, ctx, "getWorker");
 
 /** PATCH /api/v1/workers/{id}. */
 export const updateWorker: Handler = withHubSync("configure");
@@ -140,12 +135,13 @@ export const getWorkerGitCredential: Handler = async (_request, env, ctx) => {
 };
 
 /**
- * GET /api/v1/workers/connect: the worker protocol v2 WebSocket. Routed by
- * the OF-Worker-ID header to WorkerHubDO. An enrolled worker sends no
- * Authorization header (the hub checks its Ed25519 key); a development
+ * GET /api/v1/workers/connect: the worker protocol v2 WebSocket, a public
+ * route of src/index.ts (it is not a REST operation of api/openapi.json).
+ * Routed by the OF-Worker-ID header to WorkerHubDO. An enrolled worker sends
+ * no Authorization header (the hub checks its Ed25519 key); a development
  * process worker sends a team API key.
  */
-export async function connectWorker(request: Request, env: Env, ctx: RouteContext): Promise<Response> {
+export const connectWorker: Handler = async (request, env, ctx) => {
   const problem = { instance: ctx.url.pathname, requestId: ctx.requestId };
   try {
     if ((request.headers.get("upgrade") ?? "").toLowerCase() !== "websocket") {
@@ -182,4 +178,4 @@ export async function connectWorker(request: Request, env: Env, ctx: RouteContex
   } catch (e) {
     return problemResponse(toOfError(e).error, problem);
   }
-}
+};

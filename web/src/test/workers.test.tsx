@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { WorkersPage } from "../pages/Workers";
 import { ME, mockFetch, renderAt } from "./utils";
 
@@ -49,6 +49,35 @@ describe("WorkersPage", () => {
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/workers/wrk_1/drain")).toBe(true));
     await user.click(screen.getByRole("button", { name: "Resume dev-box" }));
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/workers/wrk_2/resume")).toBe(true));
+  });
+
+  it("disables the buttons of a row while its action runs", async () => {
+    const { fn } = base();
+    // The drain call never answers, so the action stays pending.
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      return url.endsWith("/workers/wrk_1/drain") ? new Promise<Response>(() => undefined) : fn(input, init);
+    });
+    const user = userEvent.setup();
+    render();
+    await user.click(await screen.findByRole("button", { name: "Drain build-host-1" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Drain build-host-1" })).toBeDisabled());
+    expect(screen.getByRole("button", { name: "Revoke build-host-1" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Delete build-host-1" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Edit factories of build-host-1" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Resume dev-box" })).toBeEnabled();
+  });
+
+  it("opens the factory dialog without the selection of a cancelled edit", async () => {
+    base();
+    const user = userEvent.setup();
+    render();
+    await user.click(await screen.findByRole("button", { name: "Edit factories of build-host-1" }));
+    await user.click(await screen.findByRole("checkbox", { name: "Docs" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(await screen.findByRole("button", { name: "Edit factories of dev-box" }));
+    expect(await screen.findByRole("checkbox", { name: "Core" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Docs" })).not.toBeChecked();
   });
 
   it("edits the factory restriction with PATCH", async () => {

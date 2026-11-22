@@ -1,7 +1,7 @@
 import type { OpenFactoryClient, Run, RunMessage } from "@openfactory/api-client";
-import { runFinished, runWaitsForInput } from "@openfactory/api-client";
+import { runFinished, runWaitsForInput, unwrap } from "@openfactory/api-client";
 import { ago, emit, localClock, rfc3339Local, table, trunc } from "../format.ts";
-import { enc, isJSON, makeClient, resolveFactory } from "../client.ts";
+import { isJSON, makeClient, resolveFactory } from "../client.ts";
 import { exactArgs, minArgs, noArgs, type Command, type Env, type Writer } from "../framework.ts";
 
 export function printMessage(w: Writer, m: RunMessage): void {
@@ -24,6 +24,9 @@ const sleepMs = (ms: number, signal: AbortSignal): Promise<void> =>
     );
   });
 
+const getRun = (c: OpenFactoryClient, runId: string): Promise<Run> =>
+  unwrap(c.api.GET("/runs/{runId}", { params: { path: { runId } } }));
+
 /** Prints run messages; with follow it polls until the run is idle or finished. */
 export async function streamLogs(c: OpenFactoryClient, env: Env, runId: string, follow: boolean): Promise<void> {
   let after = 0;
@@ -33,7 +36,7 @@ export async function streamLogs(c: OpenFactoryClient, env: Env, runId: string, 
       if (m.seq > after) after = m.seq;
     }
     if (!follow) return;
-    const r = await c.request<Run>("GET", `runs/${enc(runId)}`);
+    const r = await getRun(c, runId);
     if (runFinished(r.state) || runWaitsForInput(r.state)) {
       // Drain anything written after the last poll.
       try {
@@ -98,7 +101,7 @@ const getCommand: Command = {
   args: exactArgs(1),
   async run({ args, globals, env }) {
     const c = makeClient(globals, env);
-    const r = await c.request<Run>("GET", `runs/${enc(args[0] ?? "")}`);
+    const r = await getRun(c, args[0] ?? "");
     if (isJSON(globals)) return emit(env.stdout, r);
     let out = `Run:      ${r.run_id}\nState:    ${r.state}\nAgent:    ${r.agent_name ?? ""} (${r.name ?? ""})\nCreated:  ${rfc3339Local(new Date(r.created_at))}\nURL:      ${r.run_url ?? ""}\n`;
     if (r.parent_run_id) out += `Parent:   ${r.parent_run_id}\n`;
@@ -127,11 +130,16 @@ const followupCommand: Command = {
   flags: [{ name: "follow", short: "f", type: "boolean", usage: "stream the transcript afterwards" }],
   async run({ args, flags, globals, env }) {
     const c = makeClient(globals, env);
-    const r = await c.request<Run>("POST", `runs/${enc(args[0] ?? "")}/followups`, {
-      body: { message: args.slice(1).join(" ") },
-    });
+    const r = await unwrap(
+      c.api.POST("/runs/{runId}/followups", {
+        params: { path: { runId: args[0] ?? "" } },
+        body: { message: args.slice(1).join(" ") },
+      }),
+    );
+    const follow = flags.bool("follow");
+    if (isJSON(globals) && !follow) return emit(env.stdout, r);
     env.stdout.write(`Follow-up queued for ${r.run_id} (${r.state})\n`);
-    if (flags.bool("follow")) await streamLogs(c, env, r.run_id, true);
+    if (follow) await streamLogs(c, env, r.run_id, true);
   },
 };
 
@@ -141,7 +149,10 @@ const cancelCommand: Command = {
   args: exactArgs(1),
   async run({ args, globals, env }) {
     const c = makeClient(globals, env);
-    await c.request("POST", `runs/${enc(args[0] ?? "")}/cancel`, { body: { cascade: true } });
+    const res = await unwrap(
+      c.api.POST("/runs/{runId}/cancel", { params: { path: { runId: args[0] ?? "" } }, body: { cascade: true } }),
+    );
+    if (isJSON(globals)) return emit(env.stdout, res);
     env.stdout.write(`Cancelled ${args[0] ?? ""}\n`);
   },
 };

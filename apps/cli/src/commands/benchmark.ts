@@ -1,5 +1,6 @@
+import { unwrap } from "@openfactory/api-client";
 import { ago, emit, table } from "../format.ts";
-import { enc, explain, isJSON, makeClient, resolveFactory } from "../client.ts";
+import { enc, isJSON, makeClient, resolveFactory, type Schemas } from "../client.ts";
 import { CliError, exactArgs, type Command } from "../framework.ts";
 
 /** The most repetitions the API and the dashboard accept. */
@@ -10,21 +11,6 @@ export function validateRepetitions(n: number): void {
   if (n < 1 || n > MAX_BENCHMARK_REPETITIONS) {
     throw new CliError(`--repetitions must be between 1 and ${MAX_BENCHMARK_REPETITIONS} (got ${n})`);
   }
-}
-
-interface Suite {
-  slug: string;
-  name: string;
-  agent?: string;
-  configurations?: unknown[];
-  tasks?: unknown[];
-}
-
-interface BenchmarkRun {
-  id: string;
-  suite?: string;
-  state: string;
-  created_at?: string;
 }
 
 const runCommand: Command = {
@@ -41,21 +27,19 @@ const runCommand: Command = {
     validateRepetitions(reps);
     const c = makeClient(globals, env);
     const f = await resolveFactory(c, args[0] ?? "");
-    const body: Record<string, unknown> = {
+    const body: Schemas["StartBenchmarkRequest"] = {
       configurations: flags.list("config").map((name) => ({ name })),
       repetitions: reps,
     };
-    if (flags.list("scorer").length > 0) body["scorers"] = flags.list("scorer");
-    let br: BenchmarkRun;
-    try {
-      br = await c.request<BenchmarkRun>("POST", `factories/${enc(f.uid)}/benchmarks/${enc(args[1] ?? "")}/runs`, {
+    if (flags.list("scorer").length > 0) body.scorers = flags.list("scorer");
+    const br = await unwrap(
+      c.api.POST("/factories/{uid}/benchmarks/{suite}/runs", {
+        params: { path: { uid: f.uid, suite: args[1] ?? "" } },
         body,
-      });
-    } catch (err) {
-      throw explain(err);
-    }
+      }),
+    );
     if (isJSON(globals)) return emit(env.stdout, br);
-    env.stdout.write(`Started benchmark run ${br.id} (${br.state})\n`);
+    env.stdout.write(`Started benchmark run ${br.id ?? ""} (${br.state ?? ""})\n`);
   },
 };
 
@@ -67,18 +51,18 @@ const listCommand: Command = {
   async run({ args, flags, globals, env }) {
     const c = makeClient(globals, env);
     const f = await resolveFactory(c, args[0] ?? "");
-    const suites = await c.list<Suite>(`factories/${enc(f.uid)}/benchmarks`).collect();
+    const suites = await c.list<Schemas["BenchmarkSuite"]>(`factories/${enc(f.uid)}/benchmarks`).collect();
     const suite = flags.string("suite");
     const runsPath =
       suite === "" ? `factories/${enc(f.uid)}/benchmark-runs` : `factories/${enc(f.uid)}/benchmarks/${enc(suite)}/runs`;
-    const runs = await c.list<BenchmarkRun>(runsPath).collect();
+    const runs = await c.list<Schemas["BenchmarkRun"]>(runsPath).collect();
     if (isJSON(globals)) return emit(env.stdout, { suites, runs });
     table(
       env.stdout,
       ["SUITE", "NAME", "AGENT", "CONFIGS", "TASKS"],
       suites.map((s) => [
-        s.slug,
-        s.name,
+        s.slug ?? "",
+        s.name ?? "",
         s.agent ?? "",
         String((s.configurations ?? []).length),
         String((s.tasks ?? []).length),
@@ -89,7 +73,7 @@ const listCommand: Command = {
       table(
         env.stdout,
         ["RUN", "SUITE", "STATE", "CREATED"],
-        runs.map((r) => [r.id, r.suite ?? "", r.state, ago(r.created_at, env.now())]),
+        runs.map((r) => [r.id ?? "", r.suite ?? "", r.state ?? "", ago(r.created_at, env.now())]),
       );
     }
   },

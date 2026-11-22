@@ -1,24 +1,16 @@
-// Session sources: how a test gets the task variables of a run session so that
-// it can act as the runner.
-//
-//   shim   (go target)     The Go server's local sandbox backend starts
-//                          tools/contract/runner-shim.mjs, which writes the
-//                          task variables to the rendezvous directory.
-//   worker (worker target) The local provider sends task.assign to a fake
-//                          worker that the suite enrolled and connected.
+// Session source: how a test gets the task variables of a run session so that
+// it can act as the runner. The local provider sends task.assign to a fake
+// development process worker that the suite connects.
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
-import { join } from "node:path";
 import { afterAll, beforeAll } from "vitest";
-import { type Api, uniq, waitFor } from "./api.ts";
+import { type Api, uniq } from "./api.ts";
 import { adminApi } from "./context.ts";
 import { REPO_ROOT } from "./paths.ts";
 import type { TaskEnv } from "./runner.ts";
-import { target } from "./target.ts";
 import { FakeWorker } from "./worker.ts";
 
 export interface SessionSource {
-  readonly kind: "shim" | "worker";
+  readonly kind: "worker";
   /** Waits until the target starts session `session` of the run and returns its task variables. */
   awaitSession(runId: string, session?: number, timeoutMs?: number): Promise<TaskEnv>;
   /** Whether the target started the session (without waiting). */
@@ -28,41 +20,6 @@ export interface SessionSource {
   /** Runs a real runner command in the sandbox of the session, with the task variables. */
   exec(runId: string, session: number, command: string[], env?: Record<string, string>): void;
   close(): Promise<void>;
-}
-
-class ShimSessions implements SessionSource {
-  readonly kind = "shim" as const;
-  constructor(private readonly dir: string) {
-    if (!dir) throw new Error("OF_CONTRACT_RENDEZVOUS_DIR is not set (go target)");
-  }
-  private base(runId: string, session: number): string {
-    return join(this.dir, `${runId}.${session}`);
-  }
-  hasSession(runId: string, session = 1): boolean {
-    return existsSync(`${this.base(runId, session)}.json`);
-  }
-  async awaitSession(runId: string, session = 1, timeoutMs = 30_000): Promise<TaskEnv> {
-    const file = `${this.base(runId, session)}.json`;
-    return waitFor(
-      `session ${session} of run ${runId} (${file})`,
-      async () => {
-        if (!existsSync(file)) return undefined;
-        const rec = JSON.parse(readFileSync(file, "utf8")) as { env: TaskEnv };
-        return rec.env;
-      },
-      timeoutMs,
-      100,
-    );
-  }
-  release(runId: string, session = 1): void {
-    writeFileSync(`${this.base(runId, session)}.exit`, "");
-  }
-  exec(runId: string, session: number, command: string[], env: Record<string, string> = {}): void {
-    const base = this.base(runId, session);
-    writeFileSync(`${base}.exec.json.tmp`, JSON.stringify({ command, env, cwd: REPO_ROOT }));
-    renameSync(`${base}.exec.json.tmp`, `${base}.exec.json`);
-  }
-  async close(): Promise<void> {}
 }
 
 class WorkerSessions implements SessionSource {
@@ -133,19 +90,15 @@ class WorkerSessions implements SessionSource {
 
 /** The session source of the target. Closed after the test file. */
 export function useSessions(): SessionSource {
-  let src: SessionSource | undefined;
-  const get = (): SessionSource => {
-    if (!src) {
-      const kind = process.env.OF_CONTRACT_SESSION_SOURCE ?? (target.name === "go" ? "shim" : "worker");
-      src = kind === "shim" ? new ShimSessions(target.rendezvousDir) : new WorkerSessions(adminApi());
-    }
+  let src: WorkerSessions | undefined;
+  const get = (): WorkerSessions => {
+    src ??= new WorkerSessions(adminApi());
     return src;
   };
   // The worker source connects before the first test creates a run: a run
   // created while no worker is connected would start at a later session.
   beforeAll(async () => {
-    const s = get();
-    if (s instanceof WorkerSessions) await s.connect();
+    await get().connect();
   });
   afterAll(async () => {
     await src?.close();

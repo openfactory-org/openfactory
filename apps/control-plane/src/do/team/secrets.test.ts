@@ -5,7 +5,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { doName, type OfError } from "@openfactory/core";
 import { describe, expect, it } from "vitest";
 import type { CallMeta, Principal, TeamRpc } from "../../contracts/do-messages";
-import type { TeamKit } from "./index";
+import type { TeamKit } from "./kit";
 import { getSecretValue, putSecret } from "./secrets";
 
 const ADMIN: Principal = { kind: "user", id: "usr_admin", teamId: "secrets", role: "admin", factoryRoles: {} };

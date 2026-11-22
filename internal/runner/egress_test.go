@@ -50,7 +50,7 @@ func diagnostics(t *testing.T, r *runner) []runnerproto.DiagnosticData {
 }
 
 // TestRunnerReportsBlockedHostsAsDiagnostics checks that a host that the
-// proxy sidecar blocked gives one diagnostic network/egress_blocked with
+// egress proxy blocked gives one diagnostic network/egress_blocked with
 // data.blocked_host, also when the proxy blocks it many times.
 func TestRunnerReportsBlockedHostsAsDiagnostics(t *testing.T) {
 	rep := netguard.Report{}

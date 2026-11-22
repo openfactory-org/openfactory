@@ -152,7 +152,7 @@ export const testWebhookFilter: Handler = async (request, env, ctx) => {
 const INGRESS_TEAM = "default";
 
 async function enqueue(env: Env, teamId: string, partition: string, event: Event, dedupeKey: string) {
-  return env.INGRESS.getByName(doName.ingress(teamId, partition)).enqueue(partition, event as never, dedupeKey);
+  return env.INGRESS.getByName(doName.ingress(teamId, partition)).enqueueEvent(partition, event as never, dedupeKey);
 }
 
 interface DeliveryLogRpc {

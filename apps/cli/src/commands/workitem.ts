@@ -1,15 +1,8 @@
+import { unwrap } from "@openfactory/api-client";
 import { ago, emit, table, trunc } from "../format.ts";
-import { enc, isJSON, makeClient, resolveFactory } from "../client.ts";
+import { enc, isJSON, makeClient, resolveFactory, type Schemas } from "../client.ts";
 import { exactArgs, type Command } from "../framework.ts";
 import { dispatchCommand } from "./factory.ts";
-
-interface WorkItem {
-  id: string;
-  title: string;
-  stage: string;
-  source?: { provider?: string };
-  updated_at?: string;
-}
 
 const listCommand: Command = {
   use: "list <factory>",
@@ -20,7 +13,9 @@ const listCommand: Command = {
     const c = makeClient(globals, env);
     const f = await resolveFactory(c, args[0] ?? "");
     const stage = flags.string("stage");
-    const items = await c.list<WorkItem>(`factories/${enc(f.uid)}/work-items`, stage === "" ? {} : { stage }).collect();
+    const items = await c
+      .list<Schemas["WorkItem"]>(`factories/${enc(f.uid)}/work-items`, stage === "" ? {} : { stage })
+      .collect();
     if (isJSON(globals)) return emit(env.stdout, items);
     table(
       env.stdout,
@@ -36,7 +31,7 @@ const getCommand: Command = {
   args: exactArgs(1),
   async run({ args, globals, env }) {
     const c = makeClient(globals, env);
-    emit(env.stdout, await c.request("GET", `work-items/${enc(args[0] ?? "")}`));
+    emit(env.stdout, await unwrap(c.api.GET("/work-items/{id}", { params: { path: { id: args[0] ?? "" } } })));
   },
 };
 
@@ -47,9 +42,13 @@ const completeCommand: Command = {
   flags: [{ name: "note", type: "string", usage: "closing note" }],
   async run({ args, flags, globals, env }) {
     const c = makeClient(globals, env);
-    const w = await c.request<WorkItem>("POST", `work-items/${enc(args[0] ?? "")}/complete`, {
-      body: { note: flags.string("note") },
-    });
+    const w = await unwrap(
+      c.api.POST("/work-items/{id}/complete", {
+        params: { path: { id: args[0] ?? "" } },
+        body: { note: flags.string("note") },
+      }),
+    );
+    if (isJSON(globals)) return emit(env.stdout, w);
     env.stdout.write(`Work item ${w.id} is ${w.stage}\n`);
   },
 };

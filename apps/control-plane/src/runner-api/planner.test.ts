@@ -20,7 +20,7 @@ import {
 } from "./planner";
 import { objectPrefix, ownsKey, parseUploadId, uploadId, validateUpload } from "./transfer";
 import { deriveRunnerKey } from "./token";
-import { defaultStartConfig, deniedWithoutRequired } from "./startconfig";
+import { deniedWithoutRequired } from "./startconfig";
 
 const run = (extra: Partial<Run> = {}, cfg: Record<string, unknown> = {}): Run =>
   ({
@@ -236,15 +236,13 @@ describe("denied hosts", () => {
     expect(deniedWithoutRequired(denied, required)).toEqual(want);
   });
 
-  it("the start configurations drop a required host denied in another case", async () => {
+  it("the start configuration drops a required host denied in another case", async () => {
     const env = { OF_PUBLIC_URL: "http://cp", OF_R2_ACCOUNT_ID: "acct" } as unknown as Env;
     const policy = { restricted: true, allowed_hosts: null, denied_hosts: ["CP", "evil.example"] };
     const r = run({}, { network_policy: policy });
     const planned = startConfigOf(env, r, { session: 1 } as RunSession, await new Planner(deps()).plan(r));
     expect(planned.network_policy?.denied_hosts).toEqual(["evil.example"]);
     expect(planned.network_policy?.always_allow).toContain("cp");
-    const minimal = await defaultStartConfig(env, r, { session: 1 } as RunSession);
-    expect(minimal.network_policy?.denied_hosts).toEqual(["evil.example"]);
   });
 });
 

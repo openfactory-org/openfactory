@@ -62,6 +62,11 @@ describe("lifecycle", () => {
     ]);
     expect(lifecycleParts(run({ name: "" }), true, "succeeded", "").content).toBe('Side run "run_c" succeeded.');
   });
+  it("quotes the label like Go %q", () => {
+    expect(lifecycleParts(run({ name: 'a"b\u0007\u200b' }), false, "succeeded", "").content).toBe(
+      'Child run "a\\"b\\a\\u200b" succeeded.',
+    );
+  });
   it("truncates the result on a UTF-8 boundary", () => {
     const [s, cut] = truncateUTF8("é".repeat(4000), 6144);
     expect(cut).toBe(true);

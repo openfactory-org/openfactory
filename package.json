@@ -34,8 +34,6 @@
     "validate-examples": "node apps/cli/dist/index.js validate examples/*/",
     "contract": "node tools/contract/run.mjs --target worker",
     "dev": "wrangler dev -c apps/control-plane/wrangler.jsonc",
-    "check:ownership": "node tools/check-ownership.mjs",
-    "check:ledger": "node tools/test-ledger-check.mjs",
     "ci": "npm run format:check && npm run lint && npm run typecheck && npm run gen:check && npm run test && npm run build && npm run validate-examples && npm run contract"
   },
   "devDependencies": {

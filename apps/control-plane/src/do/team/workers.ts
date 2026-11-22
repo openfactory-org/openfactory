@@ -15,12 +15,16 @@ import { isoOf, listResponse } from "../../lib/page";
 import type { Migration } from "../../lib/sql/migrate";
 import { all, first, run } from "../../lib/sql/query";
 import { registeredProviders } from "../dispatch/providers";
-import { agentFile, automationFile, registerPreflight, type DefinitionCheck } from "./factories";
-import { created, noContent, type OpCall, type TeamKit, type TeamOp } from "./index";
+import {
+  activeMachines,
+  agentFile,
+  automationFile,
+  findFactory,
+  listFactories,
+  type DefinitionCheck,
+} from "./factories";
+import { created, noContent, type OpCall, type Preflight, type TeamKit, type TeamOp } from "./kit";
 import type { CompiledDefinition } from "@openfactory/definition";
-// A static import: a dynamic import() from a DO op can still wait for module
-// resolution when a test file ends (vitest EnvironmentTeardownError).
-import * as factoriesModule from "./factories";
 
 // ---------- schema ----------
 
@@ -708,45 +712,22 @@ function listRecords(kit: TeamKit): (WorkerRecord & { status: WorkerStatus; slot
 
 // ---------- machines (GET /machines) ----------
 
-/**
- * What the factories module (WS4) offers to list definition machines. Read
- * through a cast so that this module builds before those exports exist.
- */
-interface FactoryAccess {
-  listFactories(kit: TeamKit): { id: string; name: string }[];
-  activeMachines(kit: TeamKit, factoryId: string): Record<string, Record<string, unknown>> | undefined;
-}
-
-let factoryAccess: Partial<FactoryAccess> | null = null;
-
-/** Set by the TeamDO wiring or tests. */
-export function setFactoryAccess(a: Partial<FactoryAccess> | null): void {
-  factoryAccess = a;
-}
-
-async function factoryAccessOf(): Promise<Partial<FactoryAccess>> {
-  if (factoryAccess) return factoryAccess;
-  return factoriesModule as unknown as Partial<FactoryAccess>;
-}
-
 /** Port of handleListMachines (internal/api/platform.go). */
-async function listMachines(kit: TeamKit, call: OpCall): Promise<unknown> {
-  const fa = await factoryAccessOf();
+function listMachines(kit: TeamKit, call: OpCall): unknown {
   const fid = call.query.factory_id ?? "";
   let fs: { id: string; name: string }[];
   if (fid !== "") {
-    const { findFactory } = factoriesModule;
     const f = findFactory(kit, fid);
     call.authorize(f?.id ?? "");
     if (!f) throw notFound(`factory ${fid}`);
     fs = [{ id: f.id, name: f.name }];
   } else {
     call.authorize("");
-    fs = typeof fa.listFactories === "function" ? fa.listFactories(kit) : [];
+    fs = listFactories(kit);
   }
   const out: Record<string, unknown>[] = [];
   for (const f of fs) {
-    const machines = typeof fa.activeMachines === "function" ? fa.activeMachines(kit, f.id) : undefined;
+    const machines = activeMachines(kit, f.id);
     if (!machines) continue;
     for (const n of Object.keys(machines).sort()) {
       const spec = { ...machines[n] };
@@ -844,8 +825,9 @@ export function preflightWorkerHosts(
   }
 }
 
-export function setup(_kit: TeamKit): void {
-  registerPreflight("worker hosts", (kit, _f, def, _files, chk) =>
-    preflightWorkerHosts(kit, def, chk, registeredProviders()),
-  );
-}
+export const preflights: readonly Preflight[] = [
+  {
+    name: "worker hosts",
+    fn: (kit, _f, def, _files, chk) => preflightWorkerHosts(kit, def, chk, registeredProviders()),
+  },
+];

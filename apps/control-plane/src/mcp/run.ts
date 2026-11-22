@@ -6,6 +6,7 @@ import { doName, partitionOf, type MCPServer } from "@openfactory/core";
 import type { Env } from "../contracts/env";
 import { runnerKeys, verifySessionToken } from "../runner-api/token";
 import { expandWith, placeholders } from "../secrets/expand";
+import { unwrapOp } from "../lib/rpc";
 import { teamStub } from "./team";
 
 /** What the MCP endpoints read of a run. */
@@ -110,9 +111,7 @@ export const defaultRunBackend: McpRunBackend = {
 
   async appendRunLog(env, run, content, data) {
     const stub = env.WORK.getByName(doName.work(run.teamId, partitionOf(run.id)));
-    const out = (await stub.api({ requestId: "mcp" }, "appendRunLog", { runId: run.id }, { content, data })) as unknown;
-    const e = (out as { $error?: { detail: string } } | null)?.$error;
-    if (e) throw new Error(e.detail);
+    unwrapOp(await stub.api({ requestId: "mcp" }, "appendRunLog", { runId: run.id }, { content, data }));
   },
 
   async workItemSource(env, run) {

@@ -773,3 +773,81 @@ func TestGitCacheEndsWithTheBackend(t *testing.T) {
 		t.Fatal("the git cache refresh ignores the end of the backend")
 	}
 }
+
+// A launch that fails at any step releases what the steps before it took:
+// the slot always, the network once it was added, the helper once it ran,
+// and the VM once it started (killed; its jail stays for the retention time).
+func TestLaunchFailureUnwinds(t *testing.T) {
+	boom := errors.New("boom")
+	for _, tc := range []struct {
+		name                string
+		images              fakeImages
+		netErr, helperErr   error
+		startErr, goErr     error
+		netAdded, helperRan bool
+		vmStarted           bool
+		wantReason          rtcore.SandboxReason
+	}{
+		{name: "image", images: fakeImages{err: boom}, wantReason: rtcore.SandboxImagePull},
+		{name: "network", netErr: boom, wantReason: rtcore.SandboxProcessFailed},
+		{name: "helper", helperErr: boom, netAdded: true, wantReason: rtcore.SandboxNetworkPolicyTimeout},
+		{name: "vm start", startErr: boom, netAdded: true, helperRan: true, wantReason: rtcore.SandboxProcessFailed},
+		{name: "go", goErr: boom, netAdded: true, helperRan: true, vmStarted: true, wantReason: rtcore.SandboxProcessFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			vmm := &fakeVMM{startErr: tc.startErr, goErr: tc.goErr}
+			var helpers []*fakeHelper
+			var hmu sync.Mutex
+			e := newEnv(t, func(o *Options) {
+				o.VMM, o.Images = vmm, tc.images
+				o.Helpers = func(context.Context, vmnet.HelperSpec, func(error)) (Helper, error) {
+					if tc.helperErr != nil {
+						return nil, tc.helperErr
+					}
+					h := &fakeHelper{}
+					hmu.Lock()
+					helpers = append(helpers, h)
+					hmu.Unlock()
+					return h, nil
+				}
+			})
+			e.net.Err = tc.netErr
+			task := testTask(1)
+			task.FailureRetentionSeconds = 3600
+			st, err := e.b.Start(context.Background(), task)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fin := waitState(t, e.b, task.TaskID, rtcore.TaskExited); fin.Reason != tc.wantReason {
+				t.Fatalf("status %+v, want reason %s", fin, tc.wantReason)
+			}
+			if n := e.b.SlotsUsed(); n != 0 {
+				t.Fatalf("%d slots still used", n)
+			}
+			added, removed := e.net.Snapshot()
+			if len(added) != 0 {
+				t.Fatalf("network still added: %v", added)
+			}
+			if _, ok := removed["ofvm0"]; ok != tc.netAdded {
+				t.Fatalf("network removed = %v, want %v", ok, tc.netAdded)
+			}
+			hmu.Lock()
+			if len(helpers) > 0 != tc.helperRan || (len(helpers) > 0 && !helpers[0].stopped) {
+				t.Fatalf("helpers %+v, want ran=%v and stopped", helpers, tc.helperRan)
+			}
+			hmu.Unlock()
+			v := vmm.vm(st.SandboxID)
+			if (v != nil) != tc.vmStarted {
+				t.Fatalf("vm started = %v, want %v", v != nil, tc.vmStarted)
+			}
+			if v != nil {
+				v.mu.Lock()
+				killed := v.killed
+				v.mu.Unlock()
+				if !killed {
+					t.Fatal("the started VM was not killed")
+				}
+			}
+		})
+	}
+}
