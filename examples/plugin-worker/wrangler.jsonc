@@ -1,0 +1,13 @@
+// Example plugin Worker. Deploy it, then bind it in the control plane
+// (apps/control-plane/wrangler.jsonc "services"):
+//   { "binding": "PLUGIN_HELLO", "service": "hello-plugin", "entrypoint": "Plugin" }
+{
+  "name": "hello-plugin",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-15",
+  "compatibility_flags": ["nodejs_compat"],
+  // Reached only through the service binding.
+  "workers_dev": false,
+  "preview_urls": false,
+  "vars": { "GREETING": "hello reply" },
+}

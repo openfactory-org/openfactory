@@ -6,7 +6,10 @@
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./worker": "./src/worker.ts",
+    "./testing": "./src/testing/index.ts",
+    "./testing/cloudflare-workers-stub": "./src/testing/cloudflare-workers-stub.ts"
   },
   "scripts": {
     "test": "vitest run",
