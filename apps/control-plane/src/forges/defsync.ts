@@ -3,7 +3,7 @@
 // internal/server/defsync.go. Definitions are read with the forge content
 // APIs only (no git). Network I/O happens here, in the Worker; the apply
 // itself is one TeamDO transaction (plan rule 2).
-import { OfError, factoryLink, type ValidationError } from "@openfactory/core";
+import { OfError, factoryLink, type Integration, type ValidationError } from "@openfactory/core";
 import type { Forge, ForgeResolver } from "./forge";
 import { checkName, normalizeRepo } from "./github/events";
 import type { DefinitionPR } from "./github/webhook";
@@ -239,6 +239,7 @@ export async function checkGitSource(
   deps: Pick<DefSyncDeps, "resolver" | "check">,
   f: GitFactory,
   outcome: string,
+  integrations: readonly Integration[] = [],
 ): Promise<void> {
   try {
     await checkBranch(deps, f);
@@ -254,22 +255,63 @@ export async function checkGitSource(
     console.warn("git definition source check failed", f.id, f.git_repo, branchOf(f), (e as Error)?.message);
     throw new OfError(
       "invalid_request",
-      `${gitSourceProblem(f, e)} ${outcome.charAt(0).toUpperCase() + outcome.slice(1)}.`,
+      `${gitSourceProblem(f, e, gitSourceIntegration(f, integrations))} ${outcome.charAt(0).toUpperCase() + outcome.slice(1)}.`,
       { cause: e },
     );
   }
 }
 
+const FORGE_PROVIDERS = ["github", "gitlab", "azure_devops"];
+
+/**
+ * gitSourceIntegration: the code host record that serves the owner of the git
+ * source of f: the record of the factory, else the team record, else undefined.
+ */
+export function gitSourceIntegration(f: GitFactory, integrations: readonly Integration[]): Integration | undefined {
+  const owner = gitRepoOwner(f.git_repo ?? "");
+  if (!owner) return undefined;
+  let team: Integration | undefined;
+  for (const i of integrations) {
+    if (!FORGE_PROVIDERS.includes(i.provider) || String(i.config?.["org"] ?? "").toLowerCase() !== owner.toLowerCase())
+      continue;
+    if (i.factory_id === f.id) return i;
+    if (!i.factory_id && !team) team = i;
+  }
+  return team;
+}
+
+/** gitRepoOwner: "acme" for "acme/defs", "https://github.com/acme/defs" and "github.com/acme/defs". */
+export function gitRepoOwner(raw: string): string {
+  let path = raw.trim();
+  let isUrl = false;
+  try {
+    const u = new URL(path);
+    if (u.host) {
+      path = u.pathname;
+      isUrl = true;
+    }
+  } catch {
+    /* not a URL */
+  }
+  if (!isUrl) {
+    const i = path.indexOf("/");
+    if (i > 0 && path.slice(0, i).includes(".")) path = path.slice(i + 1);
+  }
+  return path.replace(/^\/+|\/+$/g, "").split("/")[0] ?? "";
+}
+
 /** gitSourceProblem: why the git source of f could not be read, in words that say what to fix. */
-export function gitSourceProblem(f: GitFactory, err: unknown): string {
-  const which = "of its integration";
+export function gitSourceProblem(f: GitFactory, err: unknown, integration?: Pick<Integration, "name">): string {
+  const which = integration ? `of integration ${integration.name}` : "of its integration";
   const repo = f.git_repo ?? "";
   const branch = branchOf(f);
   const status = statusCode(err) || statusCode((err as { cause?: unknown })?.cause);
   if (isNoIntegration(err) || isNoIntegration((err as { cause?: unknown })?.cause))
     return `No code host integration covers ${repo}. Connect one under Integrations.`;
   if (err instanceof OfError && err.code === "integration_disabled")
-    return `The code host integration for ${repo} is not active. Fix it under Integrations.`;
+    return integration
+      ? `The code host integration ${integration.name} is not active. Fix it under Integrations.`
+      : `The code host integration for ${repo} is not active. Fix it under Integrations.`;
   if (status === 401) return `The code host refused the token ${which} (HTTP 401). Check the token secret.`;
   if (status === 403) return `The token ${which} cannot read ${repo} (HTTP 403). Check the permissions of the token.`;
   if (status === 404)

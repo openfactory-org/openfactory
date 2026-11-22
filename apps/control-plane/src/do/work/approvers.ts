@@ -39,14 +39,8 @@ export function teamApproverDeps(env: Env, teamId: string): ApproverDeps {
   });
   return {
     async approvers(factoryId) {
-      let snap: { runtime?: { approvers?: string[] | null } } | null;
-      try {
-        snap = (await team.configSnapshot(factoryId)) as typeof snap;
-      } catch (e) {
-        // A deleted factory has no approvers list to enforce.
-        if ((e as { code?: unknown }).code === "resource_not_found") return [];
-        throw e;
-      }
+      // LoadFactoryRuntime: a factory that does not exist is an error.
+      const snap = (await team.configSnapshot(factoryId)) as { runtime?: { approvers?: string[] | null } } | null;
       return snap?.runtime?.approvers ?? [];
     },
     async user(id) {

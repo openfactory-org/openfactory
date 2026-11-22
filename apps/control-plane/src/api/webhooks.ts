@@ -201,6 +201,15 @@ export async function serveGitHubWebhook(request: Request, env: Env, ctx: Execut
       byAlias: async (teamId, alias) =>
         (await factories(teamId)).find((f) => (f.alias ?? "").toLowerCase() === alias.toLowerCase()) ?? null,
       list: factories,
+      configChecks: async (teamId, f) => {
+        const out = (await env.TEAM.getByName(doName.team(teamId)).api(
+          { requestId: "github-webhook" },
+          "defsyncConfigChecks",
+          {},
+          { factoryId: f.id },
+        )) as { mode?: string } | null;
+        return out?.mode ?? "main";
+      },
     },
     publish: async (teamId, events) => {
       for (const ev of events) {
@@ -208,8 +217,18 @@ export async function serveGitHubWebhook(request: Request, env: Env, ctx: Execut
         await enqueue(env, teamId, partition, ev, ev.delivery_id || ev.id);
       }
     },
+    // defSync (server.go OnDefinitionPush / OnDefinitionPR): the TeamDO syncs and checks.
+    onDefinitionPush: (teamId, repo, branch, sha) => teamOp(env, teamId, "defsyncPush", { repo, branch, sha }),
+    onDefinitionPR: (pr) => teamOp(env, pr.teamId, "defsyncPullRequest", pr),
     waitUntil: (p) => ctx.waitUntil(p),
   });
+}
+
+async function teamOp(env: Env, teamId: string, op: string, body: unknown): Promise<void> {
+  const out = (await env.TEAM.getByName(doName.team(teamId)).api({ requestId: "github-webhook" }, op, {}, body)) as {
+    $error?: { code: string; detail: string };
+  } | null;
+  if (out?.$error) console.warn("github webhook:", op, out.$error.code, out.$error.detail);
 }
 
 /** Routes a server path to the ingress handlers; null when the path is not one of them. */

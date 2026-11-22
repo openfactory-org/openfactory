@@ -8,7 +8,24 @@
 // lifecycle and turn-end reporting). The lifecycle message to the parent is
 // written in the transaction of the child's transition (C1): there is no
 // run.turn_ended job and no turn marker in KV.
-import { conflict, forbidden, invalid, newRoutedId, notFound, OfError } from "@openfactory/core";
+import {
+  conflict,
+  forbidden,
+  invalid,
+  isTrackerIssue,
+  ISSUE_STATE_DONE,
+  ISSUE_STATE_IN_REVIEW,
+  newRoutedId,
+  notFound,
+  OfError,
+  OUTBOUND_ATTACH_PULL_REQUEST,
+  OUTBOUND_ISSUE_STATE,
+  REF_ISSUE,
+  REF_SOURCE,
+  workItemRefs,
+  type PullRequestRef,
+  type SourceRef,
+} from "@openfactory/core";
 import { failureForSandboxReason } from "@openfactory/sandbox";
 import type { DispatchTarget } from "../../contracts/do-messages";
 import type { EnqueueInput } from "../../lib/outbox/outbox";
@@ -239,6 +256,65 @@ export function notify(
       },
     },
   });
+}
+
+// ---------- tracker write-back (engine/references.go) ----------
+
+/** trackerIssues: the linked issues of a work item, and its source when it is a tracker issue. */
+export function trackerIssues(wi: WorkItem): SourceRef[] {
+  const out: SourceRef[] = [];
+  for (const r of workItemRefs(wi as never)) {
+    if (r.kind === REF_ISSUE || (r.kind === REF_SOURCE && isTrackerIssue(r.source))) out.push(r.source);
+  }
+  return out;
+}
+
+/**
+ * trackerOp: one write-back to a tracker. It goes through the outbox with the
+ * other outbound messages (notice.tracker), so it commits with the change
+ * that caused it.
+ */
+export function trackerOp(
+  fx: Fx,
+  wi: WorkItem,
+  issue: SourceRef,
+  kind: string,
+  state: string,
+  pr?: PullRequestRef,
+): void {
+  const seq = Number(fx.repo.getMeta(`notice_seq:${wi.id}`) ?? "0") + 1;
+  fx.repo.setMeta(`notice_seq:${wi.id}`, String(seq));
+  fx.enqueue({
+    dest: "notice:",
+    kind: "notice.tracker",
+    lane: `notice:${wi.id}`,
+    msgId: `notice:${wi.id}:${seq}`,
+    payload: {
+      message: {
+        work_item_id: wi.id,
+        factory_id: wi.factory_id,
+        source: issue as unknown as Record<string, unknown>,
+        text: "",
+        kind,
+        ...(state ? { issue_state: state } : {}),
+        ...(kind === OUTBOUND_ATTACH_PULL_REQUEST && pr ? { pull_request: pr } : {}),
+      },
+    },
+  });
+}
+
+/** writeBackPullRequest: attaches a newly linked pull request to the tracker issues and moves them to in review. */
+export function writeBackPullRequest(fx: Fx, wi: WorkItem, pr: PullRequestRef): void {
+  for (const issue of trackerIssues(wi)) {
+    trackerOp(fx, wi, issue, OUTBOUND_ATTACH_PULL_REQUEST, "", pr);
+    if (pr.state !== "merged" && pr.state !== "closed")
+      trackerOp(fx, wi, issue, OUTBOUND_ISSUE_STATE, ISSUE_STATE_IN_REVIEW);
+  }
+}
+
+/** writeBackComplete: moves the tracker issues of a completed work item to done. */
+export function writeBackComplete(fx: Fx, wi: WorkItem): void {
+  for (const issue of trackerIssues(wi)) trackerOp(fx, wi, issue, OUTBOUND_ISSUE_STATE, ISSUE_STATE_DONE);
 }
 
 // ---------- transition ----------

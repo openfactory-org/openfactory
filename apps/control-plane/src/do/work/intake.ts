@@ -40,6 +40,8 @@ import {
   setStage,
   workItemEvent,
   notify,
+  writeBackComplete,
+  writeBackPullRequest,
   type DispatchPlan,
   type Fx,
 } from "./engine";
@@ -305,6 +307,7 @@ export function linkPullRequest(fx: Fx, wi: WorkItem, pr: PullRequestRef): WorkI
     } as PullRequestRef;
   else list.push(pr);
   wi.pull_requests = list;
+  const added = i < 0;
   const key = sourceKey(pullRequestSource(pr as never));
   if (key && !(wi.references ?? []).some((r) => r.key === key)) {
     wi.references = [
@@ -314,6 +317,8 @@ export function linkPullRequest(fx: Fx, wi: WorkItem, pr: PullRequestRef): WorkI
   }
   wi.updated_at = new Date(fx.now()).toISOString();
   fx.repo.putWorkItem(wi);
+  // Attach the pull request to the tracker issues.
+  if (added) writeBackPullRequest(fx, wi, pr);
   projectWorkItem(fx, wi);
   return wi;
 }
@@ -425,6 +430,8 @@ export function checkMergeCompletion(fx: Fx, r: Run): void {
 /** CompleteWorkItem (in one transaction): stage, child cancels, open inbox items, notice. */
 export function completeWorkItem(fx: Fx, wiId: string, actor: string, note: string): void {
   const wi = setStage(fx, wiId, "complete", actor || "system", note);
+  // Move the tracker issues to done.
+  writeBackComplete(fx, wi);
   for (const it of fx.repo.listInbox({ resolved: false })) {
     if (it.work_item_id === wi.id) resolveInboxItem(fx, it, "work item completed", actor || "system");
   }

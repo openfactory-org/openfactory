@@ -387,4 +387,21 @@ describe("dispatch of the factory runs route (handleDispatch, mcpserver send_wor
     const api = await call("POST", `/api/v1/factories/${f.id}/runs`, { key, body: { prompt: "From a script" } });
     expect(api.body.source).toBe("API");
   });
+
+  it("applies the overrides of the dispatch to its agent (DispatchRequest.Overrides)", async () => {
+    const { key } = await bootstrap();
+    const f = await newFactory(key);
+    const r = await call("POST", `/api/v1/factories/${f.id}/runs`, {
+      key,
+      body: { prompt: "Fast one", overrides: { model: "claude-sonnet-4-5", idle_timeout_minutes: 5 } },
+    });
+    expect(r.status, JSON.stringify(r.body)).toBe(201);
+    expect(r.body.config?.harness?.model ?? r.body.config?.model).toBe("claude-sonnet-4-5");
+    const bad = await call("POST", `/api/v1/factories/${f.id}/runs`, {
+      key,
+      body: { prompt: "x", overrides: { machine: "nope" } },
+    });
+    expect(bad.status).toBe(400);
+    expect(JSON.stringify(bad.body)).toContain("unknown machine");
+  });
 });

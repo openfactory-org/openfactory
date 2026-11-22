@@ -2,8 +2,13 @@
 // WorkDO. The idempotency row commits in the same transaction as the tool's
 // effect (C8, plan rule 3). Errors are not stored, so the model can retry.
 import {
+  conflict,
   forbidden,
   invalid,
+  ISSUE_STATE_IN_PROGRESS,
+  ISSUE_STATE_IN_REVIEW,
+  OUTBOUND_ATTACH_PULL_REQUEST,
+  OUTBOUND_ISSUE_STATE,
   isOfError,
   newRoutedId,
   OfError,
@@ -21,6 +26,9 @@ import {
   sendMessage,
   setStage,
   workItemEvent,
+  trackerOp,
+  writeBackComplete,
+  writeBackPullRequest,
   type ChildPlan,
   type Fx,
 } from "./engine";
@@ -295,9 +303,14 @@ function dispatchTool(fx: Fx, caller: Run, call: ToolCall): ToolResult {
     case "post_update": {
       const wi = caller.work_item_id ? fx.repo.getWorkItem(caller.work_item_id) : undefined;
       if (!wi) throw invalid("the run has no work item");
-      const kind = s(input.kind) || "update";
-      workItemEvent(fx, wi.id, "message_out", caller.id, actor, { text: truncate(s(input.message), 4000), kind });
-      notify(fx, wi, kind, s(input.message));
+      // postUpdate (server.go) and Engine.PostUpdate.
+      const kind = s(input.kind).trim().toLowerCase() || "update";
+      if (!["update", "handoff", "error"].includes(kind))
+        throw invalid(`unknown kind ${JSON.stringify(s(input.kind))} (want update, handoff or error)`);
+      const body = s(input.text).trim();
+      if (!body) throw invalid("text is required");
+      workItemEvent(fx, wi.id, "message_out", caller.id, actor, { text: truncate(body, 8000), kind });
+      notify(fx, wi, kind, body);
       return text({ posted: true });
     }
     case "set_stage": {
@@ -306,12 +319,14 @@ function dispatchTool(fx: Fx, caller: Run, call: ToolCall): ToolResult {
       if (!STAGES.includes(stage) || stageTerminal(stage)) throw invalid(`invalid stage ${JSON.stringify(stage)}`);
       const wi = fx.repo.getWorkItem(caller.work_item_id);
       if (wi?.root_run_id !== caller.id && !caller.parent_run_id) throw forbidden("a side run cannot set the stage");
-      const out = setStage(fx, caller.work_item_id, stage, actor, s(input.reason));
+      const out = setStage(fx, caller.work_item_id, stage, actor, s(input.note));
       return text({ stage: out.stage });
     }
     case "complete_work_item": {
       if (!caller.work_item_id) throw invalid("the run has no work item");
-      const out = setStage(fx, caller.work_item_id, "complete", actor, s(input.summary));
+      const out = setStage(fx, caller.work_item_id, "complete", actor, s(input.note));
+      // Move the tracker issues to done.
+      writeBackComplete(fx, out);
       for (const it of fx.repo.listInbox({ resolved: false })) {
         it.resolved = true;
         it.resolution = "completed";
@@ -320,7 +335,7 @@ function dispatchTool(fx: Fx, caller: Run, call: ToolCall): ToolResult {
         fx.repo.putInbox(it);
         projectInbox(fx, it);
       }
-      notify(fx, out, "handoff", s(input.summary) || "The work is complete.");
+      notify(fx, out, "handoff", s(input.note) || "The work is complete.");
       return text({ stage: out.stage });
     }
     case "link_pull_request": {
@@ -368,7 +383,11 @@ function dispatchTool(fx: Fx, caller: Run, call: ToolCall): ToolResult {
       }
       wi.updated_at = iso(fx.now());
       fx.repo.putWorkItem(wi);
-      if (i < 0) workItemEvent(fx, wi.id, "pr_linked", caller.id, actor, { key, pull_request: pr });
+      if (i < 0) {
+        workItemEvent(fx, wi.id, "pr_linked", caller.id, actor, { key, pull_request: pr });
+        // Attach the pull request to the tracker issues.
+        writeBackPullRequest(fx, wi, pr);
+      }
       projectWorkItem(fx, wi);
       return text({ linked: key || pr.url });
     }
@@ -380,6 +399,7 @@ function dispatchTool(fx: Fx, caller: Run, call: ToolCall): ToolResult {
       // The Worker resolved the issue (linkissue.ts) into key and source.
       const source = (input.source as SourceRef | undefined) ?? { provider: "", kind: "issue" };
       const ref: WorkItemRef = { kind: "issue", key, source, added_at: iso(fx.now()) };
+      if (stageTerminal(wi.stage)) throw conflict(`work item is ${wi.stage}`);
       const refs = wi.references ?? [];
       if (!refs.some((r) => r.key === key)) {
         wi.references = [...refs, ref];
@@ -393,6 +413,13 @@ function dispatchTool(fx: Fx, caller: Run, call: ToolCall): ToolResult {
           JSON.stringify(ref),
         );
         workItemEvent(fx, wi.id, "issue_linked", caller.id, actor, { key });
+        // LinkIssue: the write-back commits with the link (outbox).
+        let state = ISSUE_STATE_IN_PROGRESS;
+        for (const pr of wi.pull_requests ?? []) {
+          trackerOp(fx, wi, source, OUTBOUND_ATTACH_PULL_REQUEST, "", pr);
+          if (pr.state === "open" || pr.state === "draft" || pr.state === "") state = ISSUE_STATE_IN_REVIEW;
+        }
+        trackerOp(fx, wi, source, OUTBOUND_ISSUE_STATE, state);
         projectWorkItem(fx, wi);
       }
       return text({ linked: key });

@@ -497,6 +497,31 @@ export function setGitSourceChecker(fn: GitSourceChecker | undefined): GitSource
   return prev;
 }
 
+/**
+ * The git definition sync of a team (defSync in internal/server/defsync.go):
+ * a push to the production branch, the check of a pull request, and the
+ * periodic sync of every git-backed factory. wiring.ts sets it.
+ */
+export interface DefSyncRunner {
+  push(kit: TeamKit, repo: string, branch: string, sha: string): Promise<void>;
+  pullRequest(kit: TeamKit, pr: Record<string, unknown>): Promise<void>;
+  syncAll(kit: TeamKit): Promise<void>;
+}
+
+let defSyncRunner: DefSyncRunner | undefined;
+
+/** Sets the runner; returns the one it replaces (tests restore it). */
+export function setDefSyncRunner(r: DefSyncRunner | undefined): DefSyncRunner | undefined {
+  const prev = defSyncRunner;
+  defSyncRunner = r;
+  return prev;
+}
+
+function defSync(): DefSyncRunner {
+  if (!defSyncRunner) throw new OfError("feature_not_available", "git definition sync is not configured");
+  return defSyncRunner;
+}
+
 function validationError(detail: string, errs: ValidationError[] | undefined): OfError {
   return new OfError("invalid_request", detail, { extra: { errors: errs ?? [] } });
 }
@@ -1386,6 +1411,32 @@ function deleteFactoryRows(kit: TeamKit, id: string): void {
 // ---------- ops ----------
 
 export const ops: Record<string, TeamOp> = {
+  /** Internal (GitHub webhook): a push to a branch. Body {repo, branch, sha}. */
+  defsyncPush: async (kit, c) => {
+    const b = bodyObject(c.body);
+    await defSync().push(kit, str(b, "repo"), str(b, "branch"), str(b, "sha"));
+    return { ok: true };
+  },
+  /** Internal (GitHub webhook): a pull request that changes definition files. Body DefinitionPR. */
+  defsyncPullRequest: async (kit, c) => {
+    await defSync().pullRequest(kit, bodyObject(c.body));
+    return { ok: true };
+  },
+  /** Internal (GitHub webhook): github.factoryConfigChecks of the active definition ("main" by default). */
+  defsyncConfigChecks: async (kit, c) => {
+    const f = getFactoryById(kit, str(bodyObject(c.body), "factoryId"));
+    if (!f?.active_version_id) return { mode: "main" };
+    const src = (await activeFiles(kit, f))["factory.yaml"] ?? "";
+    const doc = parseDocument(src).toJS() as { github?: { factoryConfigChecks?: unknown } } | null;
+    const mode = doc?.github?.factoryConfigChecks;
+    return { mode: typeof mode === "string" && mode !== "" ? mode : "main" };
+  },
+  /** Internal (cron): syncs every git-backed factory of the team. */
+  defsyncAll: async (kit) => {
+    await defSync().syncAll(kit);
+    return { ok: true };
+  },
+
   listFactories: (kit, c) => {
     const page = pageFrom(c.query);
     const q = (c.query["search"] ?? "").trim().toLowerCase();

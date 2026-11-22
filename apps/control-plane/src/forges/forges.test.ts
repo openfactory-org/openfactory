@@ -23,6 +23,8 @@ import { ForgeResponder, Resolver, forgeFromProvider, integrationProvider } from
 import {
   checkBranch,
   checkGitSource,
+  gitRepoOwner,
+  gitSourceIntegration,
   gitSourceProblem,
   parseGitRepo,
   renderCheck,
@@ -760,6 +762,31 @@ describe("defsync", () => {
       'The code host did not find branch "release" of acme/defs, or the token of its integration cannot see the repository (HTTP 404). Check the repository, the branch and the path. The factory was not created.',
     );
     expect(nf.extra).toBeUndefined();
+  });
+
+  it("names the integration of the git source (gitSourceIntegration)", () => {
+    expect(["acme/defs", "https://github.com/acme/defs", "github.com/acme/defs"].map(gitRepoOwner)).toEqual([
+      "acme",
+      "acme",
+      "acme",
+    ]);
+    const rec = (id: string, provider: string, org: string, factory_id?: string) =>
+      ({ id, name: id, provider, config: { org }, ...(factory_id ? { factory_id } : {}) }) as never;
+    const f = { id: "f1", team_id: "t", git_repo: "github.com/Acme/defs" };
+    const ints = [
+      rec("slack", "slack", "acme"),
+      rec("team-gh", "github", "ACME"),
+      rec("fac-gh", "github", "acme", "f1"),
+    ];
+    expect(gitSourceIntegration(f, ints)?.name).toBe("fac-gh");
+    expect(gitSourceIntegration(f, ints.slice(0, 2))?.name).toBe("team-gh");
+    expect(gitSourceIntegration({ ...f, git_repo: "other/defs" }, ints)).toBeUndefined();
+    expect(gitSourceProblem(f, new ApiError("GET", "u", 401, ""), { name: "team-gh" })).toBe(
+      "The code host refused the token of integration team-gh (HTTP 401). Check the token secret.",
+    );
+    expect(gitSourceProblem(f, new OfError("integration_disabled", "off"), { name: "team-gh" })).toBe(
+      "The code host integration team-gh is not active. Fix it under Integrations.",
+    );
   });
 
   it("describes why a git source cannot be read (gitSourceProblem)", () => {

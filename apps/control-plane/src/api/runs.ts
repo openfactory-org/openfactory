@@ -183,6 +183,8 @@ interface DispatchBody extends CreateRunBody {
   ticket_ref?: string;
   ticket_url?: string;
   source?: SourceRef | null;
+  /** core.AgentOverrides of the dispatched agent (ApplyOverrides in prepareDispatch). */
+  overrides?: Overrides | null;
 }
 
 /**
@@ -374,7 +376,12 @@ export const dispatchRun: Handler = async (req, env, ctx) => {
   validateMetadata(b.metadata);
   const title = b.title?.trim() || b.prompt.split("\n")[0]!.slice(0, 120);
   const source = dispatchSource(b, title);
-  const { factoryId, agent } = await resolveAgent(env, ctx, ctx.params.uid ?? "", b.agent || b.agent_name || "foreman");
+  const resolved = await resolveAgent(env, ctx, ctx.params.uid ?? "", b.agent || b.agent_name || "foreman");
+  const { factoryId } = resolved;
+  if (b.overrides?.environment_id) await checkEnvironment(env, ctx, b.overrides.environment_id);
+  const agent = b.overrides
+    ? (applyOverrides(resolved.agent as never, b.overrides, resolved.machines as never) as unknown as AgentConfig)
+    : resolved.agent;
   const key = sourceKey(source);
   let token = newToken("w");
   let workItemId = newRoutedId("wi", token);

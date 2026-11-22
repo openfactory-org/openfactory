@@ -3,6 +3,8 @@
 // MCP servers that an active definition references.
 import { describe, expect, it } from "vitest";
 import { bootstrap, call } from "./helpers";
+import { mcpServerUsesOf } from "../src/do/team/mcp";
+import { environmentUses } from "../src/do/team/settings";
 
 const uniq = () => crypto.randomUUID().slice(0, 6);
 
@@ -149,9 +151,7 @@ describe("environments (internal/api environments_test ports)", () => {
     );
   });
 
-  it("finds the uses of environments and MCP servers in a definition (TestResourceUses)", async () => {
-    const { environmentUses } = await import("../src/do/team/settings");
-    const { mcpServerUsesOf } = await import("../src/do/team/mcp");
+  it("finds the uses of environments and MCP servers in a definition (TestResourceUses)", () => {
     const def = {
       mcpServers: { wiki: { managedId: "mcp_wiki" } },
       agents: [

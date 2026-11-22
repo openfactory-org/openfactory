@@ -55,7 +55,7 @@ export function setRedactor(fn: Redactor): void {
 
 /** The argument fields that each tool posts as text, redacted before the WorkDO call. */
 const REDACTED_FIELDS: Record<string, string[]> = {
-  post_update: ["message", "text"],
+  post_update: ["text"],
   ask_human: ["question", "title", "summary", "details", "body", "context", "options", "recommended_option"],
   request_approval: ["question", "title", "summary", "details", "body", "options", "links"],
   send_message: ["message", "text"],
@@ -165,12 +165,33 @@ const TOOLS: { name: string; description: string; inputSchema: Record<string, un
   {
     name: "post_update",
     description: "Post a progress update (or, with kind=handoff, the finished result) to where the work item started.",
-    inputSchema: obj({ message: "string", kind: "string" }, ["message"]),
+    inputSchema: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "Markdown update posted where the request started" },
+        kind: {
+          type: "string",
+          description: "update (default), handoff (finished result ready for the team) or error",
+        },
+      },
+      required: ["text"],
+    },
   },
   {
     name: "set_stage",
     description: "Set the work item's stage.",
-    inputSchema: obj({ stage: "string", reason: "string" }, ["stage"]),
+    inputSchema: {
+      type: "object",
+      properties: {
+        stage: {
+          type: "string",
+          description:
+            "One of intake, triage, planning, awaiting_approval, building, reviewing, handoff, complete, cancelled",
+        },
+        note: { type: "string", description: "Why the stage changed" },
+      },
+      required: ["stage"],
+    },
   },
   {
     name: "link_pull_request",
@@ -220,7 +241,11 @@ const TOOLS: { name: string; description: string; inputSchema: Record<string, un
   {
     name: "complete_work_item",
     description: "Mark the work item complete.",
-    inputSchema: obj({ summary: "string" }, []),
+    inputSchema: {
+      type: "object",
+      properties: { note: { type: "string", description: "Closing note, e.g. which pull request merged" } },
+      required: [],
+    },
   },
 ];
 

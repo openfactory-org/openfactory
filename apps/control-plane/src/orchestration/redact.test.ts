@@ -39,7 +39,7 @@ describe("run MCP redaction", () => {
       return (s) => s.replaceAll(SECRET, "***");
     });
     const calls: [string, Record<string, unknown>][] = [
-      ["post_update", { message: `the key is ${SECRET}` }],
+      ["post_update", { text: `the key is ${SECRET}` }],
       ["ask_human", { question: `Use ${SECRET}?`, details: `${SECRET} here`, options: [`yes ${SECRET}`, "no"] }],
       ["request_approval", { title: `Spec ${SECRET}`, summary: SECRET, links: [`https://x/?k=${SECRET}`] }],
       ["send_message", { run_id: f.ids.kid!, text: `pass ${SECRET}` }],
@@ -61,7 +61,7 @@ describe("run MCP redaction", () => {
   it("an identity redactor changes nothing", async () => {
     const f = await fixture();
     setRedactor(async () => (s) => s);
-    await callTool(env, "default", f.ids.root!, "post_update", { message: "plain text" });
+    await callTool(env, "default", f.ids.root!, "post_update", { text: "plain text" });
     expect(await stored(f)).toContain("plain text");
   });
 
@@ -70,7 +70,7 @@ describe("run MCP redaction", () => {
     setRedactor(async () => {
       throw new Error("no planner");
     });
-    const res = await callTool(env, "default", f.ids.root!, "post_update", { message: "still posted" });
+    const res = await callTool(env, "default", f.ids.root!, "post_update", { text: "still posted" });
     expect(res.isError).toBeFalsy();
     expect(await stored(f)).toContain("still posted");
   });

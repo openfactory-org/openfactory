@@ -13,7 +13,7 @@ import type { AgentConfig, InboxItem, Run } from "../../engine/types";
 import { call, bootstrap } from "../../../test/helpers";
 import { FakeRunner, installFakeSandbox, pump, workStub, type FakeProvider } from "../../../test/fakes/runner";
 import type { WorkDO } from "./index";
-import { canApprove, setApproverDeps, type ApproverDeps } from "./approvers";
+import { canApprove, setApproverDeps, teamApproverDeps, type ApproverDeps } from "./approvers";
 import { isApprover } from "../../engine/principal";
 
 const TEAM = "default";
@@ -38,10 +38,16 @@ const meta: CallMeta = { requestId: "t" };
 
 let provider: FakeProvider;
 let uninstall: () => void;
+let restoreApprovers: () => void;
 beforeEach(() => {
   ({ provider, uninstall } = installFakeSandbox());
+  // The factories of these tests are not in a TeamDO: no approvers list.
+  restoreApprovers = setApproverDeps(() => ({ approvers: async () => [], user: async () => undefined }));
 });
-afterEach(() => uninstall());
+afterEach(() => {
+  uninstall();
+  restoreApprovers();
+});
 
 /** A root run of a work item created by usr_dana. */
 async function creatorRun(token: string): Promise<{ w: WorkDO; run: Run; wiId: string }> {
@@ -356,6 +362,13 @@ describe("approvers", () => {
     } finally {
       restore();
     }
+  });
+
+  it("a factory that does not exist is an error (LoadFactoryRuntime)", async () => {
+    const err = await teamApproverDeps(env as never, TEAM)
+      .approvers("fac_missing")
+      .catch((e: unknown) => e);
+    expect(String(err)).toMatch(/not found/);
   });
 
   it("without a list every caller can (TestCanApproveWithoutList)", async () => {

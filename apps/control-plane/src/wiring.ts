@@ -9,6 +9,7 @@
 // - the in-process sandbox providers daytona and boatdev (credentials: Worker secrets)
 // - the active-run check of schedules with concurrency "skip"
 // - the git credential minter of the worker git cache
+// - the git definition sync (push webhook, pull request check, periodic sync)
 // TeamDO first: its modules import each other through do/team/index.
 import "./do/team/index";
 import {
@@ -28,16 +29,41 @@ import { createBoatdevProvider } from "@openfactory/boatdev";
 import { createDaytonaProvider } from "@openfactory/daytona";
 import { routeWebhookIngress } from "./api/webhooks";
 import { authenticate } from "./auth/authenticate";
-import { registerServerRoute } from "./builder";
+import { registerCronHook, registerServerRoute } from "./builder";
 import type { CallMeta, Principal } from "./contracts/do-messages";
 import type { Env } from "./contracts/env";
 import { registerProvider } from "./do/dispatch/providers";
-import { checkDefinition, configSnapshot, listFactories, setGitSourceChecker } from "./do/team/factories";
+import {
+  activeFiles,
+  applyDefinition,
+  checkDefinition,
+  configSnapshot,
+  getFactoryById,
+  getVersion,
+  listFactories,
+  setDefSyncRunner,
+  setGitSourceChecker,
+  type DefSyncRunner,
+} from "./do/team/factories";
+import type { TeamKit } from "./do/team/index";
+import { getSetting, setSetting } from "./do/team/settings";
+import { listIntegrations } from "./do/team/integrations";
 import { setNameResolver } from "./do/team/preflight";
 import { setScheduleActiveRunCheck } from "./do/team/schedules";
 import { normalizeRepo, setGitCredentialMinter } from "./do/team/workers";
-import { checkGitSource } from "./forges/defsync";
+import {
+  checkGitSource,
+  checkPullRequest,
+  onPush,
+  sync,
+  type CheckResult,
+  type DefSyncDeps,
+  type GitFactory,
+} from "./forges/defsync";
+import type { DefinitionPR } from "./forges/github/webhook";
+import { compile, diff, diffCounts, diffEmpty, diffSummary } from "@openfactory/definition";
 import { resolverFor } from "./forges/env";
+import type { ForgeResolver } from "./forges/forge";
 import { reviewBuilders } from "./eventctx/index";
 import { setEventContextBuilders } from "./do/ingress/intake";
 import { b64url, sha256 } from "./lib/bytes";
@@ -358,8 +384,94 @@ setGitSourceChecker((kit, f, outcome) =>
     },
     f,
     outcome,
+    listIntegrations(kit),
   ),
 );
+
+// ---------- git definition sync (internal/server/defsync.go) ----------
+
+/** The defsync dependencies of one TeamDO: forges, the KV of the last commit, apply and check. */
+export function defSyncDeps(kit: TeamKit, resolver: ForgeResolver = resolverFor(kit.env)): DefSyncDeps {
+  const factoryOf = (g: GitFactory) => getFactoryById(kit, g.id);
+  return {
+    resolver,
+    publicURL: kit.env.OF_PUBLIC_URL ?? "",
+    lastSha: {
+      get: async (g) => getSetting<string>(kit, `defsync:${g.id}:last_sha`) ?? "",
+      set: async (g, sha) => kit.tx(() => setSetting(kit, `defsync:${g.id}:last_sha`, sha)),
+    },
+    activeCommitSha: async (g) => {
+      const f = factoryOf(g);
+      if (!f?.active_version_id) return "";
+      return (await getVersion(kit, f.active_version_id, false))?.commit_sha ?? "";
+    },
+    apply: async (g, files, message, sha) => {
+      const r = await applyDefinition(kit, g.id, { files, author: "git", message, ...(sha ? { commitSha: sha } : {}) });
+      return r.invalid ? { invalid: true, errors: r.version.errors ?? [] } : { versionId: r.version.id };
+    },
+    check: async (g, files) => {
+      const f = factoryOf(g);
+      if (!f) throw new OfError("resource_not_found", `factory ${g.id} not found`);
+      const chk = await checkDefinition(kit, f, files);
+      const valid = chk.errors.length === 0;
+      const out: CheckResult = { valid, errors: chk.errors, warnings: chk.warnings, skipped: chk.skipped };
+      if (valid) {
+        // The resource diff against the active version.
+        const old = f.active_version_id ? compile(await activeFiles(kit, f)).definition : null;
+        const d = diff(old, chk.definition);
+        out.diff = { empty: diffEmpty(d), ...diffCounts(d), summary: diffSummary(d) };
+      }
+      return out;
+    },
+  };
+}
+
+const gitFactoriesOf = (kit: TeamKit): GitFactory[] =>
+  listFactories(kit).filter((f) => f.source === "git" && !!f.git_repo) as GitFactory[];
+
+/** The defsync runner of the TeamDO ops, with the forges of resolverOf. */
+export function defSyncRunner(resolverOf: (kit: TeamKit) => ForgeResolver): DefSyncRunner {
+  const deps = (kit: TeamKit) => defSyncDeps(kit, resolverOf(kit));
+  return {
+    push: (kit, repo, branch) => onPush(deps(kit), gitFactoriesOf(kit), repo, branch),
+    async pullRequest(kit, pr0) {
+      const pr = pr0 as unknown as DefinitionPR;
+      const f = getFactoryById(kit, pr.factoryId);
+      if (!f) return;
+      try {
+        await checkPullRequest(deps(kit), f as GitFactory, pr);
+      } catch (e) {
+        console.warn("definition pull request check", pr.factoryId, pr.repo, pr.number, (e as Error).message);
+      }
+    },
+    async syncAll(kit) {
+      for (const f of gitFactoriesOf(kit)) {
+        try {
+          await sync(deps(kit), f);
+        } catch (e) {
+          console.warn("sync git definition", f.id, f.git_repo, (e as Error).message);
+        }
+      }
+    },
+  };
+}
+
+setDefSyncRunner(defSyncRunner((kit) => resolverFor(kit.env)));
+
+const DEFSYNC_EVERY_MINUTES = 5;
+
+/** The periodic sync (every 5 minutes); it also covers forges that deliver no webhooks. */
+registerCronHook(async (env, ctx) => {
+  if (new Date().getUTCMinutes() % DEFSYNC_EVERY_MINUTES !== 0) return;
+  const team = env.TEAM.getByName(doName.team(DEFAULT_TEAM));
+  const run = async () => {
+    const out = (await team.api({ requestId: "defsync-cron" }, "defsyncAll", {}, null)) as {
+      $error?: { detail: string };
+    } | null;
+    if (out?.$error) console.warn("defsync: periodic sync", out.$error.detail);
+  };
+  ctx.waitUntil(run().catch((e: unknown) => console.warn("defsync: periodic sync", e)));
+});
 
 // ---------- worker git cache: read-only credential of one repository ----------
 
