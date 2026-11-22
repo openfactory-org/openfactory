@@ -73,7 +73,8 @@ export interface SseEvent {
  */
 export function sseResponse(opts: {
   lastEventId: string;
-  backlog: (cursor: string) => Promise<{ events: SseEvent[]; cursor: string }>;
+  /** done: write the events, then end the stream. */
+  backlog: (cursor: string) => Promise<{ events: SseEvent[]; cursor: string; done?: boolean }>;
   subscribe: () => Promise<WebSocket | undefined>;
   signal?: AbortSignal;
   heartbeatMs?: number;
@@ -106,6 +107,7 @@ export function sseResponse(opts: {
       for (const e of b.events) {
         await write(`${e.id ? `id: ${e.id}\n` : ""}event: ${e.event}\ndata: ${JSON.stringify(e.data)}\n\n`);
       }
+      if (b.done) stop();
     });
     return reading;
   };

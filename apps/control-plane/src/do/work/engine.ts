@@ -15,7 +15,7 @@ import type { EnqueueInput } from "../../lib/outbox/outbox";
 import { dest } from "../../lib/outbox/dest";
 import { decideDelivery, messageStartsTurn, outcomeFor, toItem } from "../../engine/deliver";
 import { lifecycleDedupeKey, lifecycleEvent, lifecycleParts, runUrl, turnMarker } from "../../engine/lifecycle";
-import { InvalidTransitionError, next, type RunInput as StateInput, type RunResult } from "../../engine/runstate";
+import { InvalidTransitionError, nextRunState as next, type RunStateInput as StateInput, type RunStateResult as RunResult } from "@openfactory/core";
 import { applyResult, computeSeconds, iso, ms, priorRetries } from "../../engine/sessions";
 import { recipientsOf, runInputSender, stageForAgent, truncate, firstLine } from "../../engine/text";
 import { sessionEndedRow, taskIdOf, transitionRows, type TimelineRow } from "../../engine/timeline";
@@ -36,6 +36,7 @@ import {
 } from "../../engine/types";
 import type { Repo } from "./repo";
 import { runView } from "../../engine/view";
+import { checkMergeCompletion } from "./intake";
 
 /** The root of a run tree (walks local parents). */
 export function rootRunOf(fx: Fx, r: Run): string {
@@ -418,6 +419,15 @@ export function deliver(fx: Fx, runId: string): void {
   if (d.kind === "none" || !s) return;
   const items = pending.map((m) => toItem(m));
   const ids = pending.map((m) => m.message_id);
+  if (d.kind === "start_turn" && spendStopsTurn(fx, runId)) {
+    transition(fx, runId, { event: "spend_limit" }, (run) => {
+      if (run.state === "error" && run.failure_code === "spend_limit_exceeded") {
+        run.error = "spend_limit_exceeded: the spend limit of the factory or team is reached";
+      }
+    });
+    stopSession(fx, runId);
+    return;
+  }
   if (d.kind === "start_turn") {
     const turnId = newRoutedId("turn", fx.token);
     s.active_turn_id = turnId;
@@ -429,6 +439,15 @@ export function deliver(fx: Fx, runId: string): void {
   }
   fx.repo.putSession(s);
   fx.wakeCommands(runId, s.session);
+}
+
+/** The spend gate cache: DispatchDO sent work.spendStop for the factory less than 10 minutes ago. */
+export const SPEND_GATE_TTL_MS = 10 * 60_000;
+export function spendStopsTurn(fx: Fx, runId: string): boolean {
+  const r = fx.repo.getRun(runId);
+  if (!r) return false;
+  const at = Number(fx.repo.getMeta(`spend_exceeded:${r.factory_id}`) ?? "0");
+  return at > 0 && fx.now() - at < SPEND_GATE_TTL_MS;
 }
 
 // ---------- send ----------
@@ -519,6 +538,7 @@ function reportTurnEnd(fx: Fx, r: Run): void {
   }
   const [to, side, event] = turnEndMessage(fx, r);
   if (event) sendLifecycle(fx, r, to, side, event);
+  checkMergeCompletion(fx, r);
   fx.enqueue({
     dest: dest.jobs(),
     kind: "scoring.runFinished",
@@ -744,6 +764,10 @@ export interface DispatchPlan {
   /** Work item ID chosen by the caller (router reservation). */
   workItemId?: string;
   ledger?: { actionKey: string; target: string };
+  /** Repositories at commits the root run starts from (benchmarks, judges). */
+  startingRepoRefs?: unknown[];
+  /** Agent pins of a trial; the caller applied them to config already. */
+  agentPins?: Record<string, unknown>;
 }
 
 /**

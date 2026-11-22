@@ -1,5 +1,5 @@
 // Pure parts of internal/dispatch/dispatch.go and claim.go.
-import type { RunResult } from "./runstate";
+import type { RunStateResult as RunResult } from "@openfactory/core";
 import type { Run, RunSession } from "./types";
 
 export const iso = (ms: number): string => new Date(ms).toISOString();

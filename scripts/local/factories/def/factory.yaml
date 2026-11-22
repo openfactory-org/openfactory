@@ -1,8 +1,0 @@
-# Factory of check D1 (a managed definition).
-schemaVersion: v1
-name: of-local-def
-alias: of-local-def
-description: Managed definition for check D1.
-repositories: []
-agentDefaults:
-  model: claude-sonnet-5-5

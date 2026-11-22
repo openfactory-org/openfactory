@@ -1,15 +1,26 @@
 // REST handlers: runs. Owner: WS5. The Worker authenticates; the WorkDO of
 // the run (by its partition token) owns it; lists come from IndexDO.
 import { doName, invalid, newRoutedId, newToken, notFound, OfError, partitionOf } from "@openfactory/core";
-import type { CallMeta } from "../contracts/do-messages";
+import type { CallMeta, CoreEvent } from "../contracts/do-messages";
 import type { Env } from "../contracts/env";
 import { registerCronHook, registerServerRoute } from "../builder";
 import { runView } from "../engine/view";
-import type { AgentConfig, Run, RunMessage, RunSession } from "../engine/types";
+import { isTerminal, waitsForInput, type AgentConfig, type Run, type RunMessage, type RunSession } from "../engine/types";
 import { notImplementedHandler, type Handler, type RouteContext } from "../http/handler";
 import { handleRunMcp, RUN_MCP_PREFIX } from "../orchestration/index";
 import { handleRunnerApi, RUNNER_PREFIX } from "../runner-api/index";
 import { sseResponse, subscribe } from "../stream/index";
+import { checkAttachments } from "./attachments";
+import { dispatchAutomation, platformIntakeDeps } from "../do/ingress/intake";
+
+// Registered lazily: a static import of ./schedules closes a module cycle
+// through the TeamDO modules at load time.
+void import("./schedules").then(({ setManualRunDispatcher }) => setManualRunDispatcher(async (env, input) => {
+  const out = await dispatchAutomation(platformIntakeDeps(env, input.teamId), input.factoryId, input.automation, input.event as unknown as CoreEvent);
+  if (!out.runId) throw new OfError("internal_error", "the automation started no run");
+  const run = (await env.WORK.getByName(doName.work(input.teamId, partitionOf(out.runId))).getRun(out.runId)) as Run;
+  return runView(run, { publicUrl: (env.OF_PUBLIC_URL ?? "").replace(/\/+$/, "") });
+}));
 
 // ---------- server routes and cron owned by WS5 ----------
 
@@ -72,6 +83,19 @@ async function resolveAgent(env: Env, ctx: RouteContext, factoryRef: string, age
   return { factoryId: snap.factory.id, agent };
 }
 
+/** An agent by its stable ID across the team's factories (agent_identity_uid without factory_id). */
+async function resolveAgentById(env: Env, ctx: RouteContext, agentId: string): Promise<{ factoryId: string; agent: AgentConfig }> {
+  const team = env.TEAM.getByName(doName.team(teamOf(ctx)));
+  const list = (await team.api(metaOf(ctx), "listFactories", { "?limit": "500" }, null)) as { items?: { id: string }[]; $error?: { detail: string } };
+  if (list.$error) throw new OfError("internal_error", list.$error.detail);
+  for (const f of list.items ?? []) {
+    const snap = (await team.configSnapshot(f.id)) as { factory?: { id: string }; agents?: AgentConfig[] } | null;
+    const agent = (snap?.agents ?? []).find((a) => a.id === agentId);
+    if (snap?.factory && agent) return { factoryId: snap.factory.id, agent };
+  }
+  throw notFound(`agent ${agentId}`);
+}
+
 function actorOf(ctx: RouteContext): string {
   return ctx.principal?.userId || ctx.principal?.id || "api";
 }
@@ -94,7 +118,9 @@ export const createRun: Handler = async (req, env, ctx) => {
   const factoryRef = b.factory_id ?? "";
   const agentRef = b.agent_identity_uid || b.agent_name || "";
   if (!agentRef || (!factoryRef && !b.agent_identity_uid)) throw invalid("set agent_identity_uid, or factory_id and agent_name");
-  const { factoryId, agent } = await resolveAgent(env, ctx, factoryRef || b.agent_identity_uid!, agentRef);
+  const { factoryId, agent } = factoryRef
+    ? await resolveAgent(env, ctx, factoryRef, agentRef)
+    : await resolveAgentById(env, ctx, b.agent_identity_uid!);
   const token = newToken("w");
   const out = (await env.WORK.getByName(doName.work(teamOf(ctx), token)).runsCreate(metaOf(ctx), {
     dispatch: {
@@ -150,21 +176,36 @@ export const getRun: Handler = async (_req, env, ctx) => {
   return json(200, await viewOf(env, ctx, run));
 };
 
+/** A WorkDO list read as the openapi list shape {items, page_info} (one page: a run's lists are bounded). */
 const workApi =
-  (op: string): Handler =>
-  async (_req, env, ctx) =>
-    json(200, await workFor(env, ctx, ctx.params.runId ?? "").api(metaOf(ctx), op, { ...Object.fromEntries(ctx.url.searchParams), ...ctx.params }, null));
+  (op: string, field: string): Handler =>
+  async (_req, env, ctx) => {
+    const out = (await workFor(env, ctx, ctx.params.runId ?? "").api(metaOf(ctx), op, { ...Object.fromEntries(ctx.url.searchParams), ...ctx.params }, null)) as Record<string, unknown[]>;
+    return json(200, { items: out[field] ?? [], page_info: { has_next_page: false } });
+  };
 
 /** GET /api/v1/runs/{runId}/messages */
 export const listRunMessages: Handler = async (_req, env, ctx) => {
-  const res = (await workFor(env, ctx, ctx.params.runId ?? "").api(
-    metaOf(ctx),
-    "listRunMessages",
-    { ...Object.fromEntries(ctx.url.searchParams), runId: ctx.params.runId ?? "" },
-    null,
-  )) as { messages: RunMessage[] };
-  const role = ctx.url.searchParams.get("role");
-  return json(200, { messages: role ? res.messages.filter((m) => m.role === role) : res.messages });
+  const runId = ctx.params.runId ?? "";
+  const q = ctx.url.searchParams;
+  const after = Number(q.get("after") ?? "0");
+  if (!Number.isInteger(after) || after < 0) throw invalid(`invalid after ${JSON.stringify(q.get("after"))}`);
+  let limit = Number(q.get("limit") ?? "200");
+  if (!Number.isInteger(limit)) throw invalid(`invalid limit ${JSON.stringify(q.get("limit"))}`);
+  if (limit <= 0 || limit > 1000) limit = 1000;
+  const stub = workFor(env, ctx, runId);
+  const run = (await stub.getRun(runId)) as Run;
+  const res = (await stub.api(metaOf(ctx), "listRunMessages", { runId, after: String(after), limit: "0" }, null)) as { messages: RunMessage[] };
+  const roles = q.getAll("role").flatMap((r) => r.split(",")).map((r) => r.trim()).filter(Boolean);
+  let msgs = roles.length ? res.messages.filter((m) => roles.includes(m.role)) : res.messages;
+  const out: Record<string, unknown> = { run_id: run.id, state: String(runView(run).state) };
+  if (msgs.length > limit) {
+    msgs = msgs.slice(0, limit);
+    out.next_after = msgs.at(-1)!.seq;
+    out.has_more = true;
+  } else out.has_more = false;
+  out.messages = msgs;
+  return json(200, out);
 };
 
 /** POST /api/v1/runs/{runId}/messages */
@@ -172,6 +213,7 @@ export const postRunMessage: Handler = async (req, env, ctx) => {
   const b = await body<{ message?: string; content?: string; attachments?: string[] }>(req);
   const message = b.message ?? b.content ?? "";
   if (!message.trim()) throw invalid("message is required");
+  if (b.attachments?.length) await checkAttachments(env, teamOf(ctx), b.attachments);
   const rec = await workFor(env, ctx, ctx.params.runId ?? "").runsMessage(metaOf(ctx), ctx.params.runId ?? "", {
     message,
     actor: actorOf(ctx),
@@ -190,7 +232,8 @@ export const cancelRun: Handler = async (req, env, ctx) => {
     cancelled: string[];
     run: Run;
   };
-  return json(200, { cancelled: res.cancelled, run: runView(res.run, { publicUrl: publicUrl(env) }) });
+  void res;
+  return json(200, { run_id: ctx.params.runId ?? "" });
 };
 
 /** POST /api/v1/runs/{runId}/interrupt */
@@ -204,12 +247,26 @@ export const streamRunEvents: Handler = async (req, env, ctx) => {
   const runId = ctx.params.runId ?? "";
   const stub = workFor(env, ctx, runId);
   await stub.getRun(runId); // 404 before the stream starts
+  const stopOnIdle = ["1", "true"].includes((ctx.url.searchParams.get("stop_on_idle") ?? "").toLowerCase());
+  const pub = publicUrl(env);
+  let lastState = "";
   return sseResponse({
     lastEventId: req.headers.get("last-event-id") ?? ctx.url.searchParams.get("after") ?? "0",
     backlog: async (cursor) => {
-      const res = (await stub.api(metaOf(ctx), "listRunMessages", { runId, after: cursor, limit: "200" }, null)) as { messages: RunMessage[] };
-      const events = res.messages.map((m) => ({ id: String(m.seq), event: "message", data: m }));
-      return { events, cursor: events.at(-1)?.id ?? cursor };
+      // Go handleRunEvents: "run" on each state change, the messages, then "done" at a finished state.
+      const run = (await stub.getRun(runId)) as Run;
+      const events: { id?: string; event: string; data: unknown }[] = [];
+      const view = runView(run, pub ? { publicUrl: pub } : {});
+      if (run.state !== lastState) {
+        lastState = run.state;
+        events.push({ event: "run", data: view });
+      }
+      const res = (await stub.api(metaOf(ctx), "listRunMessages", { runId, after: cursor, limit: "0" }, null)) as { messages: RunMessage[] };
+      for (const m of res.messages) events.push({ id: String(m.seq), event: "message", data: m });
+      const next = res.messages.at(-1) ? String(res.messages.at(-1)!.seq) : cursor;
+      const finished = isTerminal(run.state) || (stopOnIdle && waitsForInput(run.state));
+      if (finished) events.push({ event: "done", data: view });
+      return { events, cursor: next, done: finished };
     },
     subscribe: () => subscribe(stub, `/subscribe/run?run=${encodeURIComponent(runId)}`),
     signal: req.signal,
@@ -225,13 +282,13 @@ export const createRunAttachment: Handler = notImplementedHandler;
 export const getRunAttachment: Handler = notImplementedHandler;
 
 /** GET /api/v1/runs/{runId}/inputs */
-export const listRunInputs: Handler = workApi("listRunInputs");
+export const listRunInputs: Handler = workApi("listRunInputs", "inputs");
 /** GET /api/v1/runs/{runId}/timeline */
-export const getRunTimeline: Handler = workApi("getRunTimeline");
+export const getRunTimeline: Handler = workApi("getRunTimeline", "events");
 /** GET /api/v1/runs/{runId}/diagnostics */
-export const getRunDiagnostics: Handler = workApi("getRunDiagnostics");
+export const getRunDiagnostics: Handler = workApi("getRunDiagnostics", "diagnostics");
 /** GET /api/v1/runs/{runId}/sessions */
-export const listRunSessions: Handler = workApi("listRunSessions");
+export const listRunSessions: Handler = workApi("listRunSessions", "sessions");
 /** GET /api/v1/runs/{runId}/conversation */
 export const getRunConversation: Handler = async (_req, env, ctx) => {
   const res = (await workFor(env, ctx, ctx.params.runId ?? "").api(metaOf(ctx), "listRunMessages", { runId: ctx.params.runId ?? "" }, null)) as {

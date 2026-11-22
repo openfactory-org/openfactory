@@ -1,7 +1,7 @@
 // WorkDO (key team:<t>|work:<token>): one work item (or a run tree without
 // one), its runs, sessions, runner protocol, inbox items, dispatch ledger and
 // tool idempotency rows. Every request or alarm step is one transactionSync.
-import { conflict, invalid, isOfError, notFound, OfError, type FailureCode } from "@openfactory/core";
+import { conflict, invalid, isOfError, newRoutedId, notFound, OfError, pullRequestSource, sourceKey, type FailureCode } from "@openfactory/core";
 import { failureForSandboxReason, gateNetworkPolicy, parseProviderError, type TaskStatus } from "@openfactory/sandbox";
 import type { EndRequest, StartRequest } from "@openfactory/runner-proto";
 import type { Ack, CallMeta, CoreEvent, OutboxEnvelope, OutboxPayloads } from "../../contracts/do-messages";
@@ -12,7 +12,7 @@ import type { OutboxRow } from "../../lib/outbox/outbox";
 import type { TimerRow } from "../../lib/timers/timers";
 import { decideDeadline, decideSilent, DEFAULT_LOST_AFTER_MS } from "../../engine/liveness";
 import { parseDuration } from "../../engine/sessions";
-import { isTerminal, STAGES, type Run, type RunSession, type Stage } from "../../engine/types";
+import { isTerminal, STAGES, type InboxItem, type PullRequestRef, type Run, type RunSession, type Stage } from "../../engine/types";
 import { taskIdOf } from "../../engine/timeline";
 import { defaultProviderId, providerFor, targetOf } from "../dispatch/providers";
 import {
@@ -32,6 +32,8 @@ import {
   stopSession,
   transition,
   enqueueProvider,
+  projectInbox,
+  projectWorkItem,
   type ChildPlan,
   type DispatchPlan,
   type EngineConfig,
@@ -52,6 +54,7 @@ import {
   type RunnerError,
 } from "./runner";
 import { runTool, type ToolCall, type ToolResult } from "./tools";
+import { applyAction as applyIntake, completeWorkItem, type ApplyActionInput, type ApplyActionResult } from "./intake";
 
 /** Delivers notices (notify service). The integrations workstream sets it; the default logs and acks. */
 export type NoticeDeliverer = (env: Env, envelope: OutboxEnvelope) => Promise<void>;
@@ -83,7 +86,18 @@ export interface CreateRunInput {
   /** Root dispatch (work item + root run, or a follow-up to the root run). */
   dispatch?: DispatchPlan;
   /** A run without a work item (POST /runs of a single agent, judge runs). */
-  run?: { factoryId: string; config: Run["config"]; prompt: string; name?: string; triggeredBy?: string; metadata?: Record<string, string>; actor?: string; runId?: string };
+  run?: {
+    factoryId: string;
+    config: Run["config"];
+    prompt: string;
+    name?: string;
+    triggeredBy?: string;
+    metadata?: Record<string, string>;
+    actor?: string;
+    runId?: string;
+    /** Repositories at the commits a judge or trial run starts from (RunRepoRefsKey). */
+    startingRepoRefs?: unknown[];
+  };
 }
 
 export class WorkDO extends BaseDO {
@@ -111,6 +125,7 @@ export class WorkDO extends BaseDO {
     this.onMessage("work.spendRelease", (p) =>
       this.withFx((fx) => {
         const r = fx.repo.getRun(p.runId);
+        if (r) fx.repo.setMeta(`spend_exceeded:${r.factory_id}`, "");
         if (r?.queued_reason) {
           delete r.queued_reason;
           fx.repo.putRun(r);
@@ -239,12 +254,16 @@ export class WorkDO extends BaseDO {
       this.txFx((fx) => {
         if (input.dispatch) {
           const out = dispatchRoot(fx, input.dispatch);
+          const refs = input.dispatch.startingRepoRefs;
+          if (refs?.length && !out.followUp) fx.repo.setRunState(out.run.id, "repo_refs", JSON.stringify(refs));
           return { run: out.run, workItemId: out.workItem.id, followUp: out.followUp };
         }
         const r = input.run;
         if (!r) throw invalid("dispatch or run is required");
         if (r.runId && fx.repo.getRun(r.runId)) return { run: fx.repo.mustRun(r.runId) };
-        return { run: createRunOnly(fx, r, meta) };
+        const run = createRunOnly(fx, r, meta);
+        if (r.startingRepoRefs?.length) fx.repo.setRunState(run.id, "repo_refs", JSON.stringify(r.startingRepoRefs));
+        return { run };
       }),
     );
   }
@@ -348,6 +367,11 @@ export class WorkDO extends BaseDO {
           if (!wi) throw notFound(`work item ${params.id}`);
           return { runs: repo.listRuns({ workItemId: wi.id }) };
         }
+        case "listWorkItemInbox": {
+          const wi = repo.getWorkItem(params.id);
+          if (!wi) throw notFound(`work item ${params.id}`);
+          return { items: repo.listInbox({ resolved: false }).filter((i) => i.work_item_id === wi.id) };
+        }
         case "getInbox": {
           const it = repo.getInbox(params.id ?? "");
           if (!it) throw notFound(`inbox item ${params.id}`);
@@ -355,34 +379,128 @@ export class WorkDO extends BaseDO {
         }
         case "resolveInbox":
           return this.txFx((fx) => resolveInbox(fx, params.id ?? "", body, meta));
+        case "getRunStartCommits": {
+          repo.mustRun(runId);
+          const raw = repo.getRunState(runId, "start_commits");
+          return { start_commits: raw ? (JSON.parse(raw) as unknown[]) : [] };
+        }
+        case "createInboxItem":
+          return this.txFx((fx) => {
+            const b = (body ?? {}) as Partial<InboxItem> & { track_key?: string };
+            if (!b.kind || !b.title) throw invalid("kind and title are required");
+            const key = b.track_key ? `inbox_track:${b.track_key}` : "";
+            if (key) {
+              const prev = fx.repo.getMeta(key);
+              if (prev) return fx.repo.getInbox(prev);
+            }
+            const wi = b.work_item_id ? fx.repo.getWorkItem(b.work_item_id) : fx.repo.getWorkItem();
+            const it: InboxItem = {
+              id: newRoutedId("inb", fx.token),
+              factory_id: b.factory_id ?? wi?.factory_id ?? "",
+              ...(wi ? { work_item_id: wi.id } : {}),
+              ...(b.run_id ? { run_id: b.run_id } : {}),
+              kind: b.kind,
+              title: b.title,
+              body: b.body ?? "",
+              ...(b.options ? { options: b.options } : {}),
+              ...(b.questions ? { questions: b.questions } : {}),
+              ...(b.recipients ? { recipients: b.recipients } : wi?.creator_id ? { recipients: [wi.creator_id] } : {}),
+              resolved: false,
+              created_at: new Date(fx.now()).toISOString(),
+              version: 0,
+            };
+            fx.repo.createInbox(it);
+            projectInbox(fx, it);
+            if (key) fx.repo.setMeta(key, it.id);
+            return it;
+          });
+        case "unresolveInbox":
+          return this.txFx((fx) => unresolveInbox(fx, params.id ?? "", actorOfMeta(meta)));
+        case "appendRunLog":
+          return this.txFx((fx) => {
+            const r = fx.repo.mustRun(runId);
+            const b = (body ?? {}) as { content?: string; data?: unknown };
+            const m = fx.repo.appendMessage({
+              id: newRoutedId("msg", fx.token),
+              run_id: r.id,
+              role: "system",
+              content: b.content ?? "",
+              ...(b.data !== undefined ? { data: b.data } : {}),
+              created_at: new Date(fx.now()).toISOString(),
+            });
+            fx.wakeRun(r.id);
+            return { message_id: m.id };
+          });
+        case "mcpPatchWorkItem":
+          return this.txFx((fx) => {
+            const wi = fx.repo.getWorkItem(params.id);
+            if (!wi) throw notFound(`work item ${params.id}`);
+            const b = (body ?? {}) as { local_owner?: string; labels?: Record<string, string>; event?: { kind: string; data?: Record<string, unknown>; run_id?: string; actor?: string } };
+            if (b.local_owner !== undefined) wi.local_owner = b.local_owner;
+            if (b.labels) wi.labels = { ...(wi.labels ?? {}), ...b.labels };
+            if (b.local_owner !== undefined || b.labels) {
+              wi.updated_at = new Date(fx.now()).toISOString();
+              fx.repo.putWorkItem(wi);
+              projectWorkItem(fx, wi);
+            }
+            if (b.event?.kind) workItemEvent(fx, wi.id, b.event.kind, b.event.run_id ?? "", b.event.actor ?? actorOfMeta(meta), b.event.data ?? {});
+            return fx.repo.getWorkItem(wi.id);
+          });
+        case "mcpLinkPullRequest":
+          return this.txFx((fx) => {
+            const wi = fx.repo.getWorkItem(params.id);
+            if (!wi) throw notFound(`work item ${params.id}`);
+            const pr = (body ?? {}) as PullRequestRef;
+            if (!pr.repo || !pr.number) throw invalid("pull request repo and number are required");
+            const list = wi.pull_requests ?? [];
+            const i = list.findIndex((x) => x.forge === pr.forge && x.repo === pr.repo && x.number === pr.number);
+            if (i >= 0) list[i] = { ...list[i]!, ...pr };
+            else list.push(pr);
+            wi.pull_requests = list;
+            const key = sourceKey(pullRequestSource(pr as never));
+            if (key && !(wi.references ?? []).some((r) => r.key === key)) {
+              wi.references = [...(wi.references ?? []), { kind: "pull_request", key, added_at: new Date(fx.now()).toISOString() }];
+            }
+            wi.updated_at = new Date(fx.now()).toISOString();
+            fx.repo.putWorkItem(wi);
+            projectWorkItem(fx, wi);
+            if (i < 0) workItemEvent(fx, wi.id, "pr_linked", "", actorOfMeta(meta), { repo: pr.repo, number: pr.number, url: pr.url ?? "" });
+            return fx.repo.getWorkItem(wi.id);
+          });
         case "workItemMessage":
           return this.txFx((fx) => {
             const wi = fx.repo.getWorkItem(params.id);
             if (!wi) throw notFound(`work item ${params.id}`);
-            if (!wi.root_run_id) throw conflict("the work item has no root run");
+            if (!wi.root_run_id) throw new OfError("operation_not_supported", `work item ${wi.id} has no foreman run`);
             const b = (body ?? {}) as { message?: string };
-            return sendMessage(fx, wi.root_run_id, b.message ?? "", actorOfMeta(meta));
+            if (!(b.message ?? "").trim()) throw invalid("message is required");
+            const rec = sendMessage(fx, wi.root_run_id, b.message ?? "", actorOfMeta(meta));
+            return { work_item_id: wi.id, run_id: wi.root_run_id, message_id: rec.message_id, outcome: rec.outcome };
           });
         case "workItemCancel":
           return this.txFx((fx) => {
             const wi = fx.repo.getWorkItem(params.id);
             if (!wi) throw notFound(`work item ${params.id}`);
+            if (wi.stage === "cancelled" || wi.stage === "complete") throw conflict(`work item is already ${wi.stage}`);
             const actor = actorOfMeta(meta);
             const done = new Set<string>();
             for (const r of fx.repo.listRuns({ workItemId: wi.id })) {
               if (!r.parent_run_id) for (const id of cancel(fx, r.id, actor, true)) done.add(id);
             }
+            const note = ((body ?? {}) as { reason?: string }).reason || "Cancelled via API";
             const cur = fx.repo.getWorkItem(wi.id)!;
-            if (cur.stage !== "cancelled" && cur.stage !== "complete") setStage(fx, wi.id, "cancelled", actor, "cancelled");
+            if (cur.stage !== "cancelled" && cur.stage !== "complete") setStage(fx, wi.id, "cancelled", actor, note);
             return { work_item: fx.repo.getWorkItem(wi.id), cancelled: [...done] };
           });
         case "workItemComplete":
           return this.txFx((fx) => {
             const wi = fx.repo.getWorkItem(params.id);
             if (!wi) throw notFound(`work item ${params.id}`);
-            const out = setStage(fx, wi.id, "complete", actorOfMeta(meta), "completed");
-            for (const r of fx.repo.listRuns({ workItemId: wi.id })) if (r.parent_run_id) cancelOne(fx, r.id, actorOfMeta(meta));
-            return out;
+            if (wi.stage === "cancelled" || wi.stage === "complete") throw conflict(`work item is already ${wi.stage}`);
+            const actor = actorOfMeta(meta);
+            for (const r of fx.repo.listRuns({ workItemId: wi.id })) if (r.parent_run_id) cancelOne(fx, r.id, actor);
+            completeWorkItem(fx, wi.id, actor, ((body ?? {}) as { note?: string }).note ?? "");
+            return fx.repo.getWorkItem(wi.id);
           });
         case "workItemStage":
           return this.txFx((fx) => {
@@ -459,6 +577,104 @@ export class WorkDO extends BaseDO {
     );
   }
 
+  /**
+   * A task state pushed by its provider or WorkerHubDO. An exited task ends
+   * its session as lost (the liveness rule for "exited"); other states only
+   * count as a sign of life.
+   */
+  async sandboxState(runId: string, session: number, status: TaskStatus): Promise<{ ok: true }> {
+    return this.rpc(() =>
+      this.txFx((fx) => {
+        const s = fx.repo.getSession(runId, session);
+        if (!s || s.state === "ended") return { ok: true as const };
+        if (status.state === "exited") {
+          const reason = status.reason ?? "unknown";
+          loseCode(fx, s, reason, failureForSandboxReason(reason) ?? "", true);
+        }
+        return { ok: true as const };
+      }),
+    );
+  }
+
+  // ---------- planner and transfer reads (Worker -> WorkDO) ----------
+
+  /** Planner inputs: the work item, the starting repository refs and the start commits. */
+  async plannerState(runId: string): Promise<{ workItem?: unknown; repoRefs: unknown[]; startCommits?: unknown[] }> {
+    return this.rpc(() => {
+      const repo = new Repo(this.sql, Date.now);
+      const r = repo.mustRun(runId);
+      const wi = r.work_item_id ? repo.getWorkItem(r.work_item_id) : undefined;
+      const wiRefs = this.sql.exec<{ v: string }>("SELECT v FROM work_item_state WHERE k = 'repo_refs'").toArray()[0]?.v;
+      const raw = repo.getRunState(runId, "repo_refs") ?? wiRefs;
+      const start = repo.getRunState(runId, "start_commits");
+      return {
+        ...(wi ? { workItem: wi } : {}),
+        repoRefs: raw ? (JSON.parse(raw) as unknown[]) : [],
+        ...(start ? { startCommits: JSON.parse(start) as unknown[] } : {}),
+      };
+    });
+  }
+
+  /** recordStartCommits: the first record wins (later sessions keep it). */
+  async recordStartCommits(runId: string, list: unknown[]): Promise<{ ok: true }> {
+    return this.rpc(() =>
+      this.tx(() => {
+        const repo = new Repo(this.sql, Date.now);
+        if (list.length > 0 && !repo.getRunState(runId, "start_commits")) repo.setRunState(runId, "start_commits", JSON.stringify(list));
+        return { ok: true as const };
+      }),
+    );
+  }
+
+  /** The timeline event secrets.delivered (names only; one per task). */
+  async runnerSecretsDelivered(runId: string, session: number, data: { names: string[]; harness_credential: unknown }): Promise<{ ok: true }> {
+    return this.rpc(() =>
+      this.txFx((fx) => {
+        const s = fx.repo.getSession(runId, session);
+        if (s) {
+          fx.repo.appendTimeline({
+            event_id: "secrets.delivered:" + s.task_id,
+            run_id: runId,
+            session,
+            type: "secrets.delivered",
+            at: new Date(fx.now()).toISOString(),
+            data,
+          });
+        }
+        return { ok: true as const };
+      }),
+    );
+  }
+
+  /**
+   * snapshotFiles (transfer.go): for each part, the upload IDs of the newest
+   * session before `before` that saved it.
+   */
+  async snapshotParts(runId: string, before: number): Promise<{ session: number; part: string; uploadIds: string[] }[]> {
+    return this.rpc(() => {
+      const rows = this.sql
+        .exec<{ session: number; part: string; upload_ids: string }>(
+          "SELECT session, part, upload_ids FROM snapshot_parts WHERE run_id = ? AND session < ? ORDER BY session DESC",
+          runId,
+          before,
+        )
+        .toArray();
+      const out: { session: number; part: string; uploadIds: string[] }[] = [];
+      const seen = new Set<string>();
+      for (const r of rows) {
+        if (seen.has(r.part)) continue;
+        seen.add(r.part);
+        out.push({ session: Number(r.session), part: r.part, uploadIds: JSON.parse(r.upload_ids) as string[] });
+      }
+      return out;
+    });
+  }
+
+  /** Whether an input of the run names the attachment (downloads of kind attachment). */
+  async inputsNameAttachment(runId: string, attachmentId: string): Promise<boolean> {
+    return this.rpc(() => new Repo(this.sql, Date.now).listInputs(runId).some((i) => (i.attachments ?? []).includes(attachmentId)));
+  }
+
   /** DispatchDO reconcile only. */
   async leaseCheck(runId: string, session: number): Promise<"open" | "ended"> {
     return this.rpc(() => {
@@ -474,43 +690,38 @@ export class WorkDO extends BaseDO {
 
   // ---------- intake (IngressDO -> WorkDO) ----------
 
-  async applyAction(input: {
-    actionKey: string;
-    target: string;
-    kind: "continue" | "createRoot" | "sideRun" | "deliverToRoot" | "mention";
-    event: CoreEvent;
-    bundleRef?: string;
-    dispatchRequest?: unknown;
-  }): Promise<Ack> {
-    return this.rpc(() =>
-      this.txFx((fx) => {
-        if (fx.repo.hasDispatch(input.actionKey, input.target) !== undefined) return { ok: true } as const;
-        const plan = input.dispatchRequest as DispatchPlan | undefined;
-        if ((input.kind === "createRoot" || input.kind === "deliverToRoot" || input.kind === "mention") && plan) {
-          dispatchRoot(fx, { ...plan, ledger: { actionKey: input.actionKey, target: input.target } });
-          return { ok: true } as const;
-        }
-        const wi = fx.repo.getWorkItem();
-        if (input.kind === "continue" && wi?.root_run_id) {
-          const r = fx.repo.getRun(wi.root_run_id);
-          if (r && r.state !== "cancelled") {
-            const text = input.event.text || `${input.event.provider} ${input.event.type}`;
-            const rec = sendMessage(fx, r.id, text, input.event.actor?.handle || "system");
-            fx.repo.recordDispatch(input.actionKey, input.target, rec.message_id);
-          }
-        }
-        fx.repo.recordDispatch(input.actionKey, input.target, "");
-        return { ok: true } as const;
-      }),
-    );
+  /** IngressDO -> WorkDO: one intake action, idempotent on (actionKey, target). */
+  async applyAction(input: ApplyActionInput): Promise<ApplyActionResult> {
+    return this.rpc(() => this.txFx((fx) => applyIntake(fx, input)));
   }
 
+  /** The work item and its root run, for the intake decisions (rootAgentName). */
+  async intakeState(): Promise<{ workItemId?: string; stage?: string; rootRunId?: string; rootAgent?: string; creatorId?: string }> {
+    return this.rpc(() => {
+      const repo = new Repo(this.sql, Date.now);
+      const wi = repo.getWorkItem();
+      if (!wi) return {};
+      const root = wi.root_run_id ? repo.getRun(wi.root_run_id) : undefined;
+      return {
+        workItemId: wi.id,
+        stage: wi.stage,
+        ...(wi.creator_id ? { creatorId: wi.creator_id } : {}),
+        ...(root ? { rootRunId: root.id, rootAgent: root.agent_name ?? "" } : {}),
+      };
+    });
+  }
+
+  /** allowBotAction: at most 20 bot actions per work item in one hour; an action counts once. */
   async allowBotAction(actionKey: string): Promise<boolean> {
     return this.rpc(() =>
       this.tx(() => {
-        this.sql.exec("INSERT OR IGNORE INTO bot_actions (action_key, at_ms) VALUES (?, ?)", actionKey, Date.now());
+        const now = Date.now();
+        if (actionKey && this.sql.exec("SELECT 1 FROM bot_actions WHERE action_key = ?", actionKey).toArray().length) return true;
+        this.sql.exec("DELETE FROM bot_actions WHERE at_ms < ?", now - 3_600_000);
         const n = Number(this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM bot_actions").one().n);
-        return n <= 20;
+        if (n >= 20) return false;
+        this.sql.exec("INSERT OR IGNORE INTO bot_actions (action_key, at_ms) VALUES (?, ?)", actionKey || `anon:${now}:${Math.random()}`, now);
+        return true;
       }),
     );
   }
@@ -676,6 +887,9 @@ export class WorkDO extends BaseDO {
 
   /** work.spendStop: spend_limit on every run of the tree, and stop live sessions (N7). */
   private spendStop(fx: Fx, rootRunId: string): void {
+    const root = fx.repo.getRun(rootRunId);
+    // The spend gate before a new turn of a live session (deliver.go spendStopsTurn).
+    if (root) fx.repo.setMeta(`spend_exceeded:${root.factory_id}`, String(fx.now()));
     const queue = [rootRunId];
     const seen = new Set<string>();
     while (queue.length) {
@@ -739,6 +953,67 @@ function resolveInbox(fx: Fx, id: string, body: unknown, meta: CallMeta): unknow
     const rec = sendMessage(fx, it.run_id, `Answer to "${it.title}": ${text}`, actor);
     it.answer_message_id = rec.message_id;
     fx.repo.putInbox(it);
+  }
+  return it;
+}
+
+/** UnresolveWindow (engine/inbox.go). */
+export const UNRESOLVE_WINDOW_MS = 10 * 60_000;
+
+/** resumesRun (workitems.go): the kinds whose resolve sends an answer to the run. */
+function resumesRun(it: InboxItem): boolean {
+  switch (it.kind) {
+    case "handoff":
+    case "answered":
+    case "failure":
+    case "spend_limit":
+      return false;
+    case "review":
+      return (it.options ?? []).length > 0;
+  }
+  return true;
+}
+
+/** actorLabel (workitems.go), without the user lookup. */
+function actorLabel(actor: string): string {
+  const a = actor.trim();
+  if (!a || a === "api") return "a team member";
+  return a;
+}
+
+/**
+ * UnresolveInbox: undoes a resolve within 10 minutes, while the run did not
+ * consume the answer. The run gets a message that withdraws the answer.
+ */
+export function unresolveInbox(fx: Fx, id: string, actor: string): InboxItem {
+  const it = fx.repo.getInbox(id);
+  if (!it) throw notFound(`inbox item ${id}`);
+  if (!it.resolved) throw conflict("inbox item is not resolved");
+  const at = it.resolved_at ? Date.parse(it.resolved_at) : NaN;
+  if (!Number.isFinite(at) || fx.now() - at > UNRESOLVE_WINDOW_MS) throw conflict("the resolve is older than 10m0s and cannot be undone");
+  if (it.resolved_via === "forge" || (!it.resolved_by && !it.resolved_via)) throw conflict("the platform closed this item and it cannot be undone");
+  if (it.run_id && it.answer_message_id) {
+    const input = fx.repo.getInput(it.answer_message_id);
+    if (input && input.state !== "pending") throw conflict("the run already read the answer");
+  }
+  const old = it.resolution ?? "";
+  it.resolved = false;
+  delete it.resolution;
+  delete it.resolved_by;
+  delete it.resolved_via;
+  delete it.resolved_at;
+  delete it.answer_message_id;
+  fx.repo.putInbox(it);
+  projectInbox(fx, it);
+  if (it.work_item_id) workItemEvent(fx, it.work_item_id, "note", it.run_id ?? "", actor, { inbox_id: it.id, text: "resolve undone" });
+  if (it.run_id && resumesRun(it)) {
+    const short = [...old].length > 500 ? [...old].slice(0, 499).join("") + "…" : old;
+    const msg = `[human correction] ${actorLabel(actor)} withdrew the answer to ${JSON.stringify(it.title)} (it was: ${short}). Ignore that answer. A new answer will arrive as a follow-up message.`;
+    try {
+      sendMessage(fx, it.run_id, msg, actor);
+    } catch (e) {
+      console.warn("work: deliver inbox unresolve", it.id, e);
+    }
   }
   return it;
 }

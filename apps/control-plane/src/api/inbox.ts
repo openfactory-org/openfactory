@@ -2,7 +2,7 @@
 // (partition token "w"); team-level items in IndexDO ("i"). Lists and read
 // state come from IndexDO.
 import { doName, OfError, partitionOf, tokenKind } from "@openfactory/core";
-import { notImplementedHandler, type Handler, type RouteContext } from "../http/handler";
+import { type Handler, type RouteContext } from "../http/handler";
 import type { Env } from "../contracts/env";
 import { json, metaOf, teamOf, workFor } from "./runs";
 
@@ -51,5 +51,9 @@ export const readInboxItem: Handler = async (_req, env, ctx) => {
   return json(200, { read: true });
 };
 
-/** POST /api/v1/inbox/{id}/unresolve: not in this wave. */
-export const unresolveInboxItem: Handler = notImplementedHandler;
+/** POST /api/v1/inbox/{id}/unresolve (Engine.UnresolveInbox). */
+export const unresolveInboxItem: Handler = async (_req, env, ctx) => {
+  const id = ctx.params.id ?? "";
+  if (!ownerIsWork(id)) throw new OfError("feature_not_available", "team-level inbox items cannot be unresolved");
+  return json(200, await workFor(env, ctx, id).api(metaOf(ctx), "unresolveInbox", { id }, null));
+};

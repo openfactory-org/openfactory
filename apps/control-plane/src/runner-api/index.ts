@@ -6,7 +6,13 @@ import type { StartRequest } from "@openfactory/runner-proto";
 import type { Env } from "../contracts/env";
 import type { Run, RunSession } from "../engine/types";
 import { longPoll, MAX_WAIT_S, subscribe } from "../stream/index";
-import { buildSecrets, buildStartConfig } from "./startconfig";
+import { plannedSecrets, plannedStartConfig, plannerFor } from "./planner";
+import { buildSecrets, buildStartConfig, setSecretsBuilder, setStartConfigBuilder } from "./startconfig";
+import { attachmentDownload, CLOUD_TOKEN_TTL, getAttachment, presignUpload, snapshotDownloads, type UploadRequest } from "./transfer";
+import { issuerFor } from "../cloudid/issuer";
+
+setStartConfigBuilder(plannedStartConfig);
+setSecretsBuilder(plannedSecrets);
 import { mintSessionToken, runnerKeys, sha256Hex, verifySessionToken, type SessionClaims } from "./token";
 
 export const RUNNER_PREFIX = "/runner/v1";
@@ -90,6 +96,10 @@ export async function handleRunnerApi(request: Request, env: Env, ctx?: Executio
       case "GET /runner/v1/session/commands":
       case "POST /runner/v1/session/end":
       case "GET /runner/v1/session/conversation":
+      case "POST /runner/v1/session/uploads":
+      case "GET /runner/v1/session/downloads":
+      case "POST /runner/v1/session/git-credential":
+      case "POST /runner/v1/session/cloud-token":
         return await sessionRoute(route, request, env, url, ctx);
     }
     if (path.startsWith(RUNNER_PREFIX + "/")) return errorBody(501, "not_implemented", "not implemented");
@@ -130,7 +140,13 @@ async function start(request: Request, env: Env): Promise<Response> {
   } catch (e) {
     const { error } = toOfError(e);
     if (error.code === "invalid_request" || error.code === "resource_not_found") {
-      return fromErr((await stub.runnerFailStart(res.run.id, res.session.session, error.detail || error.message)) as RunnerErr);
+      let msg = error.detail || error.message;
+      try {
+        for (const v of await plannerFor(env, res.run).redactValues(res.run)) msg = msg.split(v).join("[REDACTED]");
+      } catch {
+        /* keep the text */
+      }
+      return fromErr((await stub.runnerFailStart(res.run.id, res.session.session, msg)) as RunnerErr);
     }
     throw e;
   }
@@ -148,7 +164,82 @@ async function sessionRoute(route: string, request: Request, env: Env, url: URL,
     case "GET /runner/v1/session/secrets": {
       const a = (await stub.runnerAuth(claims.run, claims.ses)) as { run: Run; session: RunSession } | RunnerErr;
       if (isErr(a)) return fromErr(a);
-      return json(200, await buildSecrets(env, a.run, a.session));
+      const sec = await buildSecrets(env, a.run, a.session);
+      const names = [...new Set([...Object.keys(sec.env ?? {}), ...Object.keys(sec.harness_auth ?? {}), ...(sec.files ?? []).map((f) => f.path)])].sort();
+      try {
+        await stub.runnerSecretsDelivered(a.run.id, a.session.session, { names, harness_credential: null });
+      } catch (e) {
+        console.warn("runner-api: secrets.delivered timeline", a.run.id, e);
+      }
+      return json(200, sec);
+    }
+    case "POST /runner/v1/session/uploads": {
+      const a = (await stub.runnerAuth(claims.run, claims.ses)) as { run: Run; session: RunSession } | RunnerErr;
+      if (isErr(a)) return fromErr(a);
+      const body = await readJson<UploadRequest>(request);
+      if (body instanceof Response) return body;
+      if (!env.OF_R2_ACCOUNT_ID) return errorBody(501, "not_implemented", "not implemented");
+      const out = await presignUpload(env, await runnerKeys(env), a.run, a.session, body ?? ({} as UploadRequest));
+      if ("status" in out && "code" in out) return errorBody(out.status as number, out.code as string, out.message as string);
+      return json(200, out);
+    }
+    case "GET /runner/v1/session/downloads": {
+      const a = (await stub.runnerAuth(claims.run, claims.ses)) as { run: Run; session: RunSession } | RunnerErr;
+      if (isErr(a)) return fromErr(a);
+      const kind = url.searchParams.get("kind") ?? "";
+      if (!env.OF_R2_ACCOUNT_ID) return errorBody(501, "not_implemented", "not implemented");
+      if (kind === "attachment") {
+        const id = url.searchParams.get("id") ?? "";
+        if (!id) return errorBody(400, "bad_request", "id is required");
+        const named = await stub.inputsNameAttachment(a.run.id, id);
+        const files = named ? await attachmentDownload(env, a.run, await getAttachment(env, a.run.team_id || "default", id)) : undefined;
+        if (!files) return errorBody(404, "not_found", "attachment not found");
+        return json(200, { files });
+      }
+      if (kind !== "snapshot") return errorBody(400, "bad_request", `unknown kind ${JSON.stringify(kind)}`);
+      const parts = await stub.snapshotParts(a.run.id, a.session.session);
+      return json(200, { files: await snapshotDownloads(env, await runnerKeys(env), a.run, parts) });
+    }
+    case "POST /runner/v1/session/git-credential": {
+      const a = (await stub.runnerAuth(claims.run, claims.ses)) as { run: Run; session: RunSession } | RunnerErr;
+      if (isErr(a)) return fromErr(a);
+      const body = await readJson<{ protocol?: string; host?: string; path?: string }>(request);
+      if (body instanceof Response) return body;
+      if (body?.protocol !== "https") return errorBody(400, "bad_request", "protocol must be https");
+      if (!body.host || !body.path) return errorBody(400, "bad_request", "host and path are required");
+      try {
+        const c = await plannerFor(env, a.run).gitCredential(a.run, body.host, body.path);
+        return json(200, { username: c.username, password: c.password, expires_at: c.expiresAt });
+      } catch (e) {
+        const { error } = toOfError(e);
+        if (error.code === "not_authorized") return errorBody(403, "forbidden", "no credential for this repository");
+        throw e;
+      }
+    }
+    case "POST /runner/v1/session/cloud-token": {
+      const a = (await stub.runnerAuth(claims.run, claims.ses)) as { run: Run; session: RunSession } | RunnerErr;
+      if (isErr(a)) return fromErr(a);
+      const body = await readJson<{ audience?: string; ttl_seconds?: number }>(request);
+      if (body instanceof Response) return body;
+      if (!body?.audience) return errorBody(400, "bad_request", "audience is required");
+      const ttl = body.ttl_seconds || CLOUD_TOKEN_TTL.def;
+      if (ttl < CLOUD_TOKEN_TTL.min || ttl > CLOUD_TOKEN_TTL.max) {
+        return errorBody(400, "bad_request", `ttl_seconds must be from ${CLOUD_TOKEN_TTL.min} to ${CLOUD_TOKEN_TTL.max}`);
+      }
+      const snap = (await env.TEAM.getByName(doName.team(a.run.team_id || "default")).configSnapshot(a.run.factory_id)) as {
+        runtime?: { cloud_providers?: { gcp?: { projectNumber?: string; workloadIdentityFederationPoolId?: string; workloadIdentityFederationProviderId?: string }; audiences?: string[] } };
+      };
+      if (!allowedAudience(snap?.runtime?.cloud_providers, body.audience)) return errorBody(403, "forbidden", "no cloud token for this audience");
+      let issuer;
+      try {
+        issuer = await issuerFor(env);
+      } catch {
+        return errorBody(501, "not_implemented", "not implemented");
+      }
+      const tok = await issuer.token(a.run as never, body.audience, ttl * 1000, {
+        ...(a.run.config?.worker_host ? { workerHost: a.run.config.worker_host } : {}),
+      });
+      return json(200, { token: tok.token, expires_at: new Date(tok.expiresAt).toISOString() });
     }
     case "POST /runner/v1/session/token": {
       const a = (await stub.runnerAuth(claims.run, claims.ses)) as { run: Run; session: RunSession } | RunnerErr;
@@ -239,3 +330,18 @@ async function serveBinary(env: Env, name: string): Promise<Response> {
 }
 
 export { OfError };
+
+/** cloudid.AllowedAudience without AWS: the GCP audience of the factory, or one of its audiences. */
+export function allowedAudience(
+  cp: { gcp?: { projectNumber?: string; workloadIdentityFederationPoolId?: string; workloadIdentityFederationProviderId?: string }; audiences?: string[] } | undefined,
+  aud: string,
+): boolean {
+  const a = aud.trim();
+  if (!cp || !a) return false;
+  const g = cp.gcp;
+  if (g?.projectNumber) {
+    const want = `//iam.googleapis.com/projects/${g.projectNumber}/locations/global/workloadIdentityPools/${g.workloadIdentityFederationPoolId ?? ""}/providers/${g.workloadIdentityFederationProviderId ?? ""}`;
+    if (want === a) return true;
+  }
+  return (cp.audiences ?? []).includes(a);
+}

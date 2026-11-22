@@ -11,6 +11,7 @@ import { handleRunnerApi } from "../../runner-api/index";
 import { toolIdempotencyKey } from "../../engine/canonical";
 import type { AgentConfig, Run } from "../../engine/types";
 import type { WorkDO } from "./index";
+import { platformDeps, setPlannerDeps } from "../../runner-api/planner";
 
 const TEAM = "default";
 
@@ -68,9 +69,18 @@ beforeEach(() => {
   provider = new FakeProvider();
   registerProvider("local", () => provider);
   registerProvider("cloudflare-sandbox", () => provider);
+  // The planner reads the run's WorkDO; the factory comes from a fixed snapshot.
+  setPlannerDeps((e, run) => ({
+    ...platformDeps(e, run),
+    snapshot: async (fid) => ({ factory: { id: fid }, runtime: { repositories: [] }, agents: [], integrations: {} }),
+    environment: async () => undefined,
+    secret: async () => undefined,
+    listSecrets: async () => [],
+  }));
 });
 
 afterEach(() => {
+  setPlannerDeps(platformDeps);
   unregisterProvider("local");
   unregisterProvider("cloudflare-sandbox");
 });

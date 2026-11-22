@@ -29,6 +29,13 @@ export function unregisterProvider(id: string): void {
   factories.delete(id);
 }
 
+/** The provider of an enrolled worker. WS6 sets it (MicroVMProvider); the default goes straight to WorkerHubDO. */
+export type WorkerProviderFactory = (env: Env, teamId: string, workerId: string) => SandboxProvider;
+let workerFactory: WorkerProviderFactory | undefined;
+export function setWorkerProviderFactory(f: WorkerProviderFactory): void {
+  workerFactory = f;
+}
+
 export function registeredProviders(): string[] {
   return [...factories.keys()];
 }
@@ -139,7 +146,7 @@ class WorkerProvider implements SandboxProvider {
  * granted pool slot. Throws OfError invalid_request for an unknown provider.
  */
 export function providerFor(env: Env, teamId: string, providerId: string, workerId?: string): SandboxProvider {
-  if (workerId) return new WorkerProvider(env, teamId, workerId);
+  if (workerId) return workerFactory ? workerFactory(env, teamId, workerId) : new WorkerProvider(env, teamId, workerId);
   const f = factories.get(providerId);
   if (f) return f(env, teamId);
   if (providerId === "cloudflare-sandbox") return new ServiceBindingProvider(providerId, env.PROVIDER_CLOUDFLARE_SANDBOX);

@@ -1,7 +1,7 @@
 // Event ID formulas of internal/dispatch/timeline.go. A retried write with
 // the same ID adds no second row. Go uses nanoseconds; times here are ms
 // scaled to ns so that the IDs keep their shape.
-import type { RunInput as StateInput, RunResult } from "./runstate";
+import type { RunStateInput as StateInput, RunStateResult as RunResult } from "@openfactory/core";
 import { ms } from "./sessions";
 import type { Run } from "./types";
 
