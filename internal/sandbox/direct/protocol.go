@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/openfactory-org/openfactory/internal/rtcore"
 )
@@ -30,6 +31,13 @@ import (
 const (
 	// ConnectPath is the worker connection endpoint.
 	ConnectPath = "/api/v1/workers/connect"
+	// HeaderWorkerID is the upgrade header with the worker ID. The control
+	// plane routes the connection by it; hello and auth.response must name
+	// the same ID.
+	HeaderWorkerID = "OF-Worker-ID"
+	// pingFrame is the liveness frame of an enrolled worker. The hub answers
+	// {"type":"pong"}.
+	pingFrame = `{"type":"ping"}`
 )
 
 // Message types.
@@ -90,6 +98,11 @@ type Hello struct {
 type Welcome struct {
 	ConnectionID string `json:"connection_id"`
 	HeartbeatMS  int64  `json:"heartbeat_ms"`
+	// AccessToken is a short-lived token of an enrolled worker (prefix
+	// ofw_) for its REST calls, for example the git credential of the
+	// mirror cache. It is kept in memory only.
+	AccessToken          string     `json:"access_token,omitempty"` //nolint:gosec // G117: the token goes to the worker on purpose
+	AccessTokenExpiresAt *time.Time `json:"access_token_expires_at,omitempty"`
 }
 
 // Heartbeat reports worker load.

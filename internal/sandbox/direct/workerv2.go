@@ -63,6 +63,9 @@ type WorkerV2Options struct {
 	// Facts describes the host. Nil means the facts that the Go runtime
 	// knows: arch, OS, CPUs and the version.
 	Facts *WorkerFacts
+	// OnWelcome, when set, gets the welcome of each connection, for example
+	// to read its access token.
+	OnWelcome func(Welcome)
 	// Slots and Slot describe the slots of a microVM worker.
 	Slots int
 	Slot  *SlotSize
@@ -130,9 +133,6 @@ func RunWorkerV2(parent context.Context, opts WorkerV2Options) error {
 	if opts.ServerURL == "" {
 		return fmt.Errorf("%w: server URL required", rtcore.ErrInvalid)
 	}
-	if opts.APIKey == "" {
-		return fmt.Errorf("%w: worker API key required", rtcore.ErrInvalid)
-	}
 	if opts.Backend == nil {
 		return fmt.Errorf("%w: worker backend required", rtcore.ErrInvalid)
 	}
@@ -154,6 +154,9 @@ func RunWorkerV2(parent context.Context, opts WorkerV2Options) error {
 			return err
 		}
 		opts.Key = k
+	}
+	if opts.APIKey == "" && opts.Key == nil {
+		return fmt.Errorf("%w: worker API key or worker key required", rtcore.ErrInvalid)
 	}
 	if opts.Facts == nil {
 		opts.Facts = &WorkerFacts{Arch: runtime.GOARCH, OS: runtime.GOOS, VCPUs: runtime.NumCPU(), RuntimeVersion: opts.Version}
@@ -376,7 +379,11 @@ func (w *workerV2) finishOneShot(st rtcore.TaskStatus) {
 func (w *workerV2) session(ctx context.Context) (connected bool, err error) {
 	u := strings.TrimRight(w.opts.ServerURL, "/") + ConnectPath
 	h := http.Header{}
-	h.Set("Authorization", "Bearer "+w.opts.APIKey)
+	if w.opts.APIKey != "" {
+		h.Set("Authorization", "Bearer "+w.opts.APIKey)
+	}
+	// The control plane routes the upgrade by worker ID before any frame.
+	h.Set(HeaderWorkerID, w.opts.WorkerID)
 	h.Set("User-Agent", "openfactory-worker/"+w.opts.Version)
 	dialCtx, cancelDial := context.WithTimeout(ctx, 30*time.Second)
 	wsc, _, err := ws.Dial(dialCtx, w.opts.HTTPClient, u, h, []string{SubprotocolV2}) //nolint:bodyclose // Dial closes the body on failure; on success the body is the connection, closed by wsc.Close
@@ -465,6 +472,9 @@ func (w *workerV2) session(ctx context.Context) (connected bool, err error) {
 		return false, errors.New("invalid welcome from server")
 	}
 	w.log.Info("connected to server", "connection", welcome.ConnectionID, "tasks", len(hello.Tasks))
+	if w.opts.OnWelcome != nil {
+		w.opts.OnWelcome(welcome)
+	}
 	if w.opts.Metrics != nil {
 		w.opts.Metrics.SetConnected(true)
 		defer w.opts.Metrics.SetConnected(false)
@@ -531,6 +541,13 @@ func (w *workerV2) heartbeats(ctx context.Context, c *v2Client, interval time.Du
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			if w.opts.Key != nil {
+				// An enrolled worker talks to a hub that answers this exact
+				// text without waking up.
+				if err := c.ws.WriteMessage(ws.OpText, []byte(pingFrame)); err != nil {
+					return
+				}
+			}
 			hb, _ := json.Marshal(Heartbeat{Active: w.active(), Capacity: w.opts.Capacity})
 			if err := c.send(&message{Type: typeHeartbeat, Params: hb}); err != nil {
 				return
@@ -561,7 +578,7 @@ func (w *workerV2) handle(ctx context.Context, m *message) (any, error) {
 		if err := json.Unmarshal(m.Params, &p); err != nil {
 			return nil, fmt.Errorf("%w: bad task.assign params: %w", rtcore.ErrInvalid, err)
 		}
-		st, err := w.assign(ctx, p.Task)
+		st, err := w.assign(ctx, p.Task, p.Worker)
 		if err != nil {
 			return nil, err
 		}
@@ -612,7 +629,7 @@ func (w *workerV2) handle(ctx context.Context, m *message) (any, error) {
 }
 
 // assign starts a task on the backend. It reserves its slot first.
-func (w *workerV2) assign(ctx context.Context, task rtcore.Task) (rtcore.TaskStatus, error) {
+func (w *workerV2) assign(ctx context.Context, task rtcore.Task, extras json.RawMessage) (rtcore.TaskStatus, error) {
 	if err := task.Validate(); err != nil {
 		return rtcore.TaskStatus{}, fmt.Errorf("%w: %w", rtcore.ErrInvalid, err)
 	}
@@ -652,7 +669,13 @@ func (w *workerV2) assign(ctx context.Context, task rtcore.Task) (rtcore.TaskSta
 	if w.opts.DefaultImage != "" && (task.Image == "" || task.Image == "local") {
 		task.Image = w.opts.DefaultImage
 	}
-	st, err := w.opts.Backend.Start(ctx, task)
+	var st rtcore.TaskStatus
+	var err error
+	if eb, ok := w.opts.Backend.(ExtrasBackend); ok {
+		st, err = eb.StartWithExtras(ctx, task, extras)
+	} else {
+		st, err = w.opts.Backend.Start(ctx, task)
+	}
 	if err != nil {
 		w.mu.Lock()
 		delete(w.status, task.TaskID)

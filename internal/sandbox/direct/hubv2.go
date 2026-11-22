@@ -755,7 +755,7 @@ func (h *Hub) serveV2(ctx context.Context, conn *ws.Conn, teamID, principal, tok
 		_ = conn.CloseWithStatus(closePolicy, err.Error())
 		return
 	}
-	welcome, _ := json.Marshal(Welcome{ConnectionID: c.id, HeartbeatMS: h.opts.HeartbeatInterval.Milliseconds()})
+	welcome, _ := json.Marshal(Welcome{ConnectionID: c.id, HeartbeatMS: h.opts.HeartbeatInterval.Milliseconds()}) //nolint:gosec // G117: no token is set here
 	if err := c.send(&message{Type: typeWelcome, Result: welcome}); err != nil {
 		_ = conn.Close()
 		return

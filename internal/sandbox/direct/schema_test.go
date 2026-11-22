@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -76,22 +77,23 @@ func TestFramesMatchSchema(t *testing.T) {
 				FirecrackerVersion: "v1.18.0", GuestKernel: "6.18", RuntimeVersion: "1.0.0", KVM: true, Warnings: []string{"w"}},
 			Slots: 4, Slot: &SlotSize{VCPUs: 2, MemoryMiB: 4096, ScratchGiB: 40}, Draining: true,
 		}, nil, nil),
-		"welcome":     frame(t, typeWelcome, "", "", nil, Welcome{ConnectionID: "c", HeartbeatMS: 15000}, nil),
-		"heartbeat":   frame(t, typeHeartbeat, "", "", Heartbeat{Active: 1, Capacity: 2}, nil, nil),
-		"assign":      frame(t, typeRequest, "1", methodTaskAssign, assignParams{Task: task}, nil, nil),
-		"assign-full": frame(t, typeRequest, "1", methodTaskAssign, assignParams{Task: full}, nil, nil),
-		"status":      frame(t, typeRequest, "2", methodTaskStatus, taskRef{TaskID: task.TaskID}, nil, nil),
-		"destroy":     frame(t, typeRequest, "3", methodTaskDestroy, taskRef{TaskID: task.TaskID}, nil, nil),
-		"cancel":      frame(t, typeRequest, "4", methodTaskCancel, cancelParams{TaskID: task.TaskID, GraceSeconds: 30}, nil, nil),
-		"list":        frame(t, typeRequest, "5", methodTaskList, struct{}{}, nil, nil),
-		"drain":       frame(t, typeRequest, "6", methodDrain, DrainParams{Draining: true}, nil, nil),
-		"ok-status":   frame(t, typeResponse, "1", "", nil, statusBody{Status: rtcore.TaskStatus{TaskID: task.TaskID, State: rtcore.TaskAccepted}}, nil),
-		"ok-list":     frame(t, typeResponse, "5", "", nil, TaskListResult{Tasks: []HelloTask{{TaskID: task.TaskID, Status: fullStatus(task.TaskID)}}}, nil),
-		"ok-empty":    frame(t, typeResponse, "6", "", nil, struct{}{}, nil),
-		"ok-nil":      frame(t, typeResponse, "7", "", nil, nil, nil),
-		"at-capacity": frame(t, typeResponse, "1", "", nil, nil, errorForV2(rtcore.ErrAtCapacity)),
-		"unknown":     frame(t, typeResponse, "1", "", nil, nil, errorForV2(errUnknownMethod)),
-		"state":       frame(t, typeEvent, "", eventTaskState, statusBody{Status: fullStatus(task.TaskID)}, nil, nil),
+		"welcome":       frame(t, typeWelcome, "", "", nil, Welcome{ConnectionID: "c", HeartbeatMS: 15000}, nil),
+		"heartbeat":     frame(t, typeHeartbeat, "", "", Heartbeat{Active: 1, Capacity: 2}, nil, nil),
+		"assign":        frame(t, typeRequest, "1", methodTaskAssign, assignParams{Task: task}, nil, nil),
+		"assign-full":   frame(t, typeRequest, "1", methodTaskAssign, assignParams{Task: full, Worker: json.RawMessage(`{"git_cache":[{"key":"9f8e7d6c5b4a3921","clone_url":"https://github.com/acme/app.git"}]}`)}, nil, nil),
+		"welcome-token": frame(t, typeWelcome, "", "", nil, Welcome{ConnectionID: "c", HeartbeatMS: 15000, AccessToken: "ofw_x", AccessTokenExpiresAt: &time.Time{}}, nil),
+		"status":        frame(t, typeRequest, "2", methodTaskStatus, taskRef{TaskID: task.TaskID}, nil, nil),
+		"destroy":       frame(t, typeRequest, "3", methodTaskDestroy, taskRef{TaskID: task.TaskID}, nil, nil),
+		"cancel":        frame(t, typeRequest, "4", methodTaskCancel, cancelParams{TaskID: task.TaskID, GraceSeconds: 30}, nil, nil),
+		"list":          frame(t, typeRequest, "5", methodTaskList, struct{}{}, nil, nil),
+		"drain":         frame(t, typeRequest, "6", methodDrain, DrainParams{Draining: true}, nil, nil),
+		"ok-status":     frame(t, typeResponse, "1", "", nil, statusBody{Status: rtcore.TaskStatus{TaskID: task.TaskID, State: rtcore.TaskAccepted}}, nil),
+		"ok-list":       frame(t, typeResponse, "5", "", nil, TaskListResult{Tasks: []HelloTask{{TaskID: task.TaskID, Status: fullStatus(task.TaskID)}}}, nil),
+		"ok-empty":      frame(t, typeResponse, "6", "", nil, struct{}{}, nil),
+		"ok-nil":        frame(t, typeResponse, "7", "", nil, nil, nil),
+		"at-capacity":   frame(t, typeResponse, "1", "", nil, nil, errorForV2(rtcore.ErrAtCapacity)),
+		"unknown":       frame(t, typeResponse, "1", "", nil, nil, errorForV2(errUnknownMethod)),
+		"state":         frame(t, typeEvent, "", eventTaskState, statusBody{Status: fullStatus(task.TaskID)}, nil, nil),
 	}
 	for name, m := range frames {
 		if err := v.Validate(workerSchema, m); err != nil {
@@ -193,6 +195,10 @@ func TestWorkerAnswersChallenge(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get(HeaderWorkerID) != "w1" || r.Header.Get("Authorization") != "" {
+			done <- result{err: errors.New("upgrade lacks OF-Worker-ID, or sends a bearer token with a worker key")}
+			return
+		}
 		conn, err := ws.Upgrade(w, r, []string{SubprotocolV2})
 		if err != nil {
 			done <- result{err: err}
@@ -271,7 +277,7 @@ func TestWorkerAnswersChallenge(t *testing.T) {
 	defer cancel()
 	werr := make(chan error, 1)
 	go func() {
-		werr <- RunWorkerV2(ctx, WorkerV2Options{ServerURL: srv.URL, APIKey: "k", WorkerID: "w1", Backend: newFakeTasks(), Key: priv, Version: "1.0.0"})
+		werr <- RunWorkerV2(ctx, WorkerV2Options{ServerURL: srv.URL, WorkerID: "w1", Backend: newFakeTasks(), Key: priv, Version: "1.0.0"})
 	}()
 	var res result
 	select {
@@ -323,5 +329,28 @@ func TestWorkerWithoutKeyRefusesChallenge(t *testing.T) {
 	err := RunWorkerV2(ctx, WorkerV2Options{ServerURL: srv.URL, APIKey: "k", WorkerID: "w1", Backend: newFakeTasks()})
 	if !errors.Is(err, ErrKeyRequired) {
 		t.Fatalf("err = %v, want ErrKeyRequired", err)
+	}
+}
+
+// extrasTasks is a backend that takes the worker extras.
+type extrasTasks struct {
+	*fakeTasks
+	got chan json.RawMessage
+}
+
+func (e *extrasTasks) StartWithExtras(ctx context.Context, task rtcore.Task, extras json.RawMessage) (rtcore.TaskStatus, error) {
+	e.got <- extras
+	return e.Start(ctx, task)
+}
+
+func TestAssignPassesExtras(t *testing.T) {
+	be := &extrasTasks{fakeTasks: newFakeTasks(), got: make(chan json.RawMessage, 1)}
+	w := &workerV2{opts: WorkerV2Options{Backend: be}, log: slog.Default(), status: map[string]rtcore.TaskStatus{}, watching: map[string]bool{}, ctx: context.Background()}
+	extras := json.RawMessage(`{"git_cache":[]}`)
+	if _, err := w.assign(context.Background(), testTask(1), extras); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-be.got; string(got) != string(extras) {
+		t.Errorf("extras = %s", got)
 	}
 }

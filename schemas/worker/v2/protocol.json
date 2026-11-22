@@ -110,6 +110,8 @@
       "properties": {
         "connection_id": {"$ref": "#/$defs/id"},
         "heartbeat_ms": {"type": "integer", "minimum": 0},
+        "access_token": {"type": "string", "pattern": "^ofw_"},
+        "access_token_expires_at": {"$ref": "#/$defs/timestamp"},
         "min_runtime_version": {"type": "string"},
         "recommended_runtime_version": {"type": "string"},
         "draining": {"type": "boolean"}
@@ -145,7 +147,20 @@
     },
     "assignParams": {
       "type": "object", "required": ["task"], "additionalProperties": false,
-      "properties": {"task": {"$ref": "#/$defs/task"}}
+      "properties": {"task": {"$ref": "#/$defs/task"}, "worker": {"$ref": "#/$defs/workerExtras"}}
+    },
+    "workerExtras": {
+      "description": "Extras of task.assign for a microVM worker.",
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "git_cache": {
+          "type": "array", "maxItems": 4,
+          "items": {
+            "type": "object", "required": ["key", "clone_url"], "additionalProperties": false,
+            "properties": {"key": {"type": "string", "pattern": "^[0-9a-f]{16}$"}, "clone_url": {"type": "string", "minLength": 1}}
+          }
+        }
+      }
     },
     "taskRef": {
       "type": "object", "required": ["task_id"], "additionalProperties": false,

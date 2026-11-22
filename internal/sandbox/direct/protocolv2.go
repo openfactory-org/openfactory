@@ -1,6 +1,8 @@
 package direct
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -153,6 +155,17 @@ type HelloTask struct {
 
 type assignParams struct {
 	Task rtcore.Task `json:"task"`
+	// Worker holds extras for a microVM worker, for example
+	// {"git_cache":[{"key","clone_url"}]}. A backend that implements
+	// ExtrasBackend receives it.
+	Worker json.RawMessage `json:"worker,omitempty"`
+}
+
+// ExtrasBackend is a task backend that takes the worker extras of
+// task.assign. The worker calls StartWithExtras instead of Start when the
+// backend implements it.
+type ExtrasBackend interface {
+	StartWithExtras(ctx context.Context, task rtcore.Task, extras json.RawMessage) (rtcore.TaskStatus, error)
 }
 
 type taskRef struct {

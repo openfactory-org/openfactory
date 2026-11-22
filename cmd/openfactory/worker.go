@@ -48,8 +48,8 @@ Example:
     --id dev-box-1 --capacity 2 --label region=eu`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if g.apiKey == "" {
-				return errors.New("--api-key (or OF_API_KEY) is required")
+			if g.apiKey == "" && keyFile == "" {
+				return errors.New("--api-key (or OF_API_KEY) or --key-file (or OF_WORKER_KEY_FILE) is required")
 			}
 			if err := direct.ValidateWorkerID(id); err != nil {
 				return err
