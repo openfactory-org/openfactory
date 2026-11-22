@@ -1,15 +1,47 @@
-// REST handlers: schedules. C0 stubs that answer 501. Owner: WS10.
-// Keep the exported names: src/http/routes.ts maps each openapi operation to one of them.
-import { notImplementedHandler, type Handler } from "../http/handler";
+// REST handlers: schedules and manual automation runs (owner WS10a).
+import { OfError, doName, type Automation, type Event } from "@openfactory/core";
+import type { Principal } from "../contracts/do-messages";
+import type { Env } from "../contracts/env";
+import { callMeta, json, opParams, opResult, teamApi, teamOf, type Handler } from "../http/handler";
+import { manualEvent } from "../triggers/schedules";
 
-/** GET /api/v1/factories/{uid}/schedules: List the schedules of the factory with their last and next run (owner DO: TeamDO). */
-export const listSchedules: Handler = notImplementedHandler;
+/** GET /api/v1/factories/{uid}/schedules */
+export const listSchedules: Handler = teamApi();
+/** POST /api/v1/factories/{uid}/schedules/{id}/pause */
+export const pauseSchedule: Handler = teamApi();
+/** POST /api/v1/factories/{uid}/schedules/{id}/resume */
+export const resumeSchedule: Handler = teamApi();
 
-/** POST /api/v1/factories/{uid}/schedules/{id}/pause: Pause a schedule without a definition change (owner DO: TeamDO). */
-export const pauseSchedule: Handler = notImplementedHandler;
+/**
+ * Starts the automation's run for a manual event and returns the run (201).
+ * Registered by the engine (WS5). Without it the event goes to IngressDO and
+ * the call answers 202.
+ */
+export type ManualRunDispatcher = (
+  env: Env,
+  input: { teamId: string; factoryId: string; automation: Automation; event: Event; principal: Principal },
+) => Promise<unknown>;
 
-/** POST /api/v1/factories/{uid}/schedules/{id}/resume: Resume a paused schedule (owner DO: TeamDO). */
-export const resumeSchedule: Handler = notImplementedHandler;
+let dispatcher: ManualRunDispatcher | undefined;
 
-/** POST /api/v1/automations/{id}/run: Start an automation manually (owner DO: TeamDO → IngressDO → WorkDO). */
-export const runAutomation: Handler = notImplementedHandler;
+export function setManualRunDispatcher(fn: ManualRunDispatcher): void {
+  dispatcher = fn;
+}
+
+/** POST /api/v1/automations/{id}/run (TeamDO → IngressDO → WorkDO). */
+export const runAutomation: Handler = async (_request, env, ctx) => {
+  const team = env.TEAM.getByName(doName.team(teamOf(ctx)));
+  const res = opResult(await team.api(callMeta(ctx), "automationForRun", opParams(ctx), undefined));
+  const out = (await res.json()) as { automation: Automation; factory: { id: string }; team_id: string; principal: Principal };
+  const p = out.principal;
+  const actor = { provider: "factory", external_id: "", handle: p.userId ?? p.id, is_bot: false, ...(p.userId ? { user_id: p.userId } : {}) };
+  const ev = manualEvent(out.automation, out.team_id, actor, Date.now());
+  if (dispatcher) {
+    const run = await dispatcher(env, { teamId: out.team_id, factoryId: out.factory.id, automation: out.automation, event: ev, principal: p });
+    if (!run) throw new OfError("internal_error", "engine returned no run");
+    return json(run, 201);
+  }
+  const partition = "manual:" + out.automation.id;
+  await env.INGRESS.getByName(doName.ingress(out.team_id, partition)).enqueue(partition, ev as never, ev.id);
+  return json({ event_id: ev.id, automation_id: out.automation.id, status: "accepted" }, 202);
+};

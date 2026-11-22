@@ -1,12 +1,10 @@
-// REST handlers: me-forge-tokens. C0 stubs that answer 501. Owner: WS10.
-// Keep the exported names: src/http/routes.ts maps each openapi operation to one of them.
-import { notImplementedHandler, type Handler } from "../http/handler";
+// REST handlers: personal forge tokens (owner WS10a). TeamDO module
+// src/do/team/schedules.ts stores them sealed with the secret-store key.
+import { teamApi, type Handler } from "../http/handler";
 
-/** GET /api/v1/me/forge-tokens: List the code forges for which you stored a personal token (owner DO: TeamDO). */
-export const listUserForgeTokens: Handler = notImplementedHandler;
-
-/** PUT /api/v1/me/forge-tokens/{forge}: Store your personal code-forge token (used by runs with credentialStrategy CREATOR) (owner DO: TeamDO). */
-export const setUserForgeToken: Handler = notImplementedHandler;
-
-/** DELETE /api/v1/me/forge-tokens/{forge}: Delete your personal code-forge token (owner DO: TeamDO). */
-export const deleteUserForgeToken: Handler = notImplementedHandler;
+/** GET /api/v1/me/forge-tokens */
+export const listUserForgeTokens: Handler = teamApi();
+/** PUT /api/v1/me/forge-tokens/{forge} */
+export const setUserForgeToken: Handler = teamApi();
+/** DELETE /api/v1/me/forge-tokens/{forge} */
+export const deleteUserForgeToken: Handler = teamApi();
