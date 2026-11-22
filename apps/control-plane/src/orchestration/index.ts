@@ -2,15 +2,20 @@
 // stateless JSON-RPC in the Worker. Each tool is one WorkDO RPC; the tool
 // idempotency row commits with the effect (C8). The key hashes canonical JSON
 // of the input in the active turn (plan rule 3); errors are not stored.
-import { doName, OfError, partitionOf, toOfError } from "@openfactory/core";
+import { doName, isTrialRun, newId, newRoutedId, OfError, partitionOf, sourceKey, toOfError } from "@openfactory/core";
 import type { Env } from "../contracts/env";
 import { toolIdempotencyKey } from "../engine/canonical";
-import type { AgentConfig, Run } from "../engine/types";
+import { isTerminal, type AgentConfig, type Run } from "../engine/types";
 import type { ChildPlan } from "../do/work/engine";
 import type { ToolResult } from "../do/work/tools";
+import { plannerFor } from "../runner-api/planner";
 import { runnerKeys, verifySessionToken } from "../runner-api/token";
+import { redact } from "../secrets/expand";
 import { applyOverrides } from "../scoring/overrides";
-import type { Overrides } from "../scoring/types";
+import { META_SELF_IMPROVEMENT, type Overrides } from "../scoring/types";
+import { proposalBody, proposalTitle } from "../scoring/proposals";
+import { systemPrincipal, unwrapOp } from "../scoring/clients";
+import { issueRef, type LinkIssueInput } from "./linkissue";
 
 export const RUN_MCP_PREFIX = "/mcp/run/";
 const PROTOCOL_VERSION = "2025-06-18";
@@ -28,6 +33,55 @@ export const teamAgents: AgentSource = async (env, teamId, factoryId) => {
 let agentSource: AgentSource = teamAgents;
 export function setAgentSource(fn: AgentSource): void {
   agentSource = fn;
+}
+
+/**
+ * Removes the secret values of a run from text that an agent posts
+ * (engine.Planner.RedactFor). The text of post_update, ask_human,
+ * request_approval, send_message and follow_up_agent goes through it.
+ */
+export type Redactor = (env: Env, run: Run) => Promise<(s: string) => string>;
+
+export const plannerRedactor: Redactor = async (env, run) => {
+  const values = await plannerFor(env, run).redactValues(run);
+  return (s) => redact(s, values);
+};
+
+let redactor: Redactor = plannerRedactor;
+export function setRedactor(fn: Redactor): void {
+  redactor = fn;
+}
+
+/** The argument fields that each tool posts as text, redacted before the WorkDO call. */
+const REDACTED_FIELDS: Record<string, string[]> = {
+  post_update: ["message", "text"],
+  ask_human: ["question", "title", "summary", "details", "body", "context", "options"],
+  request_approval: ["question", "title", "summary", "details", "body", "options", "links"],
+  send_message: ["message", "text"],
+  follow_up_agent: ["message"],
+};
+
+async function redactArgs(
+  env: Env,
+  work: { getRun(id: string): Promise<unknown> },
+  runId: string,
+  fields: string[],
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  if (!fields.some((f) => args[f] !== undefined)) return args;
+  let rd: (s: string) => string;
+  try {
+    rd = await redactor(env, (await work.getRun(runId)) as Run);
+  } catch {
+    return args;
+  }
+  const out = { ...args };
+  for (const f of fields) {
+    const v = out[f];
+    if (typeof v === "string") out[f] = rd(v);
+    else if (Array.isArray(v)) out[f] = v.map((x) => (typeof x === "string" ? rd(x) : x));
+  }
+  return out;
 }
 
 const TOOLS: { name: string; description: string; inputSchema: Record<string, unknown> }[] = [
@@ -70,8 +124,9 @@ const TOOLS: { name: string; description: string; inputSchema: Record<string, un
   },
   {
     name: "send_message",
-    description: "Send a message to an active run of your work item.",
-    inputSchema: obj({ run_id: "string", message: "string" }, ["run_id", "message"]),
+    description:
+      "Send a message to an active run of your work item: your parent, a child, a sibling or a side run. The target gets it as an agent message from your run. Find targets in active_runs of list_agents.",
+    inputSchema: obj({ run_id: "string", text: "string" }, ["run_id", "text"]),
   },
   {
     name: "ask_human",
@@ -103,8 +158,27 @@ const TOOLS: { name: string; description: string; inputSchema: Record<string, un
   },
   {
     name: "link_issue",
-    description: "Attach a tracker issue to the work item.",
-    inputSchema: obj({ key: "string", url: "string" }, ["key"]),
+    description:
+      "Attach a tracker issue to the work item. Give its URL (Linear, Jira, GitHub, GitLab or an Azure DevOps work item), or a provider with a key (or a repo and a number).",
+    inputSchema: obj({ url: "string", provider: "string", key: "string", repo: "string", number: "integer" }, []),
+  },
+  {
+    name: "propose_definition_change",
+    description:
+      "Propose a change to the managed factory definition for human review. The files are checked with the compiler and the preflight; errors come back so you can fix them. A valid proposal is stored and a reviewer sees its diff in the inbox. An approval applies it; a rejection comes back to you as a message. For a definition in git, open a pull request instead.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        files: {
+          type: "object",
+          additionalProperties: { type: "string" },
+          description: "Path relative to the definition root to the full new content of the file.",
+        },
+        delete: { type: "array", items: { type: "string" }, description: "Paths to remove." },
+        message: { type: "string", description: "A short description of the change." },
+      },
+      required: ["message"],
+    },
   },
   {
     name: "get_work_item",
@@ -218,7 +292,10 @@ export async function callTool(
     const mayStart = agents.filter(
       (a) => a.type !== "FOREMAN" && (a.spawnable_by ? a.spawnable_by.includes(caller) : run.config.type === "FOREMAN"),
     );
-    const children = (await work.api({ requestId: "mcp" }, "listRunChildren", { runId }, null)) as { runs: Run[] };
+    // The runs that this run can send a message to (activeTargets in sendmessage.go).
+    const targets = (await work.toolCall({ runId, tool: "list_agents", input: {}, key: "", turnId: "" })) as ToolResult;
+    if (targets.isError) return targets;
+    const { active_runs } = JSON.parse(targets.content[0]!.text) as { active_runs: unknown[] };
     return text({
       agents: mayStart.map((a) => ({
         agent_identity_uid: a.id,
@@ -228,15 +305,24 @@ export async function callTool(
         harness: a.harness?.type ?? "",
         model: a.harness?.model ?? "",
       })),
-      active_runs: children.runs
-        .filter((r) => r.state !== "cancelled")
-        .map((r) => ({ run_id: r.id, name: r.name, state: r.state })),
+      active_runs,
     });
   }
   if (!TOOLS.some((t) => t.name === name))
     return { content: [{ type: "text", text: `unknown tool ${name}` }], isError: true };
   const turnId = await work.activeTurn(runId);
   const key = turnId ? await toolIdempotencyKey(runId, turnId, name, args) : "";
+  const fields = REDACTED_FIELDS[name];
+  if (fields) args = await redactArgs(env, work, runId, fields, args);
+  if (name === "link_issue") {
+    try {
+      const src = issueRef(args as LinkIssueInput);
+      args = { ...args, key: sourceKey(src), source: src };
+    } catch (e) {
+      return { content: [{ type: "text", text: toOfError(e).error.message }], isError: true };
+    }
+  }
+  if (name === "propose_definition_change") return proposeDefinitionChange(env, teamId, runId, args, key);
   let plans: ChildPlan[] | undefined;
   if (name === "run_agents") {
     try {
@@ -273,6 +359,94 @@ export async function callTool(
 }
 
 const text = (v: unknown): ToolResult => ({ content: [{ type: "text", text: JSON.stringify(v) }] });
+const toolError = (message: string): ToolResult => ({ content: [{ type: "text", text: message }], isError: true });
+
+/**
+ * propose_definition_change (proposeDefinitionChange in tools.go and
+ * scoring.Service.ProposeDefinitionChange): TeamDO checks and stores the
+ * proposed version, then the WorkDO of the run gets the review inbox item.
+ * The item ID is chosen first so that the version names it; a repeated call
+ * with the same tool key returns the same version and the same item.
+ */
+async function proposeDefinitionChange(
+  env: Env,
+  teamId: string,
+  runId: string,
+  args: Record<string, unknown>,
+  key: string,
+): Promise<ToolResult> {
+  const token = partitionOf(runId);
+  const work = env.WORK.getByName(doName.work(teamId, token));
+  const run = (await work.getRun(runId)) as Run;
+  if (isTerminal(run.state)) return toolError(`run ${runId} is ${run.state}; it cannot propose a definition change`);
+  if (isTrialRun({ metadata: run.metadata ?? {} }))
+    return toolError("a benchmark trial cannot propose a definition change");
+  const files: Record<string, string> = {};
+  if (args.files !== undefined && (typeof args.files !== "object" || args.files === null || Array.isArray(args.files)))
+    return toolError("files must be an object of path to content");
+  for (const [p, c] of Object.entries((args.files ?? {}) as Record<string, unknown>)) {
+    if (typeof c !== "string") return toolError(`files[${JSON.stringify(p)}] must be a string`);
+    files[p] = c;
+  }
+  const del = Array.isArray(args.delete) ? args.delete.filter((x): x is string => typeof x === "string") : [];
+  const message = typeof args.message === "string" ? args.message : "";
+  const meta = { requestId: "propose", principal: { ...systemPrincipal(teamId), userId: "run:" + runId } };
+  try {
+    const out = (await env.TEAM.getByName(doName.team(teamId)).proposeDefinition(meta, {
+      factoryId: run.factory_id,
+      files,
+      delete: del,
+      message,
+      authorRunId: runId,
+      idempotencyKey: key || `propose:${runId}:${newId("k")}`,
+      inboxItemId: newRoutedId("inb", token),
+      ...(run.work_item_id ? { workItemId: run.work_item_id } : {}),
+      selfImprovement: run.metadata?.[META_SELF_IMPROVEMENT] === "true",
+    })) as {
+      version: { id: string; base_version_id?: string; message?: string; inbox_item_id?: string };
+      diff: string;
+      reviewer_id?: string;
+    };
+    const v = out.version;
+    unwrapOp(
+      await work.api(
+        meta,
+        "createInboxItem",
+        {},
+        {
+          id: v.inbox_item_id,
+          track_key: `proposal:${v.id}`,
+          factory_id: run.factory_id,
+          ...(run.work_item_id ? { work_item_id: run.work_item_id } : {}),
+          run_id: runId,
+          kind: "review",
+          title: proposalTitle(v.message ?? message),
+          body: proposalBody(
+            {
+              id: v.id,
+              author_run_id: runId,
+              message: v.message ?? message,
+              base_version_id: v.base_version_id ?? "",
+            },
+            out.diff,
+          ),
+          options: ["approve", "reject"],
+          ...(out.reviewer_id ? { assignee_id: out.reviewer_id } : {}),
+        },
+      ),
+    );
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Proposed version ${v.id} is stored and waits for review (base version ${v.base_version_id ?? ""}). End your turn; the decision arrives as a message.`,
+        },
+      ],
+    };
+  } catch (e) {
+    return toolError(toOfError(e).error.message);
+  }
+}
 
 async function resolvePlans(
   env: Env,

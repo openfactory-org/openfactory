@@ -154,6 +154,29 @@ const REPO_WINDOW_MS = 7 * 24 * 3600_000;
 const WORKER_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._ -]{0,63}$/;
 
+/**
+ * Worker IDs and names that a worker cannot use: they name built-in worker
+ * hosts and sandbox providers (direct.ReservedWorkerIDs of the Go server).
+ */
+export const RESERVED_WORKER_IDS: readonly string[] = [
+  "server",
+  "local",
+  "direct",
+  "managed",
+  "cloudflare-sandbox",
+  "daytona",
+  "boatdev",
+];
+
+/** ValidateWorkerID (internal/sandbox/direct/protocol.go). */
+export function validateWorkerId(id: string): void {
+  if (!WORKER_ID_RE.test(id))
+    throw invalid(`worker id ${JSON.stringify(id)} must be 1-64 characters of letters, digits, '.', '_' or '-'`);
+  const lower = id.toLowerCase();
+  if (lower.startsWith("openfactory")) throw invalid(`worker ids starting with "openfactory" are reserved`);
+  if (RESERVED_WORKER_IDS.includes(lower)) throw invalid(`worker id ${JSON.stringify(id)} is reserved`);
+}
+
 // ---------- helpers ----------
 
 function parseJson<T>(s: string, fallback: T): T {
@@ -286,6 +309,9 @@ function checkSlotSize(v: unknown, required: boolean): SlotSizeJson | undefined 
 function checkName(name: string): string {
   const n = name.trim();
   if (!NAME_RE.test(n)) throw invalid("name must be 1-64 letters, digits, spaces, dots, dashes or underscores");
+  // A workerHost names a worker by ID or name: a name cannot shadow a built-in host.
+  if (RESERVED_WORKER_IDS.includes(n.toLowerCase()) || n.toLowerCase().startsWith("openfactory"))
+    throw invalid(`worker name ${JSON.stringify(n)} is reserved`);
   return n;
 }
 
@@ -570,11 +596,10 @@ function hubConnect(kit: TeamKit, call: OpCall): WorkerRecord {
 function devRegister(kit: TeamKit, call: OpCall): WorkerRecord {
   const p = call.principal();
   const id = call.params.id ?? "";
+  validateWorkerId(id);
   if (!devAllowed(kit))
     throw new OfError("not_authorized", "development process workers are not allowed (OF_DEV_PROCESS_WORKERS)");
   if (p.role !== "admin") throw new OfError("not_authorized", "a development worker needs the API key of an admin");
-  if (!WORKER_ID_RE.test(id) || id.toLowerCase().startsWith("openfactory"))
-    throw invalid(`invalid worker ID ${JSON.stringify(id)}`);
   return kit.tx(() => {
     const r = getRow(kit, id);
     if (r) {

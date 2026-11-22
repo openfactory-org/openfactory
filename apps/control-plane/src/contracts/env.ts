@@ -35,6 +35,8 @@ export interface Vars {
   OF_SANDBOX_START_TIMEOUT: string;
   /** Default sandbox provider for `workerHost: server`. */
   OF_SANDBOX_PROVIDER: string;
+  /** Default sandbox image; an environment or machine image wins. Empty means ghcr.io/openfactory-org/sandbox:latest. */
+  OF_SANDBOX_IMAGE: string;
   /** "true" lets a restricted policy run on an egress "none" target. */
   OF_ALLOW_UNENFORCED_NETWORK_POLICY: string;
   /** "true" allows development process workers (`openfactory-runtime worker --process`). */
@@ -129,6 +131,7 @@ export const VAR_NAMES = [
   "OF_SESSION_STOP_GRACE",
   "OF_SANDBOX_START_TIMEOUT",
   "OF_SANDBOX_PROVIDER",
+  "OF_SANDBOX_IMAGE",
   "OF_ALLOW_UNENFORCED_NETWORK_POLICY",
   "OF_DEV_PROCESS_WORKERS",
   "OF_RUNNER_VERSION",

@@ -14,6 +14,7 @@ import type { DispatchTarget } from "../../contracts/do-messages";
 import type { EnqueueInput } from "../../lib/outbox/outbox";
 import { dest } from "../../lib/outbox/dest";
 import { decideDelivery, messageStartsTurn, outcomeFor, toItem } from "../../engine/deliver";
+import { runPrincipals } from "../../engine/principal";
 import { lifecycleDedupeKey, lifecycleEvent, lifecycleParts, runUrl, turnMarker } from "../../engine/lifecycle";
 import {
   InvalidTransitionError,
@@ -67,7 +68,7 @@ export interface EngineConfig {
   maxDepth: number;
   runnerVersion: string;
   allowUnenforced: string;
-  /** Default task image (OF_SANDBOX_IMAGE); a machine image wins. */
+  /** Default task image (OF_SANDBOX_IMAGE); an environment or machine image wins (grant.ts selectImage). */
   sandboxImage: string;
   /** OF_OBJECT_STORE_RETENTION: run data in R2 older than this is pruned; 0 keeps it. */
   retentionMs?: number;
@@ -210,7 +211,14 @@ export function projectInbox(fx: Fx, it: InboxItem): void {
 }
 
 /** e.notify: a notice to where the work item started, ordered per work item (rule 11). */
-export function notify(fx: Fx, wi: WorkItem | undefined, kind: string, text: string, inboxId?: string): void {
+export function notify(
+  fx: Fx,
+  wi: WorkItem | undefined,
+  kind: string,
+  text: string,
+  inboxId?: string,
+  options?: string[],
+): void {
   if (!wi) return;
   const seq = Number(fx.repo.getMeta(`notice_seq:${wi.id}`) ?? "0") + 1;
   fx.repo.setMeta(`notice_seq:${wi.id}`, String(seq));
@@ -227,6 +235,7 @@ export function notify(fx: Fx, wi: WorkItem | undefined, kind: string, text: str
         kind,
         factory_id: wi.factory_id,
         ...(inboxId ? { inbox_id: inboxId } : {}),
+        ...(options?.length ? { options } : {}),
       },
     },
   });
@@ -697,15 +706,27 @@ function reportRootFailure(fx: Fx, r: Run): void {
 function reportBlocked(fx: Fx, r: Run): void {
   const wi = fx.repo.getWorkItem(r.work_item_id);
   if (!wi || stageTerminal(wi.stage)) return;
-  if (fx.repo.listInbox({ resolved: false, runId: r.id }).some((i) => i.kind === "blocked")) return;
+  // openItemFor: one open item for the same people is enough.
+  const rcpt = recipientsOf(wi) ?? [];
+  const open = openInboxForWorkItem(fx).filter((i) => !i.work_item_id || i.work_item_id === wi.id);
+  if (
+    open.some((i) => {
+      const got = i.recipients ?? [];
+      return rcpt.length === 0 ? got.length === 0 : rcpt.some((x) => got.includes(x));
+    })
+  )
+    return;
   const it: InboxItem = {
     id: newRoutedId("inb", fx.token),
     factory_id: r.factory_id,
     work_item_id: wi.id,
     run_id: r.id,
     kind: "blocked",
-    title: "Run needs input: " + wi.title,
-    body: truncate(r.result ?? "", 4000),
+    title: "Run waits for input: " + wi.title,
+    body: truncate(
+      (r.result ?? "").trim() || "The agent stopped and waits for input. Answer to continue the run.",
+      4000,
+    ),
     ...(recipientsOf(wi) ? { recipients: recipientsOf(wi) } : {}),
     resolved: false,
     created_at: iso(fx.now()),
@@ -746,6 +767,7 @@ export function createRun(
 ): Run {
   if (!nr.prompt.trim()) throw invalid("prompt is required");
   const now = iso(fx.now());
+  const pr = runPrincipals(nr.factoryId, nr.triggeredBy, nr.creator, nr.runAs);
   const r: Run = {
     id: nr.id ?? newRoutedId("run", fx.token),
     version: 0,
@@ -765,8 +787,8 @@ export function createRun(
     triggered_by: nr.triggeredBy || "api",
     ...(nr.source ? { source: nr.source } : {}),
     ...(nr.sourceRef ? { source_ref: nr.sourceRef } : {}),
-    ...(nr.creator ? { creator: nr.creator } : {}),
-    ...(nr.runAs ? { run_as: nr.runAs } : {}),
+    ...(pr.creator ? { creator: pr.creator } : {}),
+    run_as: pr.runAs,
     created_at: now,
   };
   fx.repo.createRun(r);
@@ -1059,6 +1081,63 @@ export function resolveInboxItem(fx: Fx, it: InboxItem, resolution: string, acto
   fx.repo.putInbox(it);
   projectInbox(fx, it);
   return it;
+}
+
+/**
+ * resumesRun (workitems.go): whether a resolve sends the resolution to the
+ * run. A handoff, an information-only item, a failure notice, a spend limit
+ * and the review of a self-improvement pull request are bookkeeping.
+ */
+export function resumesRun(it: Pick<InboxItem, "kind" | "options">): boolean {
+  switch (it.kind) {
+    case "handoff":
+    case "answered":
+    case "failure":
+    case "spend_limit":
+      return false;
+    case "review":
+      return (it.options ?? []).length > 0;
+  }
+  return true;
+}
+
+/**
+ * actorLabel (workitems.go): a readable name of an actor for text that people
+ * and the model read, never a raw user ID. name is the user's name or email
+ * when the caller looked it up.
+ */
+export function actorLabel(actor: string, name?: string): string {
+  const n = (name ?? "").trim();
+  if (n) return n;
+  const a = actor.trim();
+  if (!a || a === "api") return "a team member";
+  const i = a.indexOf(":");
+  if (i < 0) return a.startsWith("usr_") ? "a team member" : a;
+  switch (a.slice(0, i)) {
+    case "user":
+      return "a team member";
+    case "webhook":
+    case "automation":
+    case "trigger":
+    case "schedule":
+      return "an automation";
+    case "run":
+    case "agent":
+    case "system":
+      return "the factory";
+  }
+  return a;
+}
+
+/** The follow-up message of a resolve (ResolveInbox). */
+export function resolutionMessage(it: Pick<InboxItem, "kind" | "title">, who: string, resolution: string): string {
+  switch (it.kind) {
+    case "approval":
+      return `[human decision] Approval request ${JSON.stringify(it.title)} was resolved by ${who}: ${resolution}\n\nIf approved, continue with the next stage. If rejected or changes were requested, revise accordingly and ask again before implementation.`;
+    case "question":
+      return `[human answer] ${who} answered your question ${JSON.stringify(it.title)}:\n\n${resolution}`;
+  }
+  return `[human response] ${who} responded to ${JSON.stringify(it.title)} (${it.kind}):\n\n${resolution}`;
 }
 
 // ---------- run_agents ----------

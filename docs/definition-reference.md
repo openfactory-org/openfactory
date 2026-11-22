@@ -32,6 +32,7 @@ The compiler checks the files; the preflight checks them against the team. Apply
 | Each `environment` exists in the team. | error |
 | A machine sets `registryCredentialSecretName` (only microVM workers pull images at run time and use it). | warning |
 | Each `workerHost` is `server`, a sandbox provider ID (`cloudflare-sandbox`, `daytona`, `boatdev` or a plugin provider), the ID or name of a registered worker, or `pool:<label>`. | error |
+| An agent or automation with `harness.auth.source: workerEnvironment` runs on development process workers only: its `workerHost` does not name a microVM worker, a pool with a microVM worker, `server` or a sandbox provider. | error |
 | Each `managedId` of an MCP server names a registered MCP server of the team. | error |
 | A webhook keeps `authMode` and `signatureScheme` after its first apply. To change them, remove the webhook, apply, then add a new one. | error |
 | The secret of a `url_token` webhook is safe for a URL: letters, digits, `-`, `.`, `_` and `~`. | error |

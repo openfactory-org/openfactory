@@ -45,16 +45,47 @@ export const getInboxItem: Handler = async (_req, env, ctx) => {
   return json(200, itemView(await index(env, ctx).getInboxItem(metaOf(ctx), id)));
 };
 
+/**
+ * The caller's name or email for the follow-up text (actorLabel): the run
+ * reads a name, never a raw user ID. "" when the caller is not a user.
+ */
+async function callerLabel(env: Env, ctx: RouteContext): Promise<string> {
+  const p = ctx.principal;
+  if (!p?.userId) return "";
+  try {
+    const meta = {
+      requestId: ctx.requestId,
+      principal: {
+        kind: "service_account" as const,
+        id: "inbox",
+        teamId: p.teamId,
+        role: "admin" as const,
+        factoryRoles: {},
+      },
+    };
+    const u = (await env.TEAM.getByName(doName.team(teamOf(ctx))).api(meta, "getUser", { id: p.userId }, null)) as {
+      name?: string;
+      email?: string;
+      $error?: unknown;
+    } | null;
+    if (!u || u.$error) return "";
+    return (u.name ?? "").trim() || (u.email ?? "").trim();
+  } catch {
+    return "";
+  }
+}
+
 /** POST /api/v1/inbox/{id}/resolve */
 export const resolveInboxItem: Handler = async (req, env, ctx) => {
   const id = ctx.params.id ?? "";
   if (!ownerIsWork(id))
     throw new OfError("feature_not_available", "team-level inbox items are resolved by their owner");
   const t = await req.text();
-  return json(
-    200,
-    itemView(await workFor(env, ctx, id).api(metaOf(ctx), "resolveInbox", { id }, t.trim() ? JSON.parse(t) : {})),
-  );
+  const body = {
+    ...((t.trim() ? JSON.parse(t) : {}) as Record<string, unknown>),
+    actor_label: await callerLabel(env, ctx),
+  };
+  return json(200, itemView(await workFor(env, ctx, id).api(metaOf(ctx), "resolveInbox", { id }, body)));
 };
 
 /** POST /api/v1/inbox/{id}/read */
@@ -67,5 +98,6 @@ export const readInboxItem: Handler = async (_req, env, ctx) => {
 export const unresolveInboxItem: Handler = async (_req, env, ctx) => {
   const id = ctx.params.id ?? "";
   if (!ownerIsWork(id)) throw new OfError("feature_not_available", "team-level inbox items cannot be unresolved");
-  return json(200, itemView(await workFor(env, ctx, id).api(metaOf(ctx), "unresolveInbox", { id }, null)));
+  const body = { actor_label: await callerLabel(env, ctx) };
+  return json(200, itemView(await workFor(env, ctx, id).api(metaOf(ctx), "unresolveInbox", { id }, body)));
 };

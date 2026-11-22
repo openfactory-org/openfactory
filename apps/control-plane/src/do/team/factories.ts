@@ -31,6 +31,8 @@ import { dest } from "../../lib/outbox/dest";
 import { listResponse, msOf, pageFrom, paginate, sqlPage } from "../../lib/page";
 import type { Migration } from "../../lib/sql/migrate";
 import { all, first } from "../../lib/sql/query";
+import { diffFiles, mergeProposal, proposalError } from "../../scoring/proposals";
+import { improveTrackKey, type ImprovementTrack } from "../../scoring/service";
 import * as schedules from "./schedules";
 import { created, noContent, type OpCall, type TeamKit, type TeamOp } from "./index";
 
@@ -271,14 +273,17 @@ export interface DefinitionCheck {
   skipped: SkippedCheck[];
 }
 
-/** A preflight check of another module (workers, MCP servers, webhooks...). Sync, no I/O. */
+/**
+ * A preflight check of another module (workers, MCP servers, webhooks...). No
+ * network I/O; a check may await secret decryption.
+ */
 export type PreflightCheck = (
   kit: TeamKit,
   f: FactoryRecord,
   def: CompiledDefinition,
   files: Record<string, string>,
   chk: DefinitionCheck,
-) => void;
+) => void | Promise<void>;
 
 const preflights: { name: string; fn: PreflightCheck }[] = [];
 
@@ -442,7 +447,11 @@ function addIssueLines(files: Record<string, string>, issues: ValidationError[])
 }
 
 /** checkDefinition: compile, alias check, preflight. */
-export function checkDefinition(kit: TeamKit, f: FactoryRecord, files: Record<string, string>): DefinitionCheck {
+export async function checkDefinition(
+  kit: TeamKit,
+  f: FactoryRecord,
+  files: Record<string, string>,
+): Promise<DefinitionCheck> {
   const chk: DefinitionCheck = { definition: null, errors: [], warnings: [], skipped: [] };
   const res = compile(files);
   let verrs = res.errors;
@@ -459,7 +468,7 @@ export function checkDefinition(kit: TeamKit, f: FactoryRecord, files: Record<st
   preflightEnvironments(kit, f, def, files, chk);
   for (const p of preflights) {
     try {
-      p.fn(kit, f, def, files, chk);
+      await p.fn(kit, f, def, files, chk);
     } catch (e) {
       chk.skipped.push({ check: p.name, reason: (e as Error).message });
     }
@@ -586,6 +595,20 @@ function replaceResources(kit: TeamKit, factoryId: string, m: Materialized): voi
   );
 }
 
+/**
+ * The webhooks of def with their UIDs: a webhook keeps the UID of the stored
+ * webhook of the same name, and a new one gets a random UID (not a stable ID,
+ * so a webhook removed and added again gets a new URL).
+ */
+function webhooksWithIds(kit: TeamKit, factoryId: string, def: CompiledDefinition): unknown[] {
+  const byName = new Map(
+    all<{ id: string; name: string }>(kit.sql, "SELECT id, name FROM webhooks WHERE factory_id = ?", factoryId).map(
+      (r) => [r.name, r.id],
+    ),
+  );
+  return (def.webhooks ?? []).map((w) => ({ ...w, id: w.id || byName.get(w.name) || newId("whk") }));
+}
+
 function setFactoryIntegrations(
   kit: TeamKit,
   factoryId: string,
@@ -651,7 +674,7 @@ export async function applyDefinition(kit: TeamKit, factoryId: string, input: Ap
     created_at: now,
   };
   const stored = await storeFiles(kit, input.files);
-  const chk = checkDefinition(kit, f0, input.files);
+  const chk = await checkDefinition(kit, f0, input.files);
   for (const w of chk.warnings) console.warn("definition preflight warning", factoryId, w.file, w.field, w.message);
   if (chk.errors.length > 0 || !chk.definition) {
     v.errors = chk.errors;
@@ -698,7 +721,7 @@ export async function applyDefinition(kit: TeamKit, factoryId: string, input: Ap
       syncWebhooks?: (kit: TeamKit, factoryId: string, webhooks: unknown[]) => void;
     };
     s.syncSchedules?.(kit, factoryId, m.automations);
-    s.syncWebhooks?.(kit, factoryId, def.webhooks ?? []);
+    s.syncWebhooks?.(kit, factoryId, webhooksWithIds(kit, factoryId, def));
     kit.enqueue({
       dest: dest.dispatch(kit.teamId()),
       kind: "dispatch.limits",
@@ -781,29 +804,77 @@ export async function configSnapshot(kit: TeamKit, factoryId: string): Promise<u
   return snapshot;
 }
 
-/** TeamRpc.proposeDefinition (team.proposeDefinition): a proposed version, idempotent on the tool key. */
+/** Input of TeamRpc.proposeDefinition (the run tool propose_definition_change). */
+export interface ProposeDefinitionInput {
+  factoryId: string;
+  /** Path (relative to the definition root) to the full new content. */
+  files: Record<string, string>;
+  /** Paths to remove. */
+  delete?: string[];
+  message: string;
+  authorRunId: string;
+  idempotencyKey: string;
+  /** The ID of the review inbox item that the caller creates in the WorkDO of the run. */
+  inboxItemId?: string;
+  /** The work item of the run: a Self-improvement run gives its review to the reviewer chosen at start. */
+  workItemId?: string;
+  selfImprovement?: boolean;
+}
+
+/**
+ * TeamRpc.proposeDefinition (scoring.Service.ProposeDefinitionChange): merges
+ * the changes onto the active version, runs the compiler and the preflight,
+ * and stores a version with the state "proposed". Idempotent on the tool key.
+ * Errors of the check come back as invalid_request so the agent can fix them.
+ */
 export async function proposeDefinition(
   kit: TeamKit,
   _meta: CallMeta,
-  input: {
-    factoryId: string;
-    files: Record<string, string>;
-    message: string;
-    authorRunId: string;
-    idempotencyKey: string;
-  },
-): Promise<unknown> {
+  input: ProposeDefinitionInput,
+): Promise<{ version: Omit<DefinitionVersion, "files">; diff: string; reviewer_id?: string }> {
   const f = findFactory(kit, input.factoryId);
   if (!f) throw new OfError("resource_not_found", `factory ${input.factoryId} not found`);
+  const replay = async (id: string) => {
+    const v = (await getVersion(kit, id))!;
+    const base = v.base_version_id ? await getVersion(kit, v.base_version_id) : undefined;
+    const { files, ...meta } = v;
+    return { version: meta, diff: diffFiles(base?.files ?? {}, files) };
+  };
   const prev = first<{ id: string }>(
     kit.sql,
     "SELECT id FROM definition_versions WHERE idem_key = ?",
     input.idempotencyKey,
   );
-  if (prev) return { version: await getVersion(kit, prev.id, false) };
-  const chk = checkDefinition(kit, f, input.files);
-  const stored = await storeFiles(kit, input.files);
-  return kit.tx(() => {
+  if (prev) return replay(prev.id);
+  const message = (input.message ?? "").trim();
+  if (!message) throw new OfError("invalid_request", "message is required");
+  if (f.source === "git") {
+    throw new OfError(
+      "invalid_request",
+      `the definition of this factory is in git: open a pull request against ${f.git_repo ?? ""} instead`,
+    );
+  }
+  const base = f.active_version_id ? await getVersion(kit, f.active_version_id) : undefined;
+  const tree = mergeProposal(base?.files ?? {}, { files: input.files ?? {}, delete: input.delete ?? [] });
+  const chk = await checkDefinition(kit, f, tree.files);
+  if (chk.errors.length > 0) throw proposalError(chk.errors);
+  let reviewer = "";
+  if (input.selfImprovement && input.workItemId) {
+    const raw = first<{ value: string }>(
+      kit.sql,
+      "SELECT value FROM scoring_kv WHERE key = ?",
+      improveTrackKey(input.workItemId),
+    )?.value;
+    if (raw) {
+      try {
+        reviewer = (JSON.parse(raw) as ImprovementTrack).reviewer_id ?? "";
+      } catch {
+        reviewer = "";
+      }
+    }
+  }
+  const stored = await storeFiles(kit, tree.files);
+  const out = kit.tx(() => {
     const again = first<{ id: string }>(
       kit.sql,
       "SELECT id FROM definition_versions WHERE idem_key = ?",
@@ -813,20 +884,22 @@ export async function proposeDefinition(
     const v: DefinitionVersion = {
       id: newId("defv"),
       factory_id: f.id,
-      files: input.files,
+      files: tree.files,
       author: "run:" + input.authorRunId,
-      message: input.message,
-      valid: chk.errors.length === 0,
-      ...(chk.errors.length ? { errors: chk.errors } : {}),
+      message,
+      valid: true,
       created_at: new Date().toISOString(),
       state: "proposed",
       ...(f.active_version_id ? { base_version_id: f.active_version_id } : {}),
       author_run_id: input.authorRunId,
+      ...(input.inboxItemId ? { inbox_item_id: input.inboxItemId } : {}),
     };
     insertVersion(kit, v, stored, input.idempotencyKey);
     const { files: _f, ...meta } = v;
     return { version: meta };
   });
+  if ("duplicate" in out && out.duplicate) return replay(out.duplicate);
+  return { version: out.version!, diff: tree.diff, ...(reviewer ? { reviewer_id: reviewer } : {}) };
 }
 
 // ---------- resources ----------
@@ -1150,9 +1223,13 @@ function summarize(def: CompiledDefinition): JsonObject {
   };
 }
 
-function validateFiles(kit: TeamKit, f: FactoryRecord, files: Record<string, string> | undefined): JsonObject {
+async function validateFiles(
+  kit: TeamKit,
+  f: FactoryRecord,
+  files: Record<string, string> | undefined,
+): Promise<JsonObject> {
   if (!files || Object.keys(files).length === 0) throw new OfError("invalid_request", "files is required");
-  const chk = checkDefinition(kit, f, files);
+  const chk = await checkDefinition(kit, f, files);
   const valid = chk.errors.length === 0 && chk.definition !== null;
   return {
     valid,
@@ -1757,7 +1834,7 @@ export const ops: Record<string, TeamOp> = {
     const b = bodyObject(c.body);
     try {
       const { files } = await automationFiles(kit, f, c.params["name"]!, str(b, "content"));
-      return validateFiles(kit, f, files);
+      return await validateFiles(kit, f, files);
     } catch (e) {
       if (e instanceof OfError && Array.isArray(e.extra?.["errors"]))
         return { valid: false, errors: e.extra!["errors"] };

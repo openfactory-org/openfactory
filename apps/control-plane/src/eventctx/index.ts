@@ -136,6 +136,8 @@ export async function build(
   builders: Builder[] = [],
 ): Promise<Bundle | null> {
   if (!ev || messageId === "") return null;
+  // Go's Event has value fields: an event without an actor or source still builds.
+  ev = { ...ev, actor: ev.actor ?? ({} as Event["actor"]), source: ev.source ?? {} };
   const dir = messageDir(messageId);
   const env: Envelope = {
     message_id: messageId,

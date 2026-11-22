@@ -33,6 +33,9 @@ import {
   newMsgId,
   projectWorkItem,
   resolveInboxItem,
+  resumesRun,
+  actorLabel,
+  resolutionMessage,
   sendMessage,
   setStage,
   workItemEvent,
@@ -246,7 +249,7 @@ function routeToWorkItem(fx: Fx, input: ApplyActionInput, rec: (ref: string) => 
           result: "approval_" + decision,
           inbox_id: it.id,
         });
-        answer(fx, it.id, resolution, ev.actor?.user_id || actor, inboxVia(ev));
+        answer(fx, it.id, resolution, ev.actor?.user_id || actor, inboxVia(ev), actor);
         rec(it.id);
         return result(fx, true);
       }
@@ -259,7 +262,7 @@ function routeToWorkItem(fx: Fx, input: ApplyActionInput, rec: (ref: string) => 
           result: "answer",
           inbox_id: it.id,
         });
-        answer(fx, it.id, text, ev.actor?.user_id || actor, inboxVia(ev));
+        answer(fx, it.id, text, ev.actor?.user_id || actor, inboxVia(ev), actor);
         rec(it.id);
         return result(fx, true);
       }
@@ -276,7 +279,7 @@ function routeToWorkItem(fx: Fx, input: ApplyActionInput, rec: (ref: string) => 
 }
 
 /** ResolveInbox from a chat or forge reply: resolution, timeline and the answer to the run. */
-function answer(fx: Fx, inboxId: string, resolution: string, actor: string, via: string): void {
+function answer(fx: Fx, inboxId: string, resolution: string, actor: string, via: string, label?: string): void {
   const it = fx.repo.getInbox(inboxId);
   if (!it || it.resolved) return;
   resolveInboxItem(fx, it, resolution, actor, via);
@@ -284,8 +287,8 @@ function answer(fx: Fx, inboxId: string, resolution: string, actor: string, via:
     inbox_id: it.id,
     resolution,
   });
-  if (it.run_id) {
-    const rec = sendMessage(fx, it.run_id, `Answer to "${it.title}": ${resolution}`, actor);
+  if (it.run_id && resumesRun(it)) {
+    const rec = sendMessage(fx, it.run_id, resolutionMessage(it, actorLabel(label ?? actor), resolution), actor);
     it.answer_message_id = rec.message_id;
     fx.repo.putInbox(it);
   }

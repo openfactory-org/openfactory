@@ -29,6 +29,7 @@ After you change the file, redeploy with `npx wrangler deploy -c apps/control-pl
 | `OF_SESSION_STOP_GRACE` | `30s` | Time for the runner's snapshot after a stop or cancel, before the sandbox is stopped. |
 | `OF_SANDBOX_START_TIMEOUT` | `10m` | Longest time from sandbox assignment to session start. Then the session ends with `sandbox_create_failed`. |
 | `OF_SANDBOX_PROVIDER` | `cloudflare-sandbox` | The default provider for `workerHost: server`. `local` is for development. See [Sandbox providers](../sandbox-providers.md). |
+| `OF_SANDBOX_IMAGE` | `ghcr.io/openfactory-org/sandbox:latest` | The default image of a sandbox task. The image of the run's environment wins, then the image of the agent's machine. Empty uses the default. The image must contain `sh` and `git`. |
 | `OF_ALLOW_UNENFORCED_NETWORK_POLICY` | `false` | `true` lets a restricted network policy run on a provider with `egress: none`. See [Network policy](network-policy.md#the-capability-gate). |
 | `OF_DEV_PROCESS_WORKERS` | `false` | `true` allows development process workers. Do not set it in production. See [Workers](workers.md). |
 | `OF_RUNNER_VERSION` | `0.0.0-dev` | The version of `openfactory-runtime` that session start requires. |

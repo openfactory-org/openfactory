@@ -225,6 +225,8 @@ describe("intake (HandleEvent)", () => {
     const inputs = (await work.api(meta, "listRunInputs", { runId: run.id }, null)) as {
       inputs: { content: string }[];
     };
-    expect(inputs.inputs.some((i) => i.content.startsWith("[human correction] usr_a withdrew the answer"))).toBe(true);
+    expect(
+      inputs.inputs.some((i) => i.content.startsWith("[human correction] a team member withdrew the answer")),
+    ).toBe(true);
   });
 });

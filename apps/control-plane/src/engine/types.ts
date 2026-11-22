@@ -64,11 +64,11 @@ export interface Usage {
 
 export const ZERO_USAGE: Usage = { input_tokens: 0, output_tokens: 0, cost_usd: 0, duration_ms: 0 };
 
+/** Who a run is for (core.Principal JSON): its creator and its run_as. */
 export interface Principal {
-  kind: string;
-  id?: string;
+  type: "user" | "service_account" | "factory";
+  id: string;
   name?: string;
-  email?: string;
 }
 
 export interface EffectiveNetworkPolicy {

@@ -393,12 +393,11 @@ function preflightMCPServers(
     }
   };
   add("factory.yaml", def.mcpServers);
-  for (const a of def.agents ?? []) add(`agents/${a.name}/agent.md`, (a as { mcpServers?: ServerMap }).mcpServers);
+  for (const a of def.agents ?? []) add(`agents/${a.name}/agent.md`, a.mcp_servers);
   for (const au of def.automations ?? [])
-    add(`automations/${au.name}/automation.md`, (au.overrides as { mcpServers?: ServerMap } | undefined)?.mcpServers);
-  for (const sc of def.scorers ?? [])
-    add(`scorers/${(sc as { slug: string }).slug}/scorer.md`, (sc as { mcpServers?: ServerMap }).mcpServers);
-  if (def.scorerDefaults) add("factory.yaml", (def.scorerDefaults as { mcpServers?: ServerMap }).mcpServers);
+    add(`automations/${au.name}/automation.md`, au.overrides?.mcp_servers ?? undefined);
+  for (const sc of def.scorers ?? []) add(`scorers/${sc.slug}/scorer.md`, sc.mcp_servers);
+  if (def.scorerDefaults) add("factory.yaml", def.scorerDefaults.mcp_servers ?? undefined);
   if (refs.length === 0) return;
   const known = reg.knownRefs(kit);
   const seen = new Set<string>();
@@ -425,10 +424,9 @@ export function mcpServerUses(kit: TeamKit, id: string, name: string): string[] 
     Object.values(m ?? {}).some((srv) => !!srv.managedId && refs.includes(srv.managedId));
   return teamResourceUses(kit, (agents, automations) => {
     const out: string[] = [];
-    for (const a of agents) if (selects((a as { mcpServers?: ServerMap }).mcpServers)) out.push("agent " + a.name);
+    for (const a of agents) if (selects(a.mcp_servers)) out.push("agent " + a.name);
     for (const au of automations) {
-      if (selects((au.overrides as { mcpServers?: ServerMap } | undefined)?.mcpServers))
-        out.push("automation " + au.name);
+      if (selects(au.overrides?.mcp_servers ?? undefined)) out.push("automation " + au.name);
     }
     return out;
   });

@@ -9,10 +9,17 @@ import { attachmentPrefix, getAttachment, MAX_ATTACHMENT_BYTES, type Attachment 
 import type { Env } from "../contracts/env";
 import { json, teamOf } from "./runs";
 
-/** The API form: the object key stays hidden. */
-function publicAttachment(a: Attachment): Omit<Attachment, "key"> {
-  const { key: _k, ...rest } = a;
-  return rest;
+/** The API form (core.Attachment JSON): attachment_id, the object key stays hidden, created_by omitempty. */
+function publicAttachment(a: Attachment): Record<string, unknown> {
+  return {
+    attachment_id: a.id,
+    team_id: a.team_id,
+    name: a.name,
+    content_type: a.content_type,
+    bytes: a.bytes,
+    ...(a.created_by ? { created_by: a.created_by } : {}),
+    created_at: a.created_at,
+  };
 }
 
 /** 413 payload_too_large (CodePayloadTooLarge; not an OfError code). */

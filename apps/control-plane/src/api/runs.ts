@@ -16,10 +16,12 @@ import type { CallMeta, CoreEvent } from "../contracts/do-messages";
 import type { Env } from "../contracts/env";
 import { registerCronHook, registerServerRoute } from "../builder";
 import { runView } from "../engine/view";
+import { callerPrincipal } from "../engine/principal";
 import {
   isTerminal,
   waitsForInput,
   type AgentConfig,
+  type Principal,
   type Run,
   type RunMessage,
   type RunSession,
@@ -263,6 +265,22 @@ function runConfigOverrides(cfgIn: RunConfigBody | null | undefined): Overrides 
   return ov;
 }
 
+/** CreateRun (internal/api/runs.go): config.environment_id must name an environment of the team. */
+async function checkEnvironment(env: Env, ctx: RouteContext, id: string): Promise<void> {
+  const out = (await env.TEAM.getByName(doName.team(teamOf(ctx))).api(metaOf(ctx), "getEnvironment", { id }, null)) as {
+    $error?: { code: string; detail: string };
+  };
+  if (!out?.$error) return;
+  if (out.$error.code === "resource_not_found") throw invalid(`environment ${id} does not exist`);
+  throw new OfError(out.$error.code as never, out.$error.detail);
+}
+
+/** The creator and run_as of a run that an API caller starts: the caller for both (engine/principal.go). */
+function callerPrincipals(ctx: RouteContext): { creator?: Principal; runAs?: Principal } {
+  const p = callerPrincipal(ctx.principal);
+  return p ? { creator: p, runAs: p } : {};
+}
+
 /** POST /api/v1/runs: a run of an agent: a new work item with the run as its root. */
 export const createRun: Handler = async (req, env, ctx) => {
   const b = await body<CreateRunBody>(req);
@@ -272,6 +290,7 @@ export const createRun: Handler = async (req, env, ctx) => {
   if (!agentRef || (!factoryRef && !b.agent_identity_uid))
     throw invalid("set agent_identity_uid, or factory_id and agent_name");
   const ov = runConfigOverrides(b.config);
+  if (ov?.environment_id) await checkEnvironment(env, ctx, ov.environment_id);
   const resolved = factoryRef
     ? await resolveAgent(env, ctx, factoryRef, agentRef)
     : await resolveAgentById(env, ctx, b.agent_identity_uid!);
@@ -289,6 +308,7 @@ export const createRun: Handler = async (req, env, ctx) => {
       triggeredBy: "api",
       ...(b.metadata ? { metadata: b.metadata } : {}),
       ...(ctx.principal?.userId ? { creatorId: ctx.principal.userId } : {}),
+      ...callerPrincipals(ctx),
     },
   })) as { run: Run };
   return json(201, runView(out.run, { publicUrl: publicUrl(env) }));
@@ -310,6 +330,8 @@ export const dispatchRun: Handler = async (req, env, ctx) => {
       workItemId: newRoutedId("wi", token),
       triggeredBy: "api",
       ...(b.metadata ? { metadata: b.metadata } : {}),
+      ...(ctx.principal?.userId ? { creatorId: ctx.principal.userId } : {}),
+      ...callerPrincipals(ctx),
     },
   })) as { run: Run; workItemId?: string };
   return json(201, { ...runView(out.run, { publicUrl: publicUrl(env) }), work_item_id: out.workItemId });

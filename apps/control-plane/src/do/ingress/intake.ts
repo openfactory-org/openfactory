@@ -20,12 +20,15 @@ import {
   trustOfMessage,
 } from "../../engine/intake";
 import { buildDispatchPrompt, workItemTitle } from "../../engine/text";
-import type { AgentConfig } from "../../engine/types";
+import type { AgentConfig, Principal as RunPrincipal } from "../../engine/types";
+import { dispatchPrincipals, factoryPrincipal, isApprover as approverMatch } from "../../engine/principal";
 import { prFactsKey } from "../../metrics/build";
 import { applyOverrides } from "../../scoring/overrides";
 import { matchingAutomations } from "../../triggers/match";
 import { setIntakeHandler, type IntakeResult } from "./index";
 import { build as buildBundle, promptSection, storeBundle, type Builder } from "../../eventctx/index";
+import { resolverFor } from "../../forges/env";
+import { githubActorEligible, postOnboardingNotice, type OnboardingReason } from "./onboarding";
 
 /** The event context of one message: the R2 bundle, its message ID and its prompt section. */
 export interface BundleRef {
@@ -68,6 +71,7 @@ interface Snapshot {
     repositories?: { codeForge?: string; owner: string; name: string }[] | null;
     require_linked_actor?: boolean;
     restrict_followups_to_starter?: boolean;
+    github_onboarding_notices?: boolean;
     approvers?: string[];
     machines?: Record<string, unknown>;
   };
@@ -120,8 +124,16 @@ export interface IntakeDeps {
     allowBotAction(actionKey: string): Promise<boolean>;
     reopen(i: { actionKey: string; event: CoreEvent }): Promise<unknown>;
   };
+  /**
+   * The principal that the runAs of an automation names (engine.resolveRunAs).
+   * Throws invalid_request when it names no principal of the team. Without it
+   * automation runs act as the factory.
+   */
+  resolveRunAs?(factoryId: string, runAs: string): Promise<RunPrincipal>;
   /** The event context of a message (optional: without it runs get no event files). */
   bundle?(ev: CoreEvent, withContext: boolean): Promise<BundleRef | undefined>;
+  /** The GitHub onboarding comment of an ineligible account (optional). */
+  onboardingNotice?(ev: CoreEvent, reason: OnboardingReason, factoryId: string): Promise<void>;
 }
 
 /** One bundle per (event, withContext) within one HandleEvent. */
@@ -195,19 +207,21 @@ export function platformIntakeDeps(env: Env, teamId: string): IntakeDeps {
       reopen: (i) => router.reopen(i),
     },
     work: (token) => env.WORK.getByName(doName.work(teamId, token)) as unknown as ReturnType<IntakeDeps["work"]>,
+    resolveRunAs: async (factoryId, runAs) =>
+      opOut<RunPrincipal>(
+        await team.api(meta(), "principals.resolveRunAs", {}, { factoryId, runAs }),
+        "principals.resolveRunAs",
+      ),
     bundle: (ev, withContext) => storeEventBundle(env, ev, withContext),
+    onboardingNotice: async (ev, reason, factoryId) => {
+      await postOnboardingNotice(env, resolverFor(env), teamId, ev, reason, factoryId);
+    },
   };
 }
 
 /** IsApprover (workitems.go): by email, or by name for a service account. */
 export function isApprover(approvers: string[], u: User | undefined): boolean {
-  if (!u) return false;
-  const email = (u.email ?? "").trim();
-  return approvers.some((a0) => {
-    const a = a0.trim();
-    if (email && a.toLowerCase() === email.toLowerCase()) return true;
-    return u.kind === "service_account" && !!u.name && a === u.name;
-  });
+  return approverMatch(approvers, u);
 }
 
 function resolveAgent(snap: Snapshot, name: string): AgentConfig | undefined {
@@ -283,7 +297,7 @@ export async function handleEvent(d: IntakeDeps, teamId: string, ev: CoreEvent):
         .replace(/^@/, "");
       const fid = ev.factory_id || (alias ? await d.factoryByAlias(alias) : undefined);
       const snap = snaps.find((s) => s.factory.id === fid);
-      if (fid && snap && !served.has(fid)) await dispatchMention(d, snap, ev, akey, bundles);
+      if (fid && snap && !served.has(fid)) await dispatchMention(d, snap, ev, akey, bundles, user);
     } catch (e) {
       errs.list.push(e);
     }
@@ -304,8 +318,10 @@ async function dispatchMention(
   ev: CoreEvent,
   akey: string,
   bundles = bundler(d, ev),
+  user?: User,
 ): Promise<void> {
   if (ev.actor.trust !== "member") {
+    if (normalizeProvider(ev.provider) === "github") await githubActorEligible(d, ev.team_id, ev, [snap]);
     console.info("intake: mention from a sender without a link ignored", ev.provider, ev.actor.handle);
     return;
   }
@@ -330,7 +346,47 @@ async function dispatchMention(
       triggeredBy: "mention",
       workItemId: r.wiId,
       sourceKey: key,
+      principals: dispatchPrincipals({
+        factoryId: snap.factory.id,
+        triggeredBy: "mention",
+        teamId: "",
+        ...(memberOf(ev, user) ? { creator: memberOf(ev, user)! } : {}),
+      }),
     }),
+  });
+}
+
+/** The user record of a linked sender of the team (trust member), as a principal source. */
+function memberOf(ev: CoreEvent, user: User | undefined): User | undefined {
+  if (ev.actor.trust !== "member" || !ev.actor.user_id) return undefined;
+  return user && user.id === ev.actor.user_id ? user : { id: ev.actor.user_id };
+}
+
+/** The principals of a run of automation a (engine.dispatchPrincipals). Throws when its runAs names nobody. */
+async function automationPrincipals(
+  d: IntakeDeps,
+  factoryId: string,
+  a: Automation,
+  creator: User | undefined,
+  triggeredBy: string,
+): Promise<{ creator?: RunPrincipal; runAs?: RunPrincipal }> {
+  let runAs: RunPrincipal = factoryPrincipal(factoryId);
+  const v = (a.run_as ?? "").trim();
+  if (v !== "" && v !== "factory" && d.resolveRunAs) {
+    try {
+      runAs = await d.resolveRunAs(factoryId, v);
+    } catch (e) {
+      const { error } = toOfError(e);
+      throw new OfError(error.code as never, `automation ${a.name}: ${error.detail}`);
+    }
+  }
+  return dispatchPrincipals({
+    factoryId,
+    triggeredBy,
+    teamId: "",
+    automation: true,
+    automationRunAs: runAs,
+    ...(creator ? { creator } : {}),
   });
 }
 
@@ -338,7 +394,14 @@ function dispatchPlan(
   snap: Snapshot,
   agent: AgentConfig,
   ev: CoreEvent,
-  o: { prompt: string; triggeredBy: string; workItemId?: string; sourceKey?: string; automationId?: string },
+  o: {
+    prompt: string;
+    triggeredBy: string;
+    workItemId?: string;
+    sourceKey?: string;
+    automationId?: string;
+    principals?: { creator?: RunPrincipal; runAs?: RunPrincipal };
+  },
 ): Record<string, unknown> {
   const prompt = buildDispatchPrompt({ prompt: o.prompt, event: ev });
   return {
@@ -350,7 +413,9 @@ function dispatchPlan(
     source: ev.source,
     ...(o.sourceKey ? { sourceKey: o.sourceKey } : {}),
     ...(o.automationId ? { automationId: o.automationId } : {}),
-    ...(ev.actor.user_id ? { creatorId: ev.actor.user_id, creator: { kind: "user", id: ev.actor.user_id } } : {}),
+    ...(ev.actor.user_id ? { creatorId: ev.actor.user_id } : {}),
+    ...(o.principals?.creator ? { creator: o.principals.creator } : {}),
+    ...(o.principals?.runAs ? { runAs: o.principals.runAs } : {}),
     triggeredBy: o.triggeredBy,
     eventText: ev.text ?? "",
     ...(o.workItemId ? { workItemId: o.workItemId } : {}),
@@ -440,6 +505,13 @@ async function handleForFactory(
       continue;
     }
     const triggeredBy = triggeredByFor(ev.provider, a.id);
+    let principals: { creator?: RunPrincipal; runAs?: RunPrincipal };
+    try {
+      principals = await automationPrincipals(d, fid, a, memberOf(ev, user), triggeredBy);
+    } catch (e) {
+      local.push(e);
+      continue;
+    }
     if (!wi || !state.rootRunId) {
       // The first match creates the work item and its root run.
       try {
@@ -463,6 +535,7 @@ async function handleForFactory(
             workItemId: r.wiId,
             sourceKey: key,
             automationId: a.id,
+            principals,
           }),
         });
         served = true;
@@ -487,7 +560,7 @@ async function handleForFactory(
             kind: "deliverToRoot",
             event: ev,
             dispatchRequest: {
-              ...dispatchPlan(snap, agent, ev, { prompt: a.prompt, triggeredBy }),
+              ...dispatchPlan(snap, agent, ev, { prompt: a.prompt, triggeredBy, principals }),
               alreadyServed: true,
             },
           });
@@ -498,7 +571,7 @@ async function handleForFactory(
             kind: "deliverToRoot",
             event: ev,
             ...(await bundles(false)),
-            dispatchRequest: dispatchPlan(snap, agent, ev, { prompt: a.prompt, triggeredBy }),
+            dispatchRequest: dispatchPlan(snap, agent, ev, { prompt: a.prompt, triggeredBy, principals }),
           });
         }
         served = true;
@@ -514,7 +587,7 @@ async function handleForFactory(
           kind: "sideRun",
           event: ev,
           ...(await bundles(true)),
-          dispatchRequest: dispatchPlan(snap, agent, ev, { prompt: a.prompt, triggeredBy }),
+          dispatchRequest: dispatchPlan(snap, agent, ev, { prompt: a.prompt, triggeredBy, principals }),
         });
         served = true;
       } catch (e) {
@@ -558,6 +631,10 @@ export async function dispatchAutomation(
     : base;
   const target = `auto:${a.id}`;
   const akey = actionKey(ev) || ev.id;
+  const triggeredBy = triggeredByFor(ev.provider, a.id);
+  // The person or service account who started the manual run is its creator.
+  const starter = ev.actor?.user_id ? ((await d.user(ev.actor.user_id)) ?? { id: ev.actor.user_id }) : undefined;
+  const principals = await automationPrincipals(d, factoryId, a, starter, triggeredBy);
   const r = await d.router.resolveOrReserve({ factoryId, sourceKeys: [], actionKey: akey, target });
   const res = await d.work(r.token).applyAction({
     actionKey: akey,
@@ -567,9 +644,10 @@ export async function dispatchAutomation(
     ...(await bundler(d, ev)(true)),
     dispatchRequest: dispatchPlan(snap, agent, ev, {
       prompt: a.prompt,
-      triggeredBy: triggeredByFor(ev.provider, a.id),
+      triggeredBy,
       workItemId: r.wiId,
       automationId: a.id,
+      principals,
     }),
   });
   return {

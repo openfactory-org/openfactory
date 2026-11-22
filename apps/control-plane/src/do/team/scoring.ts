@@ -235,11 +235,11 @@ const scoringOps: Record<string, TeamOp> = {
     const out = await store[method]!(...((b["args"] as unknown[]) ?? []));
     return out === undefined ? null : out;
   },
-  "scoring.checkDefinition": (kit, c) => {
+  "scoring.checkDefinition": async (kit, c) => {
     const b = bodyObject(c.body);
     const f = getFactoryById(kit, str(b, "factoryId"));
     if (!f) throw new OfError("resource_not_found", "factory not found");
-    const chk = checkDefinition(kit, f, b["files"] as Record<string, string>);
+    const chk = await checkDefinition(kit, f, b["files"] as Record<string, string>);
     return { errors: chk.errors };
   },
   /** A team-level inbox item (no work item): IndexDO owns it. */

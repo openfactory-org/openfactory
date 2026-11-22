@@ -1,7 +1,7 @@
 // /runner/v1 in the Worker (internal/runnerapi/service.go). The Worker checks
 // the runner version header, verifies tokens and holds the commands long-poll;
 // each route calls one WorkDO RPC that runs one transaction.
-import { OfError, parseBootstrapToken, partitionOf, doName, toOfError } from "@openfactory/core";
+import { buildConversation, OfError, parseBootstrapToken, partitionOf, doName, toOfError } from "@openfactory/core";
 import type { StartRequest } from "@openfactory/runner-proto";
 import type { Env } from "../contracts/env";
 import type { Run, RunSession } from "../engine/types";
@@ -17,9 +17,11 @@ import {
   getAttachment,
   presignUpload,
   snapshotDownloads,
+  type Attachment,
   type UploadRequest,
 } from "./transfer";
 import { issuerFor } from "../cloudid/issuer";
+import { mergeMessages, readCompactedMessages } from "../compaction/compact";
 
 setStartConfigBuilder(plannedStartConfig);
 setSecretsBuilder(plannedSecrets);
@@ -88,7 +90,7 @@ function workStub(env: Env, teamId: string, runId: string) {
 function subjectOf(run: Run): string {
   const p = run.run_as;
   if (!p) return "runner";
-  return p.kind && (p.id || p.name || p.email) ? `${p.kind}:${p.id ?? p.name ?? p.email}` : "runner";
+  return p.type && p.id ? `${p.type}:${p.id}` : "runner";
 }
 
 async function issue(env: Env, run: Run, session: number) {
@@ -316,18 +318,31 @@ async function sessionRoute(
       return isErr(res) ? fromErr(res) : json(200, {});
     }
     case "GET /runner/v1/session/conversation": {
-      const res = await stub.runnerConversation(
+      const res = (await stub.runnerConversation(
         claims.run,
         claims.ses,
         Number(url.searchParams.get("after") ?? "0") || 0,
-      );
-      return isErr(res) ? fromErr(res) : json(200, res);
+      )) as ConversationRows | RunnerErr;
+      if (isErr(res)) return fromErr(res);
+      return json(200, buildConversation(res.run as never, (await conversationMessages(env, res)) as never));
     }
     case "GET /runner/v1/session/commands":
       return commands(env, stub, claims, url, request.signal);
   }
   void ctx;
   return errorBody(404, "not_found", "not found");
+}
+
+interface ConversationRows {
+  run: Run;
+  messages: { seq: number }[];
+  compacted_upto?: number;
+}
+
+/** The messages of a conversation: the compacted prefix from R2 (when the run was compacted), then the rows. */
+async function conversationMessages(env: Env, rows: ConversationRows): Promise<{ seq: number }[]> {
+  if (!rows.compacted_upto) return rows.messages;
+  return mergeMessages(await readCompactedMessages(env.DATA, rows.run.id), rows.messages);
 }
 
 async function commands(
@@ -363,6 +378,7 @@ async function commands(
   if (failure) return fromErr(failure);
   const out = result.commands.map((x) => toProtoCommand(x));
   await expandEventFiles(env.DATA, out);
+  await expandAttachments(env, c.team, out);
   return json(200, { commands: out });
 }
 
@@ -403,6 +419,42 @@ export async function expandEventFiles(bucket: R2Bucket, cmds: { data?: unknown 
     }
   }
 }
+
+/**
+ * toItem with the attachment lookup (dispatch/deliver.go): sets the name,
+ * content type and size of each attachment of an input item. A failed lookup
+ * keeps only the ID; the runner gets the file from GET /session/downloads.
+ */
+export async function expandAttachments(env: Env, teamId: string, cmds: { data?: unknown }[]): Promise<void> {
+  const cache = new Map<string, Promise<Attachment | undefined>>();
+  const lookup = (id: string) => {
+    let p = cache.get(id);
+    if (!p) {
+      p = getAttachment(env, teamId || "default", id).catch((e: unknown) => {
+        console.warn("runner: read attachment", id, e instanceof Error ? e.message : String(e));
+        return undefined;
+      });
+      cache.set(id, p);
+    }
+    return p;
+  };
+  for (const c of cmds) {
+    const input = (c.data as { input?: { attachments?: InputAttachment[] }[] } | undefined)?.input;
+    if (!Array.isArray(input)) continue;
+    for (const item of input) {
+      for (const a of item.attachments ?? []) {
+        if (a.name) continue;
+        const found = await lookup(a.id);
+        if (!found) continue;
+        a.name = found.name;
+        a.content_type = found.content_type;
+        a.bytes = found.bytes;
+      }
+    }
+  }
+}
+
+type InputAttachment = { id: string; name: string; content_type: string; bytes: number };
 
 /** GET /runner/v1/bin/linux-{arch}[.sha256]: the published runner binary from R2. */
 async function serveBinary(env: Env, name: string): Promise<Response> {

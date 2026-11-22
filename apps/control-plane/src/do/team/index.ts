@@ -30,6 +30,7 @@ import * as auth from "./auth";
 import * as factories from "./factories";
 import * as integrations from "./integrations";
 import * as mcp from "./mcp";
+import * as preflight from "./preflight";
 import * as schedules from "./schedules";
 import * as scoring from "./scoring";
 import * as secrets from "./secrets";
@@ -136,6 +137,7 @@ const MODULES: Record<string, TeamModule> = {
   schedules,
   mcp,
   scoring,
+  preflight,
 };
 
 function allMigrations(): Migration[] {
@@ -314,16 +316,7 @@ export class TeamDO extends BaseDO implements TeamRpc, RetentionRpc {
     return this.rpc(() => factories.configSnapshot(this.kit, factoryId));
   }
 
-  proposeDefinition(
-    meta: CallMeta,
-    input: {
-      factoryId: string;
-      files: Record<string, string>;
-      message: string;
-      authorRunId: string;
-      idempotencyKey: string;
-    },
-  ): Promise<unknown> {
+  proposeDefinition(meta: CallMeta, input: factories.ProposeDefinitionInput): Promise<unknown> {
     return this.rpc(() => factories.proposeDefinition(this.kit, meta, input));
   }
 

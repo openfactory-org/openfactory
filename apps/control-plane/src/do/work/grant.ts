@@ -56,6 +56,16 @@ export interface TaskExtras {
   loopbackDaemonPorts?: readonly number[];
   /** sha256 of the runner binary for arch (R2 runner/<version>/openfactory-runtime-linux-<arch>.sha256). */
   runnerSha256?: string;
+  /** The image of the run's environment (empty when it has none or the lookup failed). */
+  environmentImage?: string;
+}
+
+/**
+ * sandbox.SelectImage of the Go server: the image of the environment, then
+ * the image of the machine, then the default image (OF_SANDBOX_IMAGE).
+ */
+export function selectImage(environmentImage: string | undefined, machineImage: string | undefined, def: string) {
+  return environmentImage?.trim() || machineImage?.trim() || def;
 }
 
 export function buildTask(fx: Fx, run: Run, n: number, token: string, _grant: Grant, x: TaskExtras): SandboxTask {
@@ -69,7 +79,7 @@ export function buildTask(fx: Fx, run: Run, n: number, token: string, _grant: Gr
     session: n,
     teamId: fx.teamId,
     factoryId: run.factory_id,
-    image: m?.image || fx.cfg.sandboxImage,
+    image: selectImage(x.environmentImage, m?.image, fx.cfg.sandboxImage),
     platform: { os: "linux", arch, ...(m?.user ? { user: m.user } : {}) },
     resources: {
       ...(m?.vcpus ? { vcpus: m.vcpus } : {}),

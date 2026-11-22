@@ -386,7 +386,7 @@ export class Planner {
       effectiveCredentialStrategy(r.config.credential_strategy, snap.runtime.credential_strategy) !== CREDENTIAL_CREATOR
     )
       return "";
-    if (r.run_as) return r.run_as.kind === "user" && r.run_as.id ? r.run_as.id : "";
+    if (r.run_as) return r.run_as.type === "user" && r.run_as.id ? r.run_as.id : "";
     return st.workItem?.creator_id ?? "";
   }
 

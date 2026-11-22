@@ -2,13 +2,14 @@
 // one), its runs, sessions, runner protocol, inbox items, dispatch ledger and
 // tool idempotency rows. Every request or alarm step is one transactionSync.
 import {
-  buildConversation,
   usageCoverage,
   conflict,
+  doName,
   invalid,
   newRoutedId,
   notFound,
   OfError,
+  partitionOf,
   pullRequestSource,
   sourceKey,
   type FailureCode,
@@ -36,6 +37,9 @@ import { defaultProviderId, providerFor, targetOf } from "../dispatch/providers"
 import {
   createRun as engineCreateRun,
   resolveInboxItem,
+  resumesRun,
+  actorLabel,
+  resolutionMessage,
   workItemEvent,
   cancel,
   cancelOne,
@@ -121,8 +125,7 @@ export function engineConfig(env: Env): EngineConfig {
     maxDepth: Number((env as unknown as Record<string, string>).OF_MAX_ORCHESTRATION_DEPTH ?? "") || 1,
     runnerVersion: env.OF_RUNNER_VERSION ?? "",
     allowUnenforced: env.OF_ALLOW_UNENFORCED_NETWORK_POLICY ?? "",
-    sandboxImage:
-      ((env as unknown as Record<string, string | undefined>).OF_SANDBOX_IMAGE ?? "").trim() || DEFAULT_SANDBOX_IMAGE,
+    sandboxImage: (env.OF_SANDBOX_IMAGE ?? "").trim() || DEFAULT_SANDBOX_IMAGE,
     retentionMs: safeRetentionMs(env),
   };
 }
@@ -554,8 +557,16 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
               if (prev) return fx.repo.getInbox(prev);
             }
             const wi = b.work_item_id ? fx.repo.getWorkItem(b.work_item_id) : fx.repo.getWorkItem();
+            // A caller may choose the ID (propose_definition_change names it in the version first).
+            let id = newRoutedId("inb", fx.token);
+            if (b.id) {
+              if (!b.id.startsWith("inb_") || partitionOf(b.id) !== fx.token)
+                throw invalid(`inbox item ID ${b.id} does not belong to this work item`);
+              if (fx.repo.getInbox(b.id)) return fx.repo.getInbox(b.id);
+              id = b.id;
+            }
             const it: InboxItem = {
-              id: newRoutedId("inb", fx.token),
+              id,
               factory_id: b.factory_id ?? wi?.factory_id ?? "",
               ...(wi ? { work_item_id: wi.id } : {}),
               ...(b.run_id ? { run_id: b.run_id } : {}),
@@ -564,6 +575,7 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
               body: b.body ?? "",
               ...(b.options ? { options: b.options } : {}),
               ...(b.questions ? { questions: b.questions } : {}),
+              ...(b.assignee_id ? { assignee_id: b.assignee_id } : {}),
               ...(b.recipients ? { recipients: b.recipients } : wi?.creator_id ? { recipients: [wi.creator_id] } : {}),
               resolved: false,
               created_at: new Date(fx.now()).toISOString(),
@@ -575,7 +587,14 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
             return it;
           });
         case "unresolveInbox":
-          return this.txFx((fx) => unresolveInbox(fx, params.id ?? "", actorOfMeta(meta)));
+          return this.txFx((fx) =>
+            unresolveInbox(
+              fx,
+              params.id ?? "",
+              actorOfMeta(meta),
+              (body as { actor_label?: string } | null)?.actor_label,
+            ),
+          );
         case "appendRunLog":
           return this.txFx((fx) => {
             const r = fx.repo.mustRun(runId);
@@ -760,8 +779,14 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
         const s = authSession(fx, runId, session);
         if ("error" in s) return s;
         void after;
-        // The normalized conversation of all messages (handleConversation in runnerapi/conversation.go).
-        return buildConversation(fx.repo.mustRun(runId), fx.repo.listMessages(runId, 0, 0) as never);
+        // The rows of all messages; the Worker merges the compacted prefix from
+        // R2 and builds the conversation (handleConversation in runnerapi/conversation.go).
+        const upto = Number(fx.repo.getRunState(runId, "compacted_upto") ?? "0");
+        return {
+          run: fx.repo.mustRun(runId),
+          messages: fx.repo.listMessages(runId, 0, 0),
+          ...(upto > 0 ? { compacted_upto: upto } : {}),
+        };
       }),
     );
   }
@@ -984,6 +1009,7 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
       egress: gate.egress,
       loopbackDaemonPorts: caps.loopbackDaemonPorts,
       runnerSha256: await runnerSha256(this.env, arch),
+      environmentImage: await environmentImage(this.env, run),
     });
     const pre = await provider.preflight(task);
     if (!pre.ok) {
@@ -1160,7 +1186,7 @@ function createRunOnly(fx: Fx, r: NonNullable<CreateRunInput["run"]>, meta: Call
 function resolveInbox(fx: Fx, id: string, body: unknown, meta: CallMeta): unknown {
   const it = fx.repo.getInbox(id);
   if (!it) throw notFound(`inbox item ${id}`);
-  const b = (body ?? {}) as { resolution?: string; message?: string; via?: string };
+  const b = (body ?? {}) as { resolution?: string; message?: string; via?: string; actor_label?: string };
   const resolution = (b.resolution ?? "").trim();
   if (!resolution) throw invalid("resolution is required");
   const actor = meta.principal?.userId ?? meta.principal?.id ?? "api";
@@ -1169,9 +1195,9 @@ function resolveInbox(fx: Fx, id: string, body: unknown, meta: CallMeta): unknow
     inbox_id: it.id,
     resolution,
   });
-  if (it.run_id && (it.kind === "question" || it.kind === "approval")) {
+  if (it.run_id && resumesRun(it)) {
     const text = b.message ? `${resolution}\n\n${b.message}` : resolution;
-    const rec = sendMessage(fx, it.run_id, `Answer to "${it.title}": ${text}`, actor);
+    const rec = sendMessage(fx, it.run_id, resolutionMessage(it, actorLabel(actor, b.actor_label), text), actor);
     it.answer_message_id = rec.message_id;
     fx.repo.putInbox(it);
   }
@@ -1181,32 +1207,11 @@ function resolveInbox(fx: Fx, id: string, body: unknown, meta: CallMeta): unknow
 /** UnresolveWindow (engine/inbox.go). */
 export const UNRESOLVE_WINDOW_MS = 10 * 60_000;
 
-/** resumesRun (workitems.go): the kinds whose resolve sends an answer to the run. */
-function resumesRun(it: InboxItem): boolean {
-  switch (it.kind) {
-    case "handoff":
-    case "answered":
-    case "failure":
-    case "spend_limit":
-      return false;
-    case "review":
-      return (it.options ?? []).length > 0;
-  }
-  return true;
-}
-
-/** actorLabel (workitems.go), without the user lookup. */
-function actorLabel(actor: string): string {
-  const a = actor.trim();
-  if (!a || a === "api") return "a team member";
-  return a;
-}
-
 /**
  * UnresolveInbox: undoes a resolve within 10 minutes, while the run did not
  * consume the answer. The run gets a message that withdraws the answer.
  */
-export function unresolveInbox(fx: Fx, id: string, actor: string): InboxItem {
+export function unresolveInbox(fx: Fx, id: string, actor: string, label?: string): InboxItem {
   const it = fx.repo.getInbox(id);
   if (!it) throw notFound(`inbox item ${id}`);
   if (!it.resolved) throw conflict("inbox item is not resolved");
@@ -1232,7 +1237,7 @@ export function unresolveInbox(fx: Fx, id: string, actor: string): InboxItem {
     workItemEvent(fx, it.work_item_id, "note", it.run_id ?? "", actor, { inbox_id: it.id, text: "resolve undone" });
   if (it.run_id && resumesRun(it)) {
     const short = [...old].length > 500 ? [...old].slice(0, 499).join("") + "…" : old;
-    const msg = `[human correction] ${actorLabel(actor)} withdrew the answer to ${JSON.stringify(it.title)} (it was: ${short}). Ignore that answer. A new answer will arrive as a follow-up message.`;
+    const msg = `[human correction] ${actorLabel(actor, label)} withdrew the answer to ${JSON.stringify(it.title)} (it was: ${short}). Ignore that answer. A new answer will arrive as a follow-up message.`;
     try {
       sendMessage(fx, it.run_id, msg, actor);
     } catch (e) {
@@ -1297,6 +1302,32 @@ function providerOf(env: Env, team: string, backend: string, workerId?: string) 
     backend.startsWith("worker:") ? "" : backend,
     backend.startsWith("worker:") ? backend.slice(7) : undefined,
   );
+}
+
+/**
+ * The image of the environment of a run (taskImageFor in the Go server). A
+ * failed lookup is logged and gives no image, so the next image applies.
+ */
+async function environmentImage(env: Env, run: Run): Promise<string | undefined> {
+  const id = run.config.environment_id;
+  if (!id) return undefined;
+  try {
+    const meta: CallMeta = {
+      requestId: `env-image:${run.id}`,
+      principal: { kind: "run", id: run.id, runId: run.id, teamId: run.team_id, role: "admin", factoryRoles: {} },
+    };
+    const out = (await env.TEAM.getByName(doName.team(run.team_id || "default")).api(
+      meta,
+      "getEnvironment",
+      { id },
+      null,
+    )) as { image?: string; $error?: { detail: string } };
+    if (out?.$error) throw new Error(out.$error.detail);
+    return out?.image?.trim() || undefined;
+  } catch (e) {
+    console.warn("work: sandbox image: read environment failed, using the next image", run.id, id, e);
+    return undefined;
+  }
 }
 
 /** The checksum of the published runner binary, or undefined when it is not in R2. */

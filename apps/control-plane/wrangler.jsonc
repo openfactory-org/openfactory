@@ -123,6 +123,7 @@
     "OF_SESSION_STOP_GRACE": "30s",
     "OF_SANDBOX_START_TIMEOUT": "10m",
     "OF_SANDBOX_PROVIDER": "cloudflare-sandbox",
+    "OF_SANDBOX_IMAGE": "",
     "OF_ALLOW_UNENFORCED_NETWORK_POLICY": "false",
     "OF_DEV_PROCESS_WORKERS": "false",
     "OF_RUNNER_VERSION": "0.0.0-dev",

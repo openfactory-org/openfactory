@@ -88,7 +88,7 @@ export interface TokenRun {
   agent_name?: string;
   work_item_id?: string;
   config?: { type?: string };
-  run_as?: { kind?: string; id?: string } | null;
+  run_as?: { type?: string; id?: string } | null;
 }
 
 export interface TokenOptions {
@@ -151,7 +151,7 @@ export class Issuer {
     if (ttl > MAX_TTL_MS) ttl = MAX_TTL_MS;
     let runAs = o.runAs ?? "";
     if (!runAs) {
-      if (r.run_as?.id) runAs = `${r.run_as.kind ?? "user"}:${r.run_as.id}`;
+      if (r.run_as?.id) runAs = `${r.run_as.type ?? "user"}:${r.run_as.id}`;
       else if (o.creator) runAs = "user:" + o.creator;
       else runAs = "factory:" + r.factory_id;
     }

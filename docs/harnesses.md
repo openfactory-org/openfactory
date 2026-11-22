@@ -200,6 +200,7 @@ agentDefaults:
 
 - Open Factory passes no credential. The worker must give the provider variables (for example `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`) to its sessions.
 - The definition rejects `workerEnvironment` when the effective `workerHost` is empty, also when an agent or automation clears `workerHost` and inherits this auth.
+- The preflight rejects `workerEnvironment` when the effective `workerHost` names a microVM worker, a pool that has a microVM worker, `server` or a sandbox provider.
 
 Example: [`../examples/07-self-hosted-worker`](../examples/07-self-hosted-worker). Worker setup: [Workers](self-hosting/workers.md).
 

@@ -310,9 +310,13 @@ export interface TeamRpc extends OutboxReceiver {
     input: {
       factoryId: string;
       files: Record<string, string>;
+      delete?: string[];
       message: string;
       authorRunId: string;
       idempotencyKey: string;
+      inboxItemId?: string;
+      workItemId?: string;
+      selfImprovement?: boolean;
     },
   ): Promise<unknown>;
   workersEnroll(input: {
