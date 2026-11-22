@@ -11559,6 +11559,8 @@
             "enum": [
               "run.created",
               "run.queued",
+              "run.retry_scheduled",
+              "run.blocked",
               "sandbox.assigned",
               "secrets.delivered",
               "session.started",
