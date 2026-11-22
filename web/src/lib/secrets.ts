@@ -39,7 +39,7 @@ export function useUsableSecrets(fid: string): { data: UsableSecret[] | undefine
 
 /** Model credential secret types per harness (internal/harness CredentialSecretTypes). */
 export const HARNESS_CREDENTIAL_TYPES: Record<string, string[]> = {
-  claude: ["anthropic_api_key", "anthropic_oauth_token", "anthropic_bedrock_api_key", "anthropic_bedrock_access_key"],
+  claude: ["anthropic_api_key", "anthropic_oauth_token"],
   codex: ["openai_api_key"],
 };
 

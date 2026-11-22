@@ -19,7 +19,8 @@ import { isServerPath, LoginPage, safeReturnTo } from "./pages/LoginPage";
 import { BenchmarkPage, BenchmarksPage, ScorersPage } from "./pages/Measure";
 import { RunPage, RunsPage } from "./pages/Runs";
 import { FactoryIntegrationsPage, SettingsPage } from "./pages/Settings";
-import { EnvironmentPage, EnvironmentsPage, IntegrationsPage, SecretsPage, WorkersPage } from "./pages/Team";
+import { EnvironmentPage, EnvironmentsPage, IntegrationsPage, SecretsPage } from "./pages/Team";
+import { WorkersPage } from "./pages/Workers";
 import { WebhookPage, WebhooksPage } from "./pages/Webhooks";
 import { WorkItemPage, WorkItemRedirect, WorkItemsPage } from "./pages/Work";
 

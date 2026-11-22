@@ -220,7 +220,7 @@ export function AgentPage() {
                             htmlFor="ag-auth_secret"
                             hint={
                               <>
-                                Claude Code accepts an Anthropic API key, Bedrock API key or Bedrock access key; Codex accepts an OpenAI API key. <Link to="/secrets">New auth secret</Link>
+                                Claude Code accepts an Anthropic API key or a Claude Code OAuth token; Codex accepts an OpenAI API key. <Link to="/secrets">New auth secret</Link>
                               </>
                             }
                           >
@@ -251,7 +251,7 @@ export function AgentPage() {
                           {form.machine && !s.machines.includes(form.machine) && <option value={form.machine}>Missing machine ({form.machine})</option>}
                         </select>
                       </Field>
-                      <Field label="Host" htmlFor="ag-worker_host">
+                      <Field label="Host" htmlFor="ag-worker_host" hint="server runs the session on the sandbox provider of the factory (cloudflare-sandbox, daytona or boatdev). A worker ID or pool:<label> runs it on an enrolled worker.">
                         <input id="ag-worker_host" list="workers-list" value={form.worker_host} onChange={(e) => set("worker_host", e.target.value)} placeholder={agent?.worker_host ? `Inherited: ${agent.worker_host}` : "server"} />
                         <datalist id="workers-list">
                           <option value="server" />
@@ -259,6 +259,9 @@ export function AgentPage() {
                             <option key={w.id} value={w.id}>
                               {w.name}
                             </option>
+                          ))}
+                          {[...new Set((workers.data ?? []).flatMap((w) => Object.keys(w.labels ?? {})))].sort().map((k) => (
+                            <option key={`pool:${k}`} value={`pool:${k}`} />
                           ))}
                         </datalist>
                       </Field>

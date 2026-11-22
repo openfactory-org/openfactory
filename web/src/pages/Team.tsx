@@ -3,8 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { api, errorMessage, unwrap, type Schemas } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { DeadEvents } from "../components/DeadEvents";
-import { Boxes, KeyRound, Plug, Plus, Server } from "lucide-react";
+import { Boxes, KeyRound, Plug, Plus } from "lucide-react";
 import { confirm, Dialog } from "../components/overlays";
 import { useFactories } from "../lib/queries";
 import { Alert, Badge, Button, Card, Empty, Field, PageHeader, Query, TimeAgo } from "../components/ui";
@@ -18,11 +17,8 @@ const SECRET_TYPES: { id: NonNullable<Schemas["SecretRequest"]["type"]>; label: 
   { id: "generic", label: "Generic" },
   { id: "anthropic_api_key", label: "Anthropic API key" },
   { id: "anthropic_oauth_token", label: "Claude Code OAuth token" },
-  { id: "anthropic_bedrock_api_key", label: "Bedrock API key" },
-  { id: "anthropic_bedrock_access_key", label: "Bedrock access key" },
   { id: "openai_api_key", label: "OpenAI API key" },
   { id: "docker_registry", label: "Docker registry" },
-  { id: "aws_ecr_credential", label: "AWS ECR credential" },
 ];
 const typeLabel = (t?: string) => SECRET_TYPES.find((x) => x.id === t)?.label ?? t ?? "";
 
@@ -693,61 +689,5 @@ export function EnvironmentPage() {
     <Query q={q} notFound={{ title: "Environment not found", text: "The team has no environment with this ID.", back: { label: "Go to environments", to: "/environments" } }}>
       {() => body}
     </Query>
-  );
-}
-
-// ---------- workers ----------
-
-export function WorkersPage() {
-  const q = useQuery({ queryKey: ["workers"], queryFn: () => unwrap(api.GET("/workers")).then((r) => r.items ?? []), refetchInterval: 30_000 });
-  return (
-    <>
-      <PageHeader title="Workers" subtitle="Remote workers that run sandboxes on other hosts over the worker protocol. The server also runs sandboxes with its own backend; it is not listed here." />
-      <Query q={q}>
-        {(ws) =>
-          ws.length === 0 ? (
-            <Empty icon={<Server size={18} />} title="No remote workers have connected">
-              Runs use the sandbox backend of the server. To run sandboxes on another host, start <code>openfactory worker</code> there.
-            </Empty>
-          ) : (
-            <div className="table-wrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th scope="col">Worker</th>
-                    <th scope="col">Backend</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">Load</th>
-                    <th scope="col">Last heartbeat</th>
-                    <th scope="col">Version</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {ws.map((w) => (
-                    <tr key={w.id}>
-                      <td>
-                        {w.name}
-                        <br />
-                        <code className="small muted">{w.id}</code>
-                      </td>
-                      <td>{w.backend}</td>
-                      <td>{w.status === "online" ? <Badge tone="ok">Online</Badge> : <Badge>Offline</Badge>}</td>
-                      <td>
-                        <meter min={0} max={w.capacity || 1} value={w.active ?? 0} aria-label="Active sandboxes" /> {w.active ?? 0}/{w.capacity ?? 0}
-                      </td>
-                      <td>
-                        <TimeAgo t={w.last_heartbeat} />
-                      </td>
-                      <td className="muted">{w.version}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )
-        }
-      </Query>
-      <DeadEvents />
-    </>
   );
 }

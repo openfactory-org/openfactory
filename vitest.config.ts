@@ -12,6 +12,7 @@ export default defineConfig({
       "providers/*/vitest.config.ts",
       "plugins/*/vitest.config.ts",
       "tests/*/vitest.config.ts",
+      "web/vitest.config.ts",
     ],
   },
 });

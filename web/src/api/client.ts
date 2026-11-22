@@ -1,5 +1,5 @@
 import createClient, { type Middleware } from "openapi-fetch";
-import type { components, paths } from "./schema";
+import type { components, paths } from "@openfactory/api-client";
 
 /** Every schema of the embedded OpenAPI document (internal/api/openapi.json). */
 export type Schemas = components["schemas"];

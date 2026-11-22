@@ -1,7 +1,7 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { WorkersPage } from "../pages/Team";
+import { WorkersPage } from "../pages/Workers";
 import { ME, mockFetch, renderAt } from "./utils";
 
 const ADMIN = { ...ME, user: { ...ME.user, role: "admin" }, role: "admin" };
@@ -47,7 +47,7 @@ describe("dead-lettered events", () => {
       "GET /api/v1/workers": { items: [], page_info: { has_next_page: false } },
     });
     renderAt(<WorkersPage />, { route: "/workers", path: "/workers" });
-    expect(await screen.findByText("No remote workers have connected")).toBeInTheDocument();
+    expect(await screen.findByText("No workers have enrolled")).toBeInTheDocument();
     expect(screen.queryByText("Dead-lettered events")).not.toBeInTheDocument();
     expect(calls.some((c) => c.path === "/api/v1/outbox/dead")).toBe(false);
   });
