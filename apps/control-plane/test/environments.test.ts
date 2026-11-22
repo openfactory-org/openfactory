@@ -148,4 +148,34 @@ describe("environments (internal/api environments_test ports)", () => {
       "Environment x is used by a, b, c, d, e and 2 more. Remove the references first.",
     );
   });
+
+  it("finds the uses of environments and MCP servers in a definition (TestResourceUses)", async () => {
+    const { environmentUses } = await import("../src/do/team/settings");
+    const { mcpServerUsesOf } = await import("../src/do/team/mcp");
+    const def = {
+      mcpServers: { wiki: { managedId: "mcp_wiki" } },
+      agents: [
+        { name: "foreman", environment_id: "env_1", mcp_servers: { wiki: { managedId: "mcp_wiki" } } },
+        { name: "coder", mcp_servers: { wiki: { managedId: "mcp_wiki" }, docs: { managedId: "docs" } } },
+      ],
+      automations: [
+        { name: "nightly", overrides: { environment_id: "env_1" } },
+        { name: "weekly", overrides: { environment_id: "env_2", mcp_servers: { d: { managedId: "mcp_docs" } } } },
+      ],
+      scorers: [{ slug: "quality", mcp_servers: { d: { managedId: "docs" } } }],
+      scorerDefaults: { environment_id: "env_1" },
+    } as unknown as Parameters<typeof environmentUses>[0];
+    const cases: [string, string[], string][] = [
+      ["environment", environmentUses(def, "env_1"), "agent foreman, automation nightly, scorerDefaults"],
+      ["unused environment", environmentUses(def, "env_9"), ""],
+      ["factory-wide server once", mcpServerUsesOf(def, "mcp_wiki", "wiki"), "the factory-wide mcpServers"],
+      [
+        "server by name or id",
+        mcpServerUsesOf(def, "mcp_docs", "docs"),
+        "agent coder, automation weekly, scorer quality",
+      ],
+      ["unused server", mcpServerUsesOf(def, "mcp_x", "x"), ""],
+    ];
+    for (const [name, got, want] of cases) expect(got.join(", "), name).toBe(want);
+  });
 });

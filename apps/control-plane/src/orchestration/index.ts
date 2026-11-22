@@ -16,6 +16,7 @@ import { META_SELF_IMPROVEMENT, type Overrides } from "../scoring/types";
 import { proposalBody, proposalTitle } from "../scoring/proposals";
 import { systemPrincipal, unwrapOp } from "../scoring/clients";
 import { issueRef, type LinkIssueInput } from "./linkissue";
+import { prReference, prRef, type LinkPullRequestInput } from "./linkpr";
 
 export const RUN_MCP_PREFIX = "/mcp/run/";
 const PROTOCOL_VERSION = "2025-06-18";
@@ -55,7 +56,7 @@ export function setRedactor(fn: Redactor): void {
 /** The argument fields that each tool posts as text, redacted before the WorkDO call. */
 const REDACTED_FIELDS: Record<string, string[]> = {
   post_update: ["message", "text"],
-  ask_human: ["question", "title", "summary", "details", "body", "context", "options"],
+  ask_human: ["question", "title", "summary", "details", "body", "context", "options", "recommended_option"],
   request_approval: ["question", "title", "summary", "details", "body", "options", "links"],
   send_message: ["message", "text"],
   follow_up_agent: ["message"],
@@ -131,12 +132,35 @@ const TOOLS: { name: string; description: string; inputSchema: Record<string, un
   {
     name: "ask_human",
     description: "Ask the requester a question. End your turn afterwards; the answer arrives as a follow-up message.",
-    inputSchema: obj({ question: "string", details: "string" }, ["question"]),
+    inputSchema: {
+      type: "object",
+      properties: {
+        question: { type: "string", description: "The question for the requester" },
+        context: { type: "string", description: "Background needed to answer" },
+        options: { type: "array", items: { type: "string" }, description: "Optional suggested answers" },
+        multi_select: { type: "boolean", description: "The person can pick more than one option" },
+        recommended_option: { type: "string", description: "The option you recommend. It must be one of options" },
+      },
+      required: ["question"],
+    },
   },
   {
     name: "request_approval",
     description: "Request an explicit human approval before continuing.",
-    inputSchema: obj({ title: "string", details: "string" }, ["title"]),
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "What needs approval, e.g. 'Spec: purchase-order field'" },
+        summary: { type: "string", description: "What is being approved and why" },
+        links: {
+          type: "array",
+          items: { type: "string" },
+          description: "Links to review (spec pull request, documents)",
+        },
+        options: { type: "array", items: { type: "string" }, description: "Decision options (default approve/reject)" },
+      },
+      required: ["title"],
+    },
   },
   {
     name: "post_update",
@@ -151,10 +175,18 @@ const TOOLS: { name: string; description: string; inputSchema: Record<string, un
   {
     name: "link_pull_request",
     description: "Attach a pull request to the work item so its reviews and merge events are routed back.",
-    inputSchema: obj(
-      { key: "string", forge: "string", repo: "string", number: "integer", url: "string", branch: "string" },
-      ["key"],
-    ),
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "Pull request (merge request) URL" },
+        repo: { type: "string", description: "owner/name; derived from the URL when omitted" },
+        number: { type: "integer", description: "Pull request number; derived from the URL when omitted" },
+        branch: { type: "string", description: "Head branch" },
+        forge: { type: "string", description: "GITHUB, GITLAB or AZURE_DEVOPS; derived from the URL when omitted" },
+        state: { type: "string", description: "open (default), draft, merged or closed" },
+      },
+      required: [],
+    },
   },
   {
     name: "link_issue",
@@ -318,6 +350,18 @@ export async function callTool(
     try {
       const src = issueRef(args as LinkIssueInput);
       args = { ...args, key: sourceKey(src), source: src };
+    } catch (e) {
+      return { content: [{ type: "text", text: toOfError(e).error.message }], isError: true };
+    }
+  }
+  if (name === "link_pull_request") {
+    // linkPR: the Worker reads the pull request (linkpr.ts); the WorkDO stores
+    // it with its normalized reference. Without a repo and a number there is
+    // no reference key (Go adds no alias then).
+    try {
+      const pr = prRef(args as LinkPullRequestInput);
+      const ref = prReference(pr);
+      args = { pull_request: pr, ...(ref ? { key: ref.key, source: ref.source } : {}) };
     } catch (e) {
       return { content: [{ type: "text", text: toOfError(e).error.message }], isError: true };
     }

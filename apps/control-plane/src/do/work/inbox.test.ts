@@ -13,6 +13,8 @@ import type { AgentConfig, InboxItem, Run } from "../../engine/types";
 import { call, bootstrap } from "../../../test/helpers";
 import { FakeRunner, installFakeSandbox, pump, workStub, type FakeProvider } from "../../../test/fakes/runner";
 import type { WorkDO } from "./index";
+import { canApprove, setApproverDeps, type ApproverDeps } from "./approvers";
+import { isApprover } from "../../engine/principal";
 
 const TEAM = "default";
 
@@ -109,6 +111,29 @@ describe("inbox", () => {
     const before = (await inputs(w, run.id)).length;
     await resolve(w, userMeta("usr_dana"), info.id, "seen");
     expect(await inputs(w, run.id)).toHaveLength(before);
+  });
+
+  it("question and approval bodies (TestHumanAndWorkItemTools)", async () => {
+    const token = newToken("w");
+    const { w, run } = await creatorRun(token);
+    const q = await getInbox(w, await tool(w, run.id, "ask_human", { question: "Required?", context: "API field" }));
+    expect(q.kind).toBe("question");
+    expect(q.title).toBe("Required?");
+    expect(q.body).toBe("Required?\n\nAPI field");
+    // A long question: the title is cut to 100 bytes, the body keeps it whole.
+    const long = "x".repeat(150);
+    const lq = await getInbox(w, await tool(w, run.id, "ask_human", { question: long }));
+    expect(lq.title).toBe("x".repeat(97) + "...");
+    expect(lq.body).toBe(long);
+    const ap = await getInbox(
+      w,
+      await tool(w, run.id, "request_approval", { title: "Spec", summary: "Approve", links: ["https://x/pull/1"] }),
+    );
+    expect(ap.kind).toBe("approval");
+    expect(ap.body).toBe("Approve\n\nReview:\n- https://x/pull/1");
+    const bad = await w.toolCall({ runId: run.id, tool: "ask_human", input: { question: " " }, key: "", turnId: "" });
+    expect(bad.isError).toBe(true);
+    expect(bad.content[0]!.text).toContain("question is required");
   });
 
   it("the outbound notice of an approval carries the inbox item, the factory and the options", async () => {
@@ -290,5 +315,55 @@ describe("inbox", () => {
     expect(last).toContain("[human answer] admin@example.com answered");
     expect(last).not.toContain("Spoofed");
     expect(last).not.toContain("usr_");
+  });
+});
+
+// Port of internal/engine/approvers_test.go.
+describe("approvers", () => {
+  const users: Record<string, { id: string; email: string; kind?: string; name?: string }> = {
+    usr_ada: { id: "usr_ada", email: "ada@example.test" },
+    usr_bob: { id: "usr_bob", email: "bob@example.test" },
+  };
+  const deps = (list: string[]): ApproverDeps => ({
+    approvers: () => Promise.resolve(list),
+    user: (id) => Promise.resolve(users[id]),
+  });
+
+  it("only a listed approver resolves an approval; any member answers a question (TestApproversList)", async () => {
+    const restore = setApproverDeps(() => deps(["Ada@Example.test"]));
+    try {
+      const token = newToken("w");
+      const { w, run } = await creatorRun(token);
+      const id = await tool(w, run.id, "request_approval", { title: "Spec", summary: "Review the spec" });
+      // A member who is not in the list cannot approve, even an admin.
+      expect(String(await resolve(w, userMeta("usr_bob"), id, "approved").catch((e: unknown) => e))).toMatch(
+        /approvers listed in factory.yaml/,
+      );
+      // A sender without a linked account cannot approve.
+      expect(String(await resolve(w, meta, id, "approved").catch((e: unknown) => e))).toMatch(/not_authorized/);
+      expect((await getInbox(w, id)).resolved).toBe(false);
+      // A listed approver can, from any tool. The tool is recorded.
+      const done = (await w.api(
+        userMeta("usr_ada"),
+        "resolveInbox",
+        { id },
+        { resolution: "approved", via: "chat" },
+      )) as InboxItem;
+      expect(done).toMatchObject({ resolved: true, resolved_by: "usr_ada", resolved_via: "chat" });
+      // The list applies to approvals only.
+      const q = await tool(w, run.id, "ask_human", { question: "Required?" });
+      expect((await resolve(w, userMeta("usr_bob"), q, "No")).resolved).toBe(true);
+    } finally {
+      restore();
+    }
+  });
+
+  it("without a list every caller can (TestCanApproveWithoutList)", async () => {
+    expect(await canApprove(deps([]), "fac", "")).toBe(true);
+    expect(await canApprove(deps(["a@example.test"]), "fac", "")).toBe(false);
+    expect(await canApprove(deps(["a@example.test"]), "fac", "usr_missing")).toBe(false);
+    expect(isApprover(["a@example.test"], undefined)).toBe(false);
+    expect(isApprover(["a@example.test"], { id: "u" })).toBe(false);
+    expect(isApprover(["ci-bot"], { id: "u", kind: "service_account", name: "ci-bot" })).toBe(true);
   });
 });

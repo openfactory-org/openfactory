@@ -3,19 +3,17 @@
 // preflight_principals_test.go, preflight_refs_test.go,
 // definition_runtime_test.go and internal/api/definition_preflight_test.go.
 //
-// Not ported: TestNameFiltersResolveToIDs and TestJiraAndTeamsNameFilters-
-// ResolveToIDs (filter names are not resolved at apply: the lookups need
-// network calls that are not wired), TestApplyIsOneTransaction (the apply is
+// Not ported: TestApplyIsOneTransaction (the apply is
 // one transactionSync by construction), the sa-as-user runAs case (the
-// compiler now rejects "user:<name>" without an email), and
-// TestSourceChangeToGitChecksTheBranch / TestCreateWithGitSourceChecksTheBranch
-// (forges/defsync.ts checkBranch is not wired to the factory routes).
+// compiler now rejects "user:<name>" without an email).
 import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
-import { doName } from "@openfactory/core";
+import { doName, OfError } from "@openfactory/core";
 import { describe, expect, it } from "vitest";
 import type { CallMeta, Principal } from "../../contracts/do-messages";
-import { knownModel, webhookFilterIds } from "./preflight";
+import { knownModel, setNameResolver, webhookFilterIds, type FilterNameResolver } from "./preflight";
+import { setGitSourceChecker, type FactoryRecord } from "./factories";
+import type { TeamKit } from "./index";
 
 interface Issue {
   file: string;
@@ -486,6 +484,26 @@ describe("workerEnvironment auth targets development process workers", () => {
   });
 });
 
+describe("machines (preflightMachines)", () => {
+  it("warns about registryCredentialSecretName; a machine without it gives no warning", async () => {
+    const t = team();
+    const f = await factory(t);
+    const machine = (extra: string) =>
+      `description: d\nplatform:\n  os: linux\n  linux:\n    image: registry.example.com/build:1\n${extra}`;
+    const out = await validate(t, f.id, {
+      ...f.files,
+      "machines/private.yaml": machine("    registryCredentialSecretName: REGISTRY_PULL\n"),
+      "machines/public.yaml": machine(""),
+    });
+    expect(out.valid, JSON.stringify(out.errors)).toBe(true);
+    const w = out.warnings as Issue[];
+    expect(has(w, "machines/private.yaml", "platform.registryCredentialSecretName", "only on microVM workers")).toBe(
+      true,
+    );
+    expect(w.some((x) => x.file === "machines/public.yaml")).toBe(false);
+  });
+});
+
 describe("the validate route (api/definition_preflight_test.go)", () => {
   it("returns warnings, skipped checks and a summary when valid, and no summary when invalid", async () => {
     const t = team();
@@ -545,5 +563,224 @@ describe("sender settings on the runtime (engine/definition_runtime_test.go)", (
     expect(r.err?.code).toBe("invalid_request");
     expect(r.rt.approvers).toEqual(["ada@example.test"]);
     expect(r.rt.require_linked_actor).toBe(true);
+  });
+});
+
+describe("git source branch check (api/definition_preflight_test.go)", () => {
+  const branchInvalid = () =>
+    new OfError("invalid_request", 'the definition on branch "main" of github.com/acme/defs is invalid', {
+      extra: { errors: [{ file: "factory.yaml", message: "secret X does not exist" }] },
+    });
+
+  it("a change of the source to git checks the branch (TestSourceChangeToGitChecksTheBranch)", async () => {
+    let checkErr: Error | undefined;
+    let calls = 0;
+    const prev = setGitSourceChecker(async () => {
+      calls++;
+      if (checkErr) throw checkErr;
+    });
+    try {
+      const t = team();
+      const f = await t.op("createFactory", {}, { name: "To git " + crypto.randomUUID().slice(0, 6) });
+      const fid = f.factory.id as string;
+      const toGit = { source: "git", git_repo: "github.com/acme/defs" };
+      checkErr = branchInvalid();
+      const r = await t.raw("updateFactory", { uid: fid }, toGit);
+      expect(r.$error?.code).toBe("invalid_request");
+      expect(r.$error?.extra?.errors).toHaveLength(1);
+      expect((await t.op("getFactory", { uid: fid })).source).toBe("managed");
+      checkErr = new OfError("invalid_request", "No code host integration covers github.com/acme/defs.");
+      expect((await t.raw("updateFactory", { uid: fid }, toGit)).$error?.code).toBe("invalid_request");
+      checkErr = undefined;
+      await t.op("updateFactory", { uid: fid }, toGit);
+      expect((await t.op("getFactory", { uid: fid })).source).toBe("git");
+      expect(calls).toBe(3);
+      // Other settings do not check the branch again.
+      await t.op("updateFactory", { uid: fid }, { description: "x" });
+      expect(calls).toBe(3);
+    } finally {
+      setGitSourceChecker(prev);
+    }
+  });
+
+  it("a factory created with a git source checks the branch (TestCreateWithGitSourceChecksTheBranch)", async () => {
+    let checkErr: Error | undefined;
+    let seen: FactoryRecord | undefined;
+    const prev = setGitSourceChecker(async (_kit, f) => {
+      seen = { ...f };
+      if (checkErr) throw checkErr;
+    });
+    try {
+      const t = team();
+      const name = "from-git-" + crypto.randomUUID().slice(0, 6);
+      const body = {
+        name,
+        source: "git",
+        git_repo: "github.com/acme/defs",
+        git_branch: "release",
+      };
+      const count = async () => ((await t.op("listFactories")).items as unknown[]).length;
+      const before = await count();
+      checkErr = branchInvalid();
+      const r = await t.raw("createFactory", {}, body);
+      expect(r.$error?.code).toBe("invalid_request");
+      expect(r.$error?.extra?.errors).toHaveLength(1);
+      expect(seen).toMatchObject({ git_branch: "release", git_repo: "github.com/acme/defs", source: "git" });
+      expect(await count()).toBe(before);
+      checkErr = new Error("no forge");
+      expect((await t.raw("createFactory", {}, body)).$error).toBeTruthy();
+      expect(await count()).toBe(before);
+      checkErr = undefined;
+      await t.op("createFactory", {}, body);
+      expect(await count()).toBe(before + 1);
+      // A managed factory does not check any branch.
+      seen = undefined;
+      checkErr = new Error("must not be called");
+      await t.op("createFactory", {}, { name: "managed-" + crypto.randomUUID().slice(0, 6) });
+      expect(seen).toBeUndefined();
+    } finally {
+      setGitSourceChecker(prev);
+    }
+  });
+});
+
+describe("name filters (engine/preflight_test.go)", () => {
+  /**
+   * fakeResolver: names by kind; it records the scopes. Like the resolvers of
+   * the integrations, it reads the team through RPC: a call back into the
+   * TeamDO that runs the preflight.
+   */
+  class FakeResolver implements FilterNameResolver {
+    names: Record<string, Record<string, string[]>> = {};
+    err: Error | undefined;
+    scopes: Record<string, string[]>[] = [];
+    kit: TeamKit | undefined;
+    async resolveNames(
+      teamId: string,
+      _p: string,
+      kind: string,
+      names: string[],
+      scope: Record<string, string[]> = {},
+    ) {
+      const out = (await this.kit!.env.TEAM.getByName(doName.team(teamId)).api(
+        {
+          requestId: "resolver",
+          principal: { kind: "service_account", id: "r", teamId, role: "admin", factoryRoles: {} },
+        },
+        "listIntegrations",
+        {},
+        null,
+      )) as { items?: unknown[] };
+      expect(out.items?.length).toBeGreaterThan(0);
+      if (this.err) throw this.err;
+      this.scopes.push(scope);
+      return Object.fromEntries(names.map((n) => [n, this.names[kind]?.[n] ?? []]));
+    }
+  }
+  const auto = (provider: string, event: string, filter: string) =>
+    `---\ntriggers:\n  - provider: ${provider}\n    event: ${event}\n    filter:\n${filter}---\nGo.\n`;
+  const automations = async (t: Team, fid: string) =>
+    Object.fromEntries(
+      ((await t.op("listAutomations", { uid: fid })).items as { name: string; triggers: { filter: unknown }[] }[]).map(
+        (a) => [a.name, a.triggers[0]?.filter as Record<string, unknown>],
+      ),
+    );
+
+  it("resolves Linear names to IDs at apply, with the team as scope (TestNameFiltersResolveToIDs)", async () => {
+    const t = team();
+    const f = await factory(t);
+    const file = "automations/linear-intake/automation.md";
+    const files = {
+      ...f.files,
+      [file]: auto("linear", "issue_labeled", "      teams: [Eng]\n      states: [Todo]\n      labels: [bug]\n"),
+    };
+    const prev = setNameResolver(undefined);
+    try {
+      // Not connected: a warning, and the names stay as written.
+      let chk = await validate(t, f.id, files);
+      expect(chk.valid, JSON.stringify(chk)).toBe(true);
+      expect(has(chk.warnings, file, "triggers[0].filter.teams", "not connected")).toBe(true);
+
+      await t.op("createIntegration", {}, { provider: "linear", config: { organization_id: "org1" } });
+      chk = await validate(t, f.id, files);
+      expect(has(chk.warnings, file, "triggers[0].filter.states", "cannot list")).toBe(true);
+
+      const res = new FakeResolver();
+      res.err = new Error("rate limited");
+      setNameResolver((kit) => ((res.kit = kit), res));
+      chk = await validate(t, f.id, files);
+      expect(chk.valid, JSON.stringify(chk)).toBe(true);
+      expect(has(chk.warnings, file, "triggers[0].filter.teams", "rate limited")).toBe(true);
+
+      res.err = undefined;
+      res.names = { teams: { Eng: ["t1"] }, states: { Todo: ["s1", "s2"] } };
+      chk = await validate(t, f.id, files);
+      expect(has(chk.errors, file, "triggers[0].filter.states", '2 linear states are named "Todo"')).toBe(true);
+      res.names.states!.Todo = [];
+      chk = await validate(t, f.id, files);
+      expect(has(chk.errors, file, "triggers[0].filter.states", 'no linear state is named "Todo"')).toBe(true);
+
+      res.names.states!.Todo = ["s1"];
+      res.scopes = [];
+      await t.op("putDefinition", { uid: f.id }, { files });
+      expect(res.scopes).toHaveLength(2);
+      expect(res.scopes[1]!.team_ids).toEqual(["t1"]);
+      const got = (await automations(t, f.id))["linear-intake"]!;
+      expect(got).toEqual({ team_ids: ["t1"], state_ids: ["s1"], labels: ["bug"] });
+    } finally {
+      setNameResolver(prev);
+    }
+  });
+
+  it("resolves Jira and Teams names; the team of a Teams trigger is the scope (TestJiraAndTeamsNameFiltersResolveToIDs)", async () => {
+    const t = team();
+    const f = await factory(t);
+    const files = {
+      ...f.files,
+      "automations/jira-intake/automation.md": auto(
+        "jira",
+        "status_changed",
+        "      projects: [Website]\n      statuses: [Done]\n",
+      ),
+      "automations/teams-intake/automation.md": auto(
+        "microsoft_teams",
+        "app_mention",
+        "      team_ids: [g1]\n      channels: [Incidents]\n      users: [Alice]\n",
+      ),
+    };
+    await t.op("createIntegration", {}, { provider: "jira", config: { site: "acme.example.test" } });
+    await t.op("createIntegration", {}, { provider: "microsoft_teams", config: { tenant_id: "tn1", team_id: "g1" } });
+    const res = new FakeResolver();
+    res.names = {
+      projects: { Website: ["WEB"] },
+      statuses: { Done: ["10001", "10002"] },
+      channels: { Incidents: ["19:inc@thread.tacv2"] },
+      users: { Alice: ["aad-alice"] },
+    };
+    const prev = setNameResolver((kit) => ((res.kit = kit), res));
+    try {
+      const chk = await validate(t, f.id, files);
+      expect(
+        has(
+          chk.errors,
+          "automations/jira-intake/automation.md",
+          "triggers[0].filter.statuses",
+          '2 jira statuses are named "Done"',
+        ),
+      ).toBe(true);
+      res.names.statuses!.Done = ["10001"];
+      res.scopes = [];
+      await t.op("putDefinition", { uid: f.id }, { files });
+      expect(res.scopes.filter((sc) => sc.team_ids?.length === 1 && sc.team_ids[0] === "g1")).toHaveLength(2);
+      const got = await automations(t, f.id);
+      expect(got["jira-intake"]).toEqual({ project_keys: ["WEB"], status_ids: ["10001"] });
+      expect(got["teams-intake"]).toEqual({
+        team_ids: ["g1"],
+        channel_ids: ["19:inc@thread.tacv2"],
+        user_ids: ["aad-alice"],
+      });
+    } finally {
+      setNameResolver(prev);
+    }
   });
 });

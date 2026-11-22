@@ -2,7 +2,7 @@
 // github (client with a fetch fake, scope, events, webhook intake) and the
 // forge responder.
 import { beforeEach, describe, expect, it } from "vitest";
-import type { OfError } from "@openfactory/core";
+import { OfError } from "@openfactory/core";
 import { type Event, type Integration } from "@openfactory/core";
 import { b64, utf8 } from "../lib/bytes";
 import { extractMentions, hasMention, formatOutbound, splitRepo, truncate } from "./util/text";
@@ -20,7 +20,17 @@ import { GitHubClient, resetGitHubCaches, deriveWebURL } from "./github/client";
 import { Normalizer, aliasFromLabels, checkName, isDefinitionPath, normalizeRepo } from "./github/events";
 import { handleGitHubWebhook, type GitHubWebhookDeps } from "./github/webhook";
 import { ForgeResponder, Resolver, forgeFromProvider, integrationProvider } from "./registry";
-import { parseGitRepo, renderCheck, sync, truncateDesc } from "./defsync";
+import {
+  checkBranch,
+  checkGitSource,
+  gitSourceProblem,
+  parseGitRepo,
+  renderCheck,
+  sync,
+  truncateDesc,
+} from "./defsync";
+import { ApiError } from "./util/http";
+import { noIntegration } from "./util/select";
 import { FakeForge, FakeResolver } from "../../test/fakes/forge";
 
 describe("forgeutil text", () => {
@@ -712,6 +722,62 @@ describe("defsync", () => {
     await sync(deps, f);
     expect(applied).toEqual(["Sync main @ 0123456"]);
   });
+  it("checks the branch before the source changes (TestCheckBranchBeforeTheSourceChanges)", async () => {
+    const fr = new FakeResolver();
+    const fg = fr.forgeFor("GITHUB");
+    fg.files = { "factory.yaml": "name: x\n" };
+    let valid = false;
+    const deps = {
+      resolver: fr,
+      check: async () => ({
+        valid,
+        errors: valid ? [] : [{ file: "factory.yaml", field: "secrets", message: "secret MISSING does not exist" }],
+        warnings: [],
+        skipped: [],
+      }),
+    };
+    const f = { id: "f1", team_id: "t", source: "git", git_repo: "acme/defs", git_branch: "release" };
+    const err = await checkBranch(deps, f).catch((e: unknown) => e as OfError);
+    expect(err).toBeInstanceOf(OfError);
+    expect((err as OfError).code).toBe("invalid_request");
+    expect(((err as OfError).extra?.errors as unknown[]).length).toBe(1);
+    valid = true;
+    await checkBranch(deps, f);
+    expect(fg.callsOf("getFiles")[0]!.args).toEqual(["acme", "defs", "release", ""]);
+    fg.failures.getFiles = new Error("branch not found");
+    expect(((await checkBranch(deps, f).catch((e: unknown) => e)) as OfError).code).toBe("invalid_request");
+
+    // The route form: branch errors are a validation error; a source that
+    // cannot be read gives a message for people that names the outcome.
+    valid = false;
+    delete fg.failures.getFiles;
+    const inv = (await checkGitSource(deps, f, "the source did not change").catch((e: unknown) => e)) as OfError;
+    expect(inv.detail).toBe('the definition on branch "release" of acme/defs is invalid; the source did not change');
+    expect((inv.extra?.errors as unknown[]).length).toBe(1);
+    fg.failures.getFiles = new ApiError("GET", "https://api.example.test/x", 404, "Not Found");
+    const nf = (await checkGitSource(deps, f, "the factory was not created").catch((e: unknown) => e)) as OfError;
+    expect(nf.detail).toBe(
+      'The code host did not find branch "release" of acme/defs, or the token of its integration cannot see the repository (HTTP 404). Check the repository, the branch and the path. The factory was not created.',
+    );
+    expect(nf.extra).toBeUndefined();
+  });
+
+  it("describes why a git source cannot be read (gitSourceProblem)", () => {
+    const f = { id: "f1", team_id: "t", git_repo: "acme/defs" };
+    expect(gitSourceProblem(f, noIntegration("github"))).toBe(
+      "No code host integration covers acme/defs. Connect one under Integrations.",
+    );
+    expect(gitSourceProblem(f, new ApiError("GET", "u", 401, ""))).toContain("(HTTP 401)");
+    expect(gitSourceProblem(f, new ApiError("GET", "u", 403, ""))).toContain("cannot read acme/defs (HTTP 403)");
+    expect(gitSourceProblem(f, new ApiError("GET", "u", 502, ""))).toContain("answered HTTP 502");
+    expect(gitSourceProblem(f, new OfError("invalid_request", "git_repo must name an owner and a repository"))).toBe(
+      "Git_repo must name an owner and a repository.",
+    );
+    expect(gitSourceProblem(f, new Error("boom"))).toBe(
+      'The definition on branch "main" of acme/defs could not be read. The server log has the details.',
+    );
+  });
+
   it("renders checks", () => {
     expect(
       renderCheck({

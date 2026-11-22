@@ -16,6 +16,7 @@ import type { AgentConfig, Run } from "./types";
 import type { WorkDO } from "../do/work/index";
 import { handleEvent, platformIntakeDeps, type IntakeDeps } from "../do/ingress/intake";
 import { bootstrap, call } from "../../test/helpers";
+import { callRoute } from "../mcp/server/backend";
 import {
   callerPrincipal,
   dispatchPrincipals,
@@ -313,5 +314,77 @@ describe("principals of API runs", () => {
     const want = { type: "service_account", id: sa.body.service_account.id };
     expect(r2.body.creator).toEqual(want);
     expect(r2.body.run_as).toEqual(want);
+  });
+});
+
+describe("dispatch of the factory runs route (handleDispatch, mcpserver send_work_item)", () => {
+  const newFactory = async (key: string) =>
+    (await call("POST", "/api/v1/factories", { key, body: { name: "Dispatch " + newToken("w").slice(0, 6) } })).body
+      .factory as { id: string };
+
+  it("a Factory MCP dispatch has the person as creator and run_as, triggered_by mcp and the mcp source", async () => {
+    const { key, userId } = await bootstrap();
+    const f = await newFactory(key);
+    const p = {
+      kind: "factory_mcp" as const,
+      id: userId,
+      userId,
+      teamId: "default",
+      role: "admin" as const,
+      factoryRoles: {},
+      keyId: "mcg_test",
+    };
+    const run = await callRoute<{
+      creator: unknown;
+      run_as: unknown;
+      source: string;
+      work_item_id: string;
+    }>(env as never, p, "POST", `/factories/${f.id}/runs`, {
+      prompt: "Fix the build",
+      title: "Fix the build",
+      source: { provider: "mcp", kind: "work_item", title: "Fix the build" },
+    });
+    expect(run.creator).toEqual({ type: "user", id: userId });
+    expect(run.run_as).toEqual({ type: "user", id: userId });
+    expect(run.source).toBe("MCP");
+    const wi = await call("GET", `/api/v1/work-items/${run.work_item_id}`, { key });
+    expect(wi.body.source ?? wi.body.work_item?.source).toMatchObject({ provider: "mcp", kind: "work_item" });
+  });
+
+  it("ticket_ref routes to the active work item of its key; bad input is refused; the CLI is recorded", async () => {
+    const { key } = await bootstrap();
+    const f = await newFactory(key);
+    const ref = "linear:PAY-" + newToken("w").slice(0, 4);
+    const a = await call("POST", `/api/v1/factories/${f.id}/runs`, { key, body: { prompt: "One", ticket_ref: ref } });
+    expect(a.status, JSON.stringify(a.body)).toBe(201);
+    const b = await call("POST", `/api/v1/factories/${f.id}/runs`, { key, body: { prompt: "Two", ticket_ref: ref } });
+    expect(b.status, JSON.stringify(b.body)).toBe(201);
+    expect(b.body.work_item_id).toBe(a.body.work_item_id);
+    expect(b.body.id).toBe(a.body.id);
+    const wi = await call("GET", `/api/v1/work-items/${a.body.work_item_id}`, { key });
+    expect(wi.body.source ?? wi.body.work_item?.source).toMatchObject({
+      provider: "linear",
+      kind: "issue",
+      external_id: ref.slice("linear:".length),
+    });
+
+    const bad = await call("POST", `/api/v1/factories/${f.id}/runs`, {
+      key,
+      body: { prompt: "x", ticket_ref: "PAY 1" },
+    });
+    expect(bad.status).toBe(400);
+    const meta = await call("POST", `/api/v1/factories/${f.id}/runs`, {
+      key,
+      body: { prompt: "x", metadata: { "bad key": "v" } },
+    });
+    expect(meta.status).toBe(400);
+    const cli = await call("POST", `/api/v1/factories/${f.id}/runs`, {
+      key,
+      body: { prompt: "From the CLI" },
+      headers: { "user-agent": "openfactory/1.0" },
+    });
+    expect(cli.body.source).toBe("CLI");
+    const api = await call("POST", `/api/v1/factories/${f.id}/runs`, { key, body: { prompt: "From a script" } });
+    expect(api.body.source).toBe("API");
   });
 });

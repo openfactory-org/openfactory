@@ -1056,8 +1056,8 @@ export const FACTORY_TOOLS: readonly Tool<FactoryCtx>[] = [
         {
           prompt,
           title,
+          // The route records triggered_by mcp for a Factory MCP principal (requestSource).
           source: { provider: "mcp", kind: "work_item", title },
-          metadata: { triggered_by: "mcp" },
         },
       );
       const wiId = run.work_item_id;
@@ -1133,7 +1133,6 @@ async function handBack(c: FactoryCtx, a: Args, pr: PullRequestRef | null): Prom
       prompt: msg,
       title: wi.title,
       source: wi.source ?? {},
-      metadata: { triggered_by: "mcp" },
     });
     runId = run.run_id ?? run.id ?? "";
   }

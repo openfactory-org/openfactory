@@ -480,6 +480,23 @@ export async function checkDefinition(
   return chk;
 }
 
+/**
+ * CheckGitSource (api.Options): makes sure that the git branch of a factory
+ * compiles and passes the preflight (forges/defsync.ts checkGitSource), with
+ * outcome naming what a refusal left as it was. wiring.ts sets it; without
+ * it no branch is checked.
+ */
+export type GitSourceChecker = (kit: TeamKit, f: FactoryRecord, outcome: string) => Promise<void>;
+
+let gitSourceChecker: GitSourceChecker | undefined;
+
+/** Sets the checker; returns the one it replaces (tests restore it). */
+export function setGitSourceChecker(fn: GitSourceChecker | undefined): GitSourceChecker | undefined {
+  const prev = gitSourceChecker;
+  gitSourceChecker = fn;
+  return prev;
+}
+
 function validationError(detail: string, errs: ValidationError[] | undefined): OfError {
   return new OfError("invalid_request", detail, { extra: { errors: errs ?? [] } });
 }
@@ -1435,6 +1452,17 @@ export const ops: Record<string, TeamOp> = {
       checkAliasFree(kit, alias, "");
       putFactory(kit, f);
     });
+    // The branch of a git source must compile and pass the preflight, as for
+    // a change of the source. The check needs the factory record (its team),
+    // so a refusal removes the record again.
+    if (f.source === "git" && gitSourceChecker) {
+      try {
+        await gitSourceChecker(kit, f, "the factory was not created");
+      } catch (e) {
+        kit.tx(() => deleteFactoryRows(kit, f.id));
+        throw e;
+      }
+    }
     let version: DefinitionVersion | undefined;
     if (files && Object.keys(files).length > 0) {
       let r: ApplyResult;
@@ -1456,6 +1484,7 @@ export const ops: Record<string, TeamOp> = {
 
   updateFactory: async (kit, c) => {
     const f = factoryFor(kit, c);
+    const wasSource = f.source;
     const b = bodyObject(c.body);
     const yamlEdits: Record<string, unknown> = {};
     const name = optString(b, "name");
@@ -1521,6 +1550,14 @@ export const ops: Record<string, TeamOp> = {
       if (gitBranch !== undefined) f.git_branch = gitBranch.trim() || "main";
       if (gitPath !== undefined) f.git_path = gitPath.trim().replace(/^\/+|\/+$/g, "");
     }
+    // Before the source becomes git (or its location changes), the branch
+    // must compile and pass the preflight.
+    if (
+      f.source === "git" &&
+      gitSourceChecker &&
+      (wasSource !== "git" || gitRepo !== undefined || gitBranch !== undefined || gitPath !== undefined)
+    )
+      await gitSourceChecker(kit, f, "the source did not change");
     let out = f;
     if (f.source === "managed" && f.active_version_id && Object.keys(yamlEdits).length > 0) {
       const files = await activeFiles(kit, f);

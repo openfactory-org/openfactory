@@ -32,9 +32,11 @@ import { registerServerRoute } from "./builder";
 import type { CallMeta, Principal } from "./contracts/do-messages";
 import type { Env } from "./contracts/env";
 import { registerProvider } from "./do/dispatch/providers";
-import { configSnapshot, listFactories } from "./do/team/factories";
+import { checkDefinition, configSnapshot, listFactories, setGitSourceChecker } from "./do/team/factories";
+import { setNameResolver } from "./do/team/preflight";
 import { setScheduleActiveRunCheck } from "./do/team/schedules";
 import { normalizeRepo, setGitCredentialMinter } from "./do/team/workers";
+import { checkGitSource } from "./forges/defsync";
 import { resolverFor } from "./forges/env";
 import { reviewBuilders } from "./eventctx/index";
 import { setEventContextBuilders } from "./do/ingress/intake";
@@ -330,6 +332,34 @@ setScheduleActiveRunCheck(async (kit, factoryId, automationId) => {
   }
   return "";
 });
+
+// ---------- definition preflight: names in automation filters ----------
+
+/** SetNameResolver (server.go): the name resolvers of the integrations, by trigger provider. */
+setNameResolver((kit) => ({
+  resolveNames: (teamId, provider, kind, names, scope) => {
+    const r = integrationsFor(kit.env).handlers.nameResolvers[provider];
+    if (!r) return Promise.reject(new Error(`this server cannot list ${provider} objects`));
+    return r.resolveNames(teamId, provider, kind, names, scope);
+  },
+}));
+
+// ---------- git definition source: the branch check of the factory routes ----------
+
+/** CheckGitSource (server.go): defsync.CheckBranch with the TeamDO preflight. */
+setGitSourceChecker((kit, f, outcome) =>
+  checkGitSource(
+    {
+      resolver: resolverFor(kit.env),
+      check: async (_g, files) => {
+        const chk = await checkDefinition(kit, f, files);
+        return { valid: chk.errors.length === 0, errors: chk.errors, warnings: chk.warnings, skipped: chk.skipped };
+      },
+    },
+    f,
+    outcome,
+  ),
+);
 
 // ---------- worker git cache: read-only credential of one repository ----------
 

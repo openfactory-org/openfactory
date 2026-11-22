@@ -8,8 +8,12 @@ import {
   newRoutedId,
   newToken,
   notFound,
+  newId,
   OfError,
   partitionOf,
+  sourceKey,
+  validateMetadata,
+  type SourceRef,
 } from "@openfactory/core";
 import type { MachineSpec as CoreMachineSpec, MCPServer } from "@openfactory/core";
 import type { CallMeta, CoreEvent } from "../contracts/do-messages";
@@ -173,6 +177,50 @@ interface CreateRunBody {
   metadata?: Record<string, string>;
 }
 
+/** DispatchRequest (internal/api/factories.go). */
+interface DispatchBody extends CreateRunBody {
+  agent?: string;
+  ticket_ref?: string;
+  ticket_url?: string;
+  source?: SourceRef | null;
+}
+
+/**
+ * withRequestSource (internal/api/runfilter.go): the triggered_by of a run
+ * that an API caller starts. The Factory MCP dispatched with "mcp"
+ * (internal/mcpserver); the CLI sends a User-Agent of openfactory/...; a
+ * signed-in person without an API key is the dashboard.
+ */
+export function requestSource(req: Request, ctx: RouteContext): string {
+  const p = ctx.principal;
+  if (p?.kind === "factory_mcp") return "mcp";
+  if ((req.headers.get("user-agent") ?? "").startsWith("openfactory/")) return "cli";
+  if (p?.kind === "user" && !p.keyId && p.userId) return "dashboard";
+  return "api";
+}
+
+const TICKET_REF_RE = /^([a-z][a-z0-9_-]*):(\S+)$/;
+
+/** The source of a dispatch (handleDispatch): body source, ticket_ref and ticket_url; provider api by default. */
+export function dispatchSource(b: DispatchBody, title: string): SourceRef {
+  let src: SourceRef = { provider: "api", kind: "task" };
+  if (b.source) {
+    src = { ...b.source };
+    if (!src.provider) src.provider = "api";
+  }
+  const ref = (b.ticket_ref ?? "").trim();
+  if (b.ticket_ref) {
+    const m = TICKET_REF_RE.exec(ref);
+    if (!m) throw invalid("ticket_ref must have the form <source>:<id>, e.g. linear:PAY-123");
+    src.provider = m[1]!;
+    src.external_id = m[2]!;
+    if (!src.kind || src.kind === "task") src.kind = "issue";
+  }
+  if (b.ticket_url) src.url = b.ticket_url;
+  if (!src.title) src.title = title;
+  return src;
+}
+
 const SECRET_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
 
 /** normalizeHarness (internal/api/runs.go). */
@@ -285,6 +333,7 @@ function callerPrincipals(ctx: RouteContext): { creator?: Principal; runAs?: Pri
 export const createRun: Handler = async (req, env, ctx) => {
   const b = await body<CreateRunBody>(req);
   if (!b.prompt?.trim()) throw invalid("prompt is required");
+  validateMetadata(b.metadata);
   const factoryRef = b.factory_id ?? "";
   const agentRef = b.agent_identity_uid || b.agent_name || "";
   if (!agentRef || (!factoryRef && !b.agent_identity_uid))
@@ -305,7 +354,7 @@ export const createRun: Handler = async (req, env, ctx) => {
       actor: actorOf(ctx),
       title: b.title || b.prompt.split("\n")[0]!.slice(0, 120),
       workItemId: newRoutedId("wi", token),
-      triggeredBy: "api",
+      triggeredBy: requestSource(req, ctx),
       ...(b.metadata ? { metadata: b.metadata } : {}),
       ...(ctx.principal?.userId ? { creatorId: ctx.principal.userId } : {}),
       ...callerPrincipals(ctx),
@@ -314,21 +363,42 @@ export const createRun: Handler = async (req, env, ctx) => {
   return json(201, runView(out.run, { publicUrl: publicUrl(env) }));
 };
 
-/** POST /api/v1/factories/{uid}/runs: dispatch to the factory's foreman. */
+/**
+ * POST /api/v1/factories/{uid}/runs: dispatch to the factory's foreman
+ * (handleDispatch). A source with a key routes to the active work item of
+ * that key: its root run gets the prompt as a follow-up (Engine.Dispatch).
+ */
 export const dispatchRun: Handler = async (req, env, ctx) => {
-  const b = await body<CreateRunBody & { agent?: string }>(req);
+  const b = await body<DispatchBody>(req);
   if (!b.prompt?.trim()) throw invalid("prompt is required");
+  validateMetadata(b.metadata);
+  const title = b.title?.trim() || b.prompt.split("\n")[0]!.slice(0, 120);
+  const source = dispatchSource(b, title);
   const { factoryId, agent } = await resolveAgent(env, ctx, ctx.params.uid ?? "", b.agent || b.agent_name || "foreman");
-  const token = newToken("w");
+  const key = sourceKey(source);
+  let token = newToken("w");
+  let workItemId = newRoutedId("wi", token);
+  if (key) {
+    const r = await env.ROUTER.getByName(doName.router(teamOf(ctx))).resolveOrReserve({
+      factoryId,
+      sourceKeys: [key],
+      actionKey: newId("act"),
+      target: `api:${factoryId}`,
+    });
+    token = r.token;
+    workItemId = r.wiId;
+  }
   const out = (await env.WORK.getByName(doName.work(teamOf(ctx), token)).runsCreate(metaOf(ctx), {
     dispatch: {
       factoryId,
       config: agent,
       prompt: b.prompt,
       actor: actorOf(ctx),
-      title: b.title || b.prompt.split("\n")[0]!.slice(0, 120),
-      workItemId: newRoutedId("wi", token),
-      triggeredBy: "api",
+      title,
+      source: source as never,
+      ...(key ? { sourceKey: key } : {}),
+      workItemId,
+      triggeredBy: requestSource(req, ctx),
       ...(b.metadata ? { metadata: b.metadata } : {}),
       ...(ctx.principal?.userId ? { creatorId: ctx.principal.userId } : {}),
       ...callerPrincipals(ctx),

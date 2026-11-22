@@ -46,16 +46,55 @@ export function setSetting(kit: TeamKit, k: string, v: unknown): void {
 
 // ---------- in-use helpers ----------
 
+/**
+ * The parts of an active definition that reference team resources
+ * (definitionForReferences in internal/api/platform.go): the stored agents,
+ * automations and scorers, and the factory-wide mcpServers and scorerDefaults
+ * of the compiled runtime.
+ */
+export interface ReferenceDefinition {
+  agents: AgentConfig[];
+  automations: Automation[];
+  scorers: { slug: string; mcp_servers?: Record<string, { managedId?: string }> | null }[];
+  mcpServers: Record<string, { managedId?: string }>;
+  scorerDefaults?: { environment_id?: string | null; mcp_servers?: Record<string, { managedId?: string }> | null };
+}
+
 /** Places of the active definitions of the team that `uses` reports, as "<place> of factory <name>". */
-export function teamResourceUses(
-  kit: TeamKit,
-  uses: (agents: AgentConfig[], automations: Automation[]) => string[],
-): string[] {
+export function teamResourceUses(kit: TeamKit, uses: (def: ReferenceDefinition) => string[]): string[] {
   const out: string[] = [];
   for (const f of listFactories(kit)) {
     if (!f.active_version_id) continue;
-    for (const u of uses(listAgents(kit, f.id), listAutomations(kit, f.id))) out.push(`${u} of factory ${f.name}`);
+    const rt = first<{ data: string }>(kit.sql, "SELECT data FROM factory_runtime WHERE factory_id = ?", f.id);
+    const runtime = rt
+      ? (JSON.parse(rt.data) as {
+          mcp_servers?: ReferenceDefinition["mcpServers"] | null;
+          scorer_defaults?: ReferenceDefinition["scorerDefaults"] | null;
+        })
+      : {};
+    const def: ReferenceDefinition = {
+      agents: listAgents(kit, f.id),
+      automations: listAutomations(kit, f.id),
+      scorers: all<{ data: string }>(kit.sql, "SELECT data FROM scorers WHERE factory_id = ? ORDER BY ord", f.id).map(
+        (r) => JSON.parse(r.data) as ReferenceDefinition["scorers"][number],
+      ),
+      mcpServers: runtime.mcp_servers ?? {},
+      ...(runtime.scorer_defaults ? { scorerDefaults: runtime.scorer_defaults } : {}),
+    };
+    for (const u of uses(def)) out.push(`${u} of factory ${f.name}`);
   }
+  return out;
+}
+
+/** environmentUses (platform.go): the agents, automations and scorerDefaults that select environment id. */
+export function environmentUses(def: ReferenceDefinition, id: string): string[] {
+  const out: string[] = [];
+  for (const a of def.agents) if (a.environment_id === id) out.push("agent " + a.name);
+  for (const au of def.automations) {
+    const ov = au.overrides as { environmentId?: string | null; environment_id?: string | null } | undefined | null;
+    if (ov?.environment_id === id || ov?.environmentId === id) out.push("automation " + au.name);
+  }
+  if (def.scorerDefaults?.environment_id === id) out.push("scorerDefaults");
   return out;
 }
 
@@ -273,17 +312,7 @@ export const ops: Record<string, TeamOp> = {
   deleteEnvironment: (kit, c) =>
     kit.tx(() => {
       const e = environmentOf(kit, c.params["id"]!);
-      const uses = teamResourceUses(kit, (agents, automations) => [
-        ...agents.filter((a) => a.environment_id === e.id).map((a) => "agent " + a.name),
-        ...automations
-          .filter(
-            (au) =>
-              (au.overrides as { environmentId?: string | null; environment_id?: string | null } | undefined)
-                ?.environmentId === e.id ||
-              (au.overrides as { environment_id?: string | null } | undefined)?.environment_id === e.id,
-          )
-          .map((au) => "automation " + au.name),
-      ]);
+      const uses = teamResourceUses(kit, (def) => environmentUses(def, e.id));
       const err = inUseError("Environment", e.name, uses);
       if (err) throw err;
       kit.sql.exec("DELETE FROM environments WHERE id = ?", e.id);

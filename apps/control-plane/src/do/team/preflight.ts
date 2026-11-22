@@ -4,10 +4,9 @@
 // internal/engine/principal.go (runAs). Adds the check that workerEnvironment
 // auth targets a development process worker.
 //
-// Not ported: preflightNameFilters (the provider name lookups of trigger
-// filters need network calls; names stay as written and are compared on each
-// event) and preflightMachines (the compiler rejects macOS and Windows, and
-// the registryCredentialSecretName warning is not ported yet).
+// preflightMachines keeps only the registryCredentialSecretName warning: the
+// compiler rejects macOS and Windows machines. preflightNameFilters resolves
+// filter names with the name resolver that wiring.ts sets (setNameResolver).
 import { OfError } from "@openfactory/core";
 import {
   WEBHOOK_UID_PREFIX,
@@ -25,6 +24,7 @@ import { bodyObject, str } from "../../lib/body";
 import type { Migration } from "../../lib/sql/migrate";
 import { all } from "../../lib/sql/query";
 import { listUsers } from "./auth";
+import { listIntegrations } from "./integrations";
 import { registerPreflight, type DefinitionCheck, type FactoryRecord } from "./factories";
 import { getSecretValue } from "./secrets";
 import type { TeamKit, TeamOp } from "./index";
@@ -461,6 +461,209 @@ export function preflightWorkerEnvironment(kit: TeamKit, def: CompiledDefinition
   }
 }
 
+// ---------- machines ----------
+
+/**
+ * preflightMachines: a machine that sets registryCredentialSecretName. Only
+ * microVM workers pull images at run time and use it; the sandbox providers
+ * ignore it. A named machine is checked in its file, an inline machine of an
+ * agent in the agent file.
+ */
+export function preflightMachines(def: CompiledDefinition, chk: DefinitionCheck): void {
+  const check = (file: string, field: string, m: { registryCredentialSecretName?: string }) => {
+    const name = m.registryCredentialSecretName;
+    if (name)
+      chk.warnings.push({
+        file,
+        field: field + ".registryCredentialSecretName",
+        message: `registryCredentialSecretName ${q(name)} has an effect only on microVM workers: the sandbox providers ignore it and use the image of their snapshot or deploy`,
+      });
+  };
+  const machines = def.machines ?? {};
+  for (const n of Object.keys(machines).sort()) check(`machines/${n}.yaml`, "platform", machines[n]!);
+  for (const a of def.agents ?? []) {
+    if (a.machine && !(a.machine.name in machines)) check(agentFile(a.name), "machine", a.machine);
+  }
+}
+
+// ---------- name filters ----------
+
+/** Resolves names in automation filters to provider IDs (core.NameResolver). */
+export interface FilterNameResolver {
+  resolveNames(
+    teamId: string,
+    provider: string,
+    kind: string,
+    names: string[],
+    scope?: Record<string, string[]>,
+  ): Promise<Record<string, string[]>>;
+}
+
+let nameResolverFor: ((kit: TeamKit) => FilterNameResolver | undefined) | undefined;
+
+/**
+ * SetNameResolver: the resolver that maps the names in automation filters to
+ * provider IDs. Without one, the preflight reports name filters as warnings
+ * and the names are compared on each event. Returns the previous one.
+ */
+export function setNameResolver(
+  fn: ((kit: TeamKit) => FilterNameResolver | undefined) | undefined,
+): ((kit: TeamKit) => FilterNameResolver | undefined) | undefined {
+  const prev = nameResolverFor;
+  nameResolverFor = fn;
+  return prev;
+}
+
+/**
+ * The name filters of each provider. The order matters: a key is resolved
+ * after the keys that give it scope (teams before states and issues).
+ */
+const NAME_ALIASES: Record<string, [alias: string, native: string][]> = {
+  linear: [
+    ["teams", "team_ids"],
+    ["projects", "project_ids"],
+    ["states", "state_ids"],
+    ["issues", "issue_ids"],
+  ],
+  slack: [
+    ["channels", "channel_ids"],
+    ["users", "user_ids"],
+    ["itemUsers", "item_user_ids"],
+  ],
+  jira: [
+    ["projects", "project_keys"],
+    ["statuses", "status_ids"],
+  ],
+  // Teams triggers name the Graph team in team_ids; channel and user names are looked up in that team.
+  microsoft_teams: [
+    ["channels", "channel_ids"],
+    ["users", "user_ids"],
+  ],
+};
+
+/** Native filter keys that limit the lookup of other names (the team of a project, state, issue or channel). */
+const SCOPE_KEYS = ["team_ids"];
+
+/** A plain list of names (or issue numbers) of a filter, or undefined. */
+function filterNames(v: unknown): string[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out: string[] = [];
+  for (const x of v) {
+    if (typeof x === "string") out.push(x);
+    else if (typeof x === "number") out.push(String(Math.trunc(x)));
+    else return undefined;
+  }
+  return out;
+}
+
+/** The IDs of a native filter key: a plain list, or the "in" list of a matcher object. */
+function scopeIds(v: unknown): string[] | undefined {
+  const ids = filterNames(v);
+  if (ids) return ids;
+  if (v && typeof v === "object" && "in" in v) return filterNames((v as { in: unknown }).in);
+  return undefined;
+}
+
+function singular(alias: string): string {
+  switch (alias) {
+    case "statuses":
+      return "status";
+    case "itemUsers":
+      return "user";
+    case "issues":
+      return "issue";
+  }
+  return alias.replace(/s$/, "");
+}
+
+/**
+ * preflightNameFilters (engine/preflight.go): resolves the names of
+ * automation filters to provider IDs. A name that matches no object or more
+ * than one is an error. A resolved filter replaces its trigger filter in def
+ * (applyResolvedFilters), so an apply stores the IDs. Names that cannot be
+ * checked now stay as written, with a warning.
+ */
+export async function preflightNameFilters(kit: TeamKit, def: CompiledDefinition, chk: DefinitionCheck): Promise<void> {
+  const resolver = nameResolverFor?.(kit);
+  let connected: Set<string> | undefined;
+  for (const au of def.automations ?? []) {
+    const file = automationFile(au.name);
+    for (const [ti, tr] of (au.triggers ?? []).entries()) {
+      const aliases = NAME_ALIASES[tr.provider];
+      let m: Record<string, unknown> | undefined;
+      let raw = tr.filter;
+      if (typeof raw === "string") {
+        try {
+          raw = JSON.parse(raw) as unknown;
+        } catch {
+          continue;
+        }
+      }
+      if (raw && typeof raw === "object" && !Array.isArray(raw)) m = { ...(raw as Record<string, unknown>) };
+      if (!aliases || !m) continue;
+      const scope: Record<string, string[]> = {};
+      for (const k of SCOPE_KEYS) {
+        const ids = k in m ? scopeIds(m[k]) : undefined;
+        if (ids?.length) scope[k] = ids;
+      }
+      let rewrote = false;
+      for (const [alias, native] of aliases) {
+        if (!(alias in m)) continue;
+        const names = filterNames(m[alias]);
+        if (!names?.length) continue;
+        const field = `triggers[${ti}].filter.${alias}`;
+        connected ??= new Set(listIntegrations(kit).map((i) => i.provider.toLowerCase()));
+        let reason = "";
+        if (!connected.has(tr.provider)) reason = `the ${tr.provider} integration is not connected`;
+        else if (!resolver) reason = `this server cannot list ${tr.provider} objects`;
+        if (reason) {
+          chk.warnings.push({
+            file,
+            field,
+            message: `names are not checked now, ${reason}; they are compared with the current names on each event`,
+          });
+          continue;
+        }
+        let ids: Record<string, string[]>;
+        try {
+          ids = await resolver!.resolveNames(kit.teamId(), tr.provider, alias, names, { ...scope });
+        } catch (e) {
+          chk.warnings.push({
+            file,
+            field,
+            message: `names are not checked now: ${(e as Error).message}; they are compared with the current names on each event`,
+          });
+          continue;
+        }
+        const resolved: string[] = [];
+        let good = true;
+        for (const n of names) {
+          const got = ids[n] ?? [];
+          if (got.length === 1) resolved.push(got[0]!);
+          else {
+            good = false;
+            chk.errors.push({
+              file,
+              field,
+              message:
+                got.length === 0
+                  ? `no ${tr.provider} ${singular(alias)} is named ${q(n)}`
+                  : `${got.length} ${tr.provider} ${alias} are named ${q(n)}; use the ID in ${native}`,
+            });
+          }
+        }
+        if (!good) continue;
+        scope[native] = resolved;
+        if (native in m) continue; // both keys set: keep the names as written
+        m[native] = resolved;
+        delete m[alias];
+        rewrote = true;
+      }
+      if (rewrote) tr.filter = m;
+    }
+  }
+}
+
 // ---------- module ----------
 
 export const ops: Record<string, TeamOp> = {
@@ -481,4 +684,6 @@ export function setup(_kit: TeamKit): void {
   registerPreflight("models", (_kit, _f, def, files, chk) => preflightModels(def, files, chk));
   registerPreflight("credentials", (kit, f, def, _files, chk) => preflightCredentials(kit, f, def, chk));
   registerPreflight("worker environment", (kit, _f, def, _files, chk) => preflightWorkerEnvironment(kit, def, chk));
+  registerPreflight("machines", (_kit, _f, def, _files, chk) => preflightMachines(def, chk));
+  registerPreflight("name filters", (kit, _f, def, _files, chk) => preflightNameFilters(kit, def, chk));
 }

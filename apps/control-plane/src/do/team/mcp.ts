@@ -6,7 +6,7 @@
 import { BUILTIN_MCP_PREFIX, MCP_OAUTH_ERROR, OfError, newId, type MCPServer } from "@openfactory/core";
 import type { CompiledDefinition } from "@openfactory/definition";
 import { registerPreflight, type DefinitionCheck } from "./factories";
-import { inUseError, teamResourceUses } from "./settings";
+import { inUseError, teamResourceUses, type ReferenceDefinition } from "./settings";
 import { actorId, roleRank } from "../../auth/roles";
 import * as authStore from "../../mcp/auth/store";
 import * as reg from "../../mcp/registry/store";
@@ -419,17 +419,31 @@ function preflightMCPServers(
  * name), through the settings module's teamResourceUses.
  */
 export function mcpServerUses(kit: TeamKit, id: string, name: string): string[] {
-  const refs = [id, name];
-  const selects = (m: ServerMap) =>
-    Object.values(m ?? {}).some((srv) => !!srv.managedId && refs.includes(srv.managedId));
-  return teamResourceUses(kit, (agents, automations) => {
-    const out: string[] = [];
-    for (const a of agents) if (selects(a.mcp_servers)) out.push("agent " + a.name);
-    for (const au of automations) {
-      if (selects(au.overrides?.mcp_servers ?? undefined)) out.push("automation " + au.name);
-    }
-    return out;
-  });
+  return teamResourceUses(kit, (def) => mcpServerUsesOf(def, id, name));
+}
+
+/**
+ * mcpServerUses (platform.go): the places of def whose mcpServers select the
+ * registered server by managedId (its id or its name). Factory-wide servers
+ * also appear on each agent; those count once, as the factory-wide mcpServers.
+ */
+export function mcpServerUsesOf(def: ReferenceDefinition, ...refs: string[]): string[] {
+  type Servers = Record<string, { managedId?: string }> | null | undefined;
+  const selects = (m: Servers, skipFactoryWide: boolean) =>
+    Object.entries(m ?? {}).some(([n, srv]) => {
+      if (!srv?.managedId || !refs.includes(srv.managedId)) return false;
+      const fw = def.mcpServers[n];
+      return !(skipFactoryWide && fw && fw.managedId === srv.managedId);
+    });
+  const out: string[] = [];
+  if (selects(def.mcpServers, false)) out.push("the factory-wide mcpServers");
+  for (const a of def.agents) if (selects(a.mcp_servers as Servers, true)) out.push("agent " + a.name);
+  for (const au of def.automations) {
+    if (selects(au.overrides?.mcp_servers as Servers, true)) out.push("automation " + au.name);
+  }
+  for (const sc of def.scorers) if (selects(sc.mcp_servers, true)) out.push("scorer " + sc.slug);
+  if (selects(def.scorerDefaults?.mcp_servers, true)) out.push("scorerDefaults");
+  return out;
 }
 
 // ---------- typed helpers for other TeamDO modules ----------

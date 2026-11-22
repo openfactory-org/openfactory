@@ -87,6 +87,7 @@ import {
   type RunnerError,
 } from "./runner";
 import { runTool, type ToolCall, type ToolResult } from "./tools";
+import { approverDeps, canApprove, notAnApprover } from "./approvers";
 import { applyAction as applyIntake, completeWorkItem, type ApplyActionInput, type ApplyActionResult } from "./intake";
 
 /** Delivers notices (notify service). The integrations workstream sets it; the default logs and acks. */
@@ -540,8 +541,18 @@ export class WorkDO extends BaseDO implements CompactionRpc, RetentionRpc {
           if (!it) throw notFound(`inbox item ${params.id}`);
           return it;
         }
-        case "resolveInbox":
-          return this.txFx((fx) => resolveInbox(fx, params.id ?? "", body, meta));
+        case "resolveInbox": {
+          // ResolveInbox: an approval needs CanApprove (approvers.ts) first.
+          const it = repo.getInbox(params.id ?? "");
+          if (it?.kind !== "approval" || it.resolved)
+            return this.txFx((fx) => resolveInbox(fx, params.id ?? "", body, meta));
+          return canApprove(approverDeps(this.env, this.teamId()), it.factory_id, meta.principal?.userId ?? "").then(
+            (ok) => {
+              if (!ok) throw notAnApprover();
+              return this.txFx((fx) => resolveInbox(fx, params.id ?? "", body, meta));
+            },
+          );
+        }
         case "getRunStartCommits": {
           repo.mustRun(runId);
           const raw = repo.getRunState(runId, "start_commits");

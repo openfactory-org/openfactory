@@ -7,6 +7,8 @@ import { OfError, factoryLink, type ValidationError } from "@openfactory/core";
 import type { Forge, ForgeResolver } from "./forge";
 import { checkName, normalizeRepo } from "./github/events";
 import type { DefinitionPR } from "./github/webhook";
+import { statusCode } from "./util/http";
+import { isNoIntegration } from "./util/select";
 import { splitRepo } from "./util/text";
 
 export interface GitLocation {
@@ -99,7 +101,7 @@ function short(sha: string): string {
   return sha.length > 7 ? sha.slice(0, 7) : sha;
 }
 
-async function forgeOf(deps: DefSyncDeps, f: GitFactory, loc: GitLocation): Promise<Forge> {
+async function forgeOf(deps: Pick<DefSyncDeps, "resolver">, f: GitFactory, loc: GitLocation): Promise<Forge> {
   return deps.resolver.forge({
     teamId: f.team_id,
     factoryId: f.id,
@@ -206,7 +208,7 @@ export function truncateDesc(s0: string): string {
 }
 
 /** The branch of a git source must compile and pass the preflight before a factory switches to git. */
-export async function checkBranch(deps: DefSyncDeps, f: GitFactory): Promise<void> {
+export async function checkBranch(deps: Pick<DefSyncDeps, "resolver" | "check">, f: GitFactory): Promise<void> {
   const loc = parseGitRepo(f.git_repo ?? "");
   const fg = await forgeOf(deps, f, loc);
   let files: Record<string, string>;
@@ -216,6 +218,7 @@ export async function checkBranch(deps: DefSyncDeps, f: GitFactory): Promise<voi
     throw new OfError(
       "invalid_request",
       `could not read the definition from ${f.git_repo} branch "${branchOf(f)}": ${(e as Error).message}`,
+      { cause: e },
     );
   }
   const chk = await deps.check(f, files);
@@ -224,6 +227,61 @@ export async function checkBranch(deps: DefSyncDeps, f: GitFactory): Promise<voi
     if (chk.errors.length > 0) msg += ": " + issueText(chk.errors[0]!);
     throw new OfError("invalid_request", msg, { extra: { errors: chk.errors } });
   }
+}
+
+/**
+ * checkGitBranch (internal/api/factories.go): checkBranch for the factory
+ * routes. outcome says what the refusal left as it was. Errors on the branch
+ * come back as a validation error; a source that cannot be read gives a
+ * short message for people (gitSourceProblem), and the cause goes to the log.
+ */
+export async function checkGitSource(
+  deps: Pick<DefSyncDeps, "resolver" | "check">,
+  f: GitFactory,
+  outcome: string,
+): Promise<void> {
+  try {
+    await checkBranch(deps, f);
+  } catch (e) {
+    const errs = e instanceof OfError ? (e.extra?.errors as ValidationError[] | undefined) : undefined;
+    if (errs) {
+      throw new OfError(
+        "invalid_request",
+        `the definition on branch "${branchOf(f)}" of ${f.git_repo} is invalid; ${outcome}`,
+        { extra: { errors: errs } },
+      );
+    }
+    console.warn("git definition source check failed", f.id, f.git_repo, branchOf(f), (e as Error)?.message);
+    throw new OfError(
+      "invalid_request",
+      `${gitSourceProblem(f, e)} ${outcome.charAt(0).toUpperCase() + outcome.slice(1)}.`,
+      { cause: e },
+    );
+  }
+}
+
+/** gitSourceProblem: why the git source of f could not be read, in words that say what to fix. */
+export function gitSourceProblem(f: GitFactory, err: unknown): string {
+  const which = "of its integration";
+  const repo = f.git_repo ?? "";
+  const branch = branchOf(f);
+  const status = statusCode(err) || statusCode((err as { cause?: unknown })?.cause);
+  if (isNoIntegration(err) || isNoIntegration((err as { cause?: unknown })?.cause))
+    return `No code host integration covers ${repo}. Connect one under Integrations.`;
+  if (err instanceof OfError && err.code === "integration_disabled")
+    return `The code host integration for ${repo} is not active. Fix it under Integrations.`;
+  if (status === 401) return `The code host refused the token ${which} (HTTP 401). Check the token secret.`;
+  if (status === 403) return `The token ${which} cannot read ${repo} (HTTP 403). Check the permissions of the token.`;
+  if (status === 404)
+    return `The code host did not find branch "${branch}" of ${repo}, or the token ${which} cannot see the repository (HTTP 404). Check the repository, the branch and the path.`;
+  if (status !== 0)
+    return `The code host answered HTTP ${status} for branch "${branch}" of ${repo}. Try again later; the server log has the details.`;
+  if (err instanceof OfError && err.code === "invalid_request" && !err.cause) {
+    const msg = err.detail;
+    if (msg && msg.length <= 200 && !msg.includes(": ") && !msg.includes("://"))
+      return msg.charAt(0).toUpperCase() + msg.slice(1).replace(/\.$/, "") + ".";
+  }
+  return `The definition on branch "${branch}" of ${repo} could not be read. The server log has the details.`;
 }
 
 /** Validates a pull request's definition and publishes the definition check. */

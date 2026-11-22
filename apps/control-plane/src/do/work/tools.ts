@@ -1,7 +1,15 @@
 // Effects of the per-run factory MCP tools (internal/orchestration) inside
 // WorkDO. The idempotency row commits in the same transaction as the tool's
 // effect (C8, plan rule 3). Errors are not stored, so the model can retry.
-import { forbidden, invalid, isOfError, newRoutedId, OfError, type SourceRef } from "@openfactory/core";
+import {
+  forbidden,
+  invalid,
+  isOfError,
+  newRoutedId,
+  OfError,
+  type PullRequestRef,
+  type SourceRef,
+} from "@openfactory/core";
 import { iso } from "../../engine/sessions";
 import { STAGES, stageTerminal, type InboxItem, type Run, type Stage, type WorkItemRef } from "../../engine/types";
 import { recipientsOf, truncate } from "../../engine/text";
@@ -37,6 +45,12 @@ export interface ToolResult {
 const text = (v: unknown): ToolResult => ({
   content: [{ type: "text", text: typeof v === "string" ? v : JSON.stringify(v) }],
 });
+/** The inbox title of a question: at most 100 bytes (askHuman in server.go). */
+function cutTitle(q: string): string {
+  const b = new TextEncoder().encode(q);
+  if (b.length <= 100) return q;
+  return new TextDecoder().decode(b.subarray(0, 97)).replace(/\uFFFD+$/, "") + "...";
+}
 const errorResult = (msg: string): ToolResult => ({ content: [{ type: "text", text: msg }], isError: true });
 
 /** Tools without side effects run without an idempotency row. */
@@ -213,8 +227,25 @@ function dispatchTool(fx: Fx, caller: Run, call: ToolCall): ToolResult {
     case "request_approval": {
       const kind = call.tool === "ask_human" ? "question" : "approval";
       const wi = caller.work_item_id ? fx.repo.getWorkItem(caller.work_item_id) : undefined;
-      const title = s(input.question) || s(input.title) || s(input.summary);
-      if (!title) throw invalid(kind === "question" ? "question is required" : "title is required");
+      // askHuman / requestApproval (server.go): a question's title is the
+      // question cut to 100 bytes, its body the question and its context; an
+      // approval's body is its summary and the links to review.
+      let title: string;
+      let body: string;
+      if (kind === "question") {
+        const q = (s(input.question) || s(input.title)).trim();
+        if (!q) throw invalid("question is required");
+        const ctx = (s(input.context) || s(input.details) || s(input.body)).trim();
+        body = ctx ? `${q}\n\n${ctx}` : q;
+        title = cutTitle(q);
+      } else {
+        title = (s(input.title) || s(input.question)).trim();
+        if (!title) throw invalid("title is required");
+        let b = (s(input.summary) || s(input.details) || s(input.body)).trim();
+        const links = Array.isArray(input.links) ? (input.links as unknown[]).filter((l) => typeof l === "string") : [];
+        if (links.length) b += "\n\nReview:\n" + links.map((l) => `- ${String(l)}\n`).join("");
+        body = b.trim();
+      }
       let options = Array.isArray(input.options) ? (input.options as unknown[]).map(String) : undefined;
       // RequestHuman: an approval without options offers approve and reject.
       if (kind === "approval" && !options?.length) options = ["approve", "reject"];
@@ -227,7 +258,7 @@ function dispatchTool(fx: Fx, caller: Run, call: ToolCall): ToolResult {
         run_id: caller.id,
         kind,
         title: truncate(title, 500),
-        body: s(input.details) || s(input.body),
+        body,
         ...(options ? { options } : {}),
         questions: [
           {
@@ -292,43 +323,76 @@ function dispatchTool(fx: Fx, caller: Run, call: ToolCall): ToolResult {
       notify(fx, out, "handoff", s(input.summary) || "The work is complete.");
       return text({ stage: out.stage });
     }
-    case "link_pull_request":
+    case "link_pull_request": {
+      // engine.LinkPullRequest: the Worker read the pull request (linkpr.ts)
+      // and its normalized reference key and source.
+      const wi = caller.work_item_id ? fx.repo.getWorkItem(caller.work_item_id) : undefined;
+      if (!wi) throw invalid("the run has no work item");
+      const pr = { ...(input.pull_request as PullRequestRef | undefined) } as PullRequestRef;
+      if (!pr.url && (!pr.repo || !pr.number)) throw invalid("pull request url or repo+number is required");
+      if (!pr.state) pr.state = "open";
+      const list = wi.pull_requests ?? [];
+      const i = list.findIndex(
+        (p) =>
+          (!!pr.url && p.url === pr.url) ||
+          (!!pr.repo && !!pr.number && p.repo.toLowerCase() === pr.repo.toLowerCase() && p.number === pr.number),
+      );
+      if (i >= 0) {
+        const merged = { ...list[i]! };
+        if (pr.forge) merged.forge = pr.forge;
+        if (pr.repo) merged.repo = pr.repo;
+        if (pr.number) merged.number = pr.number;
+        if (pr.url) merged.url = pr.url;
+        if (pr.branch) merged.branch = pr.branch;
+        merged.state = pr.state;
+        list[i] = merged;
+      } else {
+        list.push(pr);
+      }
+      wi.pull_requests = list;
+      const key = s(input.key);
+      const source = input.source as SourceRef | undefined;
+      if (i < 0 && key && source) {
+        const refs = wi.references ?? [];
+        if (!refs.some((r) => r.key === key)) {
+          const ref: WorkItemRef = { kind: "pull_request", key, source, added_at: iso(fx.now()) };
+          wi.references = [...refs, ref];
+          fx.repo.sql.exec(
+            "INSERT OR IGNORE INTO work_item_refs (key, kind, added_ms, data) VALUES (?, ?, ?, ?)",
+            key,
+            "pull_request",
+            fx.now(),
+            JSON.stringify(ref),
+          );
+        }
+      }
+      wi.updated_at = iso(fx.now());
+      fx.repo.putWorkItem(wi);
+      if (i < 0) workItemEvent(fx, wi.id, "pr_linked", caller.id, actor, { key, pull_request: pr });
+      projectWorkItem(fx, wi);
+      return text({ linked: key || pr.url });
+    }
     case "link_issue": {
       const wi = caller.work_item_id ? fx.repo.getWorkItem(caller.work_item_id) : undefined;
       if (!wi) throw invalid("the run has no work item");
       const key = s(input.key);
       if (!key) throw invalid("key is required");
-      const kind = call.tool === "link_pull_request" ? "pull_request" : "issue";
-      // link_issue: the Worker resolved the issue (linkissue.ts) into key and source.
-      const source = input.source as SourceRef | undefined;
-      const ref: WorkItemRef =
-        kind === "issue" && source ? { kind, key, source, added_at: iso(fx.now()) } : { kind, key, ...input };
+      // The Worker resolved the issue (linkissue.ts) into key and source.
+      const source = (input.source as SourceRef | undefined) ?? { provider: "", kind: "issue" };
+      const ref: WorkItemRef = { kind: "issue", key, source, added_at: iso(fx.now()) };
       const refs = wi.references ?? [];
       if (!refs.some((r) => r.key === key)) {
         wi.references = [...refs, ref];
-        if (kind === "pull_request" && typeof input.number === "number") {
-          wi.pull_requests = [
-            ...(wi.pull_requests ?? []),
-            {
-              forge: s(input.forge),
-              repo: s(input.repo),
-              number: input.number,
-              url: s(input.url),
-              branch: s(input.branch),
-              state: "open",
-            },
-          ];
-        }
         wi.updated_at = iso(fx.now());
         fx.repo.putWorkItem(wi);
         fx.repo.sql.exec(
           "INSERT OR IGNORE INTO work_item_refs (key, kind, added_ms, data) VALUES (?, ?, ?, ?)",
           key,
-          kind,
+          "issue",
           fx.now(),
           JSON.stringify(ref),
         );
-        workItemEvent(fx, wi.id, kind === "pull_request" ? "pr_linked" : "issue_linked", caller.id, actor, { key });
+        workItemEvent(fx, wi.id, "issue_linked", caller.id, actor, { key });
         projectWorkItem(fx, wi);
       }
       return text({ linked: key });
