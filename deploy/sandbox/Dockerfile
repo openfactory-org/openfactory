@@ -1,71 +1,54 @@
 # syntax=docker/dockerfile:1.7
 #
-# Default sandbox image: ghcr.io/openfactory-org/sandbox
+# Sandbox image: ghcr.io/openfactory-org/sandbox
 #
-#   docker build -f deploy/sandbox/Dockerfile -t ghcr.io/openfactory-org/sandbox:latest deploy/sandbox
+#   docker build -f deploy/sandbox/Dockerfile -t ghcr.io/openfactory-org/sandbox:dev deploy/sandbox
 #
-# Agents run inside this image on the docker and kubernetes backends. It is
-# glibc-based and ships sh, git and coreutils (required by the backends) and
-# the common build tools. It has no harness CLI: the kubernetes backend copies
-# the claude or codex CLI from a tool image (tool-claude, tool-codex) into the
-# sandbox. A sandbox image that runs without a tool image must hold its CLI.
-# Override it per machine (platform.linux.image), per environment, or
-# with OF_SANDBOX_IMAGE.
+# Used for the Daytona snapshot (imageName), as the base of
+# Dockerfile.cloudflare, and as a generic sandbox image. All build steps are in
+# install.sh, which scripts/boat-snapshot.sh runs on boat.dev too.
+#
+# Contract: users agent (uid 1001) and ofproxy; no sudo and no setuid
+# binaries; iproute2, iptables, ip6tables, git, claude and codex;
+# /opt/openfactory/bootstrap.sh starts the runner (see bootstrap.sh).
+#
+# A baked runner is optional: put openfactory-runtime-linux-<arch> into
+# deploy/sandbox/runner/ before the build (scripts/images/build.sh does it).
+# Without it, bootstrap.sh downloads the runner from OF_RUNNER_URL.
 
 ARG UBUNTU_VERSION=24.04
 FROM ubuntu:${UBUNTU_VERSION}
 
-ARG NODE_MAJOR=22
-ARG GO_VERSION=1.27.4
 ARG TARGETARCH
+ARG CLAUDE_CLI_VERSION=latest
+ARG CODEX_CLI_VERSION=latest
+ARG GO_VERSION=1.27.4
+ARG NODE_MAJOR=22
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      ca-certificates curl wget gnupg git git-lfs openssh-client \
-      build-essential pkg-config make unzip zip xz-utils less procps \
-      python3 python3-pip python3-venv pipx \
-      ripgrep jq fd-find tree sudo \
- && rm -rf /var/lib/apt/lists/*
+RUN --mount=type=bind,target=/src \
+    set -eu; \
+    runner=""; \
+    if [ -f "/src/runner/openfactory-runtime-linux-${TARGETARCH}" ]; then \
+      runner="/src/runner/openfactory-runtime-linux-${TARGETARCH}"; \
+    fi; \
+    sh /src/install.sh --profile base \
+      --claude-version "${CLAUDE_CLI_VERSION}" --codex-version "${CODEX_CLI_VERSION}" \
+      --go-version "${GO_VERSION}" --node-major "${NODE_MAJOR}" \
+      ${runner:+--runner "$runner"}
 
-# Node.js (NodeSource) and npm.
-RUN mkdir -p /etc/apt/keyrings \
- && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-      | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
- && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" \
-      > /etc/apt/sources.list.d/nodesource.list \
- && apt-get update && apt-get install -y --no-install-recommends nodejs \
- && rm -rf /var/lib/apt/lists/*
-
-# GitHub CLI.
-RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-      -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
- && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
- && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-      > /etc/apt/sources.list.d/github-cli.list \
- && apt-get update && apt-get install -y --no-install-recommends gh \
- && rm -rf /var/lib/apt/lists/*
-
-# Go toolchain.
-RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}" \
- && curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${arch}.tar.gz" | tar -C /usr/local -xz
-ENV PATH=/usr/local/go/bin:/root/go/bin:$PATH
-
-# fd is packaged as fdfind on Ubuntu.
-RUN ln -s "$(command -v fdfind)" /usr/local/bin/fd
-
-# A non-root user is available; the backends run commands as the image user.
-RUN useradd -m -u 1001 -s /bin/bash agent \
- && echo 'agent ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/agent \
- && mkdir -p /workspace && chown agent:agent /workspace
+ENV PATH=/opt/openfactory/tools/bin:/usr/local/go/bin:$PATH
 
 LABEL org.opencontainers.image.title="openfactory-sandbox" \
-      org.opencontainers.image.description="Default sandbox image for Open Factory agent runs" \
+      org.opencontainers.image.description="Sandbox image for Open Factory agent runs" \
       org.opencontainers.image.source="https://github.com/openfactory-org/openfactory" \
       org.opencontainers.image.licenses="Apache-2.0"
 
+# The bootstrap runs as root; the runner starts the harness as agent.
+USER root
 WORKDIR /workspace
-CMD ["sleep", "infinity"]
+ENTRYPOINT ["/usr/bin/tini", "-g", "--"]
+CMD ["/opt/openfactory/bootstrap.sh"]

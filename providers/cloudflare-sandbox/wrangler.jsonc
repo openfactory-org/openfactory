@@ -1,0 +1,47 @@
+// The cloudflare-sandbox provider Worker. Deployed on its own, so a
+// control-plane deploy does not restart running sandboxes.
+//   npx wrangler deploy -c providers/cloudflare-sandbox/wrangler.jsonc
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "openfactory-provider-cloudflare-sandbox",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+
+  // ---- Durable Objects: one per task (with the container), one registry per install ----
+  "durable_objects": {
+    "bindings": [
+      { "name": "SANDBOXES", "class_name": "OfTaskSandbox" },
+      { "name": "REGISTRY", "class_name": "OfTaskRegistry" },
+    ],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["OfTaskSandbox", "OfTaskRegistry"] }],
+
+  // ---- Container: the sandbox image, started by OfTaskSandbox with ctx.container.start ----
+  // scheduling_policy "durable_object" (Sandbox SDK 1.0 model). The move to it is one-way.
+  "containers": [
+    {
+      "class_name": "OfTaskSandbox",
+      "scheduling_policy": "durable_object",
+      "images": {
+        "runner": {
+          "dockerfile": "../../deploy/sandbox/Dockerfile.cloudflare",
+          "build_context": "../../deploy/sandbox",
+        },
+      },
+    },
+  ],
+
+  // ---- The control plane: the runner reaches it through the Egress intercept ----
+  "services": [{ "binding": "CONTROL_PLANE", "service": "openfactory" }],
+
+  "vars": {
+    "OF_INSTALL_ID": "",
+    "OF_RUNNER_VERSION": "0.0.0-dev",
+    "OF_IMAGE_KEY": "runner",
+    "OF_JURISDICTION": "",
+  },
+
+  "observability": { "enabled": true },
+}
